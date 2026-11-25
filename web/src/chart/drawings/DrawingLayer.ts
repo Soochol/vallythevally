@@ -126,8 +126,10 @@ export class DrawingLayer implements ISeriesPrimitive {
 
   updateAllViews() {
     this.frame = this.prepare(this.build()); this.prices = []; this.times = [];
+    const ctx = this.frame.ctx;
+    if (!ctx) return;
     for (const item of this.frame.items) for (const label of item.labels) {
-      const coordinate = label.axis === "price" ? this.frame.ctx.yOf(label.value) : this.frame.ctx.xOf(label.value);
+      const coordinate = label.axis === "price" ? ctx.yOf(label.value) : ctx.xOf(label.value);
       if (coordinate === null) continue;
       const max = label.axis === "price" ? this.frame.pane.height : this.frame.pane.width;
       const back = drawingColor(label.color); const ink = inkOn(back);

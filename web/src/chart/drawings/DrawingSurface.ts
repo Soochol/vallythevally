@@ -23,7 +23,7 @@ import { matchDrawingHotkey, type DrawingHotkey } from "../../lib/hotkeys";
 import { captures, IDLE, step, type Context, type Effect, type Input, type Interaction } from "./interaction";
 import { effectiveMagnet, ohlcSource, snap } from "./magnet";
 import type { DrawingSync } from "./sync";
-import type { Shape } from "./toolSpec";
+import type { Shape, ToolContext } from "./toolSpec";
 import { toolOf } from "./tools";
 import type { DrawingBody, DrawingScope, ScreenPoint } from "./types";
 import type { DrawingPoint } from "../../api/generated/DrawingPoint";
@@ -42,6 +42,8 @@ export class DrawingSurface implements ChartExtension {
   private pointer: number | null = null;
   private scroll: { handleScroll: ReturnType<ChartHost["chart"]["options"]>["handleScroll"]; handleScale: ReturnType<ChartHost["chart"]["options"]>["handleScale"] } | null = null;
   private mirror = document.createElement("div");
+  private lastMirror = "";
+  private editable = matchMedia(DESKTOP_QUERY).matches;
   private raf: number | null = null;
   private paneLayers: (() => void)[] = [];
   private transient: (TransientShapes & { createdAt: number }) | null = null;
@@ -88,7 +90,7 @@ export class DrawingSurface implements ChartExtension {
     this.cleanup.push(useDrawingSession.subscribe((s, old) => { if (this.isActive() && (s.tool !== old.tool || s.mode !== old.mode)) this.reset(); this.refresh(); }));
     this.cleanup.push(useSelectionStore.subscribe((s, old) => { if (old.activeCell === this.cellId && s.activeCell !== this.cellId) this.reset(); }));
     this.cleanup.push(useUiStore.subscribe(() => this.refresh()));
-    const media = matchMedia(DESKTOP_QUERY); const resize = () => { this.reset(); this.refresh(); };
+    const media = matchMedia(DESKTOP_QUERY); const resize = () => { this.editable = media.matches; this.reset(); this.refresh(); };
     media.addEventListener("change", resize); this.cleanup.push(() => media.removeEventListener("change", resize));
     const observer = new MutationObserver(() => this.refresh()); observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     this.cleanup.push(() => observer.disconnect());
@@ -115,6 +117,7 @@ export class DrawingSurface implements ChartExtension {
     this.raf = requestAnimationFrame(() => { this.raf = null; this.layer.refresh(); if (this.transient) this.refresh(); });
   }
   frame() { return this.layer.current(); }
+  toolContext(): ToolContext { return this.frame().ctx ?? this.context().ctx; }
   projection(): Frame {
     const h = this.host; const ts = h.chart.timeScale(); const view = h.view(); const period = view?.period ?? "D";
     const bars = h.bars();
@@ -147,10 +150,33 @@ export class DrawingSurface implements ChartExtension {
     const t = logicalToT(frame.timeline, snapped.logical);
     return t === null ? null : { t, price: snapped.price };
   }
+  private setMirror(next: string) {
+    if (this.lastMirror === next) return;
+    this.lastMirror = next;
+    this.mirror.dataset.drawings = next;
+  }
   private build(): RenderFrame {
-    const f = this.projection(); const c = this.context(f); const view = this.host.view();
-    const cell = this.cell(); const prefs = useUiStore.getState().prefs.drawing;
-    const editable = matchMedia(DESKTOP_QUERY).matches;
+    const view = this.host.view();
+    const cell = this.cell();
+    const rawDrawings = view ? this.sync.drawings(view.symbol) : [];
+    const hasEditor = cell.editor !== null && cell.editor.draft.symbol === view?.symbol;
+    if (rawDrawings.length === 0 && this.state.kind === "idle" && !this.transient && !hasEditor) {
+      this.host.fineBars.demand([]);
+      this.setMirror("[]");
+      const ts = this.host.chart.timeScale();
+      return {
+        items: [],
+        preview: [],
+        transient: undefined,
+        box: null,
+        pane: { width: ts.width(), height: this.host.chart.panes()[0]?.getHeight() ?? this.host.el.clientHeight },
+        ctx: null,
+        editable: this.editable,
+      };
+    }
+    const f = this.projection(); const c = this.context(f);
+    const prefs = useUiStore.getState().prefs.drawing;
+    const editable = this.editable;
     const layoutId = useLayoutStore.getState().layout.id;
     const where = { layoutId, cellId: this.cellId, period: view?.period ?? "D", hideAll: prefs.hideAll };
     this.host.fineBars.demand(fineDemand(f, c.drawings.filter((d) => visible(d, where)), c.ctx));
@@ -160,7 +186,7 @@ export class DrawingSurface implements ChartExtension {
       drawings = this.state.action === "clone" ? [...drawings, ...preview.map((d) => ({ ...d, id: `${d.id}:preview` }))]
         : drawings.map((d) => preview.find((p) => p.id === d.id) ?? d);
     }
-    if (cell.editor && cell.editor.draft.symbol === view?.symbol) drawings = drawings.map((d) => d.id === cell.editor?.draft.id ? cell.editor.draft : d);
+    if (hasEditor && cell.editor) drawings = drawings.map((d) => d.id === cell.editor?.draft.id ? cell.editor.draft : d);
     const items = drawings.filter((d) => visible(d, where))
       .map((d) => renderItem(d, editable && cell.selected.includes(d.id), c.ctx)).filter((item) => item !== null);
     const preview: Shape[] = [];
@@ -172,15 +198,26 @@ export class DrawingSurface implements ChartExtension {
       if (elapsed >= this.transient.fadeMs) this.transient = null;
       else transient = { shapes: this.transient.shapes, opacity: Math.max(0, 1 - Math.max(0, elapsed) / Math.max(1, this.transient.fadeMs)) };
     }
-    this.mirror.dataset.drawings = JSON.stringify(items.map((i) => ({ id: i.id, tool: i.drawing.tool, selected: cell.selected.includes(i.id), points: i.drawing.points.map(c.ctx.toScreen), handles: i.handles, texts: i.shapes.flatMap((s) => (s.kind === "text" ? [s.text] : [])) })));
+    this.setMirror(JSON.stringify(items.map((i) => ({ id: i.id, tool: i.drawing.tool, selected: cell.selected.includes(i.id), points: i.drawing.points.map(c.ctx.toScreen), handles: i.handles, texts: i.shapes.flatMap((s) => (s.kind === "text" ? [s.text] : [])) }))));
     return { items, preview, transient, box: this.state.kind === "box" ? this.state : null, pane: f.pane, ctx: c.ctx, editable };
   }
 
   private inPane(frame: RenderFrame, at: ScreenPoint) { return at.x >= 0 && at.y >= 0 && at.x < frame.pane.width && at.y < frame.pane.height; }
   private local(e: MouseEvent): ScreenPoint { const r = this.host.el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+  private setCursor(next: string) {
+    if (this.host.el.style.cursor !== next) this.host.el.style.cursor = next;
+  }
   private onPointer(e: PointerEvent, kind: "down" | "move" | "up") {
-    if (!matchMedia(DESKTOP_QUERY).matches || (kind === "down" && e.button !== 0) || this.cell().editor) return;
+    if (!this.editable || (kind === "down" && e.button !== 0) || this.cell().editor) return;
     if (this.pointer !== null && this.pointer !== e.pointerId) return;
+    if (kind === "move" && this.state.kind === "idle" && this.pointer === null) {
+      const frame = this.frame();
+      if (frame.items.length === 0) {
+        const live = this.liveTool();
+        this.setCursor(live.tool || live.mode === "eraser" ? "crosshair" : "");
+        return;
+      }
+    }
     const at = this.local(e); const frame = this.frame();
     if (kind === "down" && !this.inPane(frame, at)) return;
     if (kind === "down") { this.focus(); useDrawingSession.getState().patchCell(this.cellId, { popup: null }); }
@@ -196,7 +233,7 @@ export class DrawingSurface implements ChartExtension {
     if (kind === "up") this.release();
     if (kind === "move") {
       const live = this.liveTool(); const aiming = this.state.kind === "mode" || live.mode === "eraser";
-      this.host.el.style.cursor = captures(this.state) && !aiming ? "grabbing" : live.tool || aiming ? "crosshair" : hit.kind === "handle" ? "grab" : hit.kind === "body" ? "move" : "";
+      this.setCursor(captures(this.state) && !aiming ? "grabbing" : live.tool || aiming ? "crosshair" : hit.kind === "handle" ? "grab" : hit.kind === "body" ? "move" : "");
     }
   }
   private capture(id: number) {
@@ -212,6 +249,7 @@ export class DrawingSurface implements ChartExtension {
   }
   private input(e: Input) {
     const previous = this.state;
+    if (previous.kind === "idle" && e.kind !== "down") return;
     const transition = step(previous, e, this.context()); this.state = transition.state;
     for (const effect of transition.effects) this.effect(effect);
     if (transition.state !== previous || transition.effects.length > 0) this.refresh();
@@ -238,14 +276,15 @@ export class DrawingSurface implements ChartExtension {
       }
       case "box": { const f = this.frame(); session.select(this.cellId, idsInBox(f.items, effect.start, effect.end, f.pane)); break; }
       case "mode": {
-        const result = modeOf(effect.mode)?.finish(effect.path, effect.action === "erasePartial", this.modeContext(this.frame()));
+        const frame = this.frame();
+        const result = modeOf(effect.mode)?.finish(effect.path, effect.action === "erasePartial", this.modeContext({ items: frame.items, ctx: this.toolContext() }));
         if (result) { this.sync.commit(this.cellId, result.ops); if (result.transient) this.transient = { ...result.transient, createdAt: performance.now() }; }
         if (effect.mode === "eraser" && !useUiStore.getState().prefs.drawing.keepDrawing) useDrawingSession.setState({ mode: null });
         break;
       }
     }
   }
-  private modeContext(frame: Pick<RenderFrame, "items" | "ctx">): ModeContext {
+  private modeContext(frame: { items: RenderFrame["items"]; ctx: ToolContext }): ModeContext {
     return { ...frame, lockAll: useUiStore.getState().prefs.drawing.lockAll, panesBottom: this.host.el.clientHeight - this.host.chart.timeScale().height(), scope: this.newScope(), newId: () => crypto.randomUUID() };
   }
   newScope(): DrawingScope {
@@ -285,6 +324,7 @@ export class DrawingSurface implements ChartExtension {
   openEditor(id: string, kind: "settings" | "text" = "settings") {
     const d = this.edits.find(id);
     if (!d) return;
+    if (!this.frame().ctx) this.layer.refresh();
     const session = useDrawingSession.getState();
     session.select(this.cellId, [d.id]);
     session.patchCell(this.cellId, { editor: { kind, original: d, draft: d }, popup: null });
@@ -315,7 +355,7 @@ export class DrawingSurface implements ChartExtension {
     this.focus();
   }
   private contextMenu(e: MouseEvent) {
-    if (!matchMedia(DESKTOP_QUERY).matches) return;
+    if (!this.editable) return;
     e.preventDefault(); e.stopImmediatePropagation();
     if (this.keepsDrawing()) { this.endDrawingRun(); return; }
     this.reset(); this.focus();
@@ -333,7 +373,7 @@ export class DrawingSurface implements ChartExtension {
   }
   private onKey(e: KeyboardEvent) {
     if (e.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
-    if (ownsChartKeyboard(e) || !matchMedia(DESKTOP_QUERY).matches || isTypingTarget(e.target) || e.isComposing || this.cell().editor || useSelectionStore.getState().dialog) return;
+    if (ownsChartKeyboard(e) || !this.editable || isTypingTarget(e.target) || e.isComposing || this.cell().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
     const session = useDrawingSession.getState(); const selected = this.cell().selected; const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
     const ctrl = e.ctrlKey || e.metaKey;

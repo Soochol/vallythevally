@@ -323,7 +323,7 @@ export class ChartController {
       this.hoverIndex = nextIndex;
       if (changed) this.scheduleLegendPaint();
       if (p.sourceEvent) this.pointerOwnsCrosshair = true;
-      if (!this.pointerOwnsCrosshair || !this.el.matches(":hover")) return;
+      if (this.pointedListeners.size === 0 || !this.pointerOwnsCrosshair || !this.el.matches(":hover")) return;
       const bar = this.hoverIndex === null ? undefined : this.bars[this.hoverIndex];
       this.emitPointedBar(p.point && bar && crosshairVisible(this.el) ? barInterval(bar.t, this.period()) : null);
     });
