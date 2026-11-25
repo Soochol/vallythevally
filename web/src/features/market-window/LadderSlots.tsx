@@ -110,7 +110,7 @@ const ReplayTradeBox = memo(function ReplayTradeBox({ trades, previousClose }: {
   return (
     <div className="mw-tbox">
       <div className="mw-tscroll" data-testid="ladder-trades">
-        {trades.map((row) => <BoxTrade key={row.key} row={row} previousClose={previousClose} />)}
+        {trades.map((row, index) => <BoxTrade key={index} row={row} previousClose={previousClose} />)}
       </div>
     </div>
   );

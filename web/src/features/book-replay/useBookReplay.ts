@@ -1,12 +1,19 @@
-import { useEffect, useMemo } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import { TODAY_REFETCH_MS, useBookReplayAvailable, useBookReplayDay } from "../../api/bookReplay";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
+import type { BarInterval } from "../../chart/crosshairSync";
 import { useBookReplayStore } from "../../stores/bookReplay";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useBookReplayPref } from "../../stores/ui";
 import { REPLAY_REASON, replayDate, replayView, todayRefreshDelayMs, type ReplayView } from "./replay";
 
 const LIVE_VIEW: ReplayView = { kind: "live" };
+
+function readPointedBar(code: SymbolCode, enabled: boolean): BarInterval | null {
+  if (!enabled) return null;
+  const pointed = useBookReplayStore.getState().pointed;
+  return pointed?.symbol === code ? pointed.bar : null;
+}
 
 export function useBookReplayEnabled(): boolean {
   const pref = useBookReplayPref();
@@ -15,7 +22,22 @@ export function useBookReplayEnabled(): boolean {
 
 export function useBookReplay(code: SymbolCode): ReplayView {
   const enabled = useBookReplayEnabled();
-  const bar = useBookReplayStore((state) => (enabled && state.pointed?.symbol === code ? state.pointed.bar : null));
+  const [state, setState] = useState<{ code: SymbolCode; bar: BarInterval | null }>(() => ({
+    code,
+    bar: readPointedBar(code, enabled),
+  }));
+  useEffect(() => {
+    const next = readPointedBar(code, enabled);
+    setState((prev) => (prev.code === code && prev.bar === next ? prev : { code, bar: next }));
+    if (!enabled) return;
+    return useBookReplayStore.subscribe((storeState) => {
+      const nextBar = storeState.pointed?.symbol === code ? storeState.pointed.bar : null;
+      startTransition(() => {
+        setState((prev) => (prev.code === code && prev.bar === nextBar ? prev : { code, bar: nextBar }));
+      });
+    });
+  }, [code, enabled]);
+  const bar = enabled && state.code === code ? state.bar : null;
   const serverTimeOrigin = useServerClock((state) => (bar === null ? null : state.serverTimeOrigin));
   const date = bar === null ? null : replayDate(bar);
   const now = Math.floor(serverNow(serverTimeOrigin) / 1000);
