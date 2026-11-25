@@ -67,7 +67,7 @@ impl Harness {
         rest.set_access(Access::Open);
         let shared = tmp.path().join("shared");
         if enabled {
-            state.shared_data.enable(shared.clone());
+            state.collector_paths.configure(server::shared_data::CollectorPaths::shared_only(shared.clone()));
         }
         Harness { app: router(state), clock, kiwoom, shared, _tmp: tmp }
     }

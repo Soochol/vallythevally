@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::UNIX_EPOCH;
 
 use domain::{KstDate, KstTime, StockCode};
@@ -8,6 +8,7 @@ use tokio::sync::Semaphore;
 
 use crate::api;
 use crate::book_replay::day_index::{DayIndexCache, DayIndexState, FileStamp, read_stamp};
+use crate::shared_data::CollectorPaths;
 
 use super::flow::{FlowCache, has_symbol_flow};
 use super::kind::{Brokers, CollectedKind};
@@ -15,7 +16,6 @@ use super::store::{StoreDay, read_day};
 
 const STORE_CACHE_CAPACITY: usize = 16;
 const MAX_CONCURRENT_QUERIES: usize = 2;
-const SHARED_FOLDER: &str = "shared";
 
 struct CachedStoreDay<V> {
     stamp: FileStamp,
@@ -108,9 +108,15 @@ enum StoreLookup<V> {
     NotCollected,
 }
 
+struct DayQuery<'a> {
+    stock: StockCode,
+    date: KstDate,
+    date_str: &'a str,
+    after: Option<&'a str>,
+    now: KstTime,
+}
+
 pub struct Collected {
-    dir: OnceLock<PathBuf>,
-    shared_dir: OnceLock<PathBuf>,
     day_index: DayIndexCache,
     permits: Arc<Semaphore>,
     brokers: KindSource<Brokers>,
@@ -119,47 +125,31 @@ pub struct Collected {
 impl Collected {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            dir: OnceLock::new(),
-            shared_dir: OnceLock::new(),
             day_index: DayIndexCache::new(),
             permits: Arc::new(Semaphore::new(MAX_CONCURRENT_QUERIES)),
             brokers: KindSource::new(),
         })
     }
 
-    pub fn enable(&self, data_dir: PathBuf) {
-        let _ = self.dir.set(data_dir);
-    }
-
-    pub fn use_shared_dir(&self, dir: PathBuf) {
-        let _ = self.shared_dir.set(dir);
-    }
-
-    fn resolve_shared_dir(&self) -> Option<PathBuf> {
-        self.shared_dir
-            .get()
-            .cloned()
-            .or_else(|| self.dir.get().map(|dir| dir.join(SHARED_FOLDER)))
-    }
-
     pub(super) async fn broker_day(
         self: &Arc<Self>,
+        paths: CollectorPaths,
         stock: StockCode,
         date: KstDate,
         date_str: &str,
         after: Option<&str>,
         now: KstTime,
     ) -> Result<DaySlice<api::FeedBrokers>, String> {
-        self.read_day::<Brokers>(|c| &c.brokers, stock, date, date_str, after, now).await
+        self.read_day::<Brokers>(|c| &c.brokers, paths, DayQuery { stock, date, date_str, after, now }).await
     }
 
-    pub(super) async fn broker_days(self: &Arc<Self>, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
-        self.days_for::<Brokers>(stock, now).await
+    pub(super) async fn broker_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        self.days_for::<Brokers>(paths, stock, now).await
     }
 
-    async fn days_for<K: CollectedKind>(self: &Arc<Self>, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
-        let dir = self.dir.get().cloned();
-        let shared_dir = self.resolve_shared_dir();
+    async fn days_for<K: CollectedKind>(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        let dir = paths.hoga_dir().map(Path::to_path_buf);
+        let shared_dir = paths.shared_dir().map(Path::to_path_buf);
         if dir.is_none() && shared_dir.is_none() {
             return Ok(Vec::new());
         }
@@ -187,13 +177,11 @@ impl Collected {
     async fn read_day<K: CollectedKind>(
         self: &Arc<Self>,
         select: fn(&Self) -> &KindSource<K>,
-        stock: StockCode,
-        date: KstDate,
-        date_str: &str,
-        after: Option<&str>,
-        now: KstTime,
+        paths: CollectorPaths,
+        query: DayQuery<'_>,
     ) -> Result<DaySlice<K::View>, String> {
-        if let Some(dir) = self.dir.get().cloned() {
+        let DayQuery { stock, date, date_str, after, now } = query;
+        if let Some(dir) = paths.hoga_dir().map(Path::to_path_buf) {
             let cache_key = (stock.as_str().to_owned(), date_str.to_owned());
             let lookup = {
                 let collected = Arc::clone(self);
@@ -230,7 +218,7 @@ impl Collected {
         if date != now.kst_date() {
             return Ok(DaySlice::none());
         }
-        let Some(shared_dir) = self.resolve_shared_dir() else {
+        let Some(shared_dir) = paths.shared_dir().map(Path::to_path_buf) else {
             return Ok(DaySlice::none());
         };
         let flow_after = parse_flow_cursor(after);

@@ -50,7 +50,7 @@ impl Harness {
         let state = application(ApplicationInputs { rest, clock: clock.clone(), symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
         let data = tmp.path().join("hoga");
         if enabled {
-            state.collected.enable(data.clone());
+            state.collector_paths.configure(server::shared_data::CollectorPaths::hoga_only(data.clone()));
         }
         Harness { app: router(state), clock, data, _tmp: tmp }
     }

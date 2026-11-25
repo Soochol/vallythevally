@@ -49,6 +49,7 @@ pub struct AppState {
     pub market_source_board: Arc<crate::market_source::status::MarketSourceBoard>,
     pub public_usage: Arc<crate::public::usage::Usage>,
     pub shared_data: Arc<crate::shared_data::SharedData>,
+    pub collector_paths: Arc<crate::shared_data::CollectorPathsSlot>,
     pub book_replay: Arc<crate::book_replay::BookReplay>,
     pub collected: Arc<crate::collected::Collected>,
     pub heatmap_quotes: Arc<crate::heatmap_board::QuoteCache>,

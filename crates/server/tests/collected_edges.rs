@@ -59,12 +59,12 @@ impl Harness {
             screener_update_on_connect: false,
         });
         let data = tmp.path().join("hoga");
-        state.collected.enable(data.clone());
         let shared = if separate_shared {
             let external = tmp.path().join("external-shared");
-            state.collected.use_shared_dir(external.clone());
+            state.collector_paths.configure(server::shared_data::CollectorPaths::new(Some(data.clone()), Some(external.clone())));
             external
         } else {
+            state.collector_paths.configure(server::shared_data::CollectorPaths::hoga_only(data.clone()));
             data.join("shared")
         };
         Harness { app: router(state), clock, data, shared, _tmp: tmp }

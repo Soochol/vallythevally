@@ -4,7 +4,7 @@ pub(crate) mod store;
 
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -63,7 +63,6 @@ impl ResponseCache {
 }
 
 pub struct BookReplay {
-    dir: OnceLock<PathBuf>,
     day_index: DayIndexCache,
     responses: Mutex<ResponseCache>,
     permits: Arc<Semaphore>,
@@ -72,24 +71,17 @@ pub struct BookReplay {
 impl BookReplay {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            dir: OnceLock::new(),
             day_index: DayIndexCache::new(),
             responses: Mutex::new(ResponseCache::new()),
             permits: Arc::new(Semaphore::new(MAX_CONCURRENT_QUERIES)),
         })
     }
+}
 
-    pub fn enable(&self, dir: PathBuf) {
-        let _ = self.dir.set(dir);
-    }
-
-    pub fn is_enabled(&self) -> bool {
-        self.dir.get().is_some()
-    }
-
-    fn data_dir(&self) -> Result<PathBuf, ApiFailure> {
-        self.dir.get().cloned().ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, "호가 복기 기능이 켜져 있지 않습니다"))
-    }
+fn replay_dirs(st: &AppState) -> Result<(PathBuf, PathBuf), ApiFailure> {
+    let hoga = st.collector_paths.hoga_dir().ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, "호가 복기 기능이 켜져 있지 않습니다"))?;
+    let shared = st.collector_paths.shared_dir().ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, "호가 복기 기능이 켜져 있지 않습니다"))?;
+    Ok((hoga.to_path_buf(), shared.to_path_buf()))
 }
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -115,17 +107,17 @@ fn empty_day(stock: StockCode, date: String, coverage: api::BookReplayCoverage) 
 }
 
 async fn access(State(st): State<Arc<AppState>>) -> Json<api::BookReplayAccess> {
-    Json(api::BookReplayAccess { available: st.book_replay.is_enabled() })
+    Json(api::BookReplayAccess { available: st.collector_paths.hoga_dir().is_some() })
 }
 
 async fn days(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::BookReplayDays>, ApiFailure> {
-    let dir = st.book_replay.data_dir()?;
+    let (dir, shared) = replay_dirs(&st)?;
     let stock = parse_stock(&code)?;
     let replay = st.book_replay.clone();
     let stock_str = stock.as_str().to_owned();
     let days = tokio::task::spawn_blocking(move || {
         let mut merged: BTreeSet<String> = replay.day_index.collected_days(&dir, &stock_str)?.into_iter().collect();
-        merged.extend(live::live_days(&dir, &stock_str)?);
+        merged.extend(live::live_days(&dir, &shared, &stock_str)?);
         Ok::<Vec<String>, String>(merged.into_iter().collect())
     })
         .await
@@ -135,7 +127,7 @@ async fn days(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Resu
 }
 
 async fn day_replay(State(st): State<Arc<AppState>>, Path(code): Path<String>, Query(q): Query<HashMap<String, String>>) -> Result<Json<Arc<api::BookReplayDay>>, ApiFailure> {
-    let dir = st.book_replay.data_dir()?;
+    let (dir, shared_dir) = replay_dirs(&st)?;
     let stock = parse_stock(&code)?;
     let date_str = q.get("date").map(String::as_str).filter(|s| !s.is_empty()).ok_or_else(|| ApiFailure::bad_request("date 쿼리(YYYYMMDD)가 필요합니다"))?;
     let date = KstDate::parse_yyyymmdd(date_str).ok_or_else(|| ApiFailure::bad_request(format!("date는 YYYYMMDD 형식입니다: {date_str}")))?;
@@ -156,7 +148,7 @@ async fn day_replay(State(st): State<Arc<AppState>>, Path(code): Path<String>, Q
     let date_owned = date_str.to_owned();
     let shared = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        load_or_cached_day(&replay, &dir, stock, date, &date_owned, &cache_key)
+        load_or_cached_day(&replay, &dir, &shared_dir, stock, date, &date_owned, &cache_key)
     })
     .await
     .map_err(|e| internal_error("호가 복기 조회 작업이 멈췄습니다", e.to_string()))?
@@ -169,11 +161,11 @@ fn cached_response(replay: &BookReplay, dir: &std::path::Path, date_str: &str, c
     Ok(replay.responses.lock().expect("book replay cache").get(cache_key, &stamp))
 }
 
-fn load_or_cached_day(replay: &BookReplay, dir: &std::path::Path, stock: StockCode, date: KstDate, date_str: &str, cache_key: &(String, String)) -> Result<Arc<api::BookReplayDay>, String> {
+fn load_or_cached_day(replay: &BookReplay, dir: &std::path::Path, shared_dir: &std::path::Path, stock: StockCode, date: KstDate, date_str: &str, cache_key: &(String, String)) -> Result<Arc<api::BookReplayDay>, String> {
     if let Some(cached) = cached_response(replay, dir, date_str, cache_key)? {
         return Ok(cached);
     }
-    let (stamp, response) = load_day(replay, dir, stock, date, date_str)?;
+    let (stamp, response) = load_day(replay, dir, shared_dir, stock, date, date_str)?;
     let shared = Arc::new(response);
     if shared.coverage == api::BookReplayCoverage::Collected
         && let Some(stamp) = stamp
@@ -183,10 +175,10 @@ fn load_or_cached_day(replay: &BookReplay, dir: &std::path::Path, stock: StockCo
     Ok(shared)
 }
 
-fn load_day(replay: &BookReplay, dir: &std::path::Path, stock: StockCode, date: KstDate, date_str: &str) -> Result<(Option<FileStamp>, api::BookReplayDay), String> {
+fn load_day(replay: &BookReplay, dir: &std::path::Path, shared_dir: &std::path::Path, stock: StockCode, date: KstDate, date_str: &str) -> Result<(Option<FileStamp>, api::BookReplayDay), String> {
     let (stamp, state) = replay.day_index.load(dir, date_str)?;
     let index = match state {
-        DayIndexState::Missing => return Ok((None, live::read_live_day(&dir.join("shared"), stock, date, date_str)?)),
+        DayIndexState::Missing => return Ok((None, live::read_live_day(shared_dir, stock, date, date_str)?)),
         DayIndexState::UnsupportedVersion => return Ok((stamp, empty_day(stock, date_str.to_owned(), api::BookReplayCoverage::DayNotCollected))),
         DayIndexState::Ready(index) => index,
     };
@@ -250,9 +242,10 @@ mod tests {
         .unwrap();
         write_book_parquet(&day_dir.join("0D").join("056.parquet"), recv_ms, 71_000);
         let replay = BookReplay::new();
+        let shared = tmp.path().join("shared");
         let stock = StockCode::parse("005930").unwrap();
         let key = ("005930".to_owned(), "20261123".to_owned());
-        let first = load_or_cached_day(&replay, tmp.path(), stock, date, "20261123", &key).unwrap();
+        let first = load_or_cached_day(&replay, tmp.path(), &shared, stock, date, "20261123", &key).unwrap();
         assert_eq!(first.books[0].asks[0][0], 71_000);
         assert!(cached_response(&replay, tmp.path(), "20261123", &key).unwrap().is_some());
         write_book_parquet(&day_dir.join("0D").join("056.parquet"), recv_ms, 72_500);
@@ -262,7 +255,7 @@ mod tests {
         )
         .unwrap();
         assert!(cached_response(&replay, tmp.path(), "20261123", &key).unwrap().is_none());
-        let second = load_or_cached_day(&replay, tmp.path(), stock, date, "20261123", &key).unwrap();
+        let second = load_or_cached_day(&replay, tmp.path(), &shared, stock, date, "20261123", &key).unwrap();
         assert_eq!(second.books[0].asks[0][0], 72_500);
     }
 }

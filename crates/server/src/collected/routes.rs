@@ -31,7 +31,7 @@ async fn broker_days(State(st): State<Arc<AppState>>, Path(code): Path<String>) 
     let stock = parse_stock(&code)?;
     let days = st
         .collected
-        .broker_days(stock, st.clock.now())
+        .broker_days(st.collector_paths.snapshot(), stock, st.clock.now())
         .await
         .map_err(|e| internal_error("수집 거래원 날짜 목록을 읽지 못했습니다", e))?;
     Ok(Json(api::BrokerDays { symbol: symbol_code(stock), days }))
@@ -52,7 +52,7 @@ async fn broker_day(
     let after = q.get("after").map(String::as_str);
     let slice = st
         .collected
-        .broker_day(stock, date, date_str, after, st.clock.now())
+        .broker_day(st.collector_paths.snapshot(), stock, date, date_str, after, st.clock.now())
         .await
         .map_err(|e| internal_error("수집 거래원 자료를 읽지 못했습니다", e))?;
     Ok(Json(api::BrokerDay {

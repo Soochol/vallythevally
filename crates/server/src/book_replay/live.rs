@@ -62,8 +62,8 @@ pub(super) fn read_live_day(shared: &Path, stock: StockCode, date: KstDate, date
     })
 }
 
-pub(super) fn live_days(data_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
-    let live_root = data_dir.join("shared").join(LIVE_QUOTES_FOLDER);
+pub(super) fn live_days(data_dir: &Path, shared_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
+    let live_root = shared_dir.join(LIVE_QUOTES_FOLDER);
     let entries = match std::fs::read_dir(&live_root) {
         Ok(entries) => entries,
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
