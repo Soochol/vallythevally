@@ -397,8 +397,9 @@ impl Inner {
             if request.once.as_ref().is_some_and(|once| !(once.admit)()) {
                 return Err(KisError::NotAdmitted);
             }
-            let lease = self.auth.token().await?;
+            let _ = self.auth.token().await?;
             let oldest_in_window = self.admit(request.priority).await;
+            let lease = self.auth.token().await?;
             if request.once.as_ref().is_some_and(|once| !(once.admit)()) {
                 return Err(KisError::NotAdmitted);
             }
@@ -428,6 +429,10 @@ impl Inner {
                 Policy::ReissueOnce if !reissued => {
                     reissued = true;
                     self.auth.invalidate(lease.generation);
+                }
+                Policy::ReissueOnce if self.auth.is_supplied() => {
+                    self.auth.invalidate(lease.generation);
+                    return Err(KisError::Failed(failure));
                 }
                 Policy::ReissueOnce | Policy::HaltAll => {
                     self.auth.halt(failure.clone());

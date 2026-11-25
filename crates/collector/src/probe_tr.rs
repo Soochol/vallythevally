@@ -31,7 +31,25 @@ const KEYS_ENV_VARIABLE: &str = "VALLY_KEYS";
 const DEFAULT_KEYS_FILE: &str = ".config/vally/collector-keys.json";
 const REDACTED: &str = "[REDACTED]";
 const CUSTOMER_TYPE_PERSONAL: &str = "P";
-const SENSITIVE_KEY_FRAGMENTS: [&str; 8] = ["token", "secret", "appkey", "app_key", "cano", "acnt", "account", "authorization"];
+const SENSITIVE_KEY_FRAGMENTS: [&str; 17] = [
+    "token",
+    "secret",
+    "appkey",
+    "app_key",
+    "api_key",
+    "apikey",
+    "approval",
+    "cano",
+    "acnt",
+    "acct",
+    "account",
+    "hts",
+    "authorization",
+    "bearer",
+    "passwd",
+    "password",
+    "cookie",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProbeMethod {
@@ -119,19 +137,50 @@ fn validate_path(text: &str) -> Result<String, String> {
     Ok(text.to_owned())
 }
 
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn percent_decode(text: &str) -> Result<String, String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let decoded = (bytes[index] == b'%')
+            .then(|| bytes.get(index + 1).copied().zip(bytes.get(index + 2).copied()))
+            .flatten()
+            .and_then(|(high, low)| Some((hex_value(high)? << 4) | hex_value(low)?));
+        if let Some(byte) = decoded {
+            out.push(byte);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|_| format!("--query 값이 올바른 UTF-8 퍼센트 인코딩이 아닙니다: {text:?}"))
+}
+
 fn parse_query(text: &str) -> Result<Vec<(String, String)>, String> {
     let mut pairs = Vec::new();
     for segment in text.split('&') {
         if segment.is_empty() {
             continue;
         }
-        let Some((name, value)) = segment.split_once('=') else {
+        let Some((raw_name, raw_value)) = segment.split_once('=') else {
             return Err(format!("--query 항목은 키=값 형식이어야 합니다: {segment:?}"));
         };
+        let name = percent_decode(raw_name)?;
         if name.is_empty() {
             return Err(format!("--query 키 이름이 비어 있습니다: {segment:?}"));
         }
-        pairs.push((name.to_owned(), value.to_owned()));
+        let value = percent_decode(raw_value)?;
+        pairs.push((name, value));
     }
     Ok(pairs)
 }
@@ -235,34 +284,202 @@ pub fn scrub_json(value: &mut Value) {
     }
 }
 
-fn scrub_known_secrets_in_text(text: &mut String, secrets: &[&str]) {
-    for secret in secrets {
-        if !secret.is_empty() && text.contains(secret) {
-            *text = text.replace(secret, REDACTED);
+fn percent_encode(text: &str, space_as_plus: bool) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(byte as char);
+        } else if space_as_plus && byte == b' ' {
+            out.push('+');
+        } else {
+            out.push('%');
+            out.push(HEX[(byte >> 4) as usize] as char);
+            out.push(HEX[(byte & 0x0f) as usize] as char);
         }
+    }
+    out
+}
+
+fn build_secret_variants(secrets: &[&str]) -> Vec<String> {
+    let mut variants = Vec::new();
+    for secret in secrets {
+        if secret.is_empty() {
+            continue;
+        }
+        for candidate in [
+            (*secret).to_ascii_lowercase(),
+            percent_encode(secret, false).to_ascii_lowercase(),
+            percent_encode(secret, true).to_ascii_lowercase(),
+        ] {
+            if !candidate.is_empty() && !variants.contains(&candidate) {
+                variants.push(candidate);
+            }
+        }
+    }
+    variants.sort_by(|left, right| right.len().cmp(&left.len()).then_with(|| left.cmp(right)));
+    variants
+}
+
+fn scrub_known_secrets_in_text(text: &mut String, variants_lower: &[String]) {
+    for variant in variants_lower {
+        if variant.is_empty() {
+            continue;
+        }
+        let lower = text.to_ascii_lowercase();
+        if !lower.contains(variant.as_str()) {
+            continue;
+        }
+        let mut result = String::with_capacity(text.len());
+        let mut cursor = 0;
+        while let Some(offset) = lower[cursor..].find(variant.as_str()) {
+            let match_start = cursor + offset;
+            result.push_str(&text[cursor..match_start]);
+            result.push_str(REDACTED);
+            cursor = match_start + variant.len();
+        }
+        result.push_str(&text[cursor..]);
+        *text = result;
     }
 }
 
-fn scrub_known_secrets(value: &mut Value, secrets: &[&str]) {
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-'
+}
+
+fn is_value_delimiter(byte: u8) -> bool {
+    byte.is_ascii_whitespace() || matches!(byte, b'<' | b'>' | b',' | b';' | b'&' | b'"' | b'\'' | b')' | b']' | b'}')
+}
+
+fn scan_unquoted_value_end(bytes: &[u8], mut index: usize) -> usize {
+    while index < bytes.len() && !is_value_delimiter(bytes[index]) {
+        index += 1;
+    }
+    index
+}
+
+fn skip_spaces(bytes: &[u8], mut index: usize) -> usize {
+    while index < bytes.len() && matches!(bytes[index], b' ' | b'\t') {
+        index += 1;
+    }
+    index
+}
+
+fn scan_quoted_value_end(bytes: &[u8], mut index: usize, quote: u8) -> (usize, bool) {
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 1 < bytes.len() {
+            index += 2;
+            continue;
+        }
+        if bytes[index] == quote {
+            return (index, true);
+        }
+        index += 1;
+    }
+    (bytes.len(), false)
+}
+
+fn scrub_sensitive_text(text: &mut String) {
+    let source = text.as_str();
+    let bytes = source.as_bytes();
+    let mut out = String::with_capacity(source.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if !is_identifier_byte(bytes[index]) {
+            let ch = source[index..].chars().next().expect("유효한 UTF-8 경계");
+            out.push(ch);
+            index += ch.len_utf8();
+            continue;
+        }
+        let ident_start = index;
+        while index < bytes.len() && is_identifier_byte(bytes[index]) {
+            index += 1;
+        }
+        let ident = &source[ident_start..index];
+        out.push_str(ident);
+        if ident.eq_ignore_ascii_case("bearer") {
+            let after_space = skip_spaces(bytes, index);
+            if after_space > index {
+                let token_end = scan_unquoted_value_end(bytes, after_space);
+                if token_end > after_space {
+                    out.push_str(&source[index..after_space]);
+                    out.push_str(REDACTED);
+                    index = token_end;
+                    continue;
+                }
+            }
+        }
+        if !is_sensitive_key(ident) {
+            continue;
+        }
+        let mut cursor = index;
+        if cursor < bytes.len() && matches!(bytes[cursor], b'"' | b'\'') {
+            cursor += 1;
+        }
+        cursor = skip_spaces(bytes, cursor);
+        if cursor >= bytes.len() || !matches!(bytes[cursor], b'=' | b':') {
+            continue;
+        }
+        cursor = skip_spaces(bytes, cursor + 1);
+        out.push_str(&source[index..cursor]);
+        if cursor < bytes.len() && matches!(bytes[cursor], b'"' | b'\'') {
+            let quote = bytes[cursor];
+            out.push(quote as char);
+            let (end, closed) = scan_quoted_value_end(bytes, cursor + 1, quote);
+            out.push_str(REDACTED);
+            if closed {
+                out.push(quote as char);
+                index = end + 1;
+            } else {
+                index = end;
+            }
+        } else {
+            let first_end = scan_unquoted_value_end(bytes, cursor);
+            let first_word = &source[cursor..first_end];
+            if first_word.eq_ignore_ascii_case("bearer") || first_word.eq_ignore_ascii_case("basic") {
+                let after_scheme = skip_spaces(bytes, first_end);
+                let token_end = scan_unquoted_value_end(bytes, after_scheme);
+                if token_end > after_scheme {
+                    out.push_str(REDACTED);
+                    index = token_end;
+                    continue;
+                }
+            }
+            if first_end > cursor {
+                out.push_str(REDACTED);
+                index = first_end;
+            } else {
+                index = cursor;
+            }
+        }
+    }
+    *text = out;
+}
+
+fn scrub_known_secrets(value: &mut Value, variants_lower: &[String]) {
     match value {
-        Value::String(text) => scrub_known_secrets_in_text(text, secrets),
+        Value::String(text) => scrub_known_secrets_in_text(text, variants_lower),
         Value::Array(items) => {
             for item in items {
-                scrub_known_secrets(item, secrets);
+                scrub_known_secrets(item, variants_lower);
             }
         }
         Value::Object(map) => {
-            for item in map.values_mut() {
-                scrub_known_secrets(item, secrets);
+            let original = std::mem::take(map);
+            for (mut key, mut item) in original {
+                scrub_known_secrets_in_text(&mut key, variants_lower);
+                scrub_known_secrets(&mut item, variants_lower);
+                map.insert(key, item);
             }
         }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
 }
 
-fn scrub_header_value(header: Option<String>, secrets: &[&str]) -> Option<String> {
+fn scrub_header_value(header: Option<String>, variants_lower: &[String]) -> Option<String> {
     header.map(|mut value| {
-        scrub_known_secrets_in_text(&mut value, secrets);
+        scrub_sensitive_text(&mut value);
+        scrub_known_secrets_in_text(&mut value, variants_lower);
         value
     })
 }
@@ -331,6 +548,7 @@ pub async fn execute_probe(request: &ProbeRequest, base_url: &str, process: &Var
     };
     let client = reqwest::Client::builder()
         .tls_backend_rustls()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(SEND_TIMEOUT)
         .build()
         .map_err(|error| format!("HTTP 클라이언트를 만들지 못했습니다: {}", error.without_url()))?;
@@ -368,19 +586,26 @@ pub async fn execute_probe(request: &ProbeRequest, base_url: &str, process: &Var
     let cont_yn = non_empty_header(response.headers(), "cont-yn");
     let next_key = non_empty_header(response.headers(), "next-key");
     let raw_body = response.text().await.map_err(|error| format!("TR 응답 본문 읽기 실패: {}", error.without_url()))?;
-    let mut body = serde_json::from_str::<Value>(&raw_body).unwrap_or(Value::String(raw_body));
-    let known_secrets = [key.app_key.expose().as_str(), key.app_secret.expose().as_str(), token.expose().as_str()];
+    let mut body = match serde_json::from_str::<Value>(&raw_body) {
+        Ok(value) => value,
+        Err(_) => {
+            let mut text = raw_body;
+            scrub_sensitive_text(&mut text);
+            Value::String(text)
+        }
+    };
+    let secret_variants = build_secret_variants(&[key.app_key.expose().as_str(), key.app_secret.expose().as_str(), token.expose().as_str()]);
     scrub_json(&mut body);
-    scrub_known_secrets(&mut body, &known_secrets);
+    scrub_known_secrets(&mut body, &secret_variants);
     let fixture = CapturedFixture {
         broker: broker_label(request.broker).to_owned(),
         tr_id: request.tr_id.clone(),
         path: request.path.clone(),
         method: request.method.as_str().to_owned(),
         status,
-        tr_cont: scrub_header_value(tr_cont, &known_secrets),
-        cont_yn: scrub_header_value(cont_yn, &known_secrets),
-        next_key: scrub_header_value(next_key, &known_secrets),
+        tr_cont: scrub_header_value(tr_cont, &secret_variants),
+        cont_yn: scrub_header_value(cont_yn, &secret_variants),
+        next_key: scrub_header_value(next_key, &secret_variants),
         body,
     };
     let mut bytes = serde_json::to_vec_pretty(&fixture).map_err(|error| format!("픽스처 직렬화 실패: {error}"))?;

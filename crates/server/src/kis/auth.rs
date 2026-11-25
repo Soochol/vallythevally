@@ -152,12 +152,25 @@ impl KisAuth {
         KisAuth(Arc::new(Inner { mode: Mode::Supplied, clock, state: Mutex::new(State::default()), halted, issuing: tokio::sync::Mutex::new(()) }))
     }
 
-    pub fn record_supplied(&self, credentials: KisCredentials, token: Secret<String>, generation: TokenGen, now: KstTime, expires_at: KstTime) {
+    pub fn is_supplied(&self) -> bool {
+        matches!(self.0.mode, Mode::Supplied)
+    }
+
+    pub fn record_supplied(&self, credentials: KisCredentials, token: Secret<String>, generation: TokenGen, now: KstTime, expires_at: KstTime) -> Result<(), AuthError> {
+        if token.expose().trim().is_empty() || credentials.app_key.expose().trim().is_empty() || credentials.app_secret.expose().trim().is_empty() {
+            return Err(AuthError::BadResponse);
+        }
         let mut st = self.lock();
         st.supplied_credentials = Some(credentials);
         st.issued_count = st.issued_count.max(generation.0);
         st.issued = Some(Issued { token, issued_at: now, expires_at, generation });
         st.stale = false;
+        let was_halted = st.halt.take().is_some();
+        drop(st);
+        if was_halted {
+            self.0.halted.send_replace(None);
+        }
+        Ok(())
     }
 
     pub fn needs_issue(&self) -> bool {
@@ -463,7 +476,34 @@ mod tests {
         assert_eq!(auth.halted(), None);
 
         let credentials = KisCredentials { app_key: Secret::new("FAKE-KIS-KEY-1234".to_owned()), app_secret: Secret::new("FAKE-KIS-SECRET-5678".to_owned()) };
-        auth.record_supplied(credentials, Secret::new("FAKE-KIS-TOKEN-9999".to_owned()), TokenGen(3), start, start.plus_secs(3600));
+        assert_eq!(
+            auth.record_supplied(
+                KisCredentials { app_key: Secret::new("".to_owned()), app_secret: Secret::new("FAKE-KIS-SECRET-5678".to_owned()) },
+                Secret::new("FAKE-KIS-TOKEN-9999".to_owned()),
+                TokenGen(1),
+                start,
+                start.plus_secs(3600),
+            ),
+            Err(AuthError::BadResponse)
+        );
+        assert_eq!(
+            auth.record_supplied(
+                KisCredentials { app_key: Secret::new("FAKE-KIS-KEY-1234".to_owned()), app_secret: Secret::new("   ".to_owned()) },
+                Secret::new("FAKE-KIS-TOKEN-9999".to_owned()),
+                TokenGen(1),
+                start,
+                start.plus_secs(3600),
+            ),
+            Err(AuthError::BadResponse)
+        );
+        assert_eq!(
+            auth.record_supplied(credentials.clone(), Secret::new("  ".to_owned()), TokenGen(1), start, start.plus_secs(3600)),
+            Err(AuthError::BadResponse)
+        );
+        assert!(auth.needs_issue());
+        assert!(auth.app_headers().is_empty());
+
+        auth.record_supplied(credentials, Secret::new("FAKE-KIS-TOKEN-9999".to_owned()), TokenGen(3), start, start.plus_secs(3600)).unwrap();
 
         assert!(!auth.needs_issue());
         let lease = auth.token().await.unwrap();
@@ -485,8 +525,16 @@ mod tests {
         assert_eq!(auth.token().await.err(), Some(AuthError::IssueDisabled));
         assert_eq!(auth.halted(), None);
 
+        let halt_failure = super::super::error::judge_market(401, r#"{"rt_cd":"1","msg_cd":"EGW00123"}"#).unwrap();
+        let mut watch_halted = auth.watch_halted();
+        auth.halt(halt_failure);
+        assert!(auth.halted().is_some());
+        assert!(watch_halted.borrow_and_update().is_some());
+
         let next_credentials = KisCredentials { app_key: Secret::new("FAKE-KIS-KEY-1234".to_owned()), app_secret: Secret::new("FAKE-KIS-SECRET-5678".to_owned()) };
-        auth.record_supplied(next_credentials, Secret::new("FAKE-KIS-TOKEN-NEXT".to_owned()), TokenGen(4), start, start.plus_secs(3600));
+        auth.record_supplied(next_credentials, Secret::new("FAKE-KIS-TOKEN-NEXT".to_owned()), TokenGen(4), start, start.plus_secs(3600)).unwrap();
+        assert_eq!(auth.halted(), None);
+        assert_eq!(*watch_halted.borrow_and_update(), None);
         assert!(!auth.needs_issue());
         clock.jump(3600 - EXPIRY_MARGIN_SECS + 1);
         assert!(auth.needs_issue());

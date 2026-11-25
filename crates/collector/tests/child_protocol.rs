@@ -415,16 +415,18 @@ async fn startup_arguments_are_checked_before_anything_is_sent() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_remote_websocket_address_is_refused() {
-    let output = Command::new(env!("CARGO_BIN_EXE_collector"))
-        .args(["collect", "--child", "--key", "k1"])
-        .env_clear()
-        .env("VALLY_COLLECTOR_WS_URL", "ws://example.com:1")
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .unwrap();
-    assert_eq!(output.status.code(), Some(2));
-    assert!(output.stdout.is_empty());
+    for bad in ["ws://example.com:1", "ws://[::1]evil.example:8080", "ws://127.0.0.1:8080#frag", "ws://127.0.0.1:99999"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_collector"))
+            .args(["collect", "--child", "--key", "k1"])
+            .env_clear()
+            .env("VALLY_COLLECTOR_WS_URL", bad)
+            .stdin(Stdio::null())
+            .output()
+            .await
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{bad}");
+        assert!(output.stdout.is_empty(), "{bad}");
+    }
 }
 
 fn only_child_of(folder: &Path) -> PathBuf {

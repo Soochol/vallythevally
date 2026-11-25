@@ -113,8 +113,8 @@ impl RestTokens {
             },
             RestTokens::Kis { auth, .. } => match auth.token().await {
                 Ok(lease) => TokenOutcome::Ready { token: lease.token, generation: lease.generation.0, expires_at: auth.token_expires_at().map(|at| at.unix()) },
-                Err(error @ (AuthError::Halted(_) | AuthError::Failed(_) | AuthError::IssueDisabled)) => TokenOutcome::Halted(error.to_string()),
-                Err(AuthError::IssueInterval { .. } | AuthError::NotRecorded(_) | AuthError::Transport(_) | AuthError::BadResponse) => TokenOutcome::Retry(KIS_RETRY),
+                Err(error @ (AuthError::Halted(_) | AuthError::IssueDisabled)) => TokenOutcome::Halted(error.to_string()),
+                Err(AuthError::Failed(_) | AuthError::IssueInterval { .. } | AuthError::NotRecorded(_) | AuthError::Transport(_) | AuthError::BadResponse) => TokenOutcome::Retry(KIS_RETRY),
             },
         }
     }

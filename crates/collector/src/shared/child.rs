@@ -8,7 +8,7 @@ use domain::{KstDate, KstTime};
 use server::api::KiwoomEnvironment;
 use server::clock::Clock;
 use server::config::KisCredentials;
-use server::kis::auth::{KisAuth, TokenGen as KisTokenGen};
+use server::kis::auth::{Halt as KisHalt, KisAuth, TokenGen as KisTokenGen};
 use server::kis::rest::KisRest;
 use server::kis::transport::{ReqwestTransport as KisReqwestTransport, Transport as KisTransport};
 use server::kiwoom::auth::KiwoomAuth;
@@ -70,6 +70,13 @@ fn expires_dt(at: KstTime) -> String {
     format!("{}{:02}{:02}{:02}", at.kst_date().yyyymmdd(), seconds / 3600, seconds / 60 % 60, seconds % 60)
 }
 
+fn kis_halt_reason(halt: &KisHalt) -> String {
+    match halt {
+        KisHalt::Rejected(failure) => failure.to_string(),
+        KisHalt::TokenFileUnreadable(error) => format!("한투 토큰 파일: {error}"),
+    }
+}
+
 pub async fn run_shared(parts: SharedParts) {
     let SharedParts { key, broker, shared_dir, transport, kis_transport, clock, total_per_second, mut commands, events, mut shutdown } = parts;
     let auth = KiwoomAuth::keyless(None);
@@ -90,6 +97,7 @@ pub async fn run_shared(parts: SharedParts) {
     let mut running = Running { tasks: Vec::new(), stats: Vec::new() };
     let mut supplied_generation: Option<u64> = None;
     let mut reported_invalid: Option<u64> = None;
+    let mut reported_halt = false;
     loop {
         tokio::select! {
             _ = shutdown.wait_for(|stop| *stop) => break,
@@ -112,9 +120,14 @@ pub async fn run_shared(parts: SharedParts) {
                         }
                         Broker::Kis => match (&kis_rest, app_key, app_secret) {
                             (Some(kis_rest), Some(app_key), Some(app_secret)) => {
-                                kis_rest.auth().record_supplied(KisCredentials { app_key, app_secret }, token, KisTokenGen(generation), now, expires);
-                                supplied_generation = Some(generation);
-                                reported_invalid = None;
+                                match kis_rest.auth().record_supplied(KisCredentials { app_key, app_secret }, token, KisTokenGen(generation), now, expires) {
+                                    Ok(()) => {
+                                        supplied_generation = Some(generation);
+                                        reported_invalid = None;
+                                        reported_halt = false;
+                                    }
+                                    Err(error) => tracing::error!(%key, %error, "받은 한투 토큰을 쓰지 못했습니다"),
+                                }
                             }
                             (None, _, _) => tracing::error!(%key, "한투 세션이 없어 받은 토큰을 쓰지 못했습니다"),
                             (_, None, _) | (_, _, None) => tracing::error!(%key, "한투 앱키와 시크릿이 없어 받은 토큰을 쓰지 못했습니다"),
@@ -136,7 +149,11 @@ pub async fn run_shared(parts: SharedParts) {
                 Some(Ok(Command::Register(_) | Command::Unregister(_))) => tracing::warn!(%key, "공용 자료 자식은 등록 명령을 받지 않습니다"),
             },
             _ = heartbeat.tick() => {
-                let state = if supplied_generation.is_some() { SessionState::Live } else { SessionState::WaitingForToken };
+                let halted = match broker {
+                    Broker::Kiwoom => rest.auth().halted().is_some(),
+                    Broker::Kis => kis_rest.as_ref().is_some_and(|kis_rest| kis_rest.auth().halted().is_some()),
+                };
+                let state = if supplied_generation.is_some() && !halted { SessionState::Live } else { SessionState::WaitingForToken };
                 events.heartbeat(0, 0, state);
             }
             _ = poll.tick() => {
@@ -150,6 +167,13 @@ pub async fn run_shared(parts: SharedParts) {
                 }
             }
             _ = watch_tick.tick() => {
+                if let Some(halt) = kis_rest.as_ref().filter(|_| broker == Broker::Kis).and_then(|kis_rest| kis_rest.auth().halted()) {
+                    if !reported_halt {
+                        reported_halt = true;
+                        events.halted(&kis_halt_reason(&halt), "한투 키와 인증 상태를 확인한 뒤 다시 시작하세요");
+                    }
+                    continue;
+                }
                 let needs_issue = match broker {
                     Broker::Kiwoom => rest.auth().needs_issue(clock.now()),
                     Broker::Kis => kis_rest.as_ref().is_some_and(|kis_rest| kis_rest.auth().needs_issue()),

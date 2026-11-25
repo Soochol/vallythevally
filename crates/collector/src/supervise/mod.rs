@@ -111,8 +111,12 @@ fn loopback_http_url(variables: &Variables, variable: &str, default: &str) -> Re
     let Some(url) = variables.get(variable).filter(|url| !url.is_empty()) else {
         return Ok(default.to_owned());
     };
-    if url.starts_with("http://") && is_loopback_ws(&url.replacen("http://", "ws://", 1)) {
-        Ok(url.trim_end_matches('/').to_owned())
+    let normalized = url.strip_suffix('/').unwrap_or(url);
+    let valid = normalized
+        .strip_prefix("http://")
+        .is_some_and(|rest| !rest.contains(['/', '?', '#']) && is_loopback_ws(&format!("ws://{rest}")));
+    if valid {
+        Ok(normalized.to_owned())
     } else {
         Err(format!("{variable}는 http://127.0.0.1, http://localhost, http://[::1] 주소만 받습니다. 앱키를 밖으로 보내지 않기 위해서입니다"))
     }
@@ -418,7 +422,23 @@ mod tests {
             kis_base_url(&Variables::from([(KIS_URL_VARIABLE.to_owned(), "http://127.0.0.1:18080/".to_owned())])).unwrap(),
             "http://127.0.0.1:18080"
         );
-        assert!(kis_base_url(&Variables::from([(KIS_URL_VARIABLE.to_owned(), "https://example.com".to_owned())])).is_err());
+        assert_eq!(
+            kis_base_url(&Variables::from([(KIS_URL_VARIABLE.to_owned(), "http://[::1]:18080".to_owned())])).unwrap(),
+            "http://[::1]:18080"
+        );
+        for bad in [
+            "https://example.com",
+            "http://[::1]evil.example:8080",
+            "http://127.0.0.1:18080/override#frag",
+            "http://127.0.0.1:18080#frag",
+            "http://127.0.0.1:18080?x=1",
+            "http://127.0.0.1:18080/prefix",
+            "http://127.0.0.1:18080//",
+            "http://127.0.0.1:70000",
+        ] {
+            assert!(kis_base_url(&Variables::from([(KIS_URL_VARIABLE.to_owned(), bad.to_owned())])).is_err(), "{bad}");
+            assert!(rest_base_url(&Variables::from([(REST_URL_VARIABLE.to_owned(), bad.to_owned())])).is_err(), "{bad}");
+        }
     }
 
     #[test]
