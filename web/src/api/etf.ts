@@ -1,4 +1,6 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
+import type { EtfAccumulation } from "./generated/EtfAccumulation";
+import type { EtfAccumulationStyle } from "./generated/EtfAccumulationStyle";
 import type { EtfChanges } from "./generated/EtfChanges";
 import type { EtfFundDetail } from "./generated/EtfFundDetail";
 import type { EtfFundList } from "./generated/EtfFundList";
@@ -7,6 +9,8 @@ import type { EtfStockHolders } from "./generated/EtfStockHolders";
 import { getJson } from "./http";
 
 const STALE_MS = 60_000;
+
+export type EtfAccumulationWindow = 5 | 20;
 
 export const etfFundsQuery = queryOptions({
   queryKey: ["etf", "funds"],
@@ -51,3 +55,12 @@ export const etfChangesQuery = (code: string, before: string, after: string) =>
   });
 
 export const useEtfChanges = (code: string, pair: { before: string; after: string } | null) => useQuery({ ...etfChangesQuery(code, pair?.before ?? "", pair?.after ?? ""), enabled: pair !== null });
+
+export const etfAccumulationQuery = (window: EtfAccumulationWindow, style: EtfAccumulationStyle) =>
+  queryOptions({
+    queryKey: ["etf", "accumulation", window, style],
+    queryFn: ({ signal }) => getJson<EtfAccumulation>(`/api/etf/accumulation?window=${window}&style=${style}`, signal),
+    staleTime: STALE_MS,
+  });
+
+export const useEtfAccumulation = (window: EtfAccumulationWindow, style: EtfAccumulationStyle) => useQuery(etfAccumulationQuery(window, style));

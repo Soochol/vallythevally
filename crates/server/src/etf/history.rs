@@ -51,7 +51,7 @@ fn is_held(held: &Held) -> bool {
     held.quantity.is_finite() && held.quantity > 0.0
 }
 
-fn median(mut values: Vec<f64>) -> Option<f64> {
+pub(super) fn median(mut values: Vec<f64>) -> Option<f64> {
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
     match values.len() {
