@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
@@ -117,7 +117,7 @@ function FillsPanel({ executions, goTo }: { executions: readonly TradingExecutio
 }
 
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
-export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, holding, executions, writable, mock, venue, policy, onCancel }: Props) {
+export const AccountBand = memo(function AccountBand({ windowId, choice, onPick, maskAccount, openOrders, balance, holding, executions, writable, mock, venue, policy, onCancel }: Props) {
   const [panel, setPanel] = useState<PanelKind | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const counts: Record<PanelKind, number> = { open: openOrders.length, holdings: balance?.holdings.length ?? 0, fills: executions.length };
@@ -162,4 +162,4 @@ export function AccountBand({ windowId, choice, onPick, maskAccount, openOrders,
       )}
     </div>
   );
-}
+});
