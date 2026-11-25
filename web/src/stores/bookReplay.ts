@@ -14,7 +14,7 @@ interface BookReplayStore {
   clear(): void;
 }
 
-const sameBar = (a: BarInterval, b: BarInterval): boolean =>
+export const sameBar = (a: BarInterval, b: BarInterval): boolean =>
   a.start === b.start && a.end === b.end && a.period === b.period;
 
 export const useBookReplayStore = create<BookReplayStore>()((set) => ({

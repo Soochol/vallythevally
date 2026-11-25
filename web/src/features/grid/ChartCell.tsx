@@ -17,7 +17,7 @@ import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { useTheme, useVenue } from "../../stores/ui";
-import { useBookReplayStore } from "../../stores/bookReplay";
+import { replayPointScheduler } from "../book-replay/pointScheduler";
 import { useBookReplayEnabled } from "../book-replay/useBookReplay";
 import { type CellAction, cellErrorView, olderErrorView } from "./cellError";
 import { CellState } from "./CellState";
@@ -124,10 +124,14 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, [cellId, layoutId, layoutSession, crosshairScope, cell.symbol, cell.link]);
 
   useEffect(() => {
-    if (!replayEnabled || !ctl.current) return;
+    if (!replayEnabled) {
+      replayPointScheduler.cancel();
+      return;
+    }
+    if (!ctl.current) return;
     const symbol = cell.symbol;
     return ctl.current.subscribePointedBar((bar) => {
-      if (bar !== null) useBookReplayStore.getState().point(symbol, bar);
+      if (bar !== null) replayPointScheduler.push(symbol, bar);
     });
   }, [replayEnabled, cell.symbol]);
 
