@@ -3,7 +3,6 @@ import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { toChartTime } from "../../chart/time";
 import { useVenue } from "../../stores/ui";
 import type { ReplayView } from "./replay";
-import { useBookReplayEnabled } from "./useBookReplay";
 
 const pad2 = (value: number): string => String(value).padStart(2, "0");
 
@@ -31,8 +30,6 @@ function PastReplayStrip({ at, children }: { readonly at: UnixSeconds; readonly 
 }
 
 export function ReplayStrip({ view, children }: { readonly view: ReplayView; readonly children?: ReactNode }) {
-  const enabled = useBookReplayEnabled();
-  if (!enabled) return null;
   if (view.kind === "past") return <PastReplayStrip at={view.at}>{children}</PastReplayStrip>;
   if (view.kind === "none") {
     return (

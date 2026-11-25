@@ -1,0 +1,42 @@
+import { useMemo, useRef, useState } from "react";
+import type { HighValueRequest } from "./HighValueConfirm";
+import { createOrderCommands, type OrderCommandContext, type OrderCommands } from "./orderCommand";
+import { pendingWrites } from "./pendingWrites";
+import type { OrderWrites } from "./useOrderWrites";
+
+export interface BoundOrderCommands extends OrderCommands {
+  readonly confirm: HighValueRequest | null;
+  readonly clearConfirm: () => void;
+}
+
+export function useOrderCommands(
+  context: OrderCommandContext,
+  writes: OrderWrites,
+  onRememberEntry: (quantity: number, usedAt: number) => void,
+): BoundOrderCommands {
+  const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
+  const contextRef = useRef(context);
+  contextRef.current = context;
+  const writesRef = useRef(writes);
+  writesRef.current = writes;
+  const rememberRef = useRef(onRememberEntry);
+  rememberRef.current = onRememberEntry;
+
+  const commands = useMemo(
+    () =>
+      createOrderCommands(() => contextRef.current, {
+        place: (request) => writesRef.current.place(request),
+        modifyAll: (orders, price) => writesRef.current.modifyAll(orders, price),
+        cancelOne: (orderNo) => writesRef.current.cancelOne(orderNo),
+        cancelAtPrice: (side, price) => writesRef.current.cancelAtPrice(side, price),
+        say: (status) => writesRef.current.say(status),
+        setConfirm: (request) => setConfirm(request),
+        rememberEntry: (quantity, usedAt) => rememberRef.current(quantity, usedAt),
+        readPending: () => pendingWrites.snapshot(),
+        nowMs: () => Date.now(),
+      }),
+    [],
+  );
+
+  return { ...commands, confirm, clearConfirm: () => setConfirm(null) };
+}
