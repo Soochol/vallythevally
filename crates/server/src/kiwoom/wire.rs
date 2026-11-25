@@ -702,6 +702,7 @@ pub struct StockOrderBookResponse {
     pub after_hours_ask_quantity: Option<u64>,
     pub after_hours_bid_quantity: Option<u64>,
     pub book_time: Option<String>,
+    pub expected: Option<api::FeedExpected>,
 }
 
 impl TryFrom<std::collections::HashMap<String, Value>> for StockOrderBookResponse {
@@ -725,16 +726,20 @@ impl TryFrom<std::collections::HashMap<String, Value>> for StockOrderBookRespons
             }
             Ok(levels)
         };
-        let after_hours = |name: &str| fields.get(name).and_then(Value::as_str).and_then(|s| optional(s, unsigned).ok().flatten());
+        let optional_unsigned = |name: &str| fields.get(name).and_then(Value::as_str).and_then(|s| optional(s, unsigned).ok().flatten());
+        let expected = optional_unsigned("exp_cntr_pric")
+            .filter(|price| *price > 0)
+            .map(|price| api::FeedExpected { price: price as f64, qty: optional_unsigned("exp_cntr_qty").unwrap_or(0) });
         let clock = text("bid_req_base_tm")?.trim();
         Ok(StockOrderBookResponse {
             asks: side("sel")?,
             bids: side("buy")?,
             total_ask_quantity: quantity("tot_sel_req")?,
             total_bid_quantity: quantity("tot_buy_req")?,
-            after_hours_ask_quantity: after_hours("ovt_sel_req"),
-            after_hours_bid_quantity: after_hours("ovt_buy_req"),
+            after_hours_ask_quantity: optional_unsigned("ovt_sel_req"),
+            after_hours_bid_quantity: optional_unsigned("ovt_buy_req"),
             book_time: if clock.is_empty() { None } else { Some(clock_text(clock)?) },
+            expected,
         })
     }
 }
@@ -2371,12 +2376,17 @@ fn book_side(values: &Value, price_base: u32, qty_base: u32) -> Result<[Option<B
     Ok(levels)
 }
 
-fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
-    let expected = (|| {
-        let price = won_or_absent(values, 23).ok()??;
-        let qty = fid_or(values, 24, unsigned).ok()?;
+fn book_expected(values: &Value) -> Option<ExpectedTrade> {
+    let read = |price_fid: u32, qty_fid: u32| -> Option<ExpectedTrade> {
+        let price = won_or_absent(values, price_fid).ok()??;
+        let qty = fid_or(values, qty_fid, unsigned).ok()?;
         Some(ExpectedTrade { price, qty: Volume(qty) })
-    })();
+    };
+    read(291, 292).or_else(|| read(23, 24))
+}
+
+fn parse_book(item: &str, values: &Value) -> Result<BookSnapshot, WireError> {
+    let expected = book_expected(values);
     let (symbol, venue) = book_item(item)?;
     Ok(BookSnapshot {
         symbol,
@@ -2907,7 +2917,13 @@ mod tests {
         assert_eq!(book.bids[9], api::OrderBookLevel { price: 69_100, quantity: 10_000 });
         assert_eq!((book.total_ask_quantity, book.total_bid_quantity, book.book_time.as_deref()), (55_000, 66_000, Some("15:30:00")));
         let mut body: serde_json::Value = serde_json::from_str(&fixture("ka10004_005930_AL")).unwrap();
-        assert_eq!((book.after_hours_ask_quantity, book.after_hours_bid_quantity), (None, None), "필드가 없으면 null이다");
+        assert_eq!((book.after_hours_ask_quantity, book.after_hours_bid_quantity, book.expected), (None, None, None), "필드가 없으면 null이다");
+        body["exp_cntr_pric"] = "+70150".into();
+        body["exp_cntr_qty"] = "320".into();
+        let with_expected = serde_json::from_value::<StockOrderBookResponse>(body.clone()).unwrap();
+        assert_eq!(with_expected.expected, Some(api::FeedExpected { price: 70_150.0, qty: 320 }));
+        body["exp_cntr_pric"] = "0".into();
+        assert_eq!(serde_json::from_value::<StockOrderBookResponse>(body.clone()).unwrap().expected, None);
         body["ovt_sel_req"] = "1500".into();
         body["ovt_buy_req"] = "0".into();
         let with = serde_json::from_value::<StockOrderBookResponse>(body.clone()).unwrap();
@@ -3665,6 +3681,20 @@ mod tests {
         values["41"] = json!(71_100);
         let book = book(one("0D", "005930_AL", values));
         assert_eq!(book.asks[0].unwrap().price, Price::from_centi(7_110_000).unwrap());
+    }
+
+    #[test]
+    fn a_book_frame_prefers_fid_291_and_292_over_23_and_24_when_present() {
+        let mut values = book_values();
+        values["291"] = json!("+71300");
+        values["292"] = json!("450");
+        let preferred = book(one("0D", "005930_NX", values));
+        assert_eq!(preferred.expected, Some(ExpectedTrade { price: Price::from_centi(7_130_000).unwrap(), qty: Volume(450) }));
+        let mut zero_291 = book_values();
+        zero_291["291"] = json!(" 0");
+        zero_291["292"] = json!("0");
+        let fallback = book(one("0D", "005930_NX", zero_291));
+        assert_eq!(fallback.expected, Some(ExpectedTrade { price: Price::from_centi(7_115_000).unwrap(), qty: Volume(300) }));
     }
 
     #[test]

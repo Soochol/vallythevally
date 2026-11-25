@@ -34,6 +34,7 @@ function snapshotOf(base: number): OrderBook {
     afterHoursAskQuantity: null,
     afterHoursBidQuantity: null,
     bookTime: null,
+    expected: null,
   };
 }
 
@@ -667,7 +668,10 @@ test("ETF는 5원 호가 단위 격자로 받은 스무 단이 모두 자기 행
     bids: Array.from({ length: 10 }, (_, i) => ({ price: 35_005 - 5 * i, quantity: 200 + i })),
     totalAskQuantity: 1000,
     totalBidQuantity: 1000,
+    afterHoursAskQuantity: null,
+    afterHoursBidQuantity: null,
     bookTime: null,
+    expected: null,
   } });
   scenario.reply((url) => url.pathname === `/api/symbols/${etf}/trades`, { body: { symbol: etf, venue: "combined", trades: [], skippedRows: 0 } });
   pinQuote(scenario, etf, 35_005, 5);
@@ -1018,6 +1022,63 @@ test.describe("동시호가 예상체결", () => {
       await expect(info(page, "예상체결량")).toHaveCount(0);
       await expect(page.locator("[data-expected]")).toHaveCount(0);
       await expect(page.getByTestId("ladder-info")).toHaveCount(6);
+    });
+  });
+
+  test.describe("수요일 15:35 NXT 애프터마켓 동시호가", () => {
+    test.use({ clockStart: "20261118153500" });
+
+    test("NXT 가능 종목의 통합·NXT에서는 10호가가 와도 6호가와 예상체결이 보이고 KRX로 바꾸면 10호가다", async ({ page, scenario }) => {
+      nxtTraded(scenario, true);
+      await open(page, scenario, 70000);
+      const combinedSub = await subOf(scenario, "book");
+      const tenAsks: [number, number][] = Array.from({ length: 10 }, (_, i) => [70100 + 100 * i, 50 + i]);
+      const tenBids: [number, number][] = Array.from({ length: 10 }, (_, i) => [70000 - 100 * i, 80 + i]);
+      scenario.live.emit({ type: "feed_book", sub: combinedSub, book: frame(scenario, tenAsks, tenBids, EXPECTED) });
+
+      await expect(ladderRows(page).locator(".mw-px-num")).toHaveText(["70,300", "70,200", "70,100", "70,000", "69,900", "69,800"]);
+      await expect(info(page, "예상체결가").locator("b")).toHaveText("70,000");
+      await expect(info(page, "예상체결량").locator("b")).toHaveText("300");
+      await expect(page.locator(".mw-lr[data-expected]")).toHaveCount(1);
+
+      await pickDesktopVenue(page, "NXT");
+      let nxtSub = "";
+      await pollSaved(() => {
+        const message = feedSubscriptions(scenario, "book", "nxt")[0];
+        nxtSub = message?.type === "subscribe_feed" ? message.sub : "";
+        return nxtSub;
+      }).not.toBe("");
+      scenario.live.emit({ type: "feed_book", sub: nxtSub, book: frame(scenario, tenAsks, tenBids, { price: 70_100, qty: 450 }) });
+      await expect(ladderRows(page).locator(".mw-px-num")).toHaveText(["70,300", "70,200", "70,100", "70,000", "69,900", "69,800"]);
+      await expect(info(page, "예상체결가").locator("b")).toHaveText("70,100");
+      await expect(info(page, "예상체결량").locator("b")).toHaveText("450");
+
+      await pickDesktopVenue(page, "KRX");
+      let krxSub = "";
+      await pollSaved(() => {
+        const message = feedSubscriptions(scenario, "book", "krx")[0];
+        krxSub = message?.type === "subscribe_feed" ? message.sub : "";
+        return krxSub;
+      }).not.toBe("");
+      scenario.live.emit({ type: "feed_book", sub: krxSub, book: frame(scenario, tenAsks, tenBids, EXPECTED) });
+      await expect(ladderRows(page).locator(".mw-px-num")).toHaveCount(20);
+      await expect(info(page, "예상체결가")).toHaveCount(0);
+      await expect(page.locator("[data-expected]")).toHaveCount(0);
+    });
+
+    test("조회 호가에 예상체결이 들어 있으면 실시간 호가 전에도 6호가와 예상체결이 보인다", async ({ page, scenario }) => {
+      nxtTraded(scenario, true);
+      bookWindow(scenario, CODE);
+      replyBook(scenario, 70000);
+      scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", {
+        body: { ...snapshotOf(70000), bookTime: "15:35:00", expected: { price: 70_000, qty: 510 } },
+      });
+      await page.goto("/");
+      await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+      await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+      await expect(ladderRows(page).locator(".mw-px-num")).toHaveText(["70,300", "70,200", "70,100", "70,000", "69,900", "69,800"]);
+      await expect(info(page, "예상체결가").locator("b")).toHaveText("70,000");
+      await expect(info(page, "예상체결량").locator("b")).toHaveText("510");
     });
   });
 });

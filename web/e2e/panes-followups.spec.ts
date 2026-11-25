@@ -145,6 +145,7 @@ const bookSnapshot = (): OrderBook => ({
   afterHoursAskQuantity: null,
   afterHoursBidQuantity: null,
   bookTime: null,
+  expected: null,
 });
 
 async function openBookWindow(page: Page, scenario: Scenario) {

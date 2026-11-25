@@ -1226,6 +1226,36 @@ test.describe("수요일 08:55 동시호가", () => {
   });
 });
 
+test.describe("수요일 15:35 NXT 동시호가", () => {
+  test.use({ clockStart: "20261118153500" });
+
+  test.beforeEach(async ({ page, scenario }) => {
+    await page.clock.setFixedTime(new Date(scenario.now));
+  });
+
+  test("NXT 가능 종목의 호가주문창은 통합·NXT에서 6호가와 예상체결을 표시한다", async ({ page, scenario }) => {
+    nxtTraded(scenario, true);
+    ordersOn(scenario);
+    tradingApi(scenario);
+    await openOrderWindow(page, scenario, false, "combined");
+    let sub = "";
+    await pollSaved(() => {
+      const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "book" && m.symbol === CODE && m.venue === "combined");
+      sub = message?.type === "subscribe_feed" ? message.sub : "";
+      return sub;
+    }).not.toBe("");
+    const asks = Array.from({ length: 10 }, (_, i) => ({ price: 70_100 + 100 * i, qty: 50 + i }));
+    const bids = Array.from({ length: 10 }, (_, i) => ({ price: 70_000 - 100 * i, qty: 80 + i }));
+    scenario.live.emit({ type: "feed_book", sub, book: { t: scenario.now / 1000, asks, bids, totalAskQty: 545, totalBidQty: 845, expected: { price: 70_000, qty: 320 } } });
+    const info = page.getByTestId("ladder-info");
+    await expect(ladderRows(page).locator(".mw-px-num")).toHaveText(["70,300", "70,200", "70,100", "70,000", "69,900", "69,800"]);
+    await expect(info.and(page.locator('[data-label="예상체결가"]')).locator("b")).toHaveText("70,000");
+    await expect(info.and(page.locator('[data-label="예상체결량"]')).locator("b")).toHaveText("320");
+    await expect(page.locator(".mw-lr[data-expected]")).toHaveCount(1);
+    await expect(page.locator(".mw-lr[data-expected]")).toContainText("70,000");
+  });
+});
+
 test.describe("수요일 08:35 시간외 종가 잔량", () => {
   test.use({ clockStart: "20261118083500" });
 

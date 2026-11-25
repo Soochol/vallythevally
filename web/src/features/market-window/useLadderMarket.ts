@@ -88,6 +88,8 @@ export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGa
   const nowSeconds = Math.floor(nowMs / 1000);
   const serverNowSeconds = Math.floor(serverNow(serverTimeOrigin) / 1000);
   const vi = useSymbolVi(code, "krx");
+  const nxtVi = useSymbolVi(code, "nxt");
+  const nxtEnabled = symbolInfo?.nxtEnabled === true;
   const downSince = useFeedDownSince(feed.connected);
 
   const resolved = useMemo(
@@ -101,11 +103,14 @@ export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGa
         symbolKind: symbolInfo?.kind ?? null,
         replay,
         vi,
+        nxtVi,
+        venue,
+        nxtEnabled,
         nowSeconds,
         serverNowSeconds,
         skipSpreadGap,
       }),
-    [feed.book, feed.afterHours, feed.lastPrice, feed.previousClose, fundamentals, symbolInfo?.kind, replay, vi, nowSeconds, serverNowSeconds, skipSpreadGap],
+    [feed.book, feed.afterHours, feed.lastPrice, feed.previousClose, fundamentals, symbolInfo?.kind, replay, vi, nxtVi, venue, nxtEnabled, nowSeconds, serverNowSeconds, skipSpreadGap],
   );
 
   const viInfo = useViInfo({ code, vi, shown: pager.page === 1, regularSession: resolved.regularSession, now: nowSeconds, tickRule: resolved.tickRule });

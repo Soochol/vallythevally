@@ -3,7 +3,7 @@ import type { FeedBook } from "../../api/generated/FeedBook";
 import type { OrderBook } from "../../api/generated/OrderBook";
 import { acceptAfterHoursLive, acceptAfterHoursSnapshot, acceptLive, acceptSnapshot, EMPTY_BOOK, stripTotals } from "./bookModel";
 
-const snapshot: OrderBook = { symbol: "005930", asks: [{ price: 101, quantity: 10 }], bids: [{ price: 100, quantity: 20 }], totalAskQuantity: 10, totalBidQuantity: 20, afterHoursAskQuantity: null, afterHoursBidQuantity: null, bookTime: null };
+const snapshot: OrderBook = { symbol: "005930", asks: [{ price: 101, quantity: 10 }], bids: [{ price: 100, quantity: 20 }], totalAskQuantity: 10, totalBidQuantity: 20, afterHoursAskQuantity: null, afterHoursBidQuantity: null, bookTime: null, expected: null };
 const live = (asks: [number, number][], bids: [number, number][]): FeedBook => ({
   t: 1,
   asks: asks.map(([price, qty]) => ({ price, qty })),
@@ -151,4 +151,20 @@ test("띠는 시간외 잔량이 없으면 정규 총잔량이다", () => {
 
 test("띠는 정규 총잔량이 없으면 시간외 종가 잔량만 설명한다", () => {
   expect(stripTotals(null, { t: 1, askQty: 13_770, bidQty: 0 })).toEqual({ ask: 13_770, bid: 0, source: "afterHours", description: "시간외 종가 잔량" });
+});
+
+test("조회 호가에 예상체결이 있으면 예상체결과 시각을 함께 보존한다", () => {
+  const fetchedAt = Date.parse("2026-11-18T15:35:10+09:00") / 1000;
+  const shown = acceptSnapshot(EMPTY_BOOK, { ...snapshot, bookTime: "15:35:05", expected: { price: 70_000, qty: 320 } }, fetchedAt);
+  if (shown.phase !== "snapshot") throw new Error("snapshot");
+  expect(shown.view.expected).toEqual({ price: 70_000, qty: 320 });
+  expect(shown.view.t).toBe(Date.parse("2026-11-18T15:35:05+09:00") / 1000);
+});
+
+test("조회 호가에 예상체결이 있지만 호가 시각이 없으면 조회 시각을 사용한다", () => {
+  const fetchedAt = Date.parse("2026-11-18T15:35:10+09:00") / 1000;
+  const shown = acceptSnapshot(EMPTY_BOOK, { ...snapshot, bookTime: null, expected: { price: 70_000, qty: 320 } }, fetchedAt);
+  if (shown.phase !== "snapshot") throw new Error("snapshot");
+  expect(shown.view.expected).toEqual({ price: 70_000, qty: 320 });
+  expect(shown.view.t).toBe(fetchedAt);
 });

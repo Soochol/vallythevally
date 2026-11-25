@@ -27,6 +27,7 @@ const BOOK: OrderBook = {
   afterHoursAskQuantity: null,
   afterHoursBidQuantity: null,
   bookTime: null,
+  expected: null,
 };
 
 const TAPE: TradePrint[] = [

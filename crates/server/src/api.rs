@@ -1127,7 +1127,7 @@ pub struct OrderBookLevel {
 
 /// `GET /api/symbols/:code/order-book?venue=` → ka10004의 10호가. `venue`는 `combined`(기본)·`krx`·`nxt`다. NXT에서 거래되지 않는 종목은 어느 값이든 통합 호가다. 지수는 400 `bad_request`.
 /// 매도·매수 모두 1호가부터 순서대로이고, 키움이 가격을 주지 않은 단은 빠진다.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct OrderBook {
@@ -1144,6 +1144,8 @@ pub struct OrderBook {
     pub after_hours_bid_quantity: Option<u64>,
     /// 호가 기준 시각 `HH:MM:SS`(KST). 키움은 날짜를 주지 않는다. 없으면 null.
     pub book_time: Option<String>,
+    #[serde(default)]
+    pub expected: Option<FeedExpected>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

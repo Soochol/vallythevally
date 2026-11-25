@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, withVisibleRepeats, type BookLevel } from "./ladder";
+import { basePrice, buildDefaultLadder, buildLadder, buildLadderRows, defaultLadderPrices, gridPrices, isSinglePriceBook, LADDER_ROWS, ratioSplit, trimSinglePriceLevels, withVisibleRepeats, type BookLevel } from "./ladder";
 import { expectedInfoItems, infoCardRows, placeInfoItems, quoteInfoItems } from "./quoteInfo";
 
 const NO_BOUNDS = { lower: null, upper: null };
@@ -317,4 +317,20 @@ test("보이는 행이 줄어 잘린 교차 가격은 남은 첫 줄이 현재�
   expect([visible[0]!.repeat, visible[6]!.repeat]).toEqual([false, true]);
   expect(visible[5]!.bidRatio).toBe(sliced[5]!.bidRatio);
   expect(visible[5]!.bidRatio).toBeCloseTo(0.05);
+});
+
+test("잔량이 0인 빈 단이 함께 와도 실제 잔량이 있는 3단 이하는 단일가 호가로 본다", () => {
+  const asks = [level(70_100, 10), level(70_200, 20), level(70_300, 30), level(70_400, 0), level(70_500, 0)];
+  const bids = [level(70_000, 15), level(69_900, 25), level(69_800, 35), level(69_700, 0)];
+  expect(isSinglePriceBook({ asks, bids, lastPrice: 70_000, previousClose: 70_000 })).toBe(true);
+  const rows = auction({ asks, bids, lastPrice: 70_000, previousClose: 70_000, bounds: NO_BOUNDS });
+  expect(prices(rows).slice(7, 13)).toEqual([70_300, 70_200, 70_100, 70_000, 69_900, 69_800]);
+  expect(rows.filter((row) => row.price !== null)).toHaveLength(6);
+});
+
+test("단일가 호가 절삭은 매도 최우선 3단과 매수 최우선 3단만 남긴다", () => {
+  const asks = Array.from({ length: 10 }, (_, i) => level(70_100 + 100 * i, 10 + i));
+  const bids = Array.from({ length: 10 }, (_, i) => level(70_000 - 100 * i, 20 + i));
+  expect(trimSinglePriceLevels(asks, "ask").map((l) => l.price)).toEqual([70_100, 70_200, 70_300]);
+  expect(trimSinglePriceLevels(bids, "bid").map((l) => l.price)).toEqual([70_000, 69_900, 69_800]);
 });

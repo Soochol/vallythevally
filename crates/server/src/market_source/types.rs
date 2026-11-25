@@ -110,6 +110,7 @@ pub struct OrderBookSnapshot {
     pub after_hours_ask_quantity: Option<u64>,
     pub after_hours_bid_quantity: Option<u64>,
     pub book_time: Option<String>,
+    pub expected: Option<api::FeedExpected>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

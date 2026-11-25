@@ -575,6 +575,12 @@ async fn the_first_screen_reads_the_order_book_the_tape_and_the_program_trades()
     assert_eq!(book.bids.iter().map(|l| (l.price, l.quantity)).collect::<Vec<_>>(), [(71_000, 600), (70_900, 800)]);
     assert_eq!((book.total_ask_quantity, book.total_bid_quantity, book.after_hours_ask_quantity, book.after_hours_bid_quantity), (12_000, 15_000, Some(10), Some(20)));
     assert_eq!(book.book_time.as_deref(), Some("09:30:15"));
+    assert_eq!(book.expected, Some(server::api::FeedExpected { price: 71_050.0, qty: 0 }));
+
+    let with_qty = fixture("book.json").replace(r#""antc_cnpr":"71050""#, r#""antc_cnpr":"71050","antc_cnqn":"350""#);
+    let rig_qty = self::rig(move |_| ok(with_qty.clone()));
+    let book_qty = rig_qty.market.order_book(code("005930"), Venue::Nxt, Priority::Screen).await.unwrap();
+    assert_eq!(book_qty.expected, Some(server::api::FeedExpected { price: 71_050.0, qty: 350 }));
 
     let tape = rig.market.trades_page(code("005930"), Venue::Krx, None, Priority::Screen).await.unwrap();
     assert_eq!(tape.skipped, 1);

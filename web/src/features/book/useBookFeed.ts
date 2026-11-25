@@ -72,8 +72,9 @@ export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade
   const low = summary.data?.low ?? null;
   const dayPrices = useMemo<DayPrices>(() => ({ open, high, low }), [open, high, low]);
 
-  const book = snapshot.data ? acceptSnapshot(current.book, snapshot.data) : current.book;
-  const afterHours = snapshot.data ? acceptAfterHoursSnapshot(current.afterHours, snapshot.data, Math.floor(snapshot.dataUpdatedAt / 1000)) : current.afterHours;
+  const fetchedAt = Math.floor(snapshot.dataUpdatedAt / 1000);
+  const book = snapshot.data ? acceptSnapshot(current.book, snapshot.data, fetchedAt) : current.book;
+  const afterHours = snapshot.data ? acceptAfterHoursSnapshot(current.afterHours, snapshot.data, fetchedAt) : current.afterHours;
   const quoted = summary.data?.price != null && summary.data.t != null ? { price: summary.data.price, t: summary.data.t } : null;
   return {
     book,

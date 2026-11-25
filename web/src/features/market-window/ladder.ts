@@ -79,16 +79,27 @@ const SINGLE_PRICE_MAX_LEVELS = 3;
 
 const pricedLevels = (levels: readonly BookLevel[]): BookLevel[] => levels.filter((level) => usablePrice(level.price));
 
+const activePricedLevels = (levels: readonly BookLevel[]): BookLevel[] => {
+  const priced = pricedLevels(levels);
+  const active = priced.filter((level) => usableQuantity(level) > 0);
+  return active.length > 0 ? active : priced;
+};
+
+export function trimSinglePriceLevels(levels: readonly BookLevel[], side: "ask" | "bid"): BookLevel[] {
+  const sorted = [...activePricedLevels(levels)].sort((a, b) => (side === "ask" ? a.price - b.price : b.price - a.price));
+  return sorted.slice(0, SINGLE_PRICE_MAX_LEVELS);
+}
+
 export function isSinglePriceBook({ asks, bids }: LadderQuotes): boolean {
-  const askCount = pricedLevels(asks).length;
-  const bidCount = pricedLevels(bids).length;
+  const askCount = activePricedLevels(asks).length;
+  const bidCount = activePricedLevels(bids).length;
   return askCount <= SINGLE_PRICE_MAX_LEVELS && bidCount <= SINGLE_PRICE_MAX_LEVELS && askCount + bidCount > 0;
 }
 
 function singlePricePrices({ asks, bids }: LadderQuotes): (number | null)[] {
-  const distinct = (levels: readonly BookLevel[]) => [...new Set(pricedLevels(levels).map((level) => level.price))];
-  const askPrices = distinct(asks).sort((a, b) => a - b);
-  const bidPrices = distinct(bids).sort((a, b) => b - a);
+  const distinct = (levels: readonly BookLevel[]) => [...new Set(activePricedLevels(levels).map((level) => level.price))];
+  const askPrices = distinct(asks).sort((a, b) => a - b).slice(0, SINGLE_PRICE_MAX_LEVELS);
+  const bidPrices = distinct(bids).sort((a, b) => b - a).slice(0, SINGLE_PRICE_MAX_LEVELS);
   const prices = Array<number | null>(LADDER_ROWS).fill(null);
   askPrices.forEach((price, rank) => { prices[ROWS_ABOVE_BASE - 1 - rank] = price; });
   bidPrices.forEach((price, rank) => { prices[ROWS_ABOVE_BASE + rank] = price; });

@@ -25,7 +25,7 @@ use crate::clock::Clock;
 use crate::kiwoom::rest::Priority;
 use crate::market_source::SourceError;
 use crate::market_source::stream::{
-    AfterHoursTotals, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, ExpectedQuote, MarketStream, RealProgramTrade, RealTick, StreamEvent, StreamKind, TradeSide,
+    AfterHoursTotals, BookLevel, BookSnapshot, BrokerEntry, BrokerSnapshot, Exchange, ExpectedQuote, ExpectedTrade, MarketStream, RealProgramTrade, RealTick, StreamEvent, StreamKind, TradeSide,
 };
 use crate::market_source::vi::{ViAlert, ViMarket, ViSignal};
 use crate::quotes;
@@ -275,6 +275,8 @@ pub struct MarketHub {
     manager: SubscriptionManager,
     rejected: BTreeSet<Holder>,
     broker_history: BTreeMap<Symbol, (BrokerSnapshot, KstTime)>,
+    last_books: HashMap<(Symbol, Venue), (BookSnapshot, KstTime)>,
+    last_expected: HashMap<(Symbol, Venue), (ExpectedTrade, KstTime)>,
     first_after_hours: FirstOfDay,
     first_expected: FirstOfDay,
     tallies: DayTallies,
@@ -311,6 +313,8 @@ impl MarketHub {
             manager,
             rejected: BTreeSet::new(),
             broker_history: BTreeMap::new(),
+            last_books: HashMap::new(),
+            last_expected: HashMap::new(),
             first_after_hours: FirstOfDay::default(),
             first_expected: FirstOfDay::default(),
             tallies: DayTallies::default(),
@@ -389,6 +393,8 @@ impl MarketHub {
             }
             HubInput::DailyReset => {
                 self.broker_history.clear();
+                self.last_books.clear();
+                self.last_expected.clear();
                 self.reset_vi();
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
@@ -397,6 +403,8 @@ impl MarketHub {
                 self.manager.reseat(self.stream.seat_rules());
                 self.replan(now);
                 self.broker_history.clear();
+                self.last_books.clear();
+                self.last_expected.clear();
                 tracing::info!(keys = self.keys.len(), "시세 공급원이 바뀌어 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
@@ -639,6 +647,8 @@ impl MarketHub {
     fn replan(&mut self, now: KstTime) {
         let plan = self.manager.plan(now);
         self.broker_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Brokers)));
+        self.last_books.retain(|(symbol, venue), _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Book(*venue))));
+        self.last_expected.retain(|(symbol, venue), _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Book(*venue))));
         self.stream.set_desired(plan.feeds);
         let manager = &self.manager;
         self.vi.await_base_only_for(|code| manager.is_admitted(Symbol::Stock(code)));
@@ -748,24 +758,57 @@ impl MarketHub {
             return;
         };
         let symbol = expected.symbol;
-        let mut watchers = self.manager.watchers(symbol).peekable();
-        if watchers.peek().is_none() {
+        let watchers: Vec<ConnId> = self.manager.watchers(symbol).collect();
+        let book_targets = self.feed_targets(symbol, FeedKind::Book);
+        if watchers.is_empty() && book_targets.is_empty() {
             return;
         }
-        let Some(base_centi) = quotes::base_centi(expected.price, expected.change_centi) else {
-            return;
-        };
         let nxt_enabled = self.nxt_enabled(symbol);
         let today_fill = |exchange| self.last_fill.get(&(code, exchange)).copied().filter(|filled| filled.kst_date() == at.kst_date());
         let from = quotes::expected_exchange(nxt_enabled, expected.hhmmss, today_fill(Exchange::Krx), today_fill(Exchange::Nxt));
-        for conn in watchers {
-            let Some(c) = self.conns.get(&conn) else {
-                continue;
-            };
-            let venue = quotes::effective_venue(c.watch_venue, nxt_enabled);
-            if quotes::expected_moves_row(venue, from, nxt_enabled, expected.hhmmss) {
-                let volume = self.last_row_volume.get(&(code, venue)).filter(|(day, _)| *day == at.kst_date()).map_or(0, |&(_, volume)| volume);
-                c.outbox.set_quote(quotes::expected(symbol, venue, expected.price, base_centi, volume, at));
+        if !watchers.is_empty()
+            && let Some(base_centi) = quotes::base_centi(expected.price, expected.change_centi)
+        {
+            for conn in watchers {
+                let Some(c) = self.conns.get(&conn) else {
+                    continue;
+                };
+                let venue = quotes::effective_venue(c.watch_venue, nxt_enabled);
+                if quotes::expected_moves_row(venue, from, nxt_enabled, expected.hhmmss) {
+                    let volume = self.last_row_volume.get(&(code, venue)).filter(|(day, _)| *day == at.kst_date()).map_or(0, |&(_, volume)| volume);
+                    c.outbox.set_quote(quotes::expected(symbol, venue, expected.price, base_centi, volume, at));
+                }
+            }
+        }
+        if !book_targets.is_empty() {
+            let trade = ExpectedTrade { price: expected.price, qty: expected.expected_qty };
+            let mut updated_venues: HashMap<Venue, api::FeedBook> = HashMap::new();
+            for (conn, sub) in book_targets {
+                let Some(venue) = self.conns.get(&conn).and_then(|c| c.feeds.get(&sub)).map(|f| f.venue) else {
+                    continue;
+                };
+                if !quotes::expected_moves_row(venue, from, nxt_enabled, expected.hhmmss) {
+                    continue;
+                }
+                self.last_expected.insert((symbol, venue), (trade, at));
+                let message = if let Some(message) = updated_venues.get(&venue) {
+                    Some(message.clone())
+                } else if let Some((cached, cached_at)) = self.last_books.get(&(symbol, venue)).copied()
+                    && cached_at.kst_date() == at.kst_date()
+                {
+                    let updated = BookSnapshot { hhmmss: expected.hhmmss, expected: Some(trade), ..cached };
+                    self.last_books.insert((symbol, venue), (updated, received_at));
+                    let message = feed_book(&updated, received_at);
+                    updated_venues.insert(venue, message.clone());
+                    Some(message)
+                } else {
+                    None
+                };
+                if let Some(message) = message
+                    && let Some(c) = self.conns.get(&conn)
+                {
+                    c.outbox.set_book(&sub, message);
+                }
             }
         }
     }
@@ -1015,18 +1058,38 @@ impl MarketHub {
         if sides.iter().any(|levels| has_hole(levels)) {
             self.counters.book_frames_with_hole += 1;
         }
-        if let Some(expected) = book.expected
-            && self.first_expected.first(book.symbol, received_at.kst_date())
+        let book_at = resolve_trade_time(received_at, book.hhmmss).unwrap_or(received_at);
+        let nxt_enabled = self.nxt_enabled(book.symbol);
+        let resolved = if book.expected.is_some() {
+            self.last_expected.remove(&(book.symbol, book.venue));
+            *book
+        } else if let Some((cached, cached_at)) = self.last_expected.get(&(book.symbol, book.venue)).copied()
+            && cached_at.kst_date() == book_at.kst_date()
+            && let Some(window) = quotes::call_auction_window(book_at.kst_time_of_day(), book.venue, nxt_enabled)
+            && quotes::call_auction_window(cached_at.kst_time_of_day(), book.venue, nxt_enabled) == Some(window)
         {
-            tracing::info!(symbol = %book.symbol.as_wire(), hhmmss = %book.hhmmss, price = %won(expected.price), qty = expected.qty.0, "예상체결 첫 수신");
+            BookSnapshot { expected: Some(cached), ..*book }
+        } else {
+            *book
+        };
+        if let Some(expected) = resolved.expected
+            && self.first_expected.first(resolved.symbol, received_at.kst_date())
+        {
+            tracing::info!(symbol = %resolved.symbol.as_wire(), hhmmss = %resolved.hhmmss, price = %won(expected.price), qty = expected.qty.0, "예상체결 첫 수신");
         }
-        let message = feed_book(book, received_at);
-        for (conn, sub) in self.feed_targets(book.symbol, FeedKind::Book) {
+        let targets = self.feed_targets(resolved.symbol, FeedKind::Book);
+        let mut matched = false;
+        let message = feed_book(&resolved, received_at);
+        for (conn, sub) in targets {
             if let Some(c) = self.conns.get(&conn)
-                && c.feeds[&sub].venue == book.venue
+                && c.feeds[&sub].venue == resolved.venue
             {
+                matched = true;
                 c.outbox.set_book(&sub, message.clone());
             }
+        }
+        if matched {
+            self.last_books.insert((resolved.symbol, resolved.venue), (resolved, received_at));
         }
     }
 
@@ -1036,6 +1099,9 @@ impl MarketHub {
         }
         let message = api::FeedAfterHoursTotals { t: feed_time(received_at, totals.hhmmss), ask_qty: totals.total_ask_qty.0, bid_qty: totals.total_bid_qty.0 };
         for (conn, sub) in self.feed_targets(totals.symbol, FeedKind::Book) {
+            if self.conns.get(&conn).is_some_and(|c| c.feeds[&sub].venue == Venue::Nxt) {
+                continue;
+            }
             let msg = ServerMessage::FeedAfterHours { sub: sub.0, totals: message };
             push(&self.conns, &mut self.closing, conn, msg);
         }
@@ -3963,5 +4029,70 @@ mod tests {
         subscribe_feed(&h, conn, "t", FeedKind::Trades, Venue::Krx);
         let msgs = take(&out).await;
         assert_eq!(msgs, [feed_subscribed("t", FeedKind::Trades)], "{msgs:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expected_0h_updates_nxt_and_combined_book_feeds_during_1530_to_1540_and_persists_across_blank_0d() {
+        let h = harness(at(15, 33, 0), morning_chart(), Duration::ZERO);
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "all", FeedKind::Book, Venue::Combined);
+        subscribe_feed(&h, conn, "krx", FeedKind::Book, Venue::Krx);
+        subscribe_feed(&h, conn, "nxt", FeedKind::Book, Venue::Nxt);
+        take(&out).await;
+        for venue in [Venue::Combined, Venue::Krx, Venue::Nxt] {
+            let StreamEvent::Book { mut book, .. } = book_event_on(&h, venue, 70_100, 10) else { unreachable!() };
+            book.hhmmss = TimeOfDay::hms(15, 33, 1).unwrap();
+            h.events.send(StreamEvent::Book { book, received_at: h.clock.now() }).await.unwrap();
+        }
+        take(&out).await;
+        let quote = ExpectedQuote {
+            symbol: samsung_symbol(),
+            hhmmss: TimeOfDay::hms(15, 33, 5).unwrap(),
+            price: won(70_150),
+            change_centi: 15_000,
+            expected_qty: Volume(420),
+        };
+        h.events.send(StreamEvent::Expected { quote, received_at: h.clock.now() }).await.unwrap();
+        let msgs = take(&out).await;
+        let mut by_sub: BTreeMap<String, Option<api::FeedExpected>> = BTreeMap::new();
+        for msg in msgs {
+            if let ServerMessage::FeedBook { sub, book } = msg {
+                by_sub.insert(sub, book.expected);
+            }
+        }
+        let want = Some(api::FeedExpected { price: 70_150.0, qty: 420 });
+        assert_eq!(by_sub.get("all"), Some(&want));
+        assert_eq!(by_sub.get("nxt"), Some(&want));
+        assert_eq!(by_sub.get("krx"), None);
+
+        let StreamEvent::Book { mut book, .. } = book_event_on(&h, Venue::Nxt, 70_200, 15) else { unreachable!() };
+        book.hhmmss = TimeOfDay::hms(15, 33, 10).unwrap();
+        h.events.send(StreamEvent::Book { book, received_at: h.clock.now() }).await.unwrap();
+        let msgs = take(&out).await;
+        let [ServerMessage::FeedBook { sub, book }] = msgs.as_slice() else { panic!("{msgs:?}") };
+        assert_eq!(sub, "nxt");
+        assert_eq!(book.expected, want);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn after_hours_0e_is_not_sent_to_nxt_book_subscribers() {
+        let h = harness(at(15, 35, 0), morning_chart(), Duration::ZERO);
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "all", FeedKind::Book, Venue::Combined);
+        subscribe_feed(&h, conn, "krx", FeedKind::Book, Venue::Krx);
+        subscribe_feed(&h, conn, "nxt", FeedKind::Book, Venue::Nxt);
+        take(&out).await;
+        h.events.send(after_hours_event(&h, samsung_symbol(), 5_000, 0)).await.unwrap();
+        let subs: BTreeSet<String> = take(&out)
+            .await
+            .into_iter()
+            .filter_map(|m| match m {
+                ServerMessage::FeedAfterHours { sub, .. } => Some(sub),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(subs, BTreeSet::from(["all".to_owned(), "krx".to_owned()]));
     }
 }

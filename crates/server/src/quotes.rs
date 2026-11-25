@@ -113,11 +113,26 @@ pub fn expected(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, vol
 
 const NXT_PRE_OPEN: u32 = 8 * 3600;
 const KRX_OPEN: u32 = 8 * 3600 + 50 * 60;
+const KRX_OPEN_END: u32 = 9 * 3600;
 const BOTH_OPEN: u32 = 9 * 3600 + 30;
 const KRX_CLOSING_AUCTION: u32 = 15 * 3600 + 20 * 60;
 const NXT_AFTER_OPEN: u32 = 15 * 3600 + 30 * 60;
 const KRX_CLOSE_TAIL_END: u32 = 15 * 3600 + 31 * 60;
 const NXT_AFTER_BOTH_OPEN: u32 = 15 * 3600 + 40 * 60;
+
+pub fn call_auction_window(at: TimeOfDay, venue: Venue, nxt_enabled: bool) -> Option<u8> {
+    let secs = at.secs();
+    if (KRX_OPEN..KRX_OPEN_END).contains(&secs) && matches!(venue, Venue::Krx | Venue::Combined) {
+        return Some(0);
+    }
+    if (KRX_CLOSING_AUCTION..NXT_AFTER_OPEN).contains(&secs) && matches!(venue, Venue::Krx | Venue::Combined) {
+        return Some(1);
+    }
+    if (NXT_AFTER_OPEN..NXT_AFTER_BOTH_OPEN).contains(&secs) && nxt_enabled && matches!(venue, Venue::Nxt | Venue::Combined) {
+        return Some(2);
+    }
+    None
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenExchanges {
@@ -242,5 +257,22 @@ mod tests {
         assert_eq!(effective_venue(Venue::Nxt, true), Venue::Nxt);
         assert_eq!(effective_venue(Venue::Krx, false), Venue::Krx);
         assert_eq!(effective_venue(Venue::Combined, false), Venue::Combined);
+    }
+
+    #[test]
+    fn call_auction_window_includes_1530_to_1540_for_nxt_and_combined_only_when_nxt_enabled() {
+        let tod = |h, m, s| TimeOfDay::hms(h, m, s).unwrap();
+        assert_eq!(call_auction_window(tod(8, 55, 0), Venue::Krx, true), Some(0));
+        assert_eq!(call_auction_window(tod(8, 55, 0), Venue::Combined, true), Some(0));
+        assert_eq!(call_auction_window(tod(8, 55, 0), Venue::Nxt, true), None);
+        assert_eq!(call_auction_window(tod(15, 25, 0), Venue::Krx, true), Some(1));
+        assert_eq!(call_auction_window(tod(15, 25, 0), Venue::Combined, true), Some(1));
+        assert_eq!(call_auction_window(tod(15, 25, 0), Venue::Nxt, true), None);
+        assert_eq!(call_auction_window(tod(15, 30, 0), Venue::Nxt, true), Some(2));
+        assert_eq!(call_auction_window(tod(15, 35, 0), Venue::Combined, true), Some(2));
+        assert_eq!(call_auction_window(tod(15, 35, 0), Venue::Krx, true), None);
+        assert_eq!(call_auction_window(tod(15, 35, 0), Venue::Combined, false), None);
+        assert_eq!(call_auction_window(tod(15, 35, 0), Venue::Nxt, false), None);
+        assert_eq!(call_auction_window(tod(15, 40, 0), Venue::Nxt, true), None);
     }
 }
