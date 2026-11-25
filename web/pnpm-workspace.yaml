@@ -1,0 +1,2 @@
+patchedDependencies:
+  lightweight-charts@5.2.1: patches/lightweight-charts@5.2.1.patch
