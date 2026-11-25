@@ -106,6 +106,16 @@ test("히트맵을 더하면 값이 보이고 기준을 바꾸면 그 기준으�
     return now.ask > baseline.ask + 100 && now.bid > baseline.bid + 100;
   }).toBe(true);
 
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 설정", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "차트 설정", exact: true });
+  await settings.getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "라인", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(settings).toBeHidden();
+  await expect.poll(async () => {
+    const now = await countHeatmapPixels(page);
+    return now.ask > baseline.ask + 100 && now.bid > baseline.bid + 100;
+  }).toBe(true);
+
   await heatRow.getByRole("button", { name: "호가 잔량 히트맵 설정 열기", exact: true }).click();
   await dialog.getByRole("group", { name: "잔량 기준" }).getByRole("button", { name: "종가 호가", exact: true }).click();
   await dialog.getByRole("button", { name: "설정 닫기", exact: true }).click();

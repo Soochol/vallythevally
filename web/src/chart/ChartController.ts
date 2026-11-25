@@ -660,10 +660,11 @@ export class ChartController {
     this.indicators.flush();
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
       const replaced = this.main;
+      replaced.api.detachPrimitive(this.quoteDepthHeatmap);
       this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.lastPriceHost, this.priceAxisGeometry());
-      this.main.api.attachPrimitive(this.quoteDepthHeatmap);
       this.main.api.setSeriesOrder(replaced.api.seriesOrder());
       this.chart.removeSeries(replaced.api);
+      this.main.api.attachPrimitive(this.quoteDepthHeatmap);
       this.extensions.forEach((ext) => ext.reattach());
       this.setBars(this.bars);
     }));

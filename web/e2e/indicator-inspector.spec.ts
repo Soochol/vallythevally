@@ -175,6 +175,16 @@ test("인스펙터는 설정칸의 Enter로 추가하고, 펼친 지표를 범�
   await expect(inspector(page).locator('[aria-expanded="true"]')).toHaveCount(0);
 });
 
+test("차트 옆 지표 창에서도 호가·재무 지표의 봉 주기 안내를 보인다", async ({ page, scenario }) => {
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
+  await inspector(page).getByRole("tab", { name: "지표 추가", exact: true }).click();
+  await inspector(page).getByRole("button", { name: "총잔량 추가 후보", exact: true }).click();
+  await expect(inspector(page)).toContainText("주식·ETF 분봉의 호가 자료입니다");
+});
+
 test.describe("휴대폰", () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 

@@ -10,6 +10,7 @@ import {
   formFromSpec,
   hasBarOpacity,
   hasColor,
+  indicatorPeriodNotice,
   nextColor,
   panelLabel,
   placeErrors,
@@ -170,4 +171,12 @@ test("히트맵 설정 양식은 값을 그대로 오간다", () => {
   expect(checkForm({ ...form, text: { ...form.text, topLevels: "6" } }, null).errors.map((error) => error.field)).toEqual(["topLevels"]);
   expect(checkForm({ ...form, text: { ...form.text, maxOpacity: "101" } }, null).errors.map((error) => error.field)).toEqual(["maxOpacity"]);
   expect(checkForm({ ...form, text: { ...form.text, maxOpacity: "19" } }, null).errors.map((error) => error.field)).toEqual(["maxOpacity"]);
+});
+
+test("재무·호가 지표만 주기 안내 문구를 돌려준다", () => {
+  expect(indicatorPeriodNotice("revenue")).toContain("분기봉·연봉");
+  expect(indicatorPeriodNotice("quoteTotals")).toContain("주식·ETF 분봉");
+  expect(indicatorPeriodNotice("quoteDepth")).toContain("주식·ETF 분봉");
+  expect(indicatorPeriodNotice("ma")).toBeNull();
+  expect(indicatorPeriodNotice("rsi")).toBeNull();
 });
