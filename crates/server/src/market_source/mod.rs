@@ -4,6 +4,7 @@ mod error;
 mod feature;
 mod generation;
 mod kiwoom_handle;
+pub mod link;
 mod overview;
 pub mod route;
 pub mod status;

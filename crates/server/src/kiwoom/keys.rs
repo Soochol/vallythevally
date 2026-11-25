@@ -91,7 +91,6 @@ impl LaneFactory {
             }
             None => KiwoomStream::detached().0,
         };
-        tasks.push(tokio::spawn(crate::app::daily_token(self.clock.clone(), rest.clone(), link.clone())));
         Lane { rest, link, account: stream.account_feed(), _owned: Some(Arc::new(LaneTasks { _stream: stream, tasks })) }
     }
 }
