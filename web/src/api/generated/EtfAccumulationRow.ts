@@ -2,4 +2,4 @@
 import type { EtfAccumulationContributor } from "./EtfAccumulationContributor";
 import type { EtfMaStates } from "./EtfMaStates";
 
-export type EtfAccumulationRow = { code: string, name: string, buyingEtfCount: number, addedEtfCount: number, increasedEtfCount: number, medianRealChange: number | null, ma: EtfMaStates, contributors: Array<EtfAccumulationContributor>, };
+export type EtfAccumulationRow = { code: string, name: string, buyingEtfCount: number, addedEtfCount: number, increasedEtfCount: number, sellingEtfCount: number, removedEtfCount: number, decreasedEtfCount: number, medianRealChange: number | null, ma: EtfMaStates, contributors: Array<EtfAccumulationContributor>, };

@@ -179,6 +179,32 @@ impl Catalog {
     pub fn stock_name(&self, stock: StockCode) -> Option<&str> {
         self.stock_names.get(&stock).map(String::as_str)
     }
+
+    pub fn similar(&self, code: StockCode, limit: usize) -> Vec<(&Fund, u32, u32)> {
+        let Some(target) = self.fund(code) else {
+            return Vec::new();
+        };
+        let weights: HashMap<StockCode, u32> = target.holdings.iter().map(|h| (h.code, h.weight_bps)).collect();
+        let mut matches: Vec<(&Fund, u32, u32)> = self
+            .funds
+            .iter()
+            .filter(|fund| fund.code != target.code)
+            .filter_map(|fund| {
+                let mut overlap_bps = 0u32;
+                let mut common_count = 0u32;
+                for holding in &fund.holdings {
+                    if let Some(&target_weight) = weights.get(&holding.code) {
+                        overlap_bps = overlap_bps.saturating_add(target_weight.min(holding.weight_bps));
+                        common_count += 1;
+                    }
+                }
+                (overlap_bps > 0).then_some((fund, overlap_bps, common_count))
+            })
+            .collect();
+        matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.2.cmp(&a.2)).then_with(|| a.0.code.cmp(&b.0.code)));
+        matches.truncate(limit);
+        matches
+    }
 }
 
 fn validated(raw: RawFund, names: &HashMap<String, String>, status: &EtfDataStatus, seen: &HashMap<StockCode, usize>) -> Result<Fund, String> {

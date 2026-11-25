@@ -57,11 +57,13 @@ impl Rig {
 async fn empty_and_single_day_collections_return_empty_rows_gracefully() {
     let rig = Rig::start().await;
     let empty = rig.ok("/api/etf/accumulation").await;
-    assert_eq!(empty, json!({"window": 5, "style": "active", "fromDate": null, "toDate": null, "collectedDays": 0, "maAsOf": null, "rows": []}));
+    assert_eq!(empty, json!({"window": 5, "style": "active", "direction": "buy", "fromDate": null, "toDate": null, "collectedDays": 0, "maAsOf": null, "rows": []}));
 
     rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 5000), ("000660", 100.0, 5000)]);
     let single = rig.ok("/api/etf/accumulation").await;
-    assert_eq!(single, json!({"window": 5, "style": "active", "fromDate": null, "toDate": null, "collectedDays": 1, "maAsOf": null, "rows": []}));
+    assert_eq!(single, json!({"window": 5, "style": "active", "direction": "buy", "fromDate": null, "toDate": null, "collectedDays": 1, "maAsOf": null, "rows": []}));
+    let single_sell = rig.ok("/api/etf/accumulation?direction=sell").await;
+    assert_eq!(single_sell, json!({"window": 5, "style": "active", "direction": "sell", "fromDate": null, "toDate": null, "collectedDays": 1, "maAsOf": null, "rows": []}));
     rig.stop().await;
 }
 
@@ -169,9 +171,83 @@ async fn invalid_query_parameters_return_bad_request() {
         "/api/etf/accumulation?style=passive",
         "/api/etf/accumulation?style=ACTIVE",
         "/api/etf/accumulation?window=5&style=other",
+        "/api/etf/accumulation?direction=both",
+        "/api/etf/accumulation?direction=SELL",
+        "/api/etf/accumulation?direction=",
     ] {
         let (status, body) = rig.get(path).await;
         assert_eq!((status, body["error"]["code"].as_str()), (400, Some("bad_request")), "{path}: {body}");
     }
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn sell_direction_ignores_cu_doubling_and_ranks_removed_and_decreased() {
+    let rig = Rig::start().await;
+    rig.store(ACTIVE_A, "2026-11-17", &[("005930", 100.0, 2500), ("000660", 200.0, 2500), ("035420", 300.0, 2500), ("005380", 400.0, 2500)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 200.0, 2500), ("000660", 400.0, 2500), ("035420", 600.0, 2500), ("005380", 800.0, 2500)]);
+
+    let doubling = rig.ok("/api/etf/accumulation?window=5&style=active&direction=sell").await;
+    assert_eq!(doubling["direction"], "sell");
+    assert_eq!(doubling["rows"], json!([]));
+
+    rig.store(ACTIVE_A, "2026-11-17", &[("005930", 100.0, 2500), ("000660", 100.0, 2500), ("035420", 100.0, 2500), ("005380", 100.0, 2500)]);
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 4000), ("000660", 60.0, 2000), ("035420", 100.0, 4000)]);
+    rig.store(ACTIVE_B, "2026-11-17", &[("005930", 100.0, 2500), ("000660", 100.0, 2500), ("035420", 100.0, 2500), ("005380", 100.0, 2500)]);
+    rig.store(ACTIVE_B, "2026-11-18", &[("005930", 100.0, 3500), ("000660", 80.0, 2500), ("035420", 100.0, 4000)]);
+    rig.store(ACTIVE_C, "2026-11-17", &[("005930", 100.0, 3500), ("000660", 100.0, 3000), ("035420", 100.0, 3500)]);
+    rig.store(ACTIVE_C, "2026-11-18", &[("005930", 100.0, 5000), ("035420", 100.0, 5000)]);
+
+    let sell = rig.ok("/api/etf/accumulation?window=5&style=active&direction=sell").await;
+    assert_eq!(sell["direction"], "sell");
+    let rows = sell["rows"].as_array().unwrap();
+    let codes: Vec<&str> = rows.iter().map(|r| r["code"].as_str().unwrap()).collect();
+    assert_eq!(codes, ["000660", "005380"]);
+
+    let hynix = &rows[0];
+    assert_eq!((hynix["buyingEtfCount"].as_u64(), hynix["addedEtfCount"].as_u64(), hynix["increasedEtfCount"].as_u64()), (Some(0), Some(0), Some(0)));
+    assert_eq!((hynix["sellingEtfCount"].as_u64(), hynix["removedEtfCount"].as_u64(), hynix["decreasedEtfCount"].as_u64()), (Some(3), Some(1), Some(2)));
+    assert!((hynix["medianRealChange"].as_f64().unwrap() - (-0.3)).abs() < 1e-9);
+    let contribs: Vec<(&str, &str, Option<u64>, Option<u64>)> = hynix["contributors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["fundCode"].as_str().unwrap(), c["kind"].as_str().unwrap(), c["beforeWeightBps"].as_u64(), c["afterWeightBps"].as_u64()))
+        .collect();
+    assert_eq!(contribs, [
+        (ACTIVE_C, "removed", Some(3000), None),
+        (ACTIVE_A, "decreased", Some(2500), Some(2000)),
+        (ACTIVE_B, "decreased", Some(2500), Some(2500)),
+    ]);
+
+    let hyundai = &rows[1];
+    assert_eq!((hyundai["sellingEtfCount"].as_u64(), hyundai["removedEtfCount"].as_u64(), hyundai["decreasedEtfCount"].as_u64()), (Some(2), Some(2), Some(0)));
+    assert!(hyundai["medianRealChange"].is_null());
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn recent_activity_populates_after_two_days_and_invalidates_on_new_pdf() {
+    let rig = Rig::start().await;
+    let find_fund = |body: &Value, code: &str| body["funds"].as_array().unwrap().iter().find(|f| f["code"] == code).unwrap().clone();
+
+    let empty = rig.ok("/api/etf/funds").await;
+    assert!(find_fund(&empty, ACTIVE_A)["recentActivity"].is_null());
+
+    rig.store(ACTIVE_A, "2026-11-17", &[("005930", 100.0, 2500), ("000660", 100.0, 2500), ("035420", 100.0, 2500), ("005380", 100.0, 2500)]);
+    let one_day = rig.ok("/api/etf/funds").await;
+    assert!(find_fund(&one_day, ACTIVE_A)["recentActivity"].is_null());
+
+    rig.store(ACTIVE_A, "2026-11-18", &[("005930", 100.0, 2500), ("000660", 130.0, 3000), ("035420", 70.0, 2000), ("051910", 50.0, 2500)]);
+    let two_days = rig.ok("/api/etf/funds").await;
+    assert_eq!(find_fund(&two_days, ACTIVE_A)["recentActivity"], json!({"added": 1, "removed": 1, "increased": 1, "decreased": 1}));
+    assert!(find_fund(&two_days, ACTIVE_B)["recentActivity"].is_null());
+
+    let detail = rig.ok(&format!("/api/etf/funds/{ACTIVE_A}")).await;
+    assert_eq!(detail["fund"]["recentActivity"], json!({"added": 1, "removed": 1, "increased": 1, "decreased": 1}));
+
+    rig.store(ACTIVE_A, "2026-11-19", &[("005930", 100.0, 2500), ("000660", 130.0, 3000), ("035420", 70.0, 2000), ("051910", 50.0, 2500)]);
+    let three_days = rig.ok("/api/etf/funds").await;
+    assert_eq!(find_fund(&three_days, ACTIVE_A)["recentActivity"], json!({"added": 0, "removed": 0, "increased": 0, "decreased": 0}));
     rig.stop().await;
 }
