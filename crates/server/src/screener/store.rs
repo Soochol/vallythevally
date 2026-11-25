@@ -69,6 +69,12 @@ pub struct RecentCloses {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentDatedCloses {
+    pub latest_day: Option<KstDate>,
+    pub closes: HashMap<StockCode, Vec<(KstDate, Price)>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedMeta {
     pub code: StockCode,
     pub name: String,
@@ -268,8 +274,11 @@ impl Store {
             return Ok(Vec::new());
         }
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT DISTINCT day FROM daily ORDER BY day DESC LIMIT ?")?;
-        let rows = stmt.query_map(params![count as u64], |row| row.get::<_, i32>(0))?;
+        let Some(latest_day) = anchored_latest_day(&conn)? else {
+            return Ok(Vec::new());
+        };
+        let mut stmt = conn.prepare("SELECT DISTINCT day FROM daily WHERE day <= ? ORDER BY day DESC LIMIT ?")?;
+        let rows = stmt.query_map(params![date_value(latest_day), count as u64], |row| row.get::<_, i32>(0))?;
         let mut days = rows.map(|row| Ok(date_of(row?))).collect::<Result<Vec<_>, StoreError>>()?;
         days.reverse();
         Ok(days)
@@ -277,7 +286,7 @@ impl Store {
 
     pub fn recent_closes(&self, codes: &[StockCode], count: usize) -> Result<RecentCloses, StoreError> {
         let conn = self.conn();
-        let latest_day = conn.query_row("SELECT max(day) FROM daily", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+        let latest_day = anchored_latest_day(&conn)?;
         let mut closes = HashMap::new();
         let Some(latest_day) = latest_day else { return Ok(RecentCloses { latest_day, closes }) };
         if codes.is_empty() || count == 0 {
@@ -285,9 +294,9 @@ impl Store {
         }
         let wanted: HashSet<&str> = codes.iter().map(StockCode::as_str).collect();
         let mut stmt = conn.prepare(
-            "SELECT code, day, close FROM (SELECT code, day, close, row_number() OVER (PARTITION BY code ORDER BY day DESC) AS rn FROM daily) WHERE rn <= ? ORDER BY code, day DESC",
+            "SELECT code, day, close FROM (SELECT code, day, close, row_number() OVER (PARTITION BY code ORDER BY day DESC) AS rn FROM daily WHERE day <= ?) WHERE rn <= ? ORDER BY code, day DESC",
         )?;
-        let rows = stmt.query_map(params![count as u64], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, u64>(2)?)))?;
+        let rows = stmt.query_map(params![date_value(latest_day), count as u64], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, u64>(2)?)))?;
         let mut current: Option<(String, bool, Vec<Price>)> = None;
         for row in rows {
             let (code, day, close) = row?;
@@ -315,6 +324,41 @@ impl Store {
             closes.insert(stock_code(&prev_code)?, prices);
         }
         Ok(RecentCloses { latest_day: Some(latest_day), closes })
+    }
+
+    pub fn recent_dated_closes(&self, codes: &[StockCode], count: usize) -> Result<RecentDatedCloses, StoreError> {
+        let conn = self.conn();
+        let latest_day = anchored_latest_day(&conn)?;
+        let mut closes = HashMap::new();
+        let Some(latest_day) = latest_day else { return Ok(RecentDatedCloses { latest_day, closes }) };
+        if codes.is_empty() || count == 0 {
+            return Ok(RecentDatedCloses { latest_day: Some(latest_day), closes });
+        }
+        let wanted: HashSet<&str> = codes.iter().map(StockCode::as_str).collect();
+        let mut stmt = conn.prepare(
+            "SELECT code, day, close FROM (SELECT code, day, close, row_number() OVER (PARTITION BY code ORDER BY day DESC) AS rn FROM daily WHERE day <= ?) WHERE rn <= ? ORDER BY code, day DESC",
+        )?;
+        let rows = stmt.query_map(params![date_value(latest_day), count as u64], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, u64>(2)?)))?;
+        let mut current: Option<(String, Vec<(KstDate, Price)>)> = None;
+        for row in rows {
+            let (code, day, close) = row?;
+            if !wanted.contains(code.as_str()) {
+                continue;
+            }
+            let same = current.as_ref().is_some_and(|(prev, _)| *prev == code);
+            if !same {
+                if let Some((prev_code, prices)) = current.take() {
+                    closes.insert(stock_code(&prev_code)?, prices);
+                }
+                current = Some((code, vec![(date_of(day), price_of(close)?)]));
+            } else if let Some((_, prices)) = current.as_mut() {
+                prices.push((date_of(day), price_of(close)?));
+            }
+        }
+        if let Some((prev_code, prices)) = current {
+            closes.insert(stock_code(&prev_code)?, prices);
+        }
+        Ok(RecentDatedCloses { latest_day: Some(latest_day), closes })
     }
 
     pub fn bars_from(&self, code: StockCode, from: KstDate) -> Result<Vec<DayBar>, StoreError> {
@@ -443,6 +487,14 @@ impl Store {
         let rows = stmt.query_map(params![date_value(target), date_value(target)], |row| row.get::<_, String>(0))?;
         rows.map(|code| stock_code(&code?)).collect()
     }
+}
+
+fn anchored_latest_day(conn: &Connection) -> Result<Option<KstDate>, StoreError> {
+    let last_day = conn.query_row("SELECT last_day FROM store_meta", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+    if last_day.is_some() {
+        return Ok(last_day);
+    }
+    Ok(conn.query_row("SELECT max(day) FROM daily", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of))
 }
 
 fn connect(path: &Path) -> Result<Connection, StoreError> {

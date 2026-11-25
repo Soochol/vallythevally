@@ -41,7 +41,11 @@ pub fn active_window_at(now: KstTime) -> Option<MarketOverviewSessionWindowId> {
 }
 
 fn window_index_for(time: TimeOfDay) -> Option<usize> {
-    WINDOWS.iter().position(|spec| time >= spec.start && time < spec.end)
+    WINDOWS.iter().position(|spec| match spec.id {
+        MarketOverviewSessionWindowId::KrxClose => time >= spec.start && time <= spec.end,
+        MarketOverviewSessionWindowId::NxtMain => time > spec.start && time < spec.end,
+        _ => time >= spec.start && time < spec.end,
+    })
 }
 
 #[derive(Default, Clone, Copy)]
@@ -102,13 +106,12 @@ fn scoped_trade_value_eok(snapshot: Option<&Loaded<SnapshotBody>>, catalog: &Sto
     let Some(loaded) = snapshot else {
         return 0.0;
     };
-    let total_million: u128 = loaded
-        .body
-        .stocks
-        .iter()
-        .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.matches_venue_scope(code, scope)))
-        .map(|row| u128::from(row.traded_million_won))
-        .sum();
+    let mut total_million: u128 = 0;
+    for row in &loaded.body.stocks {
+        if scope == MarketOverviewScope::All || StockCode::parse(&row.code).is_ok_and(|code| catalog.matches_venue_scope(code, scope)) {
+            total_million += u128::from(row.traded_million_won);
+        }
+    }
     total_million as f64 / MILLION_WON_PER_EOK
 }
 

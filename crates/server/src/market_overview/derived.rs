@@ -137,7 +137,7 @@ pub struct DerivedStoreSnapshot {
     pub catalog: StockCatalog,
     pub latest_day: Option<KstDate>,
     pub trading_days: Vec<KstDate>,
-    pub closes: HashMap<StockCode, Vec<Price>>,
+    pub closes: HashMap<StockCode, Vec<(KstDate, Price)>>,
 }
 
 #[derive(Default)]
@@ -172,7 +172,7 @@ impl DerivedMaCache {
                 }
             }
         };
-        let recent = match screener.recent_closes(codes, MA_FETCH_CLOSES).await {
+        let recent = match screener.recent_dated_closes(codes, MA_FETCH_CLOSES).await {
             Ok(recent) => recent,
             Err(error) => {
                 tracing::warn!(%error, "파생 지표용 최근 종가를 읽지 못했습니다");
@@ -209,7 +209,7 @@ pub fn parse_scope(query: &HashMap<String, String>) -> Result<MarketOverviewScop
 pub fn histogram_of(rows: &[&SnapshotRow]) -> Vec<MarketOverviewHistogramBucket> {
     let mut counts = [0u32; 9];
     for row in rows {
-        if row.base_won == 0 {
+        if row.base_won == 0 || row.current_won == 0 {
             continue;
         }
         let rate = (row.current_won as f64 - row.base_won as f64) / row.base_won as f64 * 100.0;
@@ -272,16 +272,18 @@ pub fn attribution_of(
     listed_shares_by_code: &HashMap<StockCode, u64>,
     names_by_code: &HashMap<StockCode, String>,
 ) -> Option<MarketOverviewAttribution> {
-    let index_base = if index_change_rate > -100.0 {
-        index_level / (1.0 + index_change_rate / 100.0)
-    } else {
-        index_level
-    };
+    if !index_level.is_finite() || index_level <= 0.0 || !index_change_rate.is_finite() || index_change_rate <= -100.0 {
+        return None;
+    }
+    let index_base = index_level / (1.0 + index_change_rate / 100.0);
+    if !index_base.is_finite() || index_base <= 0.0 {
+        return None;
+    }
     let index_change_points = index_level - index_base;
     let mut entries: Vec<(StockCode, &SnapshotRow, i128)> = Vec::with_capacity(rows.len());
     let mut total_base_cap_won: u128 = 0;
     for &row in rows {
-        if row.base_won == 0 {
+        if row.base_won == 0 || row.current_won == 0 {
             continue;
         }
         let Ok(code) = StockCode::parse(&row.code) else { continue };
@@ -351,7 +353,7 @@ pub fn attribution_of(
 }
 
 pub fn ma_thrust_of(
-    closes_by_code: &HashMap<StockCode, Vec<Price>>,
+    closes_by_code: &HashMap<StockCode, Vec<(KstDate, Price)>>,
     today_prices: &HashMap<StockCode, Price>,
     latest_day: Option<KstDate>,
     trading_days: &[KstDate],
@@ -361,7 +363,7 @@ pub fn ma_thrust_of(
 }
 
 pub fn ma_thrust_for<'a>(
-    series: impl Iterator<Item = (StockCode, &'a [Price])>,
+    series: impl Iterator<Item = (StockCode, &'a [(KstDate, Price)])>,
     today_prices: &HashMap<StockCode, Price>,
     latest_day: Option<KstDate>,
     trading_days: &[KstDate],
@@ -369,9 +371,10 @@ pub fn ma_thrust_for<'a>(
 ) -> Option<MarketOverviewMaThrust> {
     let fallback_day = latest_day.into_iter().collect::<Vec<_>>();
     let effective_days = if trading_days.is_empty() { fallback_day.as_slice() } else { trading_days };
+    let days_len = effective_days.len();
     let hist_slots = match overlay {
-        TodayOverlay::Append(_) => effective_days.len().min(MA_HISTORY_DAYS.saturating_sub(1)),
-        TodayOverlay::Replace(_) | TodayOverlay::None => effective_days.len().min(MA_HISTORY_DAYS),
+        TodayOverlay::Append(_) => days_len.min(MA_HISTORY_DAYS.saturating_sub(1)),
+        TodayOverlay::Replace(_) | TodayOverlay::None => days_len.min(MA_HISTORY_DAYS),
     };
     let mut total_stocks = 0u32;
     let mut above_counts = [0u32; 4];
@@ -385,39 +388,77 @@ pub fn ma_thrust_for<'a>(
         total_stocks += 1;
         let (first, rest) = match (overlay, today_prices.get(&code).copied()) {
             (TodayOverlay::Append(_), Some(today)) => (today, closes),
-            (TodayOverlay::Replace(_), Some(today)) => (today, &closes[1..]),
-            _ => (closes[0], &closes[1..]),
+            (TodayOverlay::Replace(replace_day), Some(today)) if closes[0].0 == replace_day => (today, &closes[1..]),
+            (TodayOverlay::Replace(_), Some(today)) => (today, closes),
+            _ => (closes[0].1, &closes[1..]),
         };
         let first_centi = u128::from(first.centi());
         let mut running = first_centi;
-        for (idx, price) in rest.iter().take(199).enumerate() {
-            running += u128::from(price.centi());
-            let count = idx + 2;
-            let slot = match count {
-                5 => 0,
-                20 => 1,
-                60 => 2,
-                200 => 3,
-                _ => continue,
-            };
-            eligible_counts[slot] += 1;
-            if first_centi * count as u128 > running {
-                above_counts[slot] += 1;
+        let rest_len = rest.len();
+        if rest_len >= 4 {
+            let mut i = 0;
+            while i < 4 {
+                running += u128::from(rest[i].1.centi());
+                i += 1;
+            }
+            eligible_counts[0] += 1;
+            if first_centi * 5 > running {
+                above_counts[0] += 1;
+            }
+            if rest_len >= 19 {
+                while i < 19 {
+                    running += u128::from(rest[i].1.centi());
+                    i += 1;
+                }
+                eligible_counts[1] += 1;
+                if first_centi * 20 > running {
+                    above_counts[1] += 1;
+                }
+                if rest_len >= 59 {
+                    while i < 59 {
+                        running += u128::from(rest[i].1.centi());
+                        i += 1;
+                    }
+                    eligible_counts[2] += 1;
+                    if first_centi * 60 > running {
+                        above_counts[2] += 1;
+                    }
+                    if rest_len >= 199 {
+                        while i < 199 {
+                            running += u128::from(rest[i].1.centi());
+                            i += 1;
+                        }
+                        eligible_counts[3] += 1;
+                        if first_centi * 200 > running {
+                            above_counts[3] += 1;
+                        }
+                    }
+                }
             }
         }
         if hist_slots > 0 && closes.len() >= 20 {
-            let mut sum20: u128 = closes[..20].iter().map(|price| u128::from(price.centi())).sum();
-            hist_eligible[0] += 1;
-            if u128::from(closes[0].centi()) * 20 > sum20 {
-                hist_above[0] += 1;
+            let mut pos = 0usize;
+            let mut sum20: u128 = 0;
+            let mut k = 0usize;
+            while k < 20 {
+                sum20 += u128::from(closes[k].1.centi());
+                k += 1;
             }
-            let max_offset = hist_slots.min(closes.len() - 19);
-            for offset in 1..max_offset {
-                sum20 = sum20 - u128::from(closes[offset - 1].centi()) + u128::from(closes[offset + 19].centi());
-                hist_eligible[offset] += 1;
-                if u128::from(closes[offset].centi()) * 20 > sum20 {
-                    hist_above[offset] += 1;
+            let max_pos = closes.len() - 20;
+            let mut offset = 0usize;
+            while offset < hist_slots {
+                let target_day = effective_days[days_len - 1 - offset];
+                while pos < max_pos && closes[pos].0 > target_day {
+                    sum20 = sum20 - u128::from(closes[pos].1.centi()) + u128::from(closes[pos + 20].1.centi());
+                    pos += 1;
                 }
+                if closes[pos].0 == target_day {
+                    hist_eligible[offset] += 1;
+                    if u128::from(closes[pos].1.centi()) * 20 > sum20 {
+                        hist_above[offset] += 1;
+                    }
+                }
+                offset += 1;
             }
         }
     }
@@ -430,7 +471,6 @@ pub fn ma_thrust_for<'a>(
     let above_60_pct = ratio(above_counts[2], eligible_counts[2]);
     let above_200_pct = ratio(above_counts[3], eligible_counts[3]);
     let mut history_20d = Vec::with_capacity(MA_HISTORY_DAYS);
-    let days_len = effective_days.len();
     for offset in (0..hist_slots).rev() {
         let day = effective_days[days_len - 1 - offset];
         if offset == 0 && matches!(overlay, TodayOverlay::Replace(_)) {
@@ -472,7 +512,7 @@ pub struct DerivedInputs<'a> {
     pub nxt: Option<&'a Loaded<SnapshotBody>>,
     pub overview_index: Option<(f64, f64)>,
     pub catalog: &'a StockCatalog,
-    pub closes: &'a HashMap<StockCode, Vec<Price>>,
+    pub closes: &'a HashMap<StockCode, Vec<(KstDate, Price)>>,
     pub latest_day: Option<KstDate>,
     pub trading_days: &'a [KstDate],
 }
@@ -485,36 +525,50 @@ pub fn derive_market_snapshot(inputs: &DerivedInputs<'_>) -> MarketOverviewDeriv
         .map(|loaded| loaded.header.as_of)
         .max()
         .map(UnixSeconds);
-    let histogram = match combined {
-        Some(loaded) => {
-            let scoped: Vec<&SnapshotRow> = loaded
-                .body
-                .stocks
-                .iter()
-                .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.includes_stock(code, scope)))
-                .collect();
-            MarketOverviewPart::Ok { value: histogram_of(&scoped) }
+    let histogram = if scope != MarketOverviewScope::All && catalog.is_empty() {
+        not_prepared("종목 목록이 아직 준비되지 않아 시장별 등락 분포를 계산할 수 없습니다")
+    } else {
+        match combined {
+            Some(loaded) => {
+                let scoped: Vec<&SnapshotRow> = loaded
+                    .body
+                    .stocks
+                    .iter()
+                    .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.includes_stock(code, scope)))
+                    .collect();
+                MarketOverviewPart::Ok { value: histogram_of(&scoped) }
+            }
+            None => not_prepared("통합 시세 스냅샷이 아직 준비되지 않았습니다"),
         }
-        None => not_prepared("통합 시세 스냅샷이 아직 준비되지 않았습니다"),
     };
-    let venue_share = match (krx, nxt) {
-        (Some(krx_loaded), Some(nxt_loaded)) => {
-            let krx_scoped: Vec<&SnapshotRow> = krx_loaded
-                .body
-                .stocks
-                .iter()
-                .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.matches_venue_scope(code, scope)))
-                .collect();
-            let nxt_scoped: Vec<&SnapshotRow> = nxt_loaded
-                .body
-                .stocks
-                .iter()
-                .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.matches_venue_scope(code, scope)))
-                .collect();
-            MarketOverviewPart::Ok { value: venue_share_of(&krx_scoped, &nxt_scoped) }
+    let venue_share = if scope != MarketOverviewScope::All && catalog.is_empty() {
+        not_prepared("종목 목록이 아직 준비되지 않아 시장별 거래소 비중을 계산할 수 없습니다")
+    } else {
+        match (krx, nxt) {
+            (Some(krx_loaded), Some(nxt_loaded)) => {
+                if scope == MarketOverviewScope::All {
+                    let krx_refs: Vec<&SnapshotRow> = krx_loaded.body.stocks.iter().collect();
+                    let nxt_refs: Vec<&SnapshotRow> = nxt_loaded.body.stocks.iter().collect();
+                    MarketOverviewPart::Ok { value: venue_share_of(&krx_refs, &nxt_refs) }
+                } else {
+                    let krx_scoped: Vec<&SnapshotRow> = krx_loaded
+                        .body
+                        .stocks
+                        .iter()
+                        .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.matches_venue_scope(code, scope)))
+                        .collect();
+                    let nxt_scoped: Vec<&SnapshotRow> = nxt_loaded
+                        .body
+                        .stocks
+                        .iter()
+                        .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.matches_venue_scope(code, scope)))
+                        .collect();
+                    MarketOverviewPart::Ok { value: venue_share_of(&krx_scoped, &nxt_scoped) }
+                }
+            }
+            (None, _) => not_prepared("KRX 시세 스냅샷이 아직 준비되지 않았습니다"),
+            (_, None) => not_prepared("NXT 시세 스냅샷이 아직 준비되지 않았습니다"),
         }
-        (None, _) => not_prepared("KRX 시세 스냅샷이 아직 준비되지 않았습니다"),
-        (_, None) => not_prepared("NXT 시세 스냅샷이 아직 준비되지 않았습니다"),
     };
     let attribution_market = attribution_market_for(scope);
     let attribution = match combined {
@@ -542,7 +596,7 @@ pub fn derive_market_snapshot(inputs: &DerivedInputs<'_>) -> MarketOverviewDeriv
             }
         },
     };
-    let (today_prices, overlay) = extract_today_overlay(combined, latest_day);
+    let (today_prices, overlay) = extract_today_overlay(combined, latest_day, catalog, scope);
     let ma_thrust = match latest_day {
         None => not_prepared("일봉 저장소가 비어 있어 이동평균선 상회 비율을 계산할 수 없습니다"),
         Some(_) => {
@@ -596,7 +650,12 @@ fn resolve_index_quote(
     overview_index
 }
 
-pub(crate) fn extract_today_overlay(combined: Option<&Loaded<SnapshotBody>>, latest_day: Option<KstDate>) -> (HashMap<StockCode, Price>, TodayOverlay) {
+pub(crate) fn extract_today_overlay(
+    combined: Option<&Loaded<SnapshotBody>>,
+    latest_day: Option<KstDate>,
+    catalog: &StockCatalog,
+    scope: MarketOverviewScope,
+) -> (HashMap<StockCode, Price>, TodayOverlay) {
     let Some(loaded) = combined else {
         return (HashMap::new(), TodayOverlay::None);
     };
@@ -611,6 +670,7 @@ pub(crate) fn extract_today_overlay(combined: Option<&Loaded<SnapshotBody>>, lat
     let mut prices = HashMap::with_capacity(loaded.body.stocks.len());
     for row in &loaded.body.stocks {
         if let Ok(code) = StockCode::parse(&row.code)
+            && catalog.includes_stock(code, scope)
             && let Some(price) = row.current_won.checked_mul(100).and_then(Price::from_centi)
         {
             prices.insert(code, price);

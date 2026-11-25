@@ -5,11 +5,13 @@ use domain::{KstDate, TimeOfDay};
 use serde_json::Value;
 use server::api::Market as ApiMarket;
 use server::kiwoom::api::ViTriggeredStocks;
-use server::kiwoom::rest::{MergeScope, Priority};
+use server::kiwoom::rest::{ContKey, MergeScope, Priority};
 use server::shared_data::{Broker, DataKind, Header, SourceKey, ViEventRow, ViEventsBody, write_snapshot};
 
 use super::job::{JobCall, JobError, JobFuture, JobWindow, Market, SharedJob};
 use crate::universe::{MarketName, read_universe_if_present};
+
+const MAX_VI_PAGES: usize = 20;
 
 const OPENS_AT: TimeOfDay = match TimeOfDay::hms(9, 0, 0) {
     Some(time) => time,
@@ -74,20 +76,32 @@ impl SharedJob for ViEventsJob {
             if !call.slice.owns(0) {
                 return Ok(());
             }
-            let page = rest
-                .call(&ViTriggeredStocks::KRX_TODAY, None, Priority::Background, MergeScope::default())
-                .await
-                .map_err(|error| JobError(format!("VI 발동 목록을 받지 못했습니다: {error}")))?;
+            let mut rows = Vec::new();
+            let mut used: Vec<ContKey> = Vec::new();
+            let mut cont: Option<ContKey> = None;
+            for _ in 0..MAX_VI_PAGES {
+                let page = rest
+                    .call(&ViTriggeredStocks::KRX_TODAY, cont.as_ref(), Priority::Background, MergeScope::default())
+                    .await
+                    .map_err(|error| JobError(format!("VI 발동 목록을 받지 못했습니다: {error}")))?;
+                rows.extend(page.body.events().rows);
+                match page.next {
+                    Some(next) if !used.contains(&next) => {
+                        used.push(next.clone());
+                        cont = Some(next);
+                    }
+                    _ => break,
+                }
+            }
+            rows.sort_by(|a, b| b.triggered.cmp(&a.triggered).then_with(|| a.code.as_str().cmp(b.code.as_str())));
             let lookup = universe_lookup(call.shared_dir, call.observation_date);
-            let parsed = page.body.events();
-            let events = parsed
-                .rows
+            let events = rows
                 .into_iter()
                 .map(|event| {
                     let code = event.code.as_str().to_owned();
                     let found = lookup.get(&code);
                     let name = if event.name.is_empty() {
-                        found.map(|(name, _)| name.clone()).unwrap_or_else(|| code.clone())
+                        found.map(|(name, _)| name.clone()).unwrap_or_default()
                     } else {
                         event.name
                     };

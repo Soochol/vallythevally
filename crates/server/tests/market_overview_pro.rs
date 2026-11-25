@@ -793,7 +793,7 @@ struct SyntheticProFixture {
     nxt: Loaded<SnapshotBody>,
     themes_catalog: StoredCatalog,
     catalog: StockCatalog,
-    closes: HashMap<StockCode, Vec<Price>>,
+    closes: HashMap<StockCode, Vec<(KstDate, Price)>>,
     last_day: KstDate,
     trading_days: Vec<KstDate>,
     samples: Vec<Sample>,
@@ -803,7 +803,8 @@ struct SyntheticProFixture {
 fn synthetic_2600_pro_fixture() -> SyntheticProFixture {
     let last_day = day(2026, 11, 6);
     let today = day(2026, 11, 9);
-    let trading_days = trading_days_ending(last_day, 20);
+    let all_days = trading_days_ending(last_day, 220);
+    let trading_days = all_days[200..].to_vec();
     let mut listed = Vec::with_capacity(2_600);
     let mut combined_rows = Vec::with_capacity(2_600);
     let mut krx_rows = Vec::with_capacity(2_600);
@@ -830,7 +831,12 @@ fn synthetic_2600_pro_fixture() -> SyntheticProFixture {
         if idx < 800 {
             nxt_rows.push(snap_row(&code_str, "20261109", current, base, 100 + u64::from(idx)));
         }
-        let series: Vec<Price> = (0..220u64).map(|offset| price_won(base + ((offset + u64::from(idx)) % 15) * 10)).collect();
+        let series: Vec<(KstDate, Price)> = all_days
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(offset, &d)| (d, price_won(base + ((offset as u64 + u64::from(idx)) % 15) * 10)))
+            .collect();
         closes.insert(code, series);
     }
     let mut themes = Vec::with_capacity(100);
@@ -966,4 +972,284 @@ fn perf_derive_pro_card_2600_stocks_p95_under_25ms() {
     let max = *samples_ms.last().unwrap();
     println!("derive_pro_card(2600 stocks, 100 themes, 300 samples, 200 disclosures): p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms");
     assert!(p95 <= 25.0, "p95 {p95:.3}ms exceeded 25ms budget");
+}
+
+#[tokio::test]
+async fn broker_book_rejects_stale_previous_day_rankings() {
+    let yesterday = day(2026, 11, 6);
+    let today = day(2026, 11, 9);
+    let yesterday_ts = at(yesterday, 15, 30, 0).unix();
+    let h = Harness::start(at(today, 8, 20, 0), vec![listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![])], vec![]).await;
+
+    let excludes = Excludes { etf_etn: false, preferred: false };
+    let bid_ask_kospi = Ranking::BidAskBalance {
+        market: Market::Kospi,
+        venue: Venue::Combined,
+        sort: BalanceSort::NetBuyRemaining,
+        excludes,
+        exclude_managed: false,
+    };
+    write_rankings_part(
+        &h.shared,
+        yesterday,
+        yesterday_ts,
+        vec![ranking_entry(
+            &bid_ask_kospi,
+            yesterday_ts,
+            vec![SharedRankingRow {
+                code: SymbolCode("005930".into()),
+                name: "삼성전자".into(),
+                price: Some(Won(70_000)),
+                change_rate: Some(Percent(2.5)),
+                figures: RankingFigures::BidAskBalance {
+                    total_sell_remaining: Shares(100_000),
+                    total_buy_remaining: Shares(300_000),
+                    net_buy_remaining: Shares(200_000),
+                    buy_ratio: Percent(300.0),
+                },
+            }],
+        )],
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/pro?scope=all").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["brokerBook"]["status"], "failed");
+}
+
+#[tokio::test]
+async fn session_dna_and_rrg_reject_stale_previous_day_snapshots_and_sectors() {
+    let yesterday = day(2026, 11, 6);
+    let today = day(2026, 11, 9);
+    let yesterday_ts = at(yesterday, 15, 30, 0).unix();
+    let today_ts = at(today, 8, 20, 0).unix();
+    let days = trading_days_ending(today, 20);
+    let listed = vec![listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![])];
+    let bars = vec![bar_series("005930", &days, &[70_000; 20])];
+    let h = Harness::start(at(today, 8, 20, 0), listed, bars).await;
+
+    write_snap(&h.shared, DataKind::SnapshotCombined, yesterday, yesterday_ts, vec![snap_row("005930", "20261106", 76_300, 70_000, 850_000)], vec![]);
+    write_snap(&h.shared, DataKind::SnapshotKrx, yesterday, yesterday_ts, vec![snap_row("005930", "20261106", 70_000, 68_300, 850_000)], vec![]);
+    write_snap(&h.shared, DataKind::SnapshotNxt, today, today_ts, vec![snap_row("005930", "20261109", 71_000, 70_000, 5_000)], vec![]);
+    write_themes(&h.shared, today, today_ts, vec![ThemeEntry { code: "T01".into(), name: "반도체".into(), members: vec!["005930".into()] }]);
+    write_overview_sectors(
+        &h.shared,
+        yesterday,
+        yesterday_ts,
+        vec![MarketOverviewSector { code: "013".into(), name: "전기전자".into(), level: 1000.0, change_rate: 9.0, trade_value_eok: 500.0 }],
+        vec![],
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/pro?scope=all").await;
+    assert_eq!(status, 200);
+    assert!((body["sessionDna"]["value"]["krxTradeValueEok"].as_f64().unwrap() - 0.0).abs() < 1e-9);
+    assert!((body["sessionDna"]["value"]["nxtTradeValueEok"].as_f64().unwrap() - 50.0).abs() < 1e-9);
+    assert!(body["rrg"]["value"]["sectors"].as_array().unwrap().is_empty());
+    assert!((body["rrg"]["value"]["themes"][0]["changeRate"].as_f64().unwrap() - 0.0).abs() < 1e-9);
+
+    let h_all_stale = Harness::start(at(today, 8, 15, 0), vec![], vec![]).await;
+    write_snap(&h_all_stale.shared, DataKind::SnapshotKrx, yesterday, yesterday_ts, vec![snap_row("005930", "20261106", 105, 100, 5_000)], vec![]);
+    write_snap(&h_all_stale.shared, DataKind::SnapshotNxt, yesterday, yesterday_ts, vec![snap_row("005930", "20261106", 105, 100, 1_000)], vec![]);
+    h_all_stale.poll().await;
+
+    let (status_stale, body_stale) = h_all_stale.get("/api/market-overview/pro").await;
+    assert_eq!(status_stale, 200);
+    assert_eq!(body_stale["sessionDna"]["status"], "failed");
+}
+
+#[tokio::test]
+async fn zero_current_won_in_combined_snapshot_is_excluded_from_live_rates() {
+    let last_day = day(2026, 11, 6);
+    let today = day(2026, 11, 9);
+    let days = trading_days_ending(last_day, 20);
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![]),
+        listing("000660", "SK하이닉스", Market::Kospi, 1_000_000, vec![]),
+    ];
+    let bars = vec![
+        bar_series("005930", &days, &[70_000; 20]),
+        bar_series("000660", &days, &[100_000; 20]),
+    ];
+    let h = Harness::start(at(today, 8, 55, 0), listed, bars).await;
+
+    write_snap(
+        &h.shared,
+        DataKind::SnapshotCombined,
+        today,
+        at(today, 8, 55, 0).unix(),
+        vec![
+            snap_row("005930", "20261109", 0, 70_000, 0),
+            snap_row("000660", "20261109", 101_000, 100_000, 1_000),
+        ],
+        vec![],
+    );
+    write_themes(
+        &h.shared,
+        today,
+        at(today, 8, 55, 0).unix(),
+        vec![ThemeEntry { code: "T01".into(), name: "단일종목".into(), members: vec!["005930".into()] }],
+    );
+
+    let fin_store = FinancialStore::open(&h.financial_db).await.unwrap();
+    fin_store
+        .save_security(&Security {
+            stock_code: "005930".into(),
+            company: Company { corp_code: "00126380".into(), name: "삼성전자".into(), fiscal_month: Some(12) },
+            share_class: None,
+            share_class_reason: None,
+            evidence: "test".into(),
+        })
+        .await
+        .unwrap();
+    fin_store
+        .save(
+            "00126380",
+            &Collection {
+                disclosures: vec![disclosure_map("단일판매ㆍ공급계약체결", "20261109000101", "20261109", "삼성전자", "유")],
+                ..Collection::default()
+            },
+        )
+        .await
+        .unwrap();
+    h.state.market_overview.set_financial_db_path(Some(h.financial_db.clone()));
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/pro?scope=all").await;
+    assert_eq!(status, 200);
+    let theme_rate = body["rrg"]["value"]["themes"][0]["changeRate"].as_f64().unwrap();
+    assert!((theme_rate - 0.0).abs() < 1e-9);
+    assert!(body["disclosures"]["value"]["items"][0]["changeRate"].is_null());
+}
+
+#[tokio::test]
+async fn rrg_interior_halt_gap_does_not_shift_pre_halt_returns_onto_halted_dates() {
+    let last_day = day(2026, 11, 20);
+    let today = day(2026, 11, 23);
+    let days = trading_days_ending(last_day, 20);
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![]),
+        listing("000660", "SK하이닉스", Market::Kospi, 1_000_000, vec![]),
+    ];
+
+    let mut halted_days = Vec::new();
+    let mut halted_closes = Vec::new();
+    for (idx, &d) in days.iter().enumerate() {
+        if idx == 16 || idx == 17 {
+            continue;
+        }
+        halted_days.push(d);
+        halted_closes.push(if idx >= 15 { 150 } else { 100 });
+    }
+    let h = Harness::start(
+        at(today, 10, 0, 0),
+        listed,
+        vec![bar_series("005930", &days, &[100u64; 20]), bar_series("000660", &halted_days, &halted_closes)],
+    )
+    .await;
+    write_snap(
+        &h.shared,
+        DataKind::SnapshotCombined,
+        today,
+        at(today, 10, 0, 0).unix(),
+        vec![
+            snap_row("005930", "20261123", 100, 100, 1_000),
+            snap_row("000660", "20261123", 150, 150, 1_000),
+        ],
+        vec![],
+    );
+    write_themes(
+        &h.shared,
+        today,
+        at(today, 10, 0, 0).unix(),
+        vec![ThemeEntry { code: "T_GAP".into(), name: "정지갭".into(), members: vec!["000660".into()] }],
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/pro?scope=all").await;
+    assert_eq!(status, 200);
+    let points = body["rrg"]["value"]["themes"][0]["points"].as_array().unwrap();
+    let nov17 = points.iter().find(|pt| pt["date"] == "2026-11-17").unwrap()["rsRatio"].as_f64().unwrap();
+    let nov18 = points.iter().find(|pt| pt["date"] == "2026-11-18").unwrap()["rsRatio"].as_f64().unwrap();
+    assert!(nov17 > 101.0);
+    assert!(nov18 < nov17);
+}
+
+#[tokio::test]
+async fn rrg_retains_theme_when_member_was_halted_on_latest_day_and_resumes_today() {
+    let last_day = day(2026, 11, 20);
+    let today = day(2026, 11, 23);
+    let days = trading_days_ending(last_day, 20);
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![]),
+        listing("035420", "NAVER", Market::Kospi, 1_000_000, vec![]),
+    ];
+    let h = Harness::start(
+        at(today, 10, 0, 0),
+        listed,
+        vec![bar_series("005930", &days, &[100u64; 20]), bar_series("035420", &days[..19], &[100u64; 19])],
+    )
+    .await;
+    write_snap(
+        &h.shared,
+        DataKind::SnapshotCombined,
+        today,
+        at(today, 10, 0, 0).unix(),
+        vec![
+            snap_row("005930", "20261123", 100, 100, 1_000),
+            snap_row("035420", "20261123", 120, 100, 1_000),
+        ],
+        vec![],
+    );
+    write_themes(
+        &h.shared,
+        today,
+        at(today, 10, 0, 0).unix(),
+        vec![ThemeEntry { code: "T_RESUME".into(), name: "정지해제".into(), members: vec!["035420".into()] }],
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/pro?scope=all").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["rrg"]["status"], "ok");
+    let themes = body["rrg"]["value"]["themes"].as_array().unwrap();
+    assert_eq!(themes.len(), 1);
+    assert_eq!(themes[0]["code"], "T_RESUME");
+    assert!((themes[0]["changeRate"].as_f64().unwrap() - 20.0).abs() < 1e-6);
+}
+
+#[test]
+fn session_dna_assigns_1530_regular_close_sample_to_krx_close_window() {
+    let today = day(2026, 11, 9);
+    let close_mark = at(today, 15, 30, 0);
+    assert_eq!(active_window_at(close_mark), Some(MarketOverviewSessionWindowId::KrxClose));
+    assert_eq!(active_window_at(at(today, 15, 31, 0)), Some(MarketOverviewSessionWindowId::NxtMain));
+
+    let samples = vec![
+        Sample {
+            at: at(today, 15, 29, 0).unix(),
+            received_at: close_mark.unix(),
+            market: Market::Kospi,
+            value: SampleValue::Investors { individual_eok: -100, foreign_eok: 100, institution_eok: 0 },
+        },
+        Sample {
+            at: close_mark.unix(),
+            received_at: close_mark.unix(),
+            market: Market::Kospi,
+            value: SampleValue::Investors { individual_eok: -350, foreign_eok: 350, institution_eok: 0 },
+        },
+    ];
+    let dna = build_session_dna(at(today, 15, 35, 0), MarketOverviewScope::Kospi, &samples, None, None, &StockCatalog::default()).unwrap();
+    let krx_close = dna.windows.iter().find(|w| w.id == MarketOverviewSessionWindowId::KrxClose).unwrap();
+    let nxt_main = dna.windows.iter().find(|w| w.id == MarketOverviewSessionWindowId::NxtMain).unwrap();
+    assert!((krx_close.foreign_delta_eok - 350.0).abs() < 1e-9);
+    assert_eq!(krx_close.sample_count, 2);
+    assert!((nxt_main.foreign_delta_eok - 0.0).abs() < 1e-9);
+    assert_eq!(nxt_main.sample_count, 0);
+}
+
+#[test]
+fn disclosure_classifier_marks_rights_plus_bonus_issue_as_capital() {
+    assert_eq!(classify_report("유무상증자결정"), Some(MarketOverviewDisclosureCategory::Capital));
+    assert_eq!(classify_report("무상증자결정"), Some(MarketOverviewDisclosureCategory::Shareholder));
 }

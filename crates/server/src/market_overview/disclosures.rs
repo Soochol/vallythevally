@@ -17,7 +17,7 @@ const MAX_DISCLOSURES: usize = 30;
 const CONTRACT_KEYWORDS: [&str; 5] = ["단일판매", "공급계약", "수주", "기술이전", "라이선스"];
 const SHAREHOLDER_KEYWORDS: [&str; 7] = ["자기주식", "자사주", "소각", "배당", "현금배당", "주식배당", "무상증자"];
 const EARNINGS_KEYWORDS: [&str; 4] = ["잠정실적", "영업(잠정)실적", "매출액또는손익구조", "실적"];
-const CAPITAL_KEYWORDS: [&str; 7] = ["유상증자", "전환사채", "신주인수권부사채", "합병", "분할", "공개매수", "제3자배정"];
+const CAPITAL_KEYWORDS: [&str; 8] = ["유무상증자", "유상증자", "전환사채", "신주인수권부사채", "합병", "분할", "공개매수", "제3자배정"];
 
 pub fn classify_report(report_name: &str) -> Option<MarketOverviewDisclosureCategory> {
     let trimmed = report_name.trim();
@@ -27,14 +27,14 @@ pub fn classify_report(report_name: &str) -> Option<MarketOverviewDisclosureCate
     if CONTRACT_KEYWORDS.iter().any(|kw| trimmed.contains(kw)) {
         return Some(MarketOverviewDisclosureCategory::Contract);
     }
+    if CAPITAL_KEYWORDS.iter().any(|kw| trimmed.contains(kw)) {
+        return Some(MarketOverviewDisclosureCategory::Capital);
+    }
     if SHAREHOLDER_KEYWORDS.iter().any(|kw| trimmed.contains(kw)) {
         return Some(MarketOverviewDisclosureCategory::Shareholder);
     }
     if EARNINGS_KEYWORDS.iter().any(|kw| trimmed.contains(kw)) {
         return Some(MarketOverviewDisclosureCategory::Earnings);
-    }
-    if CAPITAL_KEYWORDS.iter().any(|kw| trimmed.contains(kw)) {
-        return Some(MarketOverviewDisclosureCategory::Capital);
     }
     None
 }

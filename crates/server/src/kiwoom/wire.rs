@@ -965,7 +965,7 @@ impl ViTriggeredStocksResponse {
 
     pub fn events(&self) -> ParsedRows<ViTriggeredEvent> {
         let mut parsed = collect_rows(&self.motn_stk, |r| {
-            let code = StockCode::parse(r.stk_cd.trim()).map_err(|e| WireError(format!("{e}: {:?}", r.stk_cd)))?;
+            let code = rank_code(&r.stk_cd)?;
             let trigger_price = won_or_zero(&r.motn_pric)?.map(|price| price.centi() / 100);
             let static_base = won_or_zero(&r.static_stdpc)?.map(|price| price.centi() / 100);
             let static_rate = nonzero_signed_decimal(&r.static_dispty_rt);

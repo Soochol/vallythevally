@@ -87,31 +87,37 @@ struct Harness {
 
 impl Harness {
     async fn start(clock_at: KstTime, listed: Vec<ScreenerListing>, bars: Vec<Write>) -> Harness {
+        Harness::start_with(clock_at, listed, bars, None, true).await
+    }
+
+    async fn start_with(clock_at: KstTime, listed: Vec<ScreenerListing>, bars: Vec<Write>, last_day: Option<KstDate>, populate_symbols: bool) -> Harness {
         let fake = ScriptedTransport::new();
         let clock = Clock::fake(clock_at);
         let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
         let rest = KiwoomRest::new(fake.transport(), auth, clock.clone());
         let symbols = Arc::new(SymbolDirectory::default());
-        let symbol_infos: Vec<SymbolInfo> = listed
-            .iter()
-            .map(|item| SymbolInfo {
-                symbol: Symbol::Stock(item.code),
-                name: item.name.clone(),
-                kind: if item.excludable_as.contains(&ExcludeKind::Etf) {
-                    SymbolKind::Etf
-                } else if item.excludable_as.contains(&ExcludeKind::Etn) {
-                    SymbolKind::Etn
-                } else {
-                    SymbolKind::Common
-                },
-                market: match item.market {
-                    Market::Kospi => domain::Market::Kospi,
-                    Market::Kosdaq => domain::Market::Kosdaq,
-                },
-                nxt_enabled: true,
-            })
-            .collect();
-        symbols.replace(Directory::build(symbol_infos).with_screener_listing(listed.clone()));
+        if populate_symbols {
+            let symbol_infos: Vec<SymbolInfo> = listed
+                .iter()
+                .map(|item| SymbolInfo {
+                    symbol: Symbol::Stock(item.code),
+                    name: item.name.clone(),
+                    kind: if item.excludable_as.contains(&ExcludeKind::Etf) {
+                        SymbolKind::Etf
+                    } else if item.excludable_as.contains(&ExcludeKind::Etn) {
+                        SymbolKind::Etn
+                    } else {
+                        SymbolKind::Common
+                    },
+                    market: match item.market {
+                        Market::Kospi => domain::Market::Kospi,
+                        Market::Kosdaq => domain::Market::Kosdaq,
+                    },
+                    nxt_enabled: true,
+                })
+                .collect();
+            symbols.replace(Directory::build(symbol_infos).with_screener_listing(listed.clone()));
+        }
         let tmp = tempfile::tempdir().unwrap();
         let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
         let (stream, _desired) = KiwoomStream::detached();
@@ -123,6 +129,9 @@ impl Harness {
         }
         if !bars.is_empty() {
             store.write(&bars).unwrap();
+        }
+        if let Some(day) = last_day {
+            store.set_last_day(day).unwrap();
         }
         let state = application(ApplicationInputs {
             rest: rest.clone(),
@@ -260,14 +269,15 @@ fn attribution_matches_hand_calculated_points_and_top_two_concentration() {
 fn ma_thrust_computes_exact_percentages_and_history_with_today_append() {
     let last_bar_day = day(2026, 11, 6);
     let today_day = day(2026, 11, 9);
-    let days = trading_days_ending(last_bar_day, 20);
+    let all_days = trading_days_ending(last_bar_day, 220);
+    let days = all_days[200..].to_vec();
     let c1 = StockCode::parse("005930").unwrap();
     let c2 = StockCode::parse("000660").unwrap();
     let mut closes = HashMap::new();
-    let mut s1 = vec![price_won(100); 220];
-    s1[0] = price_won(110);
-    let mut s2 = vec![price_won(100); 220];
-    s2[0] = price_won(90);
+    let mut s1: Vec<(KstDate, Price)> = all_days.iter().rev().map(|&d| (d, price_won(100))).collect();
+    s1[0].1 = price_won(110);
+    let mut s2: Vec<(KstDate, Price)> = all_days.iter().rev().map(|&d| (d, price_won(100))).collect();
+    s2[0].1 = price_won(90);
     closes.insert(c1, s1);
     closes.insert(c2, s2);
     let mut today_prices = HashMap::new();
@@ -456,7 +466,7 @@ struct SyntheticFixture {
     krx: Loaded<SnapshotBody>,
     nxt: Loaded<SnapshotBody>,
     catalog: StockCatalog,
-    closes: HashMap<StockCode, Vec<Price>>,
+    closes: HashMap<StockCode, Vec<(KstDate, Price)>>,
     last_day: KstDate,
     trading_days: Vec<KstDate>,
 }
@@ -464,7 +474,8 @@ struct SyntheticFixture {
 fn synthetic_2600_fixture() -> SyntheticFixture {
     let last_day = day(2026, 11, 6);
     let today = day(2026, 11, 9);
-    let trading_days = trading_days_ending(last_day, 20);
+    let all_days = trading_days_ending(last_day, 220);
+    let trading_days = all_days[200..].to_vec();
     let mut listed = Vec::with_capacity(2_600);
     let mut combined_rows = Vec::with_capacity(2_600);
     let mut krx_rows = Vec::with_capacity(2_600);
@@ -489,7 +500,12 @@ fn synthetic_2600_fixture() -> SyntheticFixture {
         if idx < 800 {
             nxt_rows.push(row(&code_str, "20261109", current, base, 100 + u64::from(idx)));
         }
-        let series: Vec<Price> = (0..220u64).map(|offset| price_won(base + ((offset + u64::from(idx)) % 15) * 10)).collect();
+        let series: Vec<(KstDate, Price)> = all_days
+            .iter()
+            .rev()
+            .enumerate()
+            .map(|(offset, &d)| (d, price_won(base + ((offset as u64 + u64::from(idx)) % 15) * 10)))
+            .collect();
         closes.insert(code, series);
     }
     let catalog = StockCatalog::from_listed(&listed);
@@ -575,4 +591,197 @@ fn perf_derive_market_snapshot_2600_stocks_p95_under_15ms() {
     let max = *samples_ms.last().unwrap();
     println!("derive_market_snapshot(2600 stocks): p50={p50:.3}ms p95={p95:.3}ms max={max:.3}ms");
     assert!(p95 <= 15.0, "p95 {p95:.3}ms exceeded 15ms budget");
+}
+
+#[tokio::test]
+async fn untraded_zero_current_price_rows_do_not_corrupt_histogram_and_attribution() {
+    let today = day(2026, 11, 9);
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![]),
+        listing("000660", "SK하이닉스", Market::Kospi, 1_000_000, vec![]),
+    ];
+    let h = Harness::start_with(at(today, 8, 15, 0), listed, vec![], None, true).await;
+    let indices = vec![IndexRow { code: "001".into(), name: "코스피".into(), level: 2_500.0, change_rate: 0.0, trade_million_won: 0 }];
+    write_board(
+        &h.shared,
+        DataKind::SnapshotCombined,
+        today,
+        AS_OF,
+        vec![
+            row("005930", "20261109", 10_000, 10_000, 500),
+            SnapshotRow {
+                code: "000660".to_owned(),
+                day: "20261109".to_owned(),
+                current_won: 0,
+                base_won: 10_000,
+                open_won: 0,
+                high_won: 0,
+                low_won: 0,
+                volume: 0,
+                traded_million_won: 0,
+                traded_at: None,
+            },
+        ],
+        indices,
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/derived?scope=kospi").await;
+    assert_eq!(status, 200);
+    let buckets = body["histogram"]["value"].as_array().unwrap();
+    assert_eq!(buckets[0]["label"], "≤-10%");
+    assert_eq!(buckets[0]["count"], 0);
+    assert!(body["attribution"]["value"]["topNegative"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn partial_write_ahead_of_last_day_and_halted_stock_are_retained_in_ma_thrust() {
+    let days = trading_days_ending(day(2026, 11, 9), 21);
+    let d19 = days[19];
+    let d20 = days[20];
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![]),
+        listing("000660", "SK하이닉스", Market::Kospi, 1_000_000, vec![]),
+        listing("035420", "NAVER", Market::Kospi, 1_000_000, vec![]),
+    ];
+    let flat_20 = vec![100u64; 20];
+    let h = Harness::start_with(
+        at(d20, 16, 0, 0),
+        listed,
+        vec![
+            bar_series("005930", &days, &[100u64; 21]),
+            bar_series("000660", &days[..20], &flat_20),
+            bar_series("035420", &days[..20], &flat_20),
+        ],
+        Some(d19),
+        true,
+    )
+    .await;
+    write_board(
+        &h.shared,
+        DataKind::SnapshotCombined,
+        d20,
+        AS_OF,
+        vec![
+            row("005930", &d20.yyyymmdd(), 110, 100, 1_000),
+            row("000660", &d20.yyyymmdd(), 110, 100, 1_000),
+            row("035420", &d20.yyyymmdd(), 110, 100, 1_000),
+        ],
+        vec![],
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/derived?scope=kospi").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["maThrust"]["value"]["totalStocks"], 3);
+}
+
+#[tokio::test]
+async fn trading_halt_gap_does_not_shift_ma_thrust_history_dates() {
+    let days = trading_days_ending(day(2026, 11, 6), 22);
+    let d19 = days[19];
+    let d20 = days[20];
+    let d21 = days[21];
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![]),
+        listing("000660", "SK하이닉스", Market::Kospi, 1_000_000, vec![]),
+    ];
+    let mut samsung_closes = vec![100u64; 22];
+    samsung_closes[21] = 200;
+    let mut hynix_days: Vec<KstDate> = days[..20].to_vec();
+    hynix_days.push(d21);
+    let mut hynix_closes = vec![100u64; 21];
+    hynix_closes[19] = 200;
+    hynix_closes[20] = 200;
+
+    let h = Harness::start_with(
+        at(d21, 16, 0, 0),
+        listed,
+        vec![
+            bar_series("005930", &days, &samsung_closes),
+            bar_series("000660", &hynix_days, &hynix_closes),
+        ],
+        Some(d21),
+        true,
+    )
+    .await;
+
+    let (status, body) = h.get("/api/market-overview/derived?scope=kospi").await;
+    assert_eq!(status, 200);
+    let history = body["maThrust"]["value"]["history20d"].as_array().unwrap();
+    let point_d19 = history.iter().find(|p| p["date"] == d19.to_string()).unwrap();
+    let point_d20 = history.iter().find(|p| p["date"] == d20.to_string()).unwrap();
+    assert!((point_d19["above20Pct"].as_f64().unwrap() - 50.0).abs() < 1e-6);
+    assert!((point_d20["above20Pct"].as_f64().unwrap() - 0.0).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn today_overlay_append_does_not_leak_to_scope_with_zero_today_quotes() {
+    let days = trading_days_ending(day(2026, 11, 6), 20);
+    let today = day(2026, 11, 9);
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![]),
+        listing("247540", "에코프로비엠", Market::Kosdaq, 1_000_000, vec![]),
+    ];
+    let mut kosdaq_closes = vec![100u64; 20];
+    kosdaq_closes[19] = 110;
+    let h = Harness::start_with(
+        at(today, 9, 5, 0),
+        listed,
+        vec![
+            bar_series("005930", &days, &[100u64; 20]),
+            bar_series("247540", &days, &kosdaq_closes),
+        ],
+        Some(days[19]),
+        true,
+    )
+    .await;
+    write_board(
+        &h.shared,
+        DataKind::SnapshotCombined,
+        today,
+        AS_OF,
+        vec![row("005930", "20261109", 120, 100, 1_000)],
+        vec![],
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/derived?scope=kosdaq").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["maThrust"]["value"]["asOf"], "2026-11-06");
+}
+
+#[tokio::test]
+async fn empty_catalog_with_single_market_scope_fails_histogram_and_venue_share() {
+    let today = day(2026, 11, 9);
+    let h = Harness::start_with(at(today, 10, 0, 0), vec![], vec![], None, false).await;
+    let stocks = vec![row("005930", "20261109", 110, 100, 5_000)];
+    write_board(&h.shared, DataKind::SnapshotCombined, today, AS_OF, stocks.clone(), vec![]);
+    write_board(&h.shared, DataKind::SnapshotKrx, today, AS_OF, stocks.clone(), vec![]);
+    write_board(&h.shared, DataKind::SnapshotNxt, today, AS_OF, stocks, vec![]);
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/derived?scope=kospi").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["histogram"]["status"], "failed");
+    assert_eq!(body["histogram"]["error"]["code"], "not_prepared");
+    assert_eq!(body["venueShare"]["status"], "failed");
+    assert_eq!(body["venueShare"]["error"]["code"], "not_prepared");
+}
+
+#[test]
+fn attribution_rejects_non_finite_and_invalid_index_inputs() {
+    let rows = [row("005930", "20261109", 110, 100, 100)];
+    let refs: Vec<&SnapshotRow> = rows.iter().collect();
+    let mut shares = HashMap::new();
+    shares.insert(StockCode::parse("005930").unwrap(), 1_000_000);
+    let mut names = HashMap::new();
+    names.insert(StockCode::parse("005930").unwrap(), "삼성전자".to_owned());
+
+    assert!(attribution_of(Market::Kospi, f64::NAN, 1.0, &refs, &shares, &names).is_none());
+    assert!(attribution_of(Market::Kospi, f64::INFINITY, 1.0, &refs, &shares, &names).is_none());
+    assert!(attribution_of(Market::Kospi, 0.0, 1.0, &refs, &shares, &names).is_none());
+    assert!(attribution_of(Market::Kospi, 2_500.0, f64::NAN, &refs, &shares, &names).is_none());
+    assert!(attribution_of(Market::Kospi, 2_500.0, f64::INFINITY, &refs, &shares, &names).is_none());
+    assert!(attribution_of(Market::Kospi, 2_500.0, -100.0, &refs, &shares, &names).is_none());
 }

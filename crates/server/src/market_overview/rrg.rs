@@ -85,7 +85,7 @@ fn sanitize(value: f64) -> f64 {
 pub struct RrgInputs<'a> {
     pub scope: MarketOverviewScope,
     pub catalog: &'a StockCatalog,
-    pub closes: &'a HashMap<StockCode, Vec<Price>>,
+    pub closes: &'a HashMap<StockCode, Vec<(KstDate, Price)>>,
     pub latest_day: Option<KstDate>,
     pub trading_days: &'a [KstDate],
     pub combined: Option<&'a Loaded<SnapshotBody>>,
@@ -96,7 +96,7 @@ pub struct RrgInputs<'a> {
 }
 
 pub fn build_rrg(inputs: &RrgInputs<'_>) -> Option<MarketOverviewRrg> {
-    let (today_prices, overlay) = extract_today_overlay(inputs.combined, inputs.latest_day);
+    let (today_prices, overlay) = extract_today_overlay(inputs.combined, inputs.latest_day, inputs.catalog, inputs.scope);
     let dates = effective_dates(inputs.trading_days, inputs.latest_day, overlay);
     let as_of = dates
         .last()
@@ -105,7 +105,7 @@ pub fn build_rrg(inputs: &RrgInputs<'_>) -> Option<MarketOverviewRrg> {
         .or_else(|| inputs.overview_board.and_then(|loaded| KstDate::parse_yyyymmdd(&loaded.header.observation_date)))
         .or(inputs.latest_day);
     let themes = build_theme_series(inputs, &dates, &today_prices, overlay);
-    let sectors = build_sector_series(inputs.scope, inputs.overview_board, as_of);
+    let sectors = build_sector_series(inputs.scope, inputs.overview_board, as_of, inputs.latest_day);
     if themes.is_empty() && sectors.is_empty() {
         return None;
     }
@@ -128,26 +128,43 @@ fn effective_dates(trading_days: &[KstDate], latest_day: Option<KstDate>, overla
     days
 }
 
-fn stock_price_at_back(closes: &[Price], today_price: Option<Price>, overlay: TodayOverlay, back: usize) -> Option<f64> {
-    let price = match overlay {
-        TodayOverlay::Append(_) => {
-            if back == 0 {
-                today_price.or_else(|| closes.first().copied())
-            } else {
-                closes.get(back - 1).copied()
+fn stock_prices_for_dates(
+    closes: &[(KstDate, Price)],
+    today_price: Option<Price>,
+    overlay: TodayOverlay,
+    dates: &[KstDate],
+    out: &mut [f64; MAX_SERIES_DAYS],
+) {
+    let overlay_day = match overlay {
+        TodayOverlay::Append(day) | TodayOverlay::Replace(day) => Some(day),
+        TodayOverlay::None => None,
+    };
+    let mut pos = 0usize;
+    let closes_len = closes.len();
+    let mut idx = dates.len();
+    while idx > 0 {
+        idx -= 1;
+        let target_day = dates[idx];
+        out[idx] = f64::NAN;
+        if overlay_day == Some(target_day)
+            && let Some(price) = today_price
+        {
+            let centi = price.centi();
+            if centi > 0 {
+                out[idx] = centi as f64;
+                continue;
             }
         }
-        TodayOverlay::Replace(_) => {
-            if back == 0 {
-                today_price.or_else(|| closes.first().copied())
-            } else {
-                closes.get(back).copied()
+        while pos < closes_len && closes[pos].0 > target_day {
+            pos += 1;
+        }
+        if pos < closes_len {
+            let centi = closes[pos].1.centi();
+            if centi > 0 {
+                out[idx] = centi as f64;
             }
         }
-        TodayOverlay::None => closes.get(back).copied(),
-    }?;
-    let centi = price.centi();
-    (centi > 0).then_some(centi as f64)
+    }
 }
 
 fn build_theme_series(
@@ -163,38 +180,33 @@ fn build_theme_series(
         return Vec::new();
     }
     let steps = dates.len().saturating_sub(1);
-    let mut stock_returns: HashMap<StockCode, Vec<Option<f64>>> = HashMap::new();
+    let mut stock_returns: HashMap<StockCode, [f64; MAX_SERIES_DAYS]> = HashMap::with_capacity(inputs.closes.len());
     let mut bench_sum = vec![0.0f64; steps];
     let mut bench_cnt = vec![0u32; steps];
+    let mut price_buf = [f64::NAN; MAX_SERIES_DAYS];
     if steps > 0 {
         for (&code, closes) in inputs.closes {
             if !inputs.catalog.includes_stock(code, inputs.scope) || closes.is_empty() {
                 continue;
             }
             let today = today_prices.get(&code).copied();
-            let mut series = Vec::with_capacity(steps);
+            stock_prices_for_dates(closes, today, overlay, dates, &mut price_buf);
+            let mut series = [f64::NAN; MAX_SERIES_DAYS];
             let mut any = false;
-            for step in 0..steps {
-                let back_prev = steps - step;
-                let back_curr = back_prev - 1;
-                let ret = match (
-                    stock_price_at_back(closes, today, overlay, back_prev),
-                    stock_price_at_back(closes, today, overlay, back_curr),
-                ) {
-                    (Some(prev), Some(curr)) if prev > 0.0 => {
-                        let r = (curr - prev) / prev;
-                        if r.is_finite() {
-                            bench_sum[step] += r;
-                            bench_cnt[step] += 1;
-                            any = true;
-                            Some(r)
-                        } else {
-                            None
-                        }
+            let mut step = 0usize;
+            while step < steps {
+                let prev = price_buf[step];
+                let curr = price_buf[step + 1];
+                if prev > 0.0 && curr > 0.0 {
+                    let r = (curr - prev) / prev;
+                    if r.is_finite() {
+                        bench_sum[step] += r;
+                        bench_cnt[step] += 1;
+                        any = true;
+                        series[step] = r;
                     }
-                    _ => None,
-                };
-                series.push(ret);
+                }
+                step += 1;
             }
             if any {
                 stock_returns.insert(code, series);
@@ -223,11 +235,14 @@ fn build_theme_series(
         for &code in &members {
             if let Some(returns) = stock_returns.get(&code) {
                 active_members += 1;
-                for (step, value) in returns.iter().enumerate() {
-                    if let Some(r) = value {
+                let mut step = 0usize;
+                while step < steps {
+                    let r = returns[step];
+                    if r.is_finite() {
                         member_sum[step] += r;
                         member_cnt[step] += 1;
                     }
+                    step += 1;
                 }
             }
         }
@@ -293,6 +308,7 @@ fn build_sector_series(
     scope: MarketOverviewScope,
     overview_board: Option<&Loaded<OverviewBody>>,
     as_of: Option<KstDate>,
+    latest_day: Option<KstDate>,
 ) -> Vec<MarketOverviewRrgSeries> {
     let Some(board) = overview_board else {
         return Vec::new();
@@ -300,6 +316,11 @@ fn build_sector_series(
     let Some(date) = KstDate::parse_yyyymmdd(&board.header.observation_date).or(as_of) else {
         return Vec::new();
     };
+    if let Some(last) = latest_day
+        && date < last
+    {
+        return Vec::new();
+    }
     let markets: &[Market] = match scope {
         MarketOverviewScope::All => &[Market::Kospi, Market::Kosdaq],
         MarketOverviewScope::Kospi => &[Market::Kospi],

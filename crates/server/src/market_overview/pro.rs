@@ -11,7 +11,7 @@ use super::disclosures::build_disclosure_radar;
 use super::dto::{MarketOverviewPart, MarketOverviewPhase, MarketOverviewProCard, MarketOverviewScope};
 use super::rrg::{RrgInputs, build_rrg};
 use super::samples::Sample;
-use super::session::phase;
+use super::session::{observation_day, phase};
 use super::session_dna::build_session_dna;
 use super::shared;
 use crate::api::{Market, UnixSeconds};
@@ -34,18 +34,23 @@ pub struct ProInputs<'a> {
     pub samples: &'a [Sample],
     pub disclosures: Option<&'a [SecurityDisclosures]>,
     pub catalog: &'a StockCatalog,
-    pub closes: &'a HashMap<StockCode, Vec<Price>>,
+    pub closes: &'a HashMap<StockCode, Vec<(KstDate, Price)>>,
     pub latest_day: Option<KstDate>,
     pub trading_days: &'a [KstDate],
 }
 
-fn live_rates_of(combined: Option<&Loaded<SnapshotBody>>) -> HashMap<StockCode, f64> {
+fn live_rates_of(combined: Option<&Loaded<SnapshotBody>>, latest_day: Option<KstDate>) -> HashMap<StockCode, f64> {
     let Some(loaded) = combined else {
         return HashMap::new();
     };
+    if let (Some(snapshot_day), Some(last)) = (KstDate::parse_yyyymmdd(&loaded.header.observation_date), latest_day)
+        && snapshot_day < last
+    {
+        return HashMap::new();
+    }
     let mut rates = HashMap::with_capacity(loaded.body.stocks.len());
     for row in &loaded.body.stocks {
-        if row.base_won == 0 {
+        if row.base_won == 0 || row.current_won == 0 {
             continue;
         }
         if let Ok(code) = StockCode::parse(&row.code) {
@@ -78,7 +83,7 @@ fn latest_received_at(inputs: &ProInputs<'_>) -> Option<UnixSeconds> {
 }
 
 pub fn derive_pro_card(inputs: &ProInputs<'_>) -> MarketOverviewProCard {
-    let live_rates = live_rates_of(inputs.combined);
+    let live_rates = live_rates_of(inputs.combined, inputs.latest_day);
     let rrg = match build_rrg(&RrgInputs {
         scope: inputs.scope,
         catalog: inputs.catalog,
@@ -151,11 +156,12 @@ pub async fn pro(
     } else {
         &store_snapshot.catalog
     };
-    let combined = st.shared_data.snapshot_combined.current();
-    let krx = st.shared_data.snapshot_krx.current();
-    let nxt = st.shared_data.snapshot_nxt.current();
-    let overview_board = st.shared_data.market_overview.current();
-    let intraday_themes = st.shared_data.intraday_themes.current();
+    let expected_day = observation_day(now).yyyymmdd();
+    let combined = st.shared_data.snapshot_combined.current().filter(|loaded| loaded.header.observation_date == expected_day);
+    let krx = st.shared_data.snapshot_krx.current().filter(|loaded| loaded.header.observation_date == expected_day);
+    let nxt = st.shared_data.snapshot_nxt.current().filter(|loaded| loaded.header.observation_date == expected_day);
+    let overview_board = st.shared_data.market_overview.current().filter(|loaded| loaded.header.observation_date == expected_day);
+    let intraday_themes = st.shared_data.intraday_themes.current().filter(|loaded| loaded.header.observation_date == expected_day);
     let themes_catalog = st.kiwoom_catalog.latest().or_else(|| {
         st.shared_data.kiwoom_themes.current().map(|loaded| {
             Arc::new(StoredCatalog {
@@ -170,7 +176,7 @@ pub async fn pro(
             })
         })
     });
-    let rankings = st.shared_data.rankings.current();
+    let rankings = st.shared_data.rankings.current().filter(|merged| merged.observation_date == expected_day);
     let samples = collect_samples(&st, now, scope);
     let disclosures = st.market_overview.load_security_disclosures().await;
     let card = derive_pro_card(&ProInputs {

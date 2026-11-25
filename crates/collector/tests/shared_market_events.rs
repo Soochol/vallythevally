@@ -195,3 +195,112 @@ async fn jobs_stop_after_window_end() {
     assert_eq!(fake.theme_calls.load(Ordering::SeqCst), 2);
     assert_eq!(fake.vi_calls.load(Ordering::SeqCst), 2);
 }
+
+#[derive(Default)]
+struct PagedViState {
+    vi_calls: AtomicUsize,
+    vi_cont_calls: AtomicUsize,
+}
+
+#[derive(Clone)]
+struct PagedViWire(Arc<PagedViState>);
+
+impl Transport for PagedViWire {
+    fn send(&self, request: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
+        match request.api_id.as_str() {
+            "au10001" => respond(json!({"return_code": 0, "token": "fake-token", "expires_dt": "20991231000000"})),
+            "ka10054" => {
+                self.0.vi_calls.fetch_add(1, Ordering::SeqCst);
+                let cont = request.cont.as_ref().map(|k| k.as_str().to_owned());
+                let response = match cont.as_deref() {
+                    None => HttpResponse {
+                        status: 200,
+                        next_key: Some("P2".to_owned()),
+                        body: json!({
+                            "return_code": 0,
+                            "motn_stk": [{
+                                "stk_cd": "005930",
+                                "stk_nm": "삼성전자",
+                                "mrkt_nm": "코스피",
+                                "motn_pric": "75000",
+                                "trde_cntr_proc_time": "101530",
+                                "virelis_time": "000000",
+                                "static_stdpc": "68000",
+                                "static_dispty_rt": "+10.29",
+                                "dynm_dispty_rt": "0.00",
+                                "motn_tp": "정적"
+                            }]
+                        })
+                        .to_string(),
+                    },
+                    Some("P2") => {
+                        self.0.vi_cont_calls.fetch_add(1, Ordering::SeqCst);
+                        HttpResponse {
+                            status: 200,
+                            next_key: None,
+                            body: json!({
+                                "return_code": 0,
+                                "motn_stk": [{
+                                    "stk_cd": "247540",
+                                    "stk_nm": "",
+                                    "motn_pric": "182000",
+                                    "trde_cntr_proc_time": "091205",
+                                    "virelis_time": "091410",
+                                    "static_stdpc": "0",
+                                    "static_dispty_rt": "0.00",
+                                    "dynm_dispty_rt": "-6.15",
+                                    "motn_tp": "동적"
+                                }]
+                            })
+                            .to_string(),
+                        }
+                    }
+                    Some(other) => panic!("준비하지 않은 연속 키: {other}"),
+                };
+                Box::pin(async move { Ok(response) })
+            }
+            other => panic!("준비하지 않은 요청: {other}"),
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn vi_events_job_walks_ka10054_continuation_pages_and_leaves_unresolved_name_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let shared_dir = tmp.path().join("shared");
+    let state = Arc::new(PagedViState::default());
+    let clock = Clock::fake(kst(today(), 9, 5, 0));
+    let rest = KiwoomRest::new(
+        Arc::new(PagedViWire(state.clone())),
+        KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None),
+        clock.clone(),
+    );
+    rest.set_access(Access::Open);
+    let job_loop = JobLoop {
+        job: JobName::ViEvents.job(),
+        observation_date: today(),
+        period: Duration::from_secs(60),
+        slice: Slice::WHOLE,
+        peers: Vec::new(),
+        options: Value::Null,
+    };
+    let task = tokio::spawn({
+        let (clock, shared_dir) = (clock.clone(), shared_dir.clone());
+        async move {
+            let stats = LoopStats::default();
+            job_loop.run(Market::Kiwoom(&rest), &KeyName::parse("rest-01").unwrap(), &shared_dir, &clock, &stats).await;
+        }
+    });
+
+    sleep(Duration::from_secs(5)).await;
+    let shared = SharedData::new();
+    shared.poll_once(&shared_dir).await;
+    let loaded = shared.vi_events.current().expect("vi events board");
+    task.abort();
+
+    assert_eq!(state.vi_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(state.vi_cont_calls.load(Ordering::SeqCst), 1);
+    let codes: Vec<&str> = loaded.body.events.iter().map(|e| e.code.as_str()).collect();
+    assert_eq!(codes, vec!["005930", "247540"]);
+    assert_eq!(loaded.body.events[1].name, "");
+}
