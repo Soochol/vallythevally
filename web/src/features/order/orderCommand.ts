@@ -19,6 +19,7 @@ import {
   modifyBuyProblem,
   needsHighValueConfirm,
   orderAmount,
+  orderQuantityForPrice,
   planCancel,
   type PriceGroup,
   type PriceKey,
@@ -37,6 +38,7 @@ export interface OrderCommandContext {
   readonly nxtNotTraded: boolean;
   readonly replayLocked: boolean;
   readonly quantity: number;
+  readonly buyFull?: boolean;
   readonly keepLastEntry: boolean;
   readonly capacity: Capacity;
   readonly groups: ReadonlyMap<string, PriceGroup>;
@@ -118,7 +120,15 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
         sink.say({ tone: "error", text: ETF_ETN_AFTER_HOURS_TEXT });
         return;
       }
-      const orderQuantity = cappedQuantity ?? ctx.quantity;
+      const dynamicBuyFull = cappedQuantity === undefined && side === "buy" && ctx.buyFull === true && ctx.capacity.buying !== null;
+      const orderQuantity = cappedQuantity ?? orderQuantityForPrice(side, price, ctx.quantity, ctx.capacity.buying, ctx.buyFull === true);
+      if (dynamicBuyFull && orderQuantity === 0) {
+        const block = buyBlock(price, 1, ctx.capacity.buying);
+        if (block) {
+          sink.say({ tone: "error", text: block.text });
+          return;
+        }
+      }
       const problem = capacityProblem(side, orderQuantity, ctx.capacity);
       if (problem) {
         sink.say({ tone: "error", text: problem });

@@ -24,6 +24,7 @@ interface Props {
   readonly hasHolding: boolean;
   readonly onMode: (mode: PresetMode) => void;
   readonly onInput: (input: string) => void;
+  readonly onPreset: (input: string, buyFull: boolean) => void;
   readonly trailing?: ReactNode;
 }
 
@@ -80,7 +81,7 @@ function buildSellRatioButtons(sellableRemaining: number | null, hasHolding: boo
   });
 }
 
-export const QuantityRow = memo(function QuantityRow({ input, mode, amountPresets, referencePrice, buying, sellableRemaining, hasHolding, onMode, onInput, trailing }: Props) {
+export const QuantityRow = memo(function QuantityRow({ input, mode, amountPresets, referencePrice, buying, sellableRemaining, hasHolding, onMode, onInput, onPreset, trailing }: Props) {
   const field = useRef<HTMLInputElement>(null);
   const digitsBeforeCaret = useRef<number | null>(null);
   const [picked, setPicked] = useState<{ readonly mode: PresetMode; readonly key: string; readonly value: string } | null>(null);
@@ -117,7 +118,7 @@ export const QuantityRow = memo(function QuantityRow({ input, mode, amountPreset
   const pickPreset = (button: PresetButton) => {
     const nextValue = String(button.quantity);
     setPicked({ mode, key: button.key, value: nextValue });
-    onInput(nextValue);
+    onPreset(nextValue, button.key === "buy:100");
   };
   return (
     <div className="od-qty" data-testid="order-quantity-row" data-preset-mode={mode}>

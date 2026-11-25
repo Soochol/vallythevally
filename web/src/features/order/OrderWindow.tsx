@@ -65,6 +65,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
   const [input, setInput] = useState(kept === null ? String(DEFAULT_ORDER_QUANTITY) : String(kept.quantity));
+  const [buyFull, setBuyFull] = useState(false);
   const [hover] = useState(() => createValueStore<HoverCell | null>(null));
   const [exploring, setExploring] = useState(false);
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
@@ -90,6 +91,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
   const holding = useMemo(() => atLivePrice(holdingOf(data.balance?.holdings ?? [], code), feed.lastPrice), [data.balance, code, feed.lastPrice]);
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
   const quantity = typedQuantity(input);
+  const buyFullActive = buyFull && settings.presetMode === "buy";
 
   const commands = useOrderCommands(
     {
@@ -101,6 +103,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
       nxtNotTraded,
       replayLocked,
       quantity,
+      buyFull: buyFullActive,
       keepLastEntry: settings.keepLastEntry,
       capacity: data.capacity,
       groups: data.groups,
@@ -130,15 +133,18 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
   const changePresetMode = useStableCallback((presetMode: PresetMode) => {
+    setBuyFull(false);
     const { prefs } = useUiStore.getState();
     setSettings({ ...prefs.orderSettings, presetMode });
   });
-  const changeInput = useStableCallback((nextInput: string) => {
+  const applyInput = useStableCallback((nextInput: string, nextBuyFull: boolean) => {
+    setBuyFull(nextBuyFull);
     setInput(nextInput);
     if (!useUiStore.getState().prefs.orderSettings.keepLastEntry) return;
     const nextQuantity = typedQuantity(nextInput);
     if (nextQuantity > 0) rememberEntry(entryKey, { quantity: nextQuantity, usedAt: Date.now() });
   });
+  const changeInput = useStableCallback((nextInput: string) => applyInput(nextInput, false));
   const toggleProfitUnit = useCallback(() => setProfitUnit(toggledUnit), []);
   const toggleExplorer = useStableCallback(() => {
     if (replayLocked) return;
@@ -183,6 +189,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         hasHolding={hasHolding}
         onMode={changePresetMode}
         onInput={changeInput}
+        onPreset={applyInput}
         trailing={settingsPopover}
       />
       {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
@@ -190,7 +197,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (
