@@ -10,9 +10,9 @@ import { useUiStore } from "../../stores/ui";
 import { CANVAS_DOCK_HEIGHT, DOCK_GAP } from "./size";
 
 export function workspacePlacementRoom(): PlacementRoom | null {
-  const root = document.querySelector<HTMLElement>("main.workspace");
-  const canvas = root && workArea(root.clientWidth, root.clientHeight - CANVAS_DOCK_HEIGHT);
-  return root && canvas ? { dock: { area: { w: root.clientWidth, h: root.clientHeight }, gap: DOCK_GAP }, canvas } : null;
+  const area = useLayoutStore.getState().workspaceArea;
+  const canvas = area && workArea(area.w, area.h - CANVAS_DOCK_HEIGHT);
+  return area && canvas ? { dock: { area, gap: DOCK_GAP }, canvas } : null;
 }
 
 export function setLayoutMode(mode: LayoutMode) {

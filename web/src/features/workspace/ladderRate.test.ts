@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import { rectsForArea } from "../../layout/canvas/arrange";
 import { workArea } from "../../layout/canvas/geometry";
 import { windowId } from "../../layout/kinds";
@@ -18,13 +18,11 @@ const layout: EditableLayout = {
 };
 
 beforeEach(() => {
-  vi.stubGlobal("document", { querySelector: () => ({ clientWidth: 1440, clientHeight: 948 }) });
   useUiStore.getState().load({ ...DEFAULT_UI_PREFS, layoutMode: "canvas" }, {});
   state().load(layout);
+  state().setWorkspaceArea({ w: 1440, h: 948 });
   state().setCanvasArea(area);
 });
-
-afterEach(() => vi.unstubAllGlobals());
 
 test("등락률을 끄면 폭과 설정을 한 번에 바꾸고 실행 취소 목록은 그대로다", () => {
   const before = orderWidth();
@@ -59,7 +57,7 @@ test("다른 창에서 설정만 바뀌어 들어오거나 화면 크기를 모�
   load({ ...prefs, orderSettings: { ...prefs.orderSettings, rate: false } }, extra);
   expect(state().layout.placement).toBe(placement);
   load(prefs, extra);
-  vi.stubGlobal("document", { querySelector: () => null });
+  state().setWorkspaceArea(null);
   setLadderRate(false);
   expect(useUiStore.getState().prefs.orderSettings.rate).toBe(false);
   expect(state().layout.placement).toBe(placement);

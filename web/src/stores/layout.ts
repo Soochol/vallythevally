@@ -23,9 +23,10 @@ import { isLadderKind, MAX_WINDOWS, windowId, WINDOW_KINDS, type WindowId, type 
 import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placement";
 import { isIndexCode } from "../lib/symbol";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
-import { newWindowResends, orderLedger, type WindowResends } from "../features/order/commandLedger";
-import type { OrderEntries } from "../features/order/orderEntries";
 import { ladderRateHidden, useUiStore } from "./ui";
+import { reclaimWindow, swapReclaimedWindow, type ReclaimedWindow } from "./windowReclaim";
+
+export type { ReclaimedWindow };
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
 export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
@@ -144,7 +145,6 @@ function freeChartId(windows: readonly WindowState[]): WindowId {
 
 export const ARRANGEMENT_STEPS = 20;
 export type Arrangement = Pick<EditableLayout, "windows" | "placement">;
-export type ReclaimedWindow = { layoutId: string; window: string; entries: OrderEntries; resends: WindowResends };
 export type ArrangementStep = { id: number; before: Arrangement; dockOrigins: DockOrigins; reclaimed?: ReclaimedWindow };
 export type DockRoom = { area: Size; gap: number };
 
@@ -179,6 +179,8 @@ interface LayoutState {
   dockOrigins: DockOrigins;
   commitDock(edit: { session: number; expected: DockPlacement | null; next: DockPlacement }): boolean;
   attachFloat(window: WindowId): void;
+  workspaceArea: Size | null;
+  setWorkspaceArea(area: Size | null): void;
   canvasArea: Area | null;
   setCanvasArea(area: Area | null): void;
   settlePlacement(placement: Placement): void;
@@ -242,19 +244,11 @@ function returnTo(s: Pick<LayoutState, "layout" | "revision">, step: Arrangement
   return { dockOrigins: step.dockOrigins, layout: { ...s.layout, windows, placement: step.before.placement }, revision: s.revision + 1 };
 }
 
-function swapReclaimed(reclaimed: ReclaimedWindow): ReclaimedWindow {
-  const ui = useUiStore.getState();
-  const current = { layoutId: reclaimed.layoutId, window: reclaimed.window, entries: ui.takeOrderWindow(reclaimed.layoutId, reclaimed.window), resends: orderLedger.takeWindowResends(reclaimed.window) };
-  ui.restoreOrderWindow(reclaimed.layoutId, reclaimed.window, reclaimed.entries);
-  orderLedger.restoreWindowResends(reclaimed.window, reclaimed.resends);
-  return current;
-}
-
 const withReclaimed = (step: ArrangementStep, reclaimed: ReclaimedWindow | undefined): ArrangementStep => (reclaimed ? { ...step, reclaimed } : step);
 
 export const useLayoutStore = create<LayoutState>()((set, get) => {
   const reclaimWindowId = (layoutId: string, window: string) => {
-    const reclaimed = swapReclaimed({ layoutId, window, entries: {}, resends: newWindowResends() });
+    const reclaimed = reclaimWindow(layoutId, window);
     set((s) => ({ steps: s.steps.map((step, i) => (i === s.steps.length - 1 ? withReclaimed(step, reclaimed) : step)) }));
   };
   const canvasActive = () => useUiStore.getState().prefs.layoutMode === "canvas" && get().canvasArea !== null;
@@ -318,6 +312,8 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const dock = state.layout.placement.dock;
       if (dock && useUiStore.getState().prefs.layoutMode === "dock") state.commitDock({ session: state.session, expected: dock, next: attachFloat(dock, window, state.dockOrigins.get(window), windowRefs(state.layout.windows)) });
     },
+    workspaceArea: null,
+    setWorkspaceArea: (workspaceArea) => set({ workspaceArea }),
     canvasArea: null,
     setCanvasArea: (canvasArea) => set({ canvasArea }),
     settlePlacement: (placement) => set((s) => {
@@ -369,7 +365,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     undoArrangement: () => {
       const step = get().steps.at(-1);
       if (!step) return;
-      const current = step.reclaimed && swapReclaimed(step.reclaimed);
+      const current = step.reclaimed && swapReclaimedWindow(step.reclaimed);
       set((s) => {
         const redo = withReclaimed({ id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } }, current);
         return { ...returnTo(s, step), steps: s.steps.slice(0, -1), redos: [...s.redos, redo].slice(-ARRANGEMENT_STEPS) };
@@ -378,7 +374,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     redoArrangement: () => {
       const redo = get().redos.at(-1);
       if (!redo) return;
-      const current = redo.reclaimed && swapReclaimed(redo.reclaimed);
+      const current = redo.reclaimed && swapReclaimedWindow(redo.reclaimed);
       set((s) => {
         const step = withReclaimed({ id: ++lastStepId, dockOrigins: s.dockOrigins, before: { windows: s.layout.windows, placement: s.layout.placement } }, current);
         return { ...returnTo(s, redo), steps: [...s.steps, step].slice(-ARRANGEMENT_STEPS), redos: s.redos.slice(0, -1) };

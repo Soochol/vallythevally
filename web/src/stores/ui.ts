@@ -10,6 +10,7 @@ import { actualKeys, type ActionKeys, type HotkeyOverrides } from "../lib/hotkey
 import { type OrderEntries, type OrderEntry, orderEntryKey, withOrderEntry } from "../features/order/orderEntries";
 import type { OrderSettings } from "../features/order/orderSettings";
 import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type IndicatorWindow, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
+import { registerWindowReclaim } from "./windowReclaim";
 
 interface UiStore {
   prefs: UiPrefs;
@@ -93,6 +94,12 @@ export const useUiStore = create<UiStore>()((set, get) => {
         watchColumns: p.watchColumns.includes(column) ? p.watchColumns.filter((c) => c !== column) : sortColumns([...p.watchColumns, column]),
       })),
   };
+});
+
+registerWindowReclaim<OrderEntries>({
+  empty: () => ({}),
+  take: (layoutId, windowId) => useUiStore.getState().takeOrderWindow(layoutId, windowId),
+  restore: (layoutId, windowId, entries) => useUiStore.getState().restoreOrderWindow(layoutId, windowId, entries),
 });
 
 export const useVenue = (): Venue => useUiStore((s) => s.prefs.venue);

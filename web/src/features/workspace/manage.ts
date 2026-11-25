@@ -10,8 +10,8 @@ export const WINDOW_LIMIT_REASON = `창은 ${MAX_WINDOWS}개까지 둘 수 있�
 export const CHART_LIMIT_REASON = "차트 창은 8개까지 둘 수 있습니다";
 
 export function workspaceRoom(): DockRoom | null {
-  const area = document.querySelector<HTMLElement>("main.workspace");
-  return area ? { area: { w: area.clientWidth, h: area.clientHeight }, gap: DOCK_GAP } : null;
+  const area = useLayoutStore.getState().workspaceArea;
+  return area ? { area, gap: DOCK_GAP } : null;
 }
 
 export function addWindow(kind: WindowKind, room: DockRoom | null, targetGroup?: string): WindowId | null {
