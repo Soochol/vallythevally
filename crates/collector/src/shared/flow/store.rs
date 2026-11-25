@@ -23,7 +23,7 @@ impl FileFlowStore {
         FileFlowStore { shared_dir, key, verified: HashMap::new(), verified_links: HashSet::new() }
     }
 
-    pub(super) fn append_rows(
+    pub(crate) fn append_rows(
         &mut self,
         date: u32,
         type_code: &str,

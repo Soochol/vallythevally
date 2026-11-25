@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
 use super::SubId;
-use crate::api::{Bar, FeedBook, FeedTrade, Quote, ServerMessage, Venue, ViMarket, ViState};
+use crate::api::{Bar, FeedBook, FeedTrade, OfiSnapshot, Quote, ServerMessage, Venue, ViMarket, ViState};
 
 pub const MUST_CAPACITY: usize = 256;
 pub const PENDING_TRADES_CAPACITY: usize = 4096;
@@ -35,6 +35,7 @@ struct State {
     pending_trades: usize,
     trade_seq: BTreeMap<String, u64>,
     books: BTreeMap<String, FeedBook>,
+    ofis: BTreeMap<String, OfiSnapshot>,
     vi: BTreeMap<(String, ViMarket), ViState>,
     closed: bool,
 }
@@ -115,6 +116,13 @@ impl Outbox {
         }
     }
 
+    pub fn set_ofi(&self, sub: &SubId, ofi: OfiSnapshot) {
+        let mut s = self.state.lock().expect("outbox 잠금");
+        if !s.closed {
+            s.ofis.insert(sub.0.clone(), ofi);
+        }
+    }
+
     pub fn set_vi(&self, state: ViState) {
         let mut s = self.state.lock().expect("outbox 잠금");
         if !s.closed {
@@ -128,6 +136,7 @@ impl Outbox {
             s.pending_trades -= dropped.len();
         }
         s.books.remove(&sub.0);
+        s.ofis.remove(&sub.0);
         s.trade_seq.remove(&sub.0);
     }
 
@@ -149,6 +158,7 @@ impl Outbox {
                 messages.push(ServerMessage::FeedTrades { sub, seq: *seq, trades });
             }
             messages.extend(std::mem::take(&mut s.books).into_iter().map(|(sub, book)| ServerMessage::FeedBook { sub, book }));
+            messages.extend(std::mem::take(&mut s.ofis).into_iter().map(|(sub, ofi)| ServerMessage::FeedOfi { sub, ofi }));
             messages.extend(std::mem::take(&mut s.bars).into_iter().map(|(sub, (seq, bar))| ServerMessage::Bar { sub, seq, bar }));
             if !s.quotes.is_empty() {
                 messages.push(ServerMessage::Quotes { venue: s.quote_venue, quotes: std::mem::take(&mut s.quotes).into_values().collect() });
@@ -177,6 +187,8 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         | ServerMessage::FeedAfterHours { .. }
         | ServerMessage::FeedProgram { .. }
         | ServerMessage::FeedBrokers { .. }
+        | ServerMessage::FeedMicro { .. }
+        | ServerMessage::FeedOfi { .. }
         | ServerMessage::FeedLink { .. }
         | ServerMessage::CollectorDaemon { .. } | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::MarketSource { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } | ServerMessage::TradingAccountChanged { .. } | ServerMessage::ViSnapshot { .. } | ServerMessage::ViUpdate { .. } => None,
     }

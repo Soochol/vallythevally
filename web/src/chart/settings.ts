@@ -2,7 +2,7 @@ import type { IndicatorSpec } from "./indicators/kinds";
 import type { QuoteDepthSource } from "../api/generated/QuoteDepthSource";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import { isHexColor, type HexColor } from "../lib/colors";
-import { isIndicatorColor, type IndicatorColor, KINDS, type Placement, placementOf, placementsOf } from "./indicators/kinds";
+import { isIndicatorColor, type IndicatorColor, KINDS, type MicroLabelMode, type Placement, placementOf, placementsOf } from "./indicators/kinds";
 
 export type ChartStyle = "candle" | "bar" | "line" | "area";
 export type PriceScale = "normal" | "log" | "percent";
@@ -106,6 +106,9 @@ const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "obj
 const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 const isNumOrNull = (x: unknown): x is number | null => x === null || isNum(x);
 const QUOTE_DEPTH_SOURCES = ["priceMax", "peak", "close"] as const satisfies readonly QuoteDepthSource[];
+const MICRO_LABEL_MODES = ["clean", "verbose"] as const satisfies readonly MicroLabelMode[];
+const isOptionalBool = (x: unknown): x is boolean | undefined => x === undefined || typeof x === "boolean";
+const isOptionalMicroMode = (x: unknown): x is MicroLabelMode | undefined => x === undefined || isOneOf(MICRO_LABEL_MODES, x);
 const isTopLevels = (x: unknown): x is number | null => x === null || (typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= 5);
 const isDepthOpacity = (x: unknown): x is number => isNum(x) && x >= 0.2 && x <= 1;
 const isHexOrNull = (x: unknown): x is HexColor | null => x === null || isHexColor(x);
@@ -187,7 +190,21 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
         && typeof r.aboveBars === "boolean"
         && isHexOrNull(r.askColor)
         && isHexOrNull(r.bidColor)
-        ? { kind: "quoteDepth", source: r.source, topLevels: r.topLevels, maxOpacity: r.maxOpacity, aboveBars: r.aboveBars, askColor: r.askColor, bidColor: r.bidColor }
+        && isOptionalBool(r.showSpoof)
+        && isOptionalBool(r.showIceberg)
+        && isOptionalMicroMode(r.microLabelMode)
+        ? {
+            kind: "quoteDepth",
+            source: r.source,
+            topLevels: r.topLevels,
+            maxOpacity: r.maxOpacity,
+            aboveBars: r.aboveBars,
+            askColor: r.askColor,
+            bidColor: r.bidColor,
+            ...(r.showSpoof !== undefined ? { showSpoof: r.showSpoof } : {}),
+            ...(r.showIceberg !== undefined ? { showIceberg: r.showIceberg } : {}),
+            ...(r.microLabelMode !== undefined ? { microLabelMode: r.microLabelMode } : {}),
+          }
         : null;
     case "ma":
       return (r.method === "sma" || r.method === "ema") && isNum(r.period) ? { kind: "ma", method: r.method, period: r.period } : null;

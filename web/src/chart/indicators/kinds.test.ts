@@ -11,7 +11,7 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "macd", fast: 12, slow: 26, signal: 9 },
     { kind: "stochSlow", k: 5, d: 3, smooth: 3 },
     { kind: "quoteTotals" },
-    { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null },
+    { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" },
     ...["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"].map((kind) => ({ kind })),
   ]);
   expect(KIND_ORDER.filter((k) => KINDS[k].place === "price")).toEqual(["ma", "bollinger", "ichimoku", "quoteDepth"]);
@@ -56,7 +56,7 @@ test("히트맵은 가격 패널의 호가지표다", () => {
   const spec = KINDS.quoteDepth.defaults;
   expect(KINDS.quoteDepth.label).toBe("호가 잔량 히트맵");
   expect(specName(spec)).toBe("호가 잔량 히트맵");
-  expect(spec).toEqual({ kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null });
+  expect(spec).toEqual({ kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" });
   expect(specLines(spec)).toEqual([]);
   expect(colorLine(spec)).toBeNull();
   expect(placementsOf("quoteDepth")).toEqual(["price"]);
@@ -67,6 +67,9 @@ test("히트맵은 가격 패널의 호가지표다", () => {
     ["topLevels", "가격대 수", "optionalInt"],
     ["maxOpacity", "최대 불투명도", "percent"],
     ["aboveBars", "봉 앞에 그리기", "flag"],
+    ["showSpoof", "허수 취소 표시", "flag"],
+    ["showIceberg", "아이스버그 흡수 표시", "flag"],
+    ["microLabelMode", "미시 표기 방식", "choice"],
     ["askColor", "매도 색", "color"],
     ["bidColor", "매수 색", "color"],
   ]);

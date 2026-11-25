@@ -5,6 +5,8 @@ import type { QuoteDepthSource } from "../../api/generated/QuoteDepthSource";
 import type { SpecValidation } from "../../wasm/indicators/indicators.js";
 import { isHexColor, PRESET_COLORS, type HexColor } from "../../lib/colors";
 
+export type MicroLabelMode = "clean" | "verbose";
+
 export type QuoteDepthSpec = {
   kind: "quoteDepth";
   source: QuoteDepthSource;
@@ -13,6 +15,9 @@ export type QuoteDepthSpec = {
   aboveBars: boolean;
   askColor: HexColor | null;
   bidColor: HexColor | null;
+  showSpoof?: boolean;
+  showIceberg?: boolean;
+  microLabelMode?: MicroLabelMode;
 };
 export type QuoteSpec = { kind: "quoteTotals" } | QuoteDepthSpec;
 export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec;
@@ -138,12 +143,15 @@ export const KINDS: Registry = {
   quoteDepth: {
     label: "호가 잔량 히트맵",
     place: "price",
-    defaults: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null },
+    defaults: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" },
     fields: [
       { key: "source", label: "잔량 기준", type: "choice", options: [["priceMax", "가격대마다 최댓값"], ["peak", "총잔량 최대 순간"], ["close", "종가 호가"]] },
       { key: "topLevels", label: "가격대 수", type: "optionalInt", unit: "개", toggle: "최대 잔량 가격대만", start: 1, max: 5 },
       { key: "maxOpacity", label: "최대 불투명도", type: "percent", min: 20, max: 100, step: 5 },
       { key: "aboveBars", label: "봉 앞에 그리기", type: "flag" },
+      { key: "showSpoof", label: "허수 취소 표시", type: "flag" },
+      { key: "showIceberg", label: "아이스버그 흡수 표시", type: "flag" },
+      { key: "microLabelMode", label: "미시 표기 방식", type: "choice", options: [["clean", "점 표기"], ["verbose", "배지 표기"]] },
       { key: "askColor", label: "매도 색", type: "color", token: "down" },
       { key: "bidColor", label: "매수 색", type: "color", token: "up" },
     ],

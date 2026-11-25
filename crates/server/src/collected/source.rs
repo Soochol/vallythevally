@@ -9,8 +9,8 @@ use crate::shared_data::CollectorPaths;
 
 use super::flow::{FlowCache, has_symbol_flow};
 use super::kind::{
-    Brokers, CollectedExpectedTrade, CollectedKind, CollectedProgramRow, CollectedTradeTick, CollectedViEvent, ExpectedTrades, ProgramFlow, TradeTicks,
-    ViEvents,
+    Brokers, CollectedExpectedTrade, CollectedKind, CollectedProgramRow, CollectedTradeTick, CollectedViEvent, ExpectedTrades, MicroEvents, ProgramFlow,
+    TradeTicks, ViEvents,
 };
 use super::store::{StoreDay, read_day};
 
@@ -76,6 +76,7 @@ pub struct Collected {
     vi: KindSource<ViEvents>,
     expected: KindSource<ExpectedTrades>,
     ticks: KindSource<TradeTicks>,
+    micro: KindSource<MicroEvents>,
 }
 
 impl Collected {
@@ -87,6 +88,7 @@ impl Collected {
             vi: KindSource::new(),
             expected: KindSource::new(),
             ticks: KindSource::new(),
+            micro: KindSource::new(),
         })
     }
 
@@ -168,6 +170,22 @@ impl Collected {
 
     pub async fn ticks_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
         self.days_for::<TradeTicks>(paths, stock, now).await
+    }
+
+    pub async fn micro_day(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        after: Option<&str>,
+        now: KstTime,
+    ) -> Result<DaySlice<domain::MicroEvent>, String> {
+        self.read_day::<MicroEvents>(|c| &c.micro, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
+    pub async fn micro_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
+        self.days_for::<MicroEvents>(paths, stock, now).await
     }
 
     async fn days_for<K: CollectedKind>(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {

@@ -49,7 +49,7 @@ export function formFromSpec(spec: IndicatorSpec): SpecForm {
   const text: Record<string, string> = {};
   const enabled: Record<string, boolean> = {};
   for (const f of KINDS[spec.kind].fields) {
-    const v = values[f.key];
+    const v = values[f.key] === undefined ? defaults[f.key] : values[f.key];
     if (f.type === "optionalInt") {
       enabled[f.key] = v !== null;
       text[f.key] = String(v ?? defaults[f.key] ?? f.start);
