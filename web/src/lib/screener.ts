@@ -51,6 +51,9 @@ export const KIND_LABEL: Record<ConditionKind, string> = {
   bollinger: "볼린저 밴드",
   ichimoku: "일목균형표",
   market_cap: "시가총액",
+  program_net_buy: "프로그램 순매수",
+  whale_net_buy: "고래 순매수",
+  vi_triggered: "VI 발동 이력",
 };
 export const MARKET_LABEL: Record<Market, string> = { kospi: "코스피", kosdaq: "코스닥" };
 export const MA_METHOD_LABEL: Record<MaMethod, string> = { sma: "단순", ema: "지수" };
@@ -65,9 +68,14 @@ export type NewHighCondition = Extract<Condition, { kind: "new_high" }>;
 
 export const newHighLines = (screen: Screen): NewHighCondition[] => screen.conditions.filter((c): c is NewHighCondition => c.kind === "new_high");
 
-type BarCondition = Exclude<Condition, { kind: "market_cap" }>;
+type NonBarKind = "market_cap" | "program_net_buy" | "whale_net_buy" | "vi_triggered";
+const NON_BAR_KINDS: ReadonlySet<ConditionKind> = new Set<NonBarKind>(["market_cap", "program_net_buy", "whale_net_buy", "vi_triggered"]);
+export type BarCondition = Exclude<Condition, { kind: NonBarKind }>;
 
-export const screenPeriod = (screen: Screen): ScreenPeriod => screen.conditions.find((c): c is BarCondition => c.kind !== "market_cap")?.period ?? "D";
+export const isBarKind = (kind: ConditionKind): boolean => !NON_BAR_KINDS.has(kind);
+export const isBarCondition = (condition: Condition): condition is BarCondition => !NON_BAR_KINDS.has(condition.kind);
+
+export const screenPeriod = (screen: Screen): ScreenPeriod => screen.conditions.find(isBarCondition)?.period ?? "D";
 
 export const EXCLUDE_LABEL: Record<ExcludeKind, string> = {
   etf: "ETF",
@@ -97,6 +105,7 @@ const count = (n: number) => n.toLocaleString("ko-KR");
 const decimal = (n: number) => n.toLocaleString("ko-KR", { maximumFractionDigits: 8 });
 const signedPercent = (n: number) => `${n > 0 ? "+" : n < 0 ? MINUS : ""}${decimal(Math.abs(n))}%`;
 const won = (n: number) => `${decimal(n)}원`;
+const millionWon = (n: number) => `${n < 0 ? MINUS : ""}${decimal(Math.abs(n))}백만 원`;
 const eokWon = (n: number) => `${decimal(n / EOK)}억 원`;
 const VALUE_TEXT: Record<BarField, (n: number) => string> = {
   open: won,
@@ -186,6 +195,9 @@ function claimOf(condition: BarCondition): Claim {
 
 export function conditionSentence(condition: Condition): string {
   if (condition.kind === "market_cap") return `시가총액이 ${copula(range(condition.min, condition.max, eokWon))}`;
+  if (condition.kind === "program_net_buy") return `최근 ${count(condition.days)}일 프로그램 순매수가 ${copula(range(condition.minMillionWon, condition.maxMillionWon, millionWon))}`;
+  if (condition.kind === "whale_net_buy") return `최근 ${count(condition.days)}일 고래 순매수가 ${copula(range(condition.minMillionWon, condition.maxMillionWon, millionWon))}`;
+  if (condition.kind === "vi_triggered") return `최근 ${count(condition.days)}일 VI 발동이 ${count(condition.minCount)}회 이상이다`;
   const claim = claimOf(condition);
   const { period, recentBars } = condition;
   return `${PERIOD_NAME[period]} 최근 ${count(recentBars)}${UNIT[period]} 이내 ${"state" in claim ? `${claim.state}인` : `${claim.event}한`} 봉이 있다`;
@@ -228,7 +240,7 @@ export function matchedDateText(screen: Screen, matchedDate: KstDate, asOf: KstD
   return { text: sameYear(matchedDate, asOf) ? month : `${matchedDate.slice(0, 4)}년 ${month}`, current: false };
 }
 
-export type ResultSortKey = "name" | "close" | "changeRate" | "matchedDate";
+export type ResultSortKey = "name" | "close" | "changeRate" | "matchedDate" | "programNetMillionWon" | "whaleNetMillionWon" | "viCount";
 
 export interface ResultSort {
   key: ResultSortKey;
@@ -237,7 +249,15 @@ export interface ResultSort {
 
 export const DEFAULT_SORT: ResultSort = { key: "matchedDate", descending: true };
 
-const FIRST_DESCENDING: Record<ResultSortKey, boolean> = { name: false, close: true, changeRate: true, matchedDate: true };
+const FIRST_DESCENDING: Record<ResultSortKey, boolean> = {
+  name: false,
+  close: true,
+  changeRate: true,
+  matchedDate: true,
+  programNetMillionWon: true,
+  whaleNetMillionWon: true,
+  viCount: true,
+};
 
 export const nextSort = (sort: ResultSort, key: ResultSortKey): ResultSort =>
   sort.key === key ? { key, descending: !sort.descending } : { key, descending: FIRST_DESCENDING[key] };
@@ -249,11 +269,22 @@ const COMPARE: Record<ResultSortKey, (a: ScreenerRow, b: ScreenerRow) => number>
   close: (a, b) => a.close - b.close,
   changeRate: (a, b) => (a.changeRate ?? 0) - (b.changeRate ?? 0),
   matchedDate: (a, b) => byText(a.matchedDate, b.matchedDate),
+  programNetMillionWon: (a, b) => (a.programNetMillionWon ?? 0) - (b.programNetMillionWon ?? 0),
+  whaleNetMillionWon: (a, b) => (a.whaleNetMillionWon ?? 0) - (b.whaleNetMillionWon ?? 0),
+  viCount: (a, b) => (a.viCount ?? 0) - (b.viCount ?? 0),
+};
+
+const isMissing = (row: ScreenerRow, key: ResultSortKey): boolean => {
+  if (key === "changeRate") return row.changeRate === null;
+  if (key === "programNetMillionWon") return row.programNetMillionWon === undefined;
+  if (key === "whaleNetMillionWon") return row.whaleNetMillionWon === undefined;
+  if (key === "viCount") return row.viCount === undefined;
+  return false;
 };
 
 export function sortRows(rows: readonly ScreenerRow[], { key, descending }: ResultSort): ScreenerRow[] {
   const sign = descending ? -1 : 1;
-  const unknownLast = (a: ScreenerRow, b: ScreenerRow) => (key === "changeRate" ? Number(a.changeRate === null) - Number(b.changeRate === null) : 0);
+  const unknownLast = (a: ScreenerRow, b: ScreenerRow) => Number(isMissing(a, key)) - Number(isMissing(b, key));
   return [...rows].sort((a, b) => unknownLast(a, b) || sign * COMPARE[key](a, b) || byText(a.symbol, b.symbol));
 }
 
