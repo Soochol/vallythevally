@@ -214,6 +214,18 @@ impl Screener {
         self.with_store(move |store| store.recent_closes(&codes, count)).await
     }
 
+    pub async fn listed_meta(&self) -> Result<Vec<store::ListedMeta>, StoreError> {
+        self.with_store(Store::listed_meta).await
+    }
+
+    pub async fn daily_codes(&self) -> Result<Vec<domain::StockCode>, StoreError> {
+        self.with_store(Store::daily_codes).await
+    }
+
+    pub async fn recent_trading_days(&self, count: usize) -> Result<Vec<KstDate>, StoreError> {
+        self.with_store(move |store| store.recent_trading_days(count)).await
+    }
+
     pub fn start(self: &Arc<Self>, full: bool) {
         let mut run = self.run();
         if matches!(*run, Run::Running { .. }) {

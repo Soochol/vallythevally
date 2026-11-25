@@ -222,3 +222,88 @@ pub struct MarketOverviewStreaksCard {
     pub buying: MarketOverviewPart<MarketOverviewStreakBoard>,
     pub selling: MarketOverviewPart<MarketOverviewStreakBoard>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum MarketOverviewScope {
+    All,
+    Kospi,
+    Kosdaq,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewHistogramBucket {
+    pub label: String,
+    pub count: u32,
+    pub share_pct: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewVenueShare {
+    pub krx_trade_value_eok: f64,
+    pub nxt_trade_value_eok: f64,
+    pub krx_ratio_pct: f64,
+    pub nxt_ratio_pct: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewAttributionRow {
+    pub code: SymbolCode,
+    pub name: String,
+    pub market: Market,
+    pub change_rate: f64,
+    pub points: f64,
+    pub cap_delta_eok: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewAttribution {
+    pub market: Market,
+    pub index_change_points: f64,
+    pub top_positive: Vec<MarketOverviewAttributionRow>,
+    pub top_negative: Vec<MarketOverviewAttributionRow>,
+    pub top_two_concentration_pct: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewMaHistoryPoint {
+    pub date: KstDate,
+    pub above_20_pct: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewMaThrust {
+    pub as_of: Option<KstDate>,
+    pub total_stocks: u32,
+    pub above_5_pct: f64,
+    pub above_20_pct: f64,
+    pub above_60_pct: f64,
+    pub above_200_pct: f64,
+    pub history_20d: Vec<MarketOverviewMaHistoryPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct MarketOverviewDerivedCard {
+    pub scope: MarketOverviewScope,
+    pub phase: MarketOverviewPhase,
+    pub received_at: Option<UnixSeconds>,
+    pub histogram: MarketOverviewPart<Vec<MarketOverviewHistogramBucket>>,
+    pub venue_share: MarketOverviewPart<MarketOverviewVenueShare>,
+    pub attribution: MarketOverviewPart<MarketOverviewAttribution>,
+    pub ma_thrust: MarketOverviewPart<MarketOverviewMaThrust>,
+}

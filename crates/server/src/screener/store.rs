@@ -68,6 +68,15 @@ pub struct RecentCloses {
     pub closes: HashMap<StockCode, Vec<Price>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedMeta {
+    pub code: StockCode,
+    pub name: String,
+    pub market: Market,
+    pub listed_shares: Option<NonZeroU64>,
+    pub is_etf_etn: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Summary {
     pub last_day: Option<KstDate>,
@@ -227,18 +236,83 @@ impl Store {
         .collect()
     }
 
+    pub fn listed_meta(&self) -> Result<Vec<ListedMeta>, StoreError> {
+        let conn = self.conn();
+        let etf_etn_mask = exclusion_mask(&[ExcludeKind::Etf, ExcludeKind::Etn]);
+        let mut stmt = conn.prepare("SELECT code, name, market, listed_shares, excludable_as FROM listed ORDER BY code")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<u64>>(3)?, row.get::<_, u16>(4)?))
+        })?;
+        rows.map(|row| {
+            let (code, name, market, listed_shares, excludable_as) = row?;
+            Ok(ListedMeta {
+                code: stock_code(&code)?,
+                name,
+                market: market_of(&market)?,
+                listed_shares: listed_shares.and_then(NonZeroU64::new),
+                is_etf_etn: (excludable_as & etf_etn_mask) != 0,
+            })
+        })
+        .collect()
+    }
+
+    pub fn daily_codes(&self) -> Result<Vec<StockCode>, StoreError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT DISTINCT code FROM daily ORDER BY code")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| stock_code(&row?)).collect()
+    }
+
+    pub fn recent_trading_days(&self, count: usize) -> Result<Vec<KstDate>, StoreError> {
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT DISTINCT day FROM daily ORDER BY day DESC LIMIT ?")?;
+        let rows = stmt.query_map(params![count as u64], |row| row.get::<_, i32>(0))?;
+        let mut days = rows.map(|row| Ok(date_of(row?))).collect::<Result<Vec<_>, StoreError>>()?;
+        days.reverse();
+        Ok(days)
+    }
+
     pub fn recent_closes(&self, codes: &[StockCode], count: usize) -> Result<RecentCloses, StoreError> {
         let conn = self.conn();
         let latest_day = conn.query_row("SELECT max(day) FROM daily", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
         let mut closes = HashMap::new();
         let Some(latest_day) = latest_day else { return Ok(RecentCloses { latest_day, closes }) };
-        let mut stmt = conn.prepare("SELECT day, close FROM daily WHERE code = ? ORDER BY day DESC LIMIT ?")?;
-        for &code in codes {
-            let rows = stmt.query_map(params![code.as_str(), count as u64], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, u64>(1)?)))?;
-            let newest_first = rows.collect::<Result<Vec<_>, _>>()?;
-            if newest_first.first().is_some_and(|(day, _)| date_of(*day) == latest_day) {
-                closes.insert(code, newest_first.into_iter().map(|(_, close)| price_of(close)).collect::<Result<Vec<_>, _>>()?);
+        if codes.is_empty() || count == 0 {
+            return Ok(RecentCloses { latest_day: Some(latest_day), closes });
+        }
+        let wanted: HashSet<&str> = codes.iter().map(StockCode::as_str).collect();
+        let mut stmt = conn.prepare(
+            "SELECT code, day, close FROM (SELECT code, day, close, row_number() OVER (PARTITION BY code ORDER BY day DESC) AS rn FROM daily) WHERE rn <= ? ORDER BY code, day DESC",
+        )?;
+        let rows = stmt.query_map(params![count as u64], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, u64>(2)?)))?;
+        let mut current: Option<(String, bool, Vec<Price>)> = None;
+        for row in rows {
+            let (code, day, close) = row?;
+            if !wanted.contains(code.as_str()) {
+                continue;
             }
+            let same = current.as_ref().is_some_and(|(prev, _, _)| *prev == code);
+            if !same {
+                if let Some((prev_code, matches_latest, prices)) = current.take()
+                    && matches_latest
+                {
+                    closes.insert(stock_code(&prev_code)?, prices);
+                }
+                let matches_latest = date_of(day) == latest_day;
+                let mut prices = Vec::new();
+                if matches_latest {
+                    prices.push(price_of(close)?);
+                }
+                current = Some((code, matches_latest, prices));
+            } else if let Some((_, true, prices)) = current.as_mut() {
+                prices.push(price_of(close)?);
+            }
+        }
+        if let Some((prev_code, true, prices)) = current {
+            closes.insert(stock_code(&prev_code)?, prices);
         }
         Ok(RecentCloses { latest_day: Some(latest_day), closes })
     }

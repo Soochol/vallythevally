@@ -1,4 +1,5 @@
 mod cards;
+pub mod derived;
 mod dto;
 mod kiwoom_overview;
 mod sampler;
@@ -33,6 +34,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/market-overview/flow/intraday", get(cards::intraday_flow))
         .route("/api/market-overview/turnover", get(cards::turnover))
         .route("/api/market-overview/streaks", get(cards::streaks))
+        .route("/api/market-overview/derived", get(derived::derived))
 }
 
 #[derive(Default)]
@@ -48,6 +50,7 @@ pub struct MarketOverview {
     investor_days: Mutex<InvestorDays>,
     chosen: Mutex<Option<Arc<dyn OverviewSource>>>,
     generation: SourceGeneration,
+    pub(crate) derived_ma_cache: derived::DerivedMaCache,
 }
 
 pub fn overview_source(st: &AppState) -> Picked<dyn OverviewSource> {
@@ -59,7 +62,13 @@ pub fn overview_source(st: &AppState) -> Picked<dyn OverviewSource> {
 
 impl MarketOverview {
     pub fn with_generation(generation: SourceGeneration) -> MarketOverview {
-        MarketOverview { samples: SampleBook::with_generation(generation.clone()), investor_days: Mutex::default(), chosen: Mutex::default(), generation }
+        MarketOverview {
+            samples: SampleBook::with_generation(generation.clone()),
+            investor_days: Mutex::default(),
+            chosen: Mutex::default(),
+            generation,
+            derived_ma_cache: derived::DerivedMaCache::default(),
+        }
     }
 
     pub fn ticket(&self) -> GenerationTicket {
