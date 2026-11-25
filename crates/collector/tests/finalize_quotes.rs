@@ -285,3 +285,42 @@ fn a_failure_to_write_quotes_exits_with_3_after_the_day_is_complete() {
     assert_eq!(exit_text(finalize::run(&without_option)), success());
     assert!(closed_day_dir(&place.data.join("shared"), &day_text(DATE)).is_dir());
 }
+
+#[test]
+fn quotes_backfill_fills_missing_closed_days_and_rebuilds_explicit_date() {
+    let place = place();
+    prepared_day(&place.data, EARLIER);
+    prepared_day(&place.data, DATE);
+    assert_eq!(finalize_with(&place, EARLIER, &[]), success());
+    assert_eq!(finalize_with(&place, DATE, &[]), success());
+
+    fs::remove_dir_all(closed_day_dir(&place.shared, &day_text(EARLIER))).unwrap();
+    let kept_file = closed_day_dir(&place.shared, &day_text(DATE)).join(format!("{BUSY}.json.gz"));
+    fs::write(&kept_file, b"sentinel").unwrap();
+
+    let backfill_all: Vec<String> = [
+        "backfill",
+        "--data",
+        &place.data.to_string_lossy(),
+        "--shared",
+        &place.shared.to_string_lossy(),
+        "--threads",
+        "2",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    assert_eq!(exit_text(collector::quotes::run(&backfill_all)), success());
+    assert_eq!(read(&place, EARLIER, BUSY).unwrap().minutes, folded(&busy_quotes()));
+    assert_eq!(fs::read(&kept_file).unwrap(), b"sentinel");
+
+    assert_eq!(exit_text(collector::quotes::run(&backfill_all)), success());
+
+    let mut rebuild_one = backfill_all.clone();
+    rebuild_one.extend(["--date".to_owned(), DATE.to_string()]);
+    assert_eq!(exit_text(collector::quotes::run(&rebuild_one)), success());
+    assert_eq!(read(&place, DATE, BUSY).unwrap().minutes, folded(&busy_quotes()));
+
+    assert_eq!(exit_text(collector::quotes::run(&[])), exit_text(ExitCode::from(2)));
+    assert_eq!(exit_text(collector::quotes::run(&["unknown".to_owned()])), exit_text(ExitCode::from(2)));
+    assert_eq!(exit_text(collector::quotes::run(&["backfill".to_owned(), "--threads".to_owned(), "0".to_owned()])), exit_text(ExitCode::from(2)));
+}

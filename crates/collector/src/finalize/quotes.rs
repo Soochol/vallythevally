@@ -91,6 +91,18 @@ struct BatchColumns<'a> {
     nxt_bids: [Option<&'a Int64Array>; BOOK_DEPTH],
 }
 
+pub fn missing_closed_quote_days(data_dir: &Path, shared_dir: &Path) -> io::Result<Vec<u32>> {
+    Ok(complete_days(data_dir)?
+        .into_iter()
+        .filter(|candidate| !closed_day_dir(shared_dir, &candidate.to_string()).is_dir())
+        .collect())
+}
+
+pub fn fill_missing_closed_days(data_dir: &Path, shared_dir: &Path, threads: usize) -> io::Result<Vec<QuotesReport>> {
+    let targets = missing_closed_quote_days(data_dir, shared_dir)?;
+    write_closed_targets(data_dir, shared_dir, targets, threads)
+}
+
 pub fn fill_closed_days(data_dir: &Path, shared_dir: &Path, date: u32, threads: usize) -> io::Result<Vec<QuotesReport>> {
     let candidates = complete_days(data_dir)?;
     let mut targets = Vec::new();
@@ -102,6 +114,10 @@ pub fn fill_closed_days(data_dir: &Path, shared_dir: &Path, date: u32, threads: 
             targets.push(candidate);
         }
     }
+    write_closed_targets(data_dir, shared_dir, targets, threads)
+}
+
+fn write_closed_targets(data_dir: &Path, shared_dir: &Path, targets: Vec<u32>, threads: usize) -> io::Result<Vec<QuotesReport>> {
     let mut reports = Vec::new();
     let mut failures = Vec::new();
     for target in targets {
