@@ -72,6 +72,7 @@ export class CrosshairSync {
     group.participants.add(lease);
     const unsubscribe = controller.subscribePointedBar((bar) => {
       if (!group.participants.has(lease)) return;
+      if (group.participants.size === 1 && group.owner === null) return;
       const pointed = crosshairVisible(element) ? bar : null;
       if (pointed === null && group.owner !== lease) return;
       group.owner = pointed === null ? null : lease;

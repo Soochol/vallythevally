@@ -13,7 +13,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { AxisLabelCache } from "./axisLabelCache";
-import { AXIS_WIDTH, axisPriceFormat, priceAxisWidth, type AxisGeometry } from "./axisFormat";
+import { AXIS_WIDTH, axisPriceFormat, invalidateAxisMeasureCache, priceAxisWidth, type AxisGeometry } from "./axisFormat";
 import type { LastPriceHost } from "./lastPriceTag";
 import { fetchBarsPage, fetchJumpPage } from "../api/bars";
 import { fetchQuoteDepth, fetchQuoteTotals } from "../api/quoteMinutes";
@@ -183,6 +183,10 @@ export class ChartController {
   private readonly crosshairMarker: CrosshairMarker;
   private readonly pointedListeners = new Set<(bar: PointedBar) => void>();
   private pointerOwnsCrosshair = false;
+  private elVisible = false;
+  private lastPointedKey: string | null = null;
+  private indicatorRowsDirty = true;
+  private lastIndicatorRowTime: UnixSeconds | null = null;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: JumpableFeed;
   private readonly quoteTotals: QuoteFeed<QuoteTotalPoint>;
@@ -222,13 +226,30 @@ export class ChartController {
   private readonly unwatch: () => void;
   private readonly resize: ResizeObserver;
   private readonly hostResize: ResizeObserver;
+  private readonly narrowMedia: MediaQueryList;
+  private narrow: boolean;
+  private paneLayoutDirty = true;
+  private lastAxisWidth = -1;
+  private lastPaneHeights: number[] = [];
+  private lastAxisCeil: number | null = null;
+  private lastAxisFontSize: number | null = null;
   private readonly onCorner: ControllerDeps["onCorner"];
+  private readonly onNarrowChange = (): void => {
+    this.narrow = this.narrowMedia.matches;
+    this.paneLayoutDirty = true;
+    this.applyAxisWidth();
+    this.scheduleFrame();
+  };
 
   constructor(el: HTMLElement, deps: ControllerDeps) {
     this.el = el;
     this.onCorner = deps.onCorner;
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
+    this.elVisible = crosshairVisible(el);
+    this.narrowMedia = matchMedia("(max-width: 767px)");
+    this.narrow = this.narrowMedia.matches;
+    this.narrowMedia.addEventListener("change", this.onNarrowChange);
     this.initialRange = new InitialRange(() => this.chart.timeScale(), () => ({ width: el.clientWidth, height: el.clientHeight }));
     this.hostResize = new ResizeObserver(() => {
       this.initialRange.hostResized();
@@ -288,7 +309,9 @@ export class ChartController {
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
     this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
-      if (!crosshairVisible(el)) this.clearPointedBar();
+      this.paneLayoutDirty = true;
+      this.elVisible = crosshairVisible(el);
+      if (!this.elVisible) this.clearPointedBar();
       this.crosshairMarker.refresh();
       this.applyAxisWidth();
       this.indicators.applyStretch();
@@ -296,7 +319,11 @@ export class ChartController {
       this.scheduleFrame();
     });
     this.resize.observe(el);
-    this.panelControls = new PanelControls(el, this.chart, () => this.scheduleFrame(), () => {
+    this.panelControls = new PanelControls(el, this.chart, () => {
+      this.paneLayoutDirty = true;
+      this.scheduleFrame();
+    }, () => {
+      this.paneLayoutDirty = true;
       const shown = this.indicators.stretches();
       const drawn = this.view ? chartPanels(this.view.settings, this.view.period, !isIndexCode(this.view.symbol)) : [];
       let n = 0;
@@ -351,9 +378,14 @@ export class ChartController {
       this.hoverIndex = nextIndex;
       if (changed) this.scheduleLegendPaint();
       if (p.sourceEvent) this.pointerOwnsCrosshair = true;
-      if (this.pointedListeners.size === 0 || !this.pointerOwnsCrosshair || !this.el.matches(":hover")) return;
+      if (this.pointedListeners.size === 0 || !this.pointerOwnsCrosshair) return;
       const bar = this.hoverIndex === null ? undefined : this.bars[this.hoverIndex];
-      this.emitPointedBar(p.point && bar && crosshairVisible(this.el) ? barInterval(bar.t, this.period()) : null);
+      const visible = p.point !== undefined && bar !== undefined && this.elVisible && this.el.isConnected;
+      const period = this.period();
+      const nextKey = visible ? `${bar.t}:${period}` : null;
+      if (nextKey === this.lastPointedKey) return;
+      this.lastPointedKey = nextKey;
+      this.emitPointedBar(visible ? barInterval(bar.t, period) : null);
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       const r = this.chart.timeScale().getVisibleLogicalRange();
@@ -369,7 +401,13 @@ export class ChartController {
     });
     // 캔버스 글자는 글꼴을 다 받은 뒤 다시 그려야 Pretendard로 보인다.
     void document.fonts?.ready.then(() => {
-      if (!this.disposed) this.chart.applyOptions({ layout: { fontFamily: this.tokens.fontFamily } });
+      if (!this.disposed) {
+        invalidateAxisMeasureCache();
+        this.indicatorLegend.invalidatePanelLayout();
+        this.paneLayoutDirty = true;
+        this.lastAxisCeil = null;
+        this.chart.applyOptions({ layout: { fontFamily: this.tokens.fontFamily } });
+      }
     });
   }
 
@@ -411,6 +449,7 @@ export class ChartController {
       this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
     if (prev?.period !== next.period || (prev !== null && isIndexCode(prev.symbol) !== isIndex) || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels) {
+      this.paneLayoutDirty = true;
       const configs = chartIndicators(next.settings, next.period, !isIndex);
       const panels = chartPanels(next.settings, next.period, !isIndex);
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, this.pendingScroll, () => this.indicators.setConfigs(configs, panels)));
@@ -432,11 +471,17 @@ export class ChartController {
   }
 
   subscribePointedBar(listener: (bar: PointedBar) => void): () => void {
-    if (this.pointedListeners.size === 0) this.pointerOwnsCrosshair = false;
+    if (this.pointedListeners.size === 0) {
+      this.pointerOwnsCrosshair = false;
+      this.lastPointedKey = null;
+    }
     this.pointedListeners.add(listener);
     return () => {
       this.pointedListeners.delete(listener);
-      if (this.pointedListeners.size === 0) this.pointerOwnsCrosshair = false;
+      if (this.pointedListeners.size === 0) {
+        this.pointerOwnsCrosshair = false;
+        this.lastPointedKey = null;
+      }
     };
   }
 
@@ -455,6 +500,7 @@ export class ChartController {
 
   private readonly clearPointedBar = (): void => {
     this.pointerOwnsCrosshair = false;
+    this.lastPointedKey = null;
     this.emitPointedBar(null);
   };
 
@@ -522,6 +568,10 @@ export class ChartController {
     this.compare.flush(this.bars);
     this.indicators.flush();
     this.tokens = tokens;
+    invalidateAxisMeasureCache();
+    this.indicatorLegend.invalidatePanelLayout();
+    this.lastAxisCeil = null;
+    this.paneLayoutDirty = true;
     this.chart.applyOptions(this.chartOptions());
     applyMainColors(this.main, tokens);
     this.indicators.setTheme();
@@ -534,6 +584,7 @@ export class ChartController {
 
   dispose(): void {
     this.disposed = true;
+    this.narrowMedia.removeEventListener("change", this.onNarrowChange);
     this.initialRange.forget();
     this.clearPointedBar();
     this.pointedListeners.clear();
@@ -630,11 +681,11 @@ export class ChartController {
   private axisStep: number = AXIS_WIDTH;
 
   private axisWidth(): number {
-    return matchMedia("(max-width: 767px)").matches ? 52 : this.axisStep;
+    return this.narrow ? 52 : this.axisStep;
   }
 
   private axisBudgetWidth(): number {
-    return matchMedia("(max-width: 767px)").matches ? AXIS_WIDTH : this.axisStep;
+    return this.narrow ? AXIS_WIDTH : this.axisStep;
   }
 
   private reservePriceTop(legendBottom: number, paneHeight: number): void {
@@ -646,7 +697,10 @@ export class ChartController {
 
   private applyAxisWidth(): void {
     const width = this.axisWidth();
-    if (this.chart.options().rightPriceScale.minimumWidth !== width) this.chart.priceScale("right").applyOptions({ minimumWidth: width });
+    if (this.chart.options().rightPriceScale.minimumWidth !== width) {
+      this.paneLayoutDirty = true;
+      this.chart.priceScale("right").applyOptions({ minimumWidth: width });
+    }
   }
 
   private chartOptions(): DeepPartial<ChartOptions> {
@@ -777,7 +831,7 @@ export class ChartController {
     if (this.frame !== null || this.legendFrame !== null || this.disposed) return;
     this.legendFrame = requestAnimationFrame(() => {
       this.legendFrame = null;
-      this.paintLegend();
+      this.paintLegend("skip");
     });
   }
 
@@ -800,7 +854,20 @@ export class ChartController {
 
   private fitAxisWidth(): void {
     const range = this.view && shownScale(this.view.settings) !== "percent" ? this.main.api.priceScale().getVisibleRange() : null;
-    this.axisStep = range ? priceAxisWidth(Math.max(Math.abs(range.from), Math.abs(range.to)), this.tokens.fontSize) : AXIS_WIDTH;
+    const maxPrice = range ? Math.max(Math.abs(range.from), Math.abs(range.to)) : Number.NaN;
+    if (!Number.isFinite(maxPrice)) {
+      this.lastAxisCeil = null;
+      this.axisStep = AXIS_WIDTH;
+      this.applyAxisWidth();
+      return;
+    }
+    const ceil = Math.ceil(maxPrice);
+    const fontSize = this.tokens.fontSize;
+    if (ceil !== this.lastAxisCeil || fontSize !== this.lastAxisFontSize) {
+      this.lastAxisCeil = ceil;
+      this.lastAxisFontSize = fontSize;
+      this.axisStep = priceAxisWidth(maxPrice, fontSize);
+    }
     this.applyAxisWidth();
   }
 
@@ -912,7 +979,7 @@ export class ChartController {
   }
 
   private fitInitialRange(): IRange<number> | null {
-    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: matchMedia("(max-width: 767px)").matches });
+    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: this.narrow });
   }
 
   private rightEdgeT(): UnixSeconds | null {
@@ -1026,7 +1093,7 @@ export class ChartController {
       bars: shown === -1 ? this.bars : this.bars.slice(0, shown),
       period: this.period(),
       visibleBars: this.view?.settings.visibleBars ?? null,
-      narrow: matchMedia("(max-width: 767px)").matches,
+      narrow: this.narrow,
       rightOffset: shown === -1 ? undefined : 0,
     });
   }
@@ -1088,6 +1155,7 @@ export class ChartController {
     for (const source of sources) {
       if (source === "base") this.pendingBase = "full";
       else this.pendingLegendSources.add(source);
+      if (source === "indicators") this.indicatorRowsDirty = true;
     }
     this.scheduleFrame();
   }
@@ -1097,6 +1165,7 @@ export class ChartController {
       this.pendingBase = this.pendingBase === null ? from : Math.min(this.pendingBase, from);
     }
     this.pendingLegendSources.add("indicators");
+    this.indicatorRowsDirty = true;
     this.pendingLegendSources.add("compare");
     this.scheduleFrame();
   }
@@ -1145,25 +1214,53 @@ export class ChartController {
     return changed;
   }
 
+  private paneHeightsChanged(chartPanes: ReturnType<IChartApi["panes"]>): boolean {
+    if (chartPanes.length !== this.lastPaneHeights.length) return true;
+    for (let i = 0; i < chartPanes.length; i++) {
+      if (chartPanes[i]!.getHeight() !== this.lastPaneHeights[i]) return true;
+    }
+    return false;
+  }
+
   private renderLegend(): void {
     this.compare.flush(this.bars);
     this.indicators.flush();
     const sourcesChanged = this.refreshPendingLegendSources();
-    this.paintLegend();
-    this.legend.fit(sourcesChanged ? "content" : "geometry");
+    const layoutUpdated = this.paintLegend("if-dirty");
+    if (sourcesChanged) this.legend.fit("content");
+    else if (layoutUpdated) this.legend.fit("geometry");
   }
 
-  private paintLegend(): void {
+  private paintLegend(layout: "if-dirty" | "skip"): boolean {
     this.cancelLegendFrame();
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
-    const panes = this.paneBounds();
-    const axisWidth = this.chart.priceScale("right").width();
-    const panels = view ? chartPanels(view.settings, this.period(), !isIndexCode(view.symbol)) : [];
-    this.panelControls.render(panels, panes.map((pane) => pane.top));
-    this.indicatorLegend.render(this.indicators.rows(this.financialHoverTime ?? bar?.t ?? null), panes, axisWidth);
-    this.compareLegend.render(this.compare.rows(this.leftT(), bar?.t ?? null));
+    const rowTime = this.financialHoverTime ?? bar?.t ?? null;
+    let layoutUpdated = false;
+    if (layout === "if-dirty") {
+      const axisWidth = this.chart.priceScale("right").width();
+      const chartPanes = this.chart.panes();
+      if (this.paneLayoutDirty || axisWidth !== this.lastAxisWidth || this.paneHeightsChanged(chartPanes)) {
+        this.paneLayoutDirty = false;
+        this.lastAxisWidth = axisWidth;
+        this.lastPaneHeights = chartPanes.map((pane) => pane.getHeight());
+        const panes = this.paneBounds();
+        const panels = view ? chartPanels(view.settings, this.period(), !isIndexCode(view.symbol)) : [];
+        this.panelControls.render(panels, panes.map((pane) => pane.top));
+        this.indicatorRowsDirty = false;
+        this.lastIndicatorRowTime = rowTime;
+        this.indicatorLegend.render(this.indicators.rows(rowTime), panes, axisWidth);
+        layoutUpdated = true;
+      }
+    }
+    if (!layoutUpdated && (this.indicatorRowsDirty || rowTime !== this.lastIndicatorRowTime)) {
+      this.indicatorRowsDirty = false;
+      this.lastIndicatorRowTime = rowTime;
+      this.indicatorLegend.render(this.indicators.rows(rowTime), null);
+    }
+    const compareLeft = view?.settings.compare.length ? this.leftT() : null;
+    this.compareLegend.render(this.compare.rows(compareLeft, bar?.t ?? null));
     if (!view || !bar) this.legend.show(null);
     else this.legend.show({
       bar,
@@ -1173,6 +1270,7 @@ export class ChartController {
       period: view.period,
       stalledAt: this.stalledAt,
     }, this.hoverIndex !== null);
+    return layoutUpdated;
   }
 
   private syncQuoteTotalsKey(): void {

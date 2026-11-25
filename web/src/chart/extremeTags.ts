@@ -71,6 +71,8 @@ class Tag {
   private readonly price = document.createElement("span");
   private readonly label = document.createElement("span");
   private placed: LabelPlacement | null = null;
+  private lastHidden = true;
+  private lastTransform = "";
 
   constructor(private readonly side: ExtremeSide) {
     this.root.className = "chart-extreme";
@@ -84,9 +86,17 @@ class Tag {
   }
 
   show(tag: ExtremeTag | null, surface: ExtremeSurface): void {
-    this.root.hidden = tag === null;
+    const hidden = tag === null;
+    if (this.lastHidden !== hidden) {
+      this.lastHidden = hidden;
+      this.root.hidden = hidden;
+    }
     if (!tag) return;
-    this.root.style.transform = `translate(${tag.x}px, ${tag.y}px)`;
+    const transform = `translate(${tag.x}px, ${tag.y}px)`;
+    if (this.lastTransform !== transform) {
+      this.lastTransform = transform;
+      this.root.style.transform = transform;
+    }
     const text = tag.change === null ? tag.price : `${tag.price} (${tag.change})`;
     if (this.price.textContent !== text) this.price.textContent = text;
     const placement = placeExtremeLabel(this.side, tag, `${SIDE_LABEL[this.side]} ${text}`, surface);

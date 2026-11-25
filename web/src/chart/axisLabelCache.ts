@@ -1,9 +1,12 @@
-import type { IChartApi } from "lightweight-charts";
+import { PriceScaleMode, type IChartApi } from "lightweight-charts";
 
 type Pane = ReturnType<IChartApi["panes"]>[number];
+interface LabelledSeries {
+  priceToCoordinate(price: number): number | null;
+}
+
 interface AxisInput {
-  from: number | null;
-  to: number | null;
+  percentBaseIndex: number | null;
   min: number | null;
   max: number | null;
   height: number;
@@ -12,7 +15,7 @@ interface AxisInput {
   font: string;
   fontSize: number;
   minimumWidth: number;
-  last: { series: object; price: number; y: number | null }[];
+  last: { series: LabelledSeries; price: number; y: number | null }[];
 }
 interface CachedAxis {
   input: AxisInput | null;
@@ -23,13 +26,18 @@ interface CachedAxis {
   failed: boolean;
 }
 
-function sameInput(a: AxisInput, b: AxisInput): boolean {
-  return a.from === b.from && a.to === b.to && a.min === b.min && a.max === b.max
+function sameScaleConfig(a: AxisInput, b: AxisInput): boolean {
+  return a.percentBaseIndex === b.percentBaseIndex
     && a.height === b.height && a.mode === b.mode && a.inverted === b.inverted && a.font === b.font && a.fontSize === b.fontSize && a.minimumWidth === b.minimumWidth
     && a.last.length === b.last.length && a.last.every((last, i) => {
       const next = b.last[i]!;
-      return last.series === next.series && last.price === next.price && last.y === next.y;
+      return last.series === next.series && last.price === next.price;
     });
+}
+
+function sameInput(a: AxisInput, b: AxisInput): boolean {
+  return sameScaleConfig(a, b) && a.min === b.min && a.max === b.max
+    && a.last.every((last, i) => last.y === b.last[i]!.y);
 }
 
 export class AxisLabelCache {
@@ -48,7 +56,14 @@ export class AxisLabelCache {
 
   lastCoordinates(pane: Pane): number[] {
     const key = pane.getHTMLElement();
-    return key ? this.axes.get(key)?.input?.last.flatMap((last) => last.y === null ? [] : [last.y]) ?? [] : [];
+    const last = key ? this.axes.get(key)?.input?.last : undefined;
+    if (!last) return [];
+    const coordinates: number[] = [];
+    for (const entry of last) {
+      const y = entry.series.priceToCoordinate(entry.price);
+      if (y !== null) coordinates.push(y);
+    }
+    return coordinates;
   }
 
   failed(pane: Pane, error: unknown): void {
@@ -68,7 +83,8 @@ export class AxisLabelCache {
         axis.collectedAt = frame;
         try {
           const input = this.input(pane);
-          axis.pending ||= !axis.input || !sameInput(axis.input, input);
+          const alreadyFormatted = axis.input !== null && axis.formattedAt === frame && sameScaleConfig(axis.input, input);
+          if (!alreadyFormatted) axis.pending ||= !axis.input || !sameInput(axis.input, input);
           axis.input = input;
         } catch (error) {
           this.fail(axis, error);
@@ -107,13 +123,14 @@ export class AxisLabelCache {
   }
 
   private input(pane: Pane): AxisInput {
-    const visible = this.chart.timeScale().getVisibleLogicalRange();
     const scale = pane.priceScale("right");
     const range = scale.getVisibleRange();
     const options = scale.options();
     const layout = this.chart.options().layout;
+    const usesPercentBase = options.mode === PriceScaleMode.Percentage || options.mode === PriceScaleMode.IndexedTo100;
+    const visible = usesPercentBase ? this.chart.timeScale().getVisibleLogicalRange() : null;
     return {
-      from: visible?.from ?? null, to: visible?.to ?? null, min: range?.from ?? null, max: range?.to ?? null,
+      percentBaseIndex: visible ? Math.floor(visible.from) : null, min: range?.from ?? null, max: range?.to ?? null,
       height: pane.getHeight(), mode: options.mode, inverted: options.invertScale, font: layout.fontFamily, fontSize: layout.fontSize, minimumWidth: options.minimumWidth,
       last: pane.getSeries().flatMap((series) => {
         const options = series.options();

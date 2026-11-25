@@ -67,16 +67,34 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 const PANES = [{ top: 0, height: 300 }, { top: 300, height: 100 }, { top: 400, height: 100 }, { top: 500, height: 100 }];
+const RESIZED_PANES = [{ top: 0, height: 240 }, { top: 240, height: 120 }, { top: 360, height: 120 }, { top: 480, height: 120 }];
 const panelRow = (index: number, value: string): IndicatorRow => ({ id: `panel${index}`, name: `지표 ${index}`, color: "#000", values: [{ text: value, color: "#000" }], state: "ok", panel: { index, count: 3 } });
 
-test("패널 지표 줄은 쓰기를 마친 뒤 위치를 한꺼번에 읽는다", () => {
+test("패널 지표 줄은 패널 크기가 바뀔 때 쓰기를 마친 뒤 위치를 한꺼번에 읽는다", () => {
   const legend = new IndicatorLegend(new FakeElement("div") as unknown as HTMLElement, () => {});
   const rows = (value: string) => [0, 1, 2].map((index) => panelRow(index, value));
   legend.render(rows("1"), PANES);
   operations = [];
-  legend.render(rows("2"), PANES);
+  legend.render(rows("2"), RESIZED_PANES);
   const first = operations.indexOf("read");
   const last = operations.lastIndexOf("read");
   expect(first).toBeGreaterThanOrEqual(0);
   expect(operations.slice(first, last + 1)).not.toContain("write");
+});
+
+test("값만 바뀌는 패널 지표 갱신은 레이아웃을 다시 읽지 않고 값 요소를 제자리에서 고친다", () => {
+  const overlay = new FakeElement("div");
+  const legend = new IndicatorLegend(overlay as unknown as HTMLElement, () => {});
+  const rows = (value: string) => [0, 1, 2].map((index) => panelRow(index, value));
+  legend.render(rows("1"), PANES);
+  const firstValueNodes = overlay.children.map((row) => row.children[3]!.children[0]);
+  operations = [];
+  legend.render(rows("2"), PANES);
+  expect(operations).not.toContain("read");
+  expect(overlay.children.map((row) => row.children[3]!.children[0])).toEqual(firstValueNodes);
+  expect(firstValueNodes.map((node) => node?.textContent)).toEqual(["2", "2", "2"]);
+  operations = [];
+  legend.render(rows("3"), null);
+  expect(operations).not.toContain("read");
+  expect(firstValueNodes.map((node) => node?.textContent)).toEqual(["3", "3", "3"]);
 });

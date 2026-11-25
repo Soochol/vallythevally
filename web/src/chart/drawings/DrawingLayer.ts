@@ -9,8 +9,22 @@ import type { Fill, ScreenPoint, Stroke } from "./types";
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 const dash = { solid: [], dashed: [7, 5], dotted: [2, 4] };
 
+let colorTheme: string | null = null;
+const colorCache = new Map<string, string>();
+
 export function drawingColor(color: string): string {
-  return color.startsWith("$") ? getComputedStyle(document.documentElement).getPropertyValue(`--${color.slice(1)}`).trim() || "#12b5a5" : color;
+  if (!color.startsWith("$")) return color;
+  const root = document.documentElement;
+  const theme = root.dataset.theme ?? "";
+  if (theme !== colorTheme) {
+    colorTheme = theme;
+    colorCache.clear();
+  }
+  const hit = colorCache.get(color);
+  if (hit !== undefined) return hit;
+  const resolved = getComputedStyle(root).getPropertyValue(`--${color.slice(1)}`).trim() || "#12b5a5";
+  colorCache.set(color, resolved);
+  return resolved;
 }
 const READABLE_CONTRAST = 4.5;
 const BAND_WIDTH_PX = 2;
@@ -150,7 +164,7 @@ export class DrawingLayer implements ISeriesPrimitive {
         for (const s of item.shapes) paintShape(c, s, f.pane);
         for (const p of item.handles) {
           c.save(); c.beginPath(); c.arc(p.x, p.y, HANDLE_DIAMETER_PX / 2, 0, Math.PI * 2);
-          c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--chart-bg"); c.fill();
+          c.fillStyle = drawingColor("$chart-bg"); c.fill();
           c.strokeStyle = drawingColor("$draw"); c.lineWidth = 1.5; c.stroke(); c.restore();
         }
       }

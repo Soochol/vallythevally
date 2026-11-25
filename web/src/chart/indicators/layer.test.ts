@@ -991,3 +991,22 @@ test("히트맵은 선을 만들지 않고 설정을 바꿔도 다른 선을 다
   expect(f.active).toHaveLength(LINES.length);
   expect(f.sent.filter((m) => m.type === "create").every((m) => m.type === "create" && m.engines.every((engine) => engine.id === "ichi"))).toBe(true);
 });
+
+test("분봉과 일봉 전환으로 히트맵이나 끝 패널 총잔량이 드나들어도 기존 가격·패널 지표 선은 다시 만들지 않는다", () => {
+  const intradayPanels: Panel[] = [...VOLUME_PANELS, { id: "quotes", stretch: 0.25 }];
+  const intradayConfigs: IndicatorConfig[] = [ICHIMOKU, DEPTH, VOLUME, TOTALS];
+  const dailyConfigs: IndicatorConfig[] = [ICHIMOKU, VOLUME];
+  const f = fixture("1m", intradayConfigs, intradayPanels);
+  const keptBefore = [...f.active.slice(0, LINES.length + 1)];
+  const totalCreated = f.series.length;
+
+  f.layer.setConfigs(dailyConfigs, VOLUME_PANELS);
+  expect(f.active).toEqual(keptBefore);
+  expect(f.series).toHaveLength(totalCreated);
+
+  f.layer.setConfigs(intradayConfigs, intradayPanels);
+  expect(f.active.slice(0, LINES.length + 1)).toEqual(keptBefore);
+  expect(f.active).toHaveLength(LINES.length + 3);
+  expect(f.active.slice(-2).map((s) => s.pane)).toEqual([2, 2]);
+  expect(f.series).toHaveLength(totalCreated + 2);
+});

@@ -99,12 +99,66 @@ function ohlcClasses({ showLegend, showOhlcChange }: LegendDisplay) {
   return !showLegend ? OHLC_WITH_VENUE_AND_NOTICE : showOhlcChange ? OHLC_ALONE_WITH_CHANGE : OHLC_ALONE;
 }
 
-function ohlcCell([label, value, change]: LegendParts["cells"][number], withChange: boolean) {
+interface OhlcCellEls {
+  root: HTMLSpanElement;
+  name: HTMLElement;
+  valueNode: Text;
+  spaceNode: Text;
+  change: HTMLSpanElement;
+  label: string;
+  value: string;
+  changeText: string;
+  changeClass: string;
+  changeShown: boolean;
+}
+
+function ohlcLabel(label: string) {
+  return el("i", "mr-[3px] not-italic text-text-2", label);
+}
+
+function createOhlcCell([label, value, change]: LegendParts["cells"][number], withChange: boolean): OhlcCellEls {
   const root = el("span", "");
-  const name = el("i", "mr-[3px] not-italic text-text-2", label);
-  root.append(name, value);
-  if (change && withChange) root.append(" ", el("span", DIR_CLASS[change.dir], `(${change.text})`));
-  return { root, name };
+  const name = ohlcLabel(label);
+  const valueNode = document.createTextNode(value);
+  const spaceNode = document.createTextNode(" ");
+  const changeShown = Boolean(change && withChange);
+  const changeClass = change ? DIR_CLASS[change.dir] : "";
+  const changeText = change ? `(${change.text})` : "";
+  const changeEl = el("span", changeClass, changeText);
+  root.append(name, valueNode);
+  if (changeShown) root.append(spaceNode, changeEl);
+  return { root, name, valueNode, spaceNode, change: changeEl, label, value, changeText, changeClass, changeShown };
+}
+
+function syncOhlcCell(cell: OhlcCellEls, [label, value, change]: LegendParts["cells"][number], withChange: boolean): void {
+  if (cell.label !== label) {
+    cell.label = label;
+    cell.name.textContent = label;
+  }
+  if (cell.value !== value) {
+    cell.value = value;
+    cell.valueNode.data = value;
+  }
+  if (withChange && change) {
+    const nextClass = DIR_CLASS[change.dir];
+    const nextText = `(${change.text})`;
+    if (cell.changeClass !== nextClass) {
+      cell.changeClass = nextClass;
+      cell.change.className = nextClass;
+    }
+    if (cell.changeText !== nextText) {
+      cell.changeText = nextText;
+      cell.change.textContent = nextText;
+    }
+    if (!cell.changeShown) {
+      cell.changeShown = true;
+      cell.root.append(cell.spaceNode, cell.change);
+    }
+  } else if (cell.changeShown) {
+    cell.changeShown = false;
+    cell.spaceNode.remove();
+    cell.change.remove();
+  }
 }
 
 function statusParts(value: LegendBar) {
@@ -186,12 +240,36 @@ export class Legend {
   private readonly venueAndOhlc = el("div", OHLC_ALONE.group);
   private readonly ohlc = el("div", OHLC_ALONE.values);
   private display: LegendDisplay = { showLegend: true, showOhlcChange: false };
-  private ohlcContent = "";
+  private ohlcCells: OhlcCellEls[] = [];
+  private lastShownBar: Bar | null = null;
+  private lastShownPrev: Bar | null = null;
+  private lastShownIsCurrent = false;
+  private lastShownIsIndex = false;
+  private lastShownPeriod: Period | null = null;
+  private lastShownStalledAt: UnixSeconds | null = null;
+  private lastShownLegend = true;
+  private lastShownOhlcChange = false;
+  private lastCloseText = "";
+  private lastCloseClass = "";
+  private lastChangeText = "";
+  private lastChangeClass = "";
+  private lastTimeText = "";
+  private lastStalledText = "";
+  private lastStalledHidden: boolean | null = null;
+  private lastFetchedHidden: boolean | null = null;
+  private lastPriceHidden: boolean | null = null;
+  private lastOhlcHidden: boolean | null = null;
+  private lastOhlcLineHidden: boolean | null = null;
+  private lastOhlcLineClass = OHLC_ALONE.line;
+  private lastVenueAndOhlcClass = OHLC_ALONE.group;
+  private lastOhlcClass = OHLC_ALONE.values;
   private layout = emptyAlternatives();
 
   private readonly host: HTMLElement;
   private readonly presentationResize: ResizeObserver;
   private readonly presentationMutations: MutationObserver;
+  private readonly phoneMedia: MediaQueryList;
+  private phone: boolean;
   private presentation: PresentationState = { kind: "invalidated" };
   private presentationFrame: number | null = null;
   private tier: LegendTier = "full";
@@ -199,9 +277,16 @@ export class Legend {
   private pointed = false;
   private disposed = false;
   private readonly fontsChanged = () => this.fit("content");
+  private readonly onPhoneChange = () => {
+    this.phone = this.phoneMedia.matches;
+    this.fit("geometry");
+  };
 
   constructor(private readonly parent: HTMLElement, private readonly presentationHost: LegendHost) {
     this.host = parent.closest<HTMLElement>("[data-chart-overlay-host]") ?? parent;
+    this.phoneMedia = matchMedia("(width < 48rem)");
+    this.phone = this.phoneMedia.matches;
+    this.phoneMedia.addEventListener("change", this.onPhoneChange);
     this.head.dataset.legendHead = "";
     this.sub.dataset.legendSub = "";
     this.period.dataset.legendPeriod = "";
@@ -282,34 +367,111 @@ export class Legend {
   }
 
   show(v: LegendBar | null, pointed = false): void {
+    if (
+      v !== null
+      && this.pointed === pointed
+      && v.bar === this.lastShownBar
+      && v.prev === this.lastShownPrev
+      && v.isCurrent === this.lastShownIsCurrent
+      && v.isIndex === this.lastShownIsIndex
+      && v.period === this.lastShownPeriod
+      && v.stalledAt === this.lastShownStalledAt
+      && this.display.showLegend === this.lastShownLegend
+      && this.display.showOhlcChange === this.lastShownOhlcChange
+    ) {
+      return;
+    }
     if (this.pointed !== pointed) {
       this.pointed = pointed;
       this.root.toggleAttribute("data-pointed", pointed);
     }
-    this.price.row.hidden = v === null;
-    this.ohlc.hidden = v === null;
-    this.ohlcLine.hidden = v === null && this.display.showLegend;
+    const empty = v === null;
+    if (this.lastPriceHidden !== empty) {
+      this.lastPriceHidden = empty;
+      this.price.row.hidden = empty;
+    }
+    if (this.lastOhlcHidden !== empty) {
+      this.lastOhlcHidden = empty;
+      this.ohlc.hidden = empty;
+    }
+    const lineHidden = empty && this.display.showLegend;
+    if (this.lastOhlcLineHidden !== lineHidden) {
+      this.lastOhlcLineHidden = lineHidden;
+      this.ohlcLine.hidden = lineHidden;
+    }
     const { showOhlcChange: withChange } = this.display;
     const classes = ohlcClasses(this.display);
-    this.ohlcLine.className = classes.line;
-    this.venueAndOhlc.className = classes.group;
-    this.ohlc.className = classes.values;
-    if (!v) return;
+    if (this.lastOhlcLineClass !== classes.line) {
+      this.lastOhlcLineClass = classes.line;
+      this.ohlcLine.className = classes.line;
+    }
+    if (this.lastVenueAndOhlcClass !== classes.group) {
+      this.lastVenueAndOhlcClass = classes.group;
+      this.venueAndOhlc.className = classes.group;
+    }
+    if (this.lastOhlcClass !== classes.values) {
+      this.lastOhlcClass = classes.values;
+      this.ohlc.className = classes.values;
+    }
+    this.lastShownLegend = this.display.showLegend;
+    this.lastShownOhlcChange = withChange;
+    if (!v) {
+      this.lastShownBar = null;
+      return;
+    }
+    this.lastShownBar = v.bar;
+    this.lastShownPrev = v.prev;
+    this.lastShownIsCurrent = v.isCurrent;
+    this.lastShownIsIndex = v.isIndex;
+    this.lastShownPeriod = v.period;
+    this.lastShownStalledAt = v.stalledAt;
     const parts = legendParts(v);
     const dir = DIR_CLASS[parts.dir];
-    this.price.fields.close.textContent = parts.close;
-    this.price.fields.close.className = `text-xl font-semibold tracking-[-0.02em] ${dir}${v.stalledAt === null ? "" : " opacity-70"}`;
+    if (this.lastCloseText !== parts.close) {
+      this.lastCloseText = parts.close;
+      this.price.fields.close.textContent = parts.close;
+    }
+    const closeClass = `text-xl font-semibold tracking-[-0.02em] ${dir}${v.stalledAt === null ? "" : " opacity-70"}`;
+    if (this.lastCloseClass !== closeClass) {
+      this.lastCloseClass = closeClass;
+      this.price.fields.close.className = closeClass;
+    }
     const status = statusParts(v);
-    this.price.fields.stalled.hidden = status.stalled === "";
-    this.price.fields.stalled.textContent = status.stalled;
-    this.price.fields.change.textContent = parts.change;
-    this.price.fields.change.className = `text-s whitespace-pre ${dir}`;
-    this.price.fields.time.textContent = parts.time;
-    this.price.fields.fetched.hidden = status.fetched === "";
-    const ohlcContent = JSON.stringify([parts.cells, withChange]);
-    if (ohlcContent === this.ohlcContent) return;
-    this.ohlcContent = ohlcContent;
-    this.ohlc.replaceChildren(...parts.cells.map((cell) => ohlcCell(cell, withChange).root));
+    const stalledHidden = status.stalled === "";
+    if (this.lastStalledHidden !== stalledHidden) {
+      this.lastStalledHidden = stalledHidden;
+      this.price.fields.stalled.hidden = stalledHidden;
+    }
+    if (this.lastStalledText !== status.stalled) {
+      this.lastStalledText = status.stalled;
+      this.price.fields.stalled.textContent = status.stalled;
+    }
+    if (this.lastChangeText !== parts.change) {
+      this.lastChangeText = parts.change;
+      this.price.fields.change.textContent = parts.change;
+    }
+    const changeClass = `text-s whitespace-pre ${dir}`;
+    if (this.lastChangeClass !== changeClass) {
+      this.lastChangeClass = changeClass;
+      this.price.fields.change.className = changeClass;
+    }
+    if (this.lastTimeText !== parts.time) {
+      this.lastTimeText = parts.time;
+      this.price.fields.time.textContent = parts.time;
+    }
+    const fetchedHidden = status.fetched === "";
+    if (this.lastFetchedHidden !== fetchedHidden) {
+      this.lastFetchedHidden = fetchedHidden;
+      this.price.fields.fetched.hidden = fetchedHidden;
+    }
+    if (this.ohlcCells.length !== parts.cells.length) {
+      this.ohlcCells = parts.cells.map((cell) => createOhlcCell(cell, withChange));
+      this.ohlc.replaceChildren(...this.ohlcCells.map((cell) => cell.root));
+      return;
+    }
+    for (let i = 0; i < parts.cells.length; i++) {
+      syncOhlcCell(this.ohlcCells[i]!, parts.cells[i]!, withChange);
+    }
   }
 
   setLayoutBars(bars: readonly LegendBar[]): void {
@@ -387,7 +549,7 @@ export class Legend {
   private readGeometryInputs(): LegendGeometryInputs {
     const viewport = this.presentationHost.readViewport();
     return {
-      desktop: !matchMedia("(width < 48rem)").matches,
+      desktop: !this.phone,
       chart: geometryBox(this.parent),
       viewport: { axisWidth: viewport.axisWidth, pricePane: viewport.pricePane ? { top: viewport.pricePane.top, height: viewport.pricePane.height } : null },
     };
@@ -432,10 +594,10 @@ export class Legend {
     line.hidden = !this.layout.present && this.display.showLegend;
     for (const { label, values } of this.layout.cells) {
       const alternatives = values.values;
-      const cell = ohlcCell([label, alternatives[0] ?? "", null], false);
+      const root = el("span", "");
       const slot = el("span", "", alternatives[0] ?? "");
-      cell.root.replaceChildren(cell.name, slot);
-      ohlc.append(cell.root);
+      root.append(ohlcLabel(label), slot);
+      ohlc.append(root);
       fields.push({ element: slot, alternatives });
     }
     if (!this.display.showLegend) group.append(this.venueAnchor.cloneNode(true));
@@ -501,6 +663,7 @@ export class Legend {
 
   dispose(): void {
     this.disposed = true;
+    this.phoneMedia.removeEventListener("change", this.onPhoneChange);
     document.fonts.removeEventListener("loadingdone", this.fontsChanged);
     if (this.presentationFrame !== null) cancelAnimationFrame(this.presentationFrame);
     this.presentationResize.disconnect();
