@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ViDirection } from "../../api/generated/ViDirection";
 import type { ViPlaybook } from "../../api/generated/ViPlaybook";
 import type { ViPlaybookHorizon } from "../../api/generated/ViPlaybookHorizon";
@@ -145,15 +145,22 @@ function PlaybookPopover({
           <span>평균수익</span>
           <span>평균MAE</span>
         </div>
-        {playbook.horizons.map((horizon: ViPlaybookHorizon) => (
-          <div key={horizon.minutes} className="od-vi-pop-hrow">
-            <span>+{horizon.minutes}분</span>
-            <span>{horizon.samples}건</span>
-            <b>{Math.round(horizon.winRatePct)}%</b>
-            <b data-tone={toneOf(horizon.avgReturnPct)}>{formatPercent(horizon.avgReturnPct)}</b>
-            <span data-tone={horizon.avgMaePct < 0 ? "down" : "flat"}>{formatPercent(horizon.avgMaePct)}</span>
-          </div>
-        ))}
+        {playbook.horizons.map((horizon: ViPlaybookHorizon) => {
+          const hasSamples = horizon.samples > 0;
+          return (
+            <div key={horizon.minutes} className="od-vi-pop-hrow">
+              <span>+{horizon.minutes}분</span>
+              <span>{horizon.samples}건</span>
+              <b>{hasSamples ? `${Math.round(horizon.winRatePct)}%` : "-"}</b>
+              <b data-tone={hasSamples ? toneOf(horizon.avgReturnPct) : "flat"}>
+                {hasSamples ? formatPercent(horizon.avgReturnPct) : "-"}
+              </b>
+              <span data-tone={hasSamples && horizon.avgMaePct < 0 ? "down" : "flat"}>
+                {hasSamples ? formatPercent(horizon.avgMaePct) : "-"}
+              </span>
+            </div>
+          );
+        })}
       </div>
       {playbook.recentMatches.length > 0 && (
         <div className="od-vi-pop-matches" data-testid="order-vi-pop-matches">
@@ -197,12 +204,20 @@ interface Props {
 }
 
 export function ViOrderOverlay({ band, state, previousClose }: Props) {
-  const [popoverOpen, setPopoverOpen] = useState(false);
+  const activeSessionKey = state.kind === "active" ? state.sessionKey : null;
+  const [openedSessionKey, setOpenedSessionKey] = useState<string | null>(null);
+  const popoverOpen = activeSessionKey !== null && openedSessionKey === activeSessionKey;
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (openedSessionKey !== null && openedSessionKey !== activeSessionKey) {
+      setOpenedSessionKey(null);
+    }
+  }, [activeSessionKey, openedSessionKey]);
 
   if (state.kind === "inactive") return null;
 
-  const { trigger, remainingSec, expectedSeries, trapAlert, playbook } = state;
+  const { trigger, remainingSec, expectedSeries, trapAlert, playbook, playbookStatus } = state;
 
   if (band === "top") {
     const latest = expectedSeries[expectedSeries.length - 1] ?? null;
@@ -244,8 +259,14 @@ export function ViOrderOverlay({ band, state, previousClose }: Props) {
 
   return (
     <div ref={bottomRef} className="od-vi-bottom" data-testid="order-vi-bottom">
-      {playbook === null ? (
-        <div className="od-vi-empty">과거 VI 이력 조회 중…</div>
+      {playbookStatus === "error" ? (
+        <div className="od-vi-empty" data-testid="order-vi-error" role="status">
+          과거 VI 이력을 불러오지 못했습니다
+        </div>
+      ) : playbook === null ? (
+        <div className="od-vi-empty" data-testid="order-vi-loading">
+          과거 VI 이력 조회 중…
+        </div>
       ) : playbook.sampleCount === 0 ? (
         <div className="od-vi-empty" data-testid="order-vi-empty">
           이력 부족{playbook.lookbackDays > 0 ? ` · 최근 ${playbook.lookbackDays}거래일 일치 VI 없음` : ""}
@@ -259,9 +280,10 @@ export function ViOrderOverlay({ band, state, previousClose }: Props) {
           <div className="od-vi-cards">
             {CARD_MINUTES.map((minutes) => {
               const horizon = horizonMap.get(minutes);
-              const winRate = horizon ? `${Math.round(horizon.winRatePct)}%` : "-";
-              const avgReturn = horizon ? formatPercent(horizon.avgReturnPct) : "-";
-              const tone = horizon ? toneOf(horizon.avgReturnPct) : "flat";
+              const hasSamples = horizon !== undefined && horizon.samples > 0;
+              const winRate = hasSamples ? `${Math.round(horizon.winRatePct)}%` : "-";
+              const avgReturn = hasSamples ? formatPercent(horizon.avgReturnPct) : "-";
+              const tone = hasSamples ? toneOf(horizon.avgReturnPct) : "flat";
               return (
                 <button
                   key={minutes}
@@ -269,7 +291,7 @@ export function ViOrderOverlay({ band, state, previousClose }: Props) {
                   className="od-vi-card"
                   data-testid={`order-vi-card-${minutes}`}
                   aria-expanded={popoverOpen}
-                  onClick={() => setPopoverOpen((was) => !was)}
+                  onClick={() => setOpenedSessionKey((prev) => (prev === activeSessionKey ? null : activeSessionKey))}
                 >
                   <span className="od-vi-card-min">+{minutes}분</span>
                   <b className="od-vi-card-win">승률 {winRate}</b>
@@ -280,7 +302,7 @@ export function ViOrderOverlay({ band, state, previousClose }: Props) {
               );
             })}
           </div>
-          {popoverOpen && <PlaybookPopover anchor={bottomRef} playbook={playbook} onClose={() => setPopoverOpen(false)} />}
+          {popoverOpen && <PlaybookPopover anchor={bottomRef} playbook={playbook} onClose={() => setOpenedSessionKey(null)} />}
         </>
       )}
     </div>

@@ -175,4 +175,128 @@ test.describe("호가주문창 VI 오버레이", () => {
     await expect(win(page).getByTestId("order-vi-countdown")).toHaveText("01:30");
     await expect(win(page).getByTestId("order-vi-empty")).toContainText("이력 부족");
   });
+
+  test("플레이북 API 실패 시 조회 중이 아니라 오류 안내를 표시한다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/vi-playbook`, {
+      status: 500,
+      body: { error: { code: "internal", message: "playbook failed" } },
+    });
+    await openOrderWindow(page, scenario);
+    const now = nowOf(scenario);
+    scenario.live.emit({
+      type: "vi_update",
+      state: { symbol: CODE, market: "krx", active: true, direction: "up", triggerPrice: VI_PRICE, base: BASE, triggeredAt: now - 30, releasedAt: null },
+    });
+    await expect(win(page).getByTestId("order-vi-error")).toContainText("과거 VI 이력을 불러오지 못했습니다");
+    await expect(win(page).getByTestId("order-vi-loading")).toHaveCount(0);
+  });
+
+  test("표본이 0건인 구간은 0%가 아니라 대시(-)로 표시한다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    const partialPlaybook: ViPlaybook = {
+      ...SAMPLE_PLAYBOOK,
+      sampleCount: 2,
+      horizons: [
+        { minutes: 1, samples: 2, winRatePct: 50.0, avgReturnPct: 1.2, avgMaePct: -0.5 },
+        { minutes: 3, samples: 2, winRatePct: 100.0, avgReturnPct: 2.1, avgMaePct: -0.3 },
+        { minutes: 5, samples: 0, winRatePct: 0.0, avgReturnPct: 0.0, avgMaePct: 0.0 },
+        { minutes: 10, samples: 0, winRatePct: 0.0, avgReturnPct: 0.0, avgMaePct: 0.0 },
+      ],
+    };
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/vi-playbook`, { body: partialPlaybook });
+    await openOrderWindow(page, scenario);
+    const now = nowOf(scenario);
+    scenario.live.emit({
+      type: "vi_update",
+      state: { symbol: CODE, market: "krx", active: true, direction: "up", triggerPrice: VI_PRICE, base: BASE, triggeredAt: now - 30, releasedAt: null },
+    });
+
+    const card5 = win(page).getByTestId("order-vi-card-5");
+    await expect(card5.locator(".od-vi-card-win")).toHaveText("승률 -");
+    await expect(card5.locator(".od-vi-card-ret")).toHaveText("-");
+
+    await card5.click();
+    const popover = page.getByTestId("order-vi-popover");
+    await expect(popover).toBeVisible();
+    const rows = popover.locator(".od-vi-pop-hrow");
+    await expect(rows.nth(2)).toHaveText("+5분0건---");
+    await expect(rows.nth(3)).toHaveText("+10분0건---");
+  });
+
+  test("VI 해제 후 재발동하거나 세션이 바뀌면 이전 팝오버가 닫힌 상태로 시작한다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/vi-playbook`, { body: SAMPLE_PLAYBOOK });
+    await openOrderWindow(page, scenario);
+    const now = nowOf(scenario);
+    const firstVi: ViState = {
+      symbol: CODE,
+      market: "krx",
+      active: true,
+      direction: "up",
+      triggerPrice: VI_PRICE,
+      base: BASE,
+      triggeredAt: now - 30,
+      releasedAt: null,
+    };
+    scenario.live.emit({ type: "vi_update", state: firstVi });
+    await win(page).getByTestId("order-vi-card-1").click();
+    await expect(page.getByTestId("order-vi-popover")).toBeVisible();
+
+    scenario.live.emit({ type: "vi_update", state: { ...firstVi, active: false, base: null, releasedAt: now } });
+    await expect(page.getByTestId("order-vi-popover")).toHaveCount(0);
+
+    const secondVi: ViState = {
+      ...firstVi,
+      triggeredAt: now + 5,
+    };
+    scenario.live.emit({ type: "vi_update", state: secondVi });
+    await expect(win(page).getByTestId("order-vi-card-1")).toBeVisible();
+    await expect(page.getByTestId("order-vi-popover")).toHaveCount(0);
+
+    await win(page).getByTestId("order-vi-card-1").click();
+    await expect(page.getByTestId("order-vi-popover")).toBeVisible();
+
+    scenario.live.emit({ type: "vi_snapshot", states: [{ ...secondVi, market: "nxt" }] });
+    await expect(win(page).getByTestId("order-vi-badge")).toContainText("NXT");
+    await expect(page.getByTestId("order-vi-popover")).toHaveCount(0);
+  });
+
+  test("막판 15초 내 0H 갱신이 없으면 급락 경고가 뜨지 않고 전체호가 전환 후에도 누적 0H로 급락을 감지한다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    tradingApi(scenario);
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/vi-playbook`, { body: SAMPLE_PLAYBOOK });
+    await openOrderWindow(page, scenario);
+
+    await pollSaved(() => bookSub(scenario)).not.toBe("");
+    const sub = bookSub(scenario);
+    const now = nowOf(scenario);
+    const triggeredAt = now - 50;
+
+    scenario.live.emit({
+      type: "vi_update",
+      state: { symbol: CODE, market: "krx", active: true, direction: "up", triggerPrice: VI_PRICE, base: BASE, triggeredAt, releasedAt: null },
+    });
+    scenario.live.emit({ type: "feed_book", sub, book: singlePriceBook(now, 80_000, 1_500) });
+    await expect(win(page).getByTestId("order-vi-expected-latest")).toContainText("80,000");
+
+    scenario.live.emit({ type: "feed_book", sub, book: singlePriceBook(now, 79_200, 1_500) });
+    await expect(win(page).getByTestId("order-vi-expected-latest")).toContainText("79,200");
+
+    await win(page).getByTestId("order-explorer").click();
+    await expect(win(page).getByTestId("order-vi-top")).toHaveCount(0);
+
+    const lateTimeSec = triggeredAt + 110;
+    await page.clock.setFixedTime(new Date(lateTimeSec * 1000));
+    await win(page).getByTestId("order-explorer").click();
+
+    await expect(win(page).getByTestId("order-vi-countdown")).toHaveText("00:10");
+    await expect(win(page).getByTestId("order-vi-trap")).toHaveCount(0);
+
+    scenario.live.emit({ type: "feed_book", sub, book: singlePriceBook(lateTimeSec, 79_000, 1_400) });
+    await expect(win(page).getByTestId("order-vi-trap")).toContainText("막판 15초 급락");
+  });
 });
