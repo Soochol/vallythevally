@@ -14,6 +14,7 @@ mod check;
 mod chunk;
 mod complete;
 mod coverage;
+pub mod daily_micro;
 mod merge;
 mod observation;
 mod prune;
@@ -24,6 +25,7 @@ pub mod schema;
 
 pub use complete::{COMPLETE_FILE_NAME, COMPLETE_FORMAT_VERSION, CompleteFile, REPLACED_SUFFIX, publish_store, recover_interrupted_swap};
 pub use coverage::{CoverageInput, Gap, Handoff, JournalFact, KeyTimeline, KeyTimelines, StockCoverage, build_coverage};
+pub use daily_micro::{DailyMicroReport, DailyMicroRow, write_daily_micro};
 pub use observation::{IndexCheckResult, IndexCheckSummary, JudgedVerdict, JudgmentSummary, MarketOpenSummary, ObservationSummary, TreatedAs};
 pub use prune::{
     CompleteState, DayFacts, KeepReason, PRUNE_LOG_NAME, PruneReport, PrunePlan, RetentionSettings, UnfinalizedCount, delete_planned_day, delete_raw_day,
@@ -217,10 +219,13 @@ pub fn finalize_day_with_shared(options: &Options, shared_dir: &Path) -> io::Res
     let raw_files = RawFiles::of_day(&options.data_dir, options.date)?;
     let written = write_store(options)?;
     let report = verify_store(&written.store_dir, options.date, options.buckets, options.threads, &written.tally)?;
-    if seal_day(options, &report, raw_files)?
-        && let Err(error) = crate::shared::flow::remove_finished_days(shared_dir, &options.data_dir)
-    {
-        tracing::warn!(%error, shared_dir = %shared_dir.display(), "지난 종목 흐름 폴더를 지우지 못했습니다");
+    if seal_day(options, &report, raw_files)? {
+        if let Err(error) = crate::shared::flow::remove_finished_days(shared_dir, &options.data_dir) {
+            tracing::warn!(%error, shared_dir = %shared_dir.display(), "지난 종목 흐름 폴더를 지우지 못했습니다");
+        }
+        if let Err(error) = daily_micro::write_daily_micro(&options.data_dir, shared_dir, options.date, options.threads) {
+            tracing::warn!(%error, shared_dir = %shared_dir.display(), date = options.date, "일별 미시구조 요약 파일을 쓰지 못했습니다");
+        }
     }
     Ok(report)
 }
