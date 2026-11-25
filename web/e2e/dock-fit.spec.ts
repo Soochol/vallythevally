@@ -123,7 +123,7 @@ test("빈 레이아웃에 창 열 가지를 차례로 더해도 어느 묶음도
     const low = (await groupSizes(page)).filter((size) => size.h < WINDOW_KINDS[size.kind as WindowKind].minSize.h + WINDOW_HEAD_HEIGHT);
     expect({ kind, low }).toEqual({ kind, low: [] });
   }
-  await expect(groups(page).locator(".dock-tab-scroll [role=tab]")).toHaveCount(11);
+  await expect(groups(page).locator(".dock-tab-scroll [role=tab]")).toHaveCount(1 + WINDOW_KIND_LIST.length);
 });
 
 test("창 더하기로 연 호가주문 창은 1440×900에서 높이 520px 이상을 받는다", async ({ page }) => {
