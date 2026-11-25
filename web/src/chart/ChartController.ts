@@ -179,7 +179,7 @@ export class ChartController {
   private readonly pointedListeners = new Set<(bar: PointedBar, close: number | null) => void>();
   private pointerOwnsCrosshair = false;
   private elVisible = false;
-  private lastPointedKey: string | null = null;
+  private pendingPaneLayout: { panes: PaneBounds[]; axisWidth: number } | null = null;
   private indicatorRowsDirty = true;
   private lastIndicatorRowTime: UnixSeconds | null = null;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
@@ -362,11 +362,7 @@ export class ChartController {
       if (this.pointedListeners.size === 0 || !this.pointerOwnsCrosshair) return;
       const bar = this.hoverIndex === null ? undefined : this.bars[this.hoverIndex];
       const visible = p.point !== undefined && bar !== undefined && this.elVisible && this.el.isConnected;
-      const period = this.period();
-      const nextKey = visible ? `${bar.t}:${period}:${bar.c}` : null;
-      if (nextKey === this.lastPointedKey) return;
-      this.lastPointedKey = nextKey;
-      this.emitPointedBar(visible ? barInterval(bar.t, period) : null, visible ? bar.c : null);
+      this.emitPointedBar(visible ? barInterval(bar.t, this.period()) : null, visible ? bar.c : null);
     });
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
       const r = this.chart.timeScale().getVisibleLogicalRange();
@@ -453,17 +449,11 @@ export class ChartController {
   }
 
   subscribePointedBar(listener: (bar: PointedBar, close: number | null) => void): () => void {
-    if (this.pointedListeners.size === 0) {
-      this.pointerOwnsCrosshair = false;
-      this.lastPointedKey = null;
-    }
+    if (this.pointedListeners.size === 0) this.pointerOwnsCrosshair = false;
     this.pointedListeners.add(listener);
     return () => {
       this.pointedListeners.delete(listener);
-      if (this.pointedListeners.size === 0) {
-        this.pointerOwnsCrosshair = false;
-        this.lastPointedKey = null;
-      }
+      if (this.pointedListeners.size === 0) this.pointerOwnsCrosshair = false;
     };
   }
 
@@ -482,7 +472,6 @@ export class ChartController {
 
   private readonly clearPointedBar = (): void => {
     this.pointerOwnsCrosshair = false;
-    this.lastPointedKey = null;
     this.emitPointedBar(null, null);
   };
 
@@ -805,7 +794,7 @@ export class ChartController {
     if (this.frame !== null || this.legendFrame !== null || this.disposed) return;
     this.legendFrame = requestAnimationFrame(() => {
       this.legendFrame = null;
-      this.paintLegend("skip");
+      this.paintLegend();
     });
   }
 
@@ -1190,39 +1179,44 @@ export class ChartController {
     return false;
   }
 
+  private syncPaneLayout(): boolean {
+    const axisWidth = this.chart.priceScale("right").width();
+    const chartPanes = this.chart.panes();
+    if (!this.paneLayoutDirty && axisWidth === this.lastAxisWidth && !this.paneHeightsChanged(chartPanes)) return false;
+    this.paneLayoutDirty = false;
+    this.lastAxisWidth = axisWidth;
+    this.lastPaneHeights = chartPanes.map((pane) => pane.getHeight());
+    const panes = this.paneBounds();
+    const view = this.view;
+    const panels = view ? chartPanels(view.settings, this.period(), !isIndexCode(view.symbol)) : [];
+    this.panelControls.render(panels, panes.map((pane) => pane.top));
+    this.pendingPaneLayout = { panes, axisWidth };
+    return true;
+  }
+
   private renderLegend(): void {
     this.compare.flush(this.bars);
     this.indicators.flush();
     const sourcesChanged = this.refreshPendingLegendSources();
-    const layoutUpdated = this.paintLegend("if-dirty");
+    const layoutUpdated = this.syncPaneLayout();
+    this.paintLegend();
     if (sourcesChanged) this.legend.fit("content");
     else if (layoutUpdated) this.legend.fit("geometry");
   }
 
-  private paintLegend(layout: "if-dirty" | "skip"): boolean {
+  private paintLegend(): void {
     this.cancelLegendFrame();
     const view = this.view;
     const i = this.hoverIndex ?? this.bars.length - 1;
     const bar = this.bars[i];
     const rowTime = this.financialHoverTime ?? bar?.t ?? null;
-    let layoutUpdated = false;
-    if (layout === "if-dirty") {
-      const axisWidth = this.chart.priceScale("right").width();
-      const chartPanes = this.chart.panes();
-      if (this.paneLayoutDirty || axisWidth !== this.lastAxisWidth || this.paneHeightsChanged(chartPanes)) {
-        this.paneLayoutDirty = false;
-        this.lastAxisWidth = axisWidth;
-        this.lastPaneHeights = chartPanes.map((pane) => pane.getHeight());
-        const panes = this.paneBounds();
-        const panels = view ? chartPanels(view.settings, this.period(), !isIndexCode(view.symbol)) : [];
-        this.panelControls.render(panels, panes.map((pane) => pane.top));
-        this.indicatorRowsDirty = false;
-        this.lastIndicatorRowTime = rowTime;
-        this.indicatorLegend.render(this.indicators.rows(rowTime), panes, axisWidth);
-        layoutUpdated = true;
-      }
-    }
-    if (!layoutUpdated && (this.indicatorRowsDirty || rowTime !== this.lastIndicatorRowTime)) {
+    const paneLayout = this.pendingPaneLayout;
+    this.pendingPaneLayout = null;
+    if (paneLayout) {
+      this.indicatorRowsDirty = false;
+      this.lastIndicatorRowTime = rowTime;
+      this.indicatorLegend.render(this.indicators.rows(rowTime), paneLayout.panes, paneLayout.axisWidth);
+    } else if (this.indicatorRowsDirty || rowTime !== this.lastIndicatorRowTime) {
       this.indicatorRowsDirty = false;
       this.lastIndicatorRowTime = rowTime;
       this.indicatorLegend.render(this.indicators.rows(rowTime), null);
@@ -1238,7 +1232,6 @@ export class ChartController {
       period: view.period,
       stalledAt: this.stalledAt,
     }, this.hoverIndex !== null);
-    return layoutUpdated;
   }
 }
 
