@@ -142,11 +142,16 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
 
   const ladderActions = useMemo<LadderActions>(
     () => ({ place: commands.place, cancelOne: commands.cancelLadderOne, cancelGroups: commands.cancelLadderGroups }),
-    [commands],
+    [commands.place, commands.cancelLadderOne, commands.cancelLadderGroups],
   );
   const totalsActions = useMemo(
     () => ({ cancelOne: commands.cancelOne, cancelGroups: commands.cancelGroups }),
-    [commands],
+    [commands.cancelOne, commands.cancelGroups],
+  );
+  const hasHolding = holding !== null;
+  const settingsPopover = useMemo(
+    () => <OrderSettingsPopover settings={settings} venue={orderVenue} mock={mock} nxtNotTraded={nxtNotTraded} holding={hasHolding} onChange={setSettings} />,
+    [settings, orderVenue, mock, nxtNotTraded, hasHolding, setSettings],
   );
   const sellOrdered = sellOrderQuantity(data.groups, data.pending, code, data.openOrdersListedAt);
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
@@ -167,7 +172,7 @@ function OrderBody({ id, code, infoPager, choice, access, balance }: { id: Windo
         amountPresets={settings.amountPresets}
         referencePrice={referencePrice}
         onInput={changeInput}
-        trailing={<OrderSettingsPopover settings={settings} venue={orderVenue} mock={mock} nxtNotTraded={nxtNotTraded} holding={holding !== null} onChange={setSettings} />}
+        trailing={settingsPopover}
       />
       {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>

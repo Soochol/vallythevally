@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { HighValueRequest } from "./HighValueConfirm";
 import { createOrderCommands, type OrderCommandContext, type OrderCommands } from "./orderCommand";
 import { pendingWrites } from "./pendingWrites";
@@ -38,5 +38,6 @@ export function useOrderCommands(
     [],
   );
 
-  return { ...commands, confirm, clearConfirm: () => setConfirm(null) };
+  const clearConfirm = useCallback(() => setConfirm(null), []);
+  return useMemo(() => ({ ...commands, confirm, clearConfirm }), [commands, confirm, clearConfirm]);
 }

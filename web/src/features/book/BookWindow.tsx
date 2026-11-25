@@ -45,7 +45,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
     const fullRows = buildDefaultLadder({ asks: liveView.asks, bids: liveView.bids, lastPrice: feed.lastPrice, previousClose: feed.previousClose, bounds: market.bounds, skipSpreadGap, tickRule: market.tickRule });
     const rows = rowsPerSide >= ROWS_ABOVE_BASE ? fullRows : withVisibleRepeats(visibleLadderRows(fullRows, rowsPerSide), feed.lastPrice);
     const infoSlots = placeInfoItems(rows, market.info, expectedItemsOnPage(pager.page, market.expected, feed.previousClose, pager.flipped));
-    return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} rateShown={rate} expectedPrice={market.expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
+    return <PriceLadder rows={rows} firstBidIndex={rowsPerSide} previousClose={feed.previousClose} dayPrices={feed.dayPrices} rateShown={rate} expectedPrice={market.expected?.price ?? null} rowSlots={{ infoCard: infoSlot(infoSlots, pager), bottomLeft: tradeSlot(trades, feed.previousClose) }} />;
   })();
 
   return (

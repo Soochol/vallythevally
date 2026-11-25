@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import { formatPrice } from "../../lib/format";
@@ -18,7 +18,7 @@ interface Props {
   readonly onFill: (input: string) => void;
 }
 
-export function HoldingSummary({ account, holding, orderable, buyableProblem, sellOrdered, unit, onUnit, onFill }: Props) {
+export const HoldingSummary = memo(function HoldingSummary({ account, holding, orderable, buyableProblem, sellOrdered, unit, onUnit, onFill }: Props) {
   const fill = sellableFill(holding, sellOrdered);
   const allSelling = holding !== null && sellOrdered > 0 && fill === null;
   const [funds, setFunds] = useState(false);
@@ -43,4 +43,4 @@ export function HoldingSummary({ account, holding, orderable, buyableProblem, se
       {funds && orderable !== null && <FundsPopover account={account} orderable={orderable} opener={opener} onClose={() => setFunds(false)} />}
     </div>
   );
-}
+});
