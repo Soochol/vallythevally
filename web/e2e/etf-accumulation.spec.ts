@@ -70,7 +70,7 @@ test("종목의 차트 버튼을 누르면 연동 색 차트로 종목을 보낸
 
 test("수집일이 2일 미만이면 빈 안내를 보이고 오류 시 다시 시도로 복구한다", async ({ page, scenario }) => {
   scenario.reply("/api/etf/accumulation", {
-    body: { window: 5, style: "active", fromDate: null, toDate: null, collectedDays: 1, maAsOf: null, rows: [] },
+    body: { window: 5, style: "active", direction: "buy", fromDate: null, toDate: null, collectedDays: 1, maAsOf: null, rows: [] },
   });
   await page.goto("/etf?tab=accumulation");
   const notice = page.getByRole("status").filter({ hasText: "수집일이 2일 이상 쌓이면 집계됩니다" });
@@ -107,4 +107,35 @@ test("동시 매집 요약·필터 칩·버블 레이더 클릭과 역추적 이
   await table(page).getByRole("button", { name: "SK하이닉스 역추적" }).click();
   await expect(page).toHaveURL(/tab=reverse&stock=000660/);
   await expect(page.getByRole("table", { name: "담은 ETF 표" })).toBeVisible();
+});
+
+test("동시 매도 토글은 매도 레이더와 편출·줄임 드릴다운 및 역배열 필터를 보인다", async ({ page }) => {
+  await page.goto("/etf?tab=accumulation");
+  await page.getByRole("group", { name: "매집 방향" }).getByRole("button", { name: "동시 매도" }).click();
+
+  const kpis = page.getByLabel("동시 매도 요약");
+  await expect(kpis).toContainText("동시 매도 종목");
+  await expect(kpis).toContainText("전량 편출 발생");
+  await expect(kpis).toContainText("에코프로");
+
+  const sellTable = page.getByRole("table", { name: "동시 매도 종목 표" });
+  const sellRows = sellTable.locator("tbody tr[data-code]");
+  await expect(sellRows).toHaveCount(2);
+
+  const ecopro = sellTable.locator('tr[data-code="086520"]');
+  await expect(ecopro).toContainText("2개");
+  await expect(ecopro).toContainText("편출 1");
+  await expect(ecopro).toContainText("-24.5%");
+
+  await ecopro.click();
+  const detail = page.getByRole("region", { name: "에코프로 매도 ETF 목록" });
+  await expect(detail).toBeVisible();
+  await expect(detail).toContainText("편출");
+  await expect(detail).toContainText("이전 3.80%");
+  await expect(detail).toContainText("줄임");
+  await expect(detail).toContainText("-24.5%");
+
+  await page.getByRole("group", { name: "동시 매집 필터" }).getByRole("button", { name: "이평선 역배열 0▲" }).click();
+  await expect(sellRows).toHaveCount(1);
+  await expect(sellRows.first()).toHaveAttribute("data-code", "086520");
 });

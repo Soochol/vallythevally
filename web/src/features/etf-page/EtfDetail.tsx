@@ -14,8 +14,9 @@ import { Failure, Loading, Notice } from "./EtfStates";
 import { HelpTip } from "./HelpTip";
 import { HistoryTab } from "./HistoryTab";
 import { HoldingsTable } from "./HoldingsTable";
-import { OverlapTab } from "./OverlapTab";
+import { type OverlapPair, OverlapTab } from "./OverlapTab";
 import { ReverseTab } from "./ReverseTab";
+import { SimilarTab } from "./SimilarTab";
 import { Treemap } from "./Treemap";
 import {
   BASKET_LIMIT,
@@ -41,6 +42,7 @@ const GLOBAL_TABS = [
 const FUND_TABS = [
   { id: "holdings", label: "구성" },
   { id: "history", label: "편입 변경" },
+  { id: "similar", label: "유사 ETF" },
 ] as const;
 
 export const TABS = [...GLOBAL_TABS, ...FUND_TABS] as const;
@@ -335,12 +337,14 @@ interface EtfDetailProps {
   basketNotice: string | null;
   stock: string | null;
   pair: string | null;
+  overlapPair: OverlapPair | null;
   onPair: (after: string) => void;
   onTab: (tab: TabId) => void;
   onToggleBasket: (code: string) => void;
   onStock: (code: string | null) => void;
   onOpenFund: (code: string) => void;
   onOpenReverse: (stockCode: string) => void;
+  onComparePair: (codeA: string, codeB: string) => void;
 }
 
 function Panel({
@@ -350,14 +354,24 @@ function Panel({
   basket,
   stock,
   pair,
+  overlapPair,
   onPair,
   onToggleBasket,
   onStock,
   onOpenFund,
   onOpenReverse,
+  onComparePair,
 }: EtfDetailProps) {
   if (tab === "overlap") {
-    return <OverlapTab basket={basket} funds={funds} onRemove={onToggleBasket} onOpenReverse={onOpenReverse} />;
+    return (
+      <OverlapTab
+        basket={basket}
+        funds={funds}
+        initialPair={overlapPair}
+        onRemove={onToggleBasket}
+        onOpenReverse={onOpenReverse}
+      />
+    );
   }
   if (tab === "reverse") {
     return (
@@ -376,6 +390,17 @@ function Panel({
   if (tab === "holdings" && fund) return <HoldingsTab key={fund.code} code={fund.code} onOpenReverse={onOpenReverse} />;
   if (tab === "history" && fund) {
     return <HistoryTab key={fund.code} code={fund.code} pair={pair} onPair={onPair} onOpenReverse={onOpenReverse} />;
+  }
+  if (tab === "similar" && fund) {
+    return (
+      <SimilarTab
+        key={fund.code}
+        code={fund.code}
+        fundName={fund.name}
+        onOpenFund={onOpenFund}
+        onComparePair={onComparePair}
+      />
+    );
   }
   return <Notice title="ETF를 고르세요">왼쪽 목록에서 ETF를 고르세요</Notice>;
 }

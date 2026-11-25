@@ -4,6 +4,7 @@ import type { EtfChangeRow } from "../../api/generated/EtfChangeRow";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfHolding } from "../../api/generated/EtfHolding";
 import {
+  activityScore,
   commonHoldings,
   filterChangeRows,
   filterFunds,
@@ -25,9 +26,16 @@ import {
   uniqueHoldings,
 } from "./etfModel";
 
-const fund = (code: string, name: string, style: EtfFundSummary["style"], issuer: string): EtfFundSummary => ({
+const fund = (
+  code: string,
+  name: string,
+  style: EtfFundSummary["style"],
+  issuer: string,
+  recentActivity: EtfFundSummary["recentActivity"] = null,
+): EtfFundSummary => ({
   code, name, issuer, style, benchmark: "", holdingsCount: 1, top5WeightBps: 100, effectiveHoldings: 1,
   status: { source: "snapshot", holdingsAsOf: "2026-10-30", lastAttemptAt: null, refreshFailed: false },
+  recentActivity,
 });
 
 const FUNDS = [
@@ -86,14 +94,26 @@ describe("squarify", () => {
 
 describe("sortFunds", () => {
   const sized = [
-    { ...fund("a", "다", "passive", "x"), top5WeightBps: 3000, holdingsCount: 10, effectiveHoldings: 12.4 },
-    { ...fund("b", "가", "passive", "x"), top5WeightBps: 9000, holdingsCount: 5, effectiveHoldings: 4.2 },
-    { ...fund("c", "나", "passive", "x"), top5WeightBps: 6000, holdingsCount: 50, effectiveHoldings: 8.1 },
+    { ...fund("a", "다", "passive", "x", { added: 0, removed: 0, increased: 1, decreased: 0 }), top5WeightBps: 3000, holdingsCount: 10, effectiveHoldings: 12.4 },
+    { ...fund("b", "가", "passive", "x", null), top5WeightBps: 9000, holdingsCount: 5, effectiveHoldings: 4.2 },
+    { ...fund("c", "나", "passive", "x", { added: 1, removed: 1, increased: 1, decreased: 1 }), top5WeightBps: 6000, holdingsCount: 50, effectiveHoldings: 8.1 },
   ];
   it("이름순은 가나다 순이다", () => expect(sortFunds(sized, "name").map((f) => f.code)).toEqual(["b", "c", "a"]));
   it("상위 5 비중순은 큰 것부터다", () => expect(sortFunds(sized, "top5").map((f) => f.code)).toEqual(["b", "c", "a"]));
   it("종목 수순은 많은 것부터다", () => expect(sortFunds(sized, "count").map((f) => f.code)).toEqual(["c", "a", "b"]));
   it("실효 종목순은 적은 것(집중형)부터다", () => expect(sortFunds(sized, "effective").map((f) => f.code)).toEqual(["b", "c", "a"]));
+  it("최근 리밸런싱순은 활동 점수가 높은 순이며 활동 기록이 없으면 뒤로 간다", () => {
+    expect(activityScore(null)).toBe(-1);
+    expect(activityScore({ added: 0, removed: 0, increased: 0, decreased: 0 })).toBe(0);
+    expect(activityScore({ added: 1, removed: 1, increased: 1, decreased: 1 })).toBe(8);
+    expect(sortFunds(sized, "activity").map((f) => f.code)).toEqual(["c", "a", "b"]);
+    const tied = [
+      fund("d", "라", "passive", "x", null),
+      fund("e", "가", "passive", "x", null),
+      fund("f", "나", "passive", "x", { added: 0, removed: 0, increased: 0, decreased: 0 }),
+    ];
+    expect(sortFunds(tied, "activity").map((f) => f.code)).toEqual(["f", "e", "d"]);
+  });
   it("원래 배열을 바꾸지 않는다", () => {
     sortFunds(sized, "count");
     expect(sized.map((f) => f.code)).toEqual(["a", "b", "c"]);
@@ -172,6 +192,7 @@ describe("parseBasket and isGlobalTab", () => {
     expect(isGlobalTab("reverse")).toBe(true);
     expect(isGlobalTab("holdings")).toBe(false);
     expect(isGlobalTab("history")).toBe(false);
+    expect(isGlobalTab("similar")).toBe(false);
   });
 });
 

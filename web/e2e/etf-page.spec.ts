@@ -234,7 +234,7 @@ test.describe("1440×900", () => {
     await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
 
     scenario.reply("/api/etf/accumulation", {
-      body: { window: 5, style: "active", fromDate: null, toDate: null, collectedDays: 1, maAsOf: null, rows: [] },
+      body: { window: 5, style: "active", direction: "buy", fromDate: null, toDate: null, collectedDays: 1, maAsOf: null, rows: [] },
     });
     await page.goto("/etf");
     await expect(page).toHaveURL(/\/etf$/);
@@ -263,6 +263,63 @@ test.describe("1440×900", () => {
     await page.getByRole("table", { name: "구성 종목 표" }).getByRole("button", { name: "삼성전자 역추적" }).click();
     await expect(page).toHaveURL(/tab=reverse&stock=005930/);
     await expect(page.getByRole("table", { name: "담은 ETF 표" })).toBeVisible();
+  });
+
+  test("도움말 버튼 클릭으로 설명 팝오버가 열리고 Escape·Tab·바깥 클릭으로 닫히며 바깥 클릭을 삼키지 않는다", async ({ page }) => {
+    await page.goto("/etf?code=444200&tab=holdings");
+    const helpBtn = page.getByRole("button", { name: "실효 종목 수 설명" });
+    await expect(helpBtn).toHaveAttribute("aria-expanded", "false");
+    await expect(helpBtn).not.toHaveAttribute("title");
+
+    await helpBtn.click();
+    const popover = page.getByRole("dialog", { name: "실효 종목 수 설명" });
+    await expect(popover).toBeVisible();
+    await expect(popover).toContainText("1 ÷ Σ(비중²)");
+    await expect(helpBtn).toHaveAttribute("aria-expanded", "true");
+
+    await page.keyboard.press("Escape");
+    await expect(popover).toHaveCount(0);
+    await expect(helpBtn).toHaveAttribute("aria-expanded", "false");
+    await expect(helpBtn).toBeFocused();
+
+    await helpBtn.click();
+    await expect(popover).toBeVisible();
+    await page.keyboard.press("Tab");
+    await expect(popover).toHaveCount(0);
+
+    await helpBtn.click();
+    await expect(popover).toBeVisible();
+    await page.getByRole("tab", { name: "편입 변경" }).click();
+    await expect(popover).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "편입 변경" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("목록의 최근 리밸런싱 배지는 선택·비선택 모두 4.5:1 대비를 지키고 최근 리밸런싱순으로 정렬된다", async ({ page }) => {
+    await page.goto("/etf");
+    const megaRow = fundButton(page, "444200");
+    const activity = megaRow.locator(".etf-fund-activity");
+    await expect(activity).toBeVisible();
+    await expect(activity).toContainText("▲2");
+    await expect(activity).toContainText("▼2");
+
+    const surface = await page.locator(".etf-rail").evaluate((node) => getComputedStyle(node).backgroundColor);
+    const defaultInks = await activity.locator("span").evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color));
+    const defaultFill = await megaRow.evaluate((node) => getComputedStyle(node).backgroundColor);
+    for (const ratio of await contrastOf(page, defaultInks.map((ink) => ({ ink, fill: defaultFill, opacity: "1" })), surface)) {
+      expect(ratio).toBeGreaterThanOrEqual(4.5);
+    }
+
+    await megaRow.click();
+    await expect(megaRow).toHaveAttribute("aria-pressed", "true");
+    const selectedInks = await activity.locator("span").evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).color));
+    const selectedFill = await megaRow.evaluate((node) => getComputedStyle(node).backgroundColor);
+    for (const ratio of await contrastOf(page, selectedInks.map((ink) => ({ ink, fill: selectedFill, opacity: "1" })), surface)) {
+      expect(ratio).toBeGreaterThanOrEqual(4.5);
+    }
+
+    await selectOption(page.getByRole("combobox", { name: "정렬" }), "activity");
+    const codes = () => list(page).locator("[data-code]").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-code")));
+    await expect.poll(codes).toEqual(["444200", "091160", "426030"]);
   });
 });
 

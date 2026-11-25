@@ -1,3 +1,4 @@
+import type { EtfAccumulationDirection } from "../../api/generated/EtfAccumulationDirection";
 import type { EtfAccumulationRow } from "../../api/generated/EtfAccumulationRow";
 import type { EtfChangeKind } from "../../api/generated/EtfChangeKind";
 import type { EtfChangePair } from "../../api/generated/EtfChangePair";
@@ -5,10 +6,11 @@ import type { EtfChangeRow } from "../../api/generated/EtfChangeRow";
 import type { EtfFundSummary } from "../../api/generated/EtfFundSummary";
 import type { EtfHolding } from "../../api/generated/EtfHolding";
 import type { EtfMaStates } from "../../api/generated/EtfMaStates";
+import type { EtfRecentActivity } from "../../api/generated/EtfRecentActivity";
 import type { EtfStyle } from "../../api/generated/EtfStyle";
 
 export type GlobalTabId = "accumulation" | "overlap" | "reverse";
-export type FundTabId = "holdings" | "history";
+export type FundTabId = "holdings" | "history" | "similar";
 export type TabId = GlobalTabId | FundTabId;
 
 export function isGlobalTab(tab: TabId): tab is GlobalTabId {
@@ -35,19 +37,30 @@ export function filterFunds(funds: readonly EtfFundSummary[], filter: FundFilter
   );
 }
 
-export type FundSort = "name" | "top5" | "count" | "effective";
+export type FundSort = "name" | "top5" | "effective" | "activity" | "count";
 
 export const SORT_CHOICES: readonly { value: FundSort; label: string }[] = [
   { value: "name", label: "이름순" },
   { value: "top5", label: "상위 5 비중순" },
   { value: "effective", label: "실효 종목순" },
+  { value: "activity", label: "최근 리밸런싱순" },
   { value: "count", label: "종목 수순" },
 ];
+
+export function activityScore(activity: EtfRecentActivity | null): number {
+  if (activity === null) return -1;
+  return activity.added * 3 + activity.increased * 2 + activity.removed * 2 + activity.decreased;
+}
 
 export function sortFunds(funds: readonly EtfFundSummary[], sort: FundSort): EtfFundSummary[] {
   if (sort === "top5") return funds.toSorted((a, b) => b.top5WeightBps - a.top5WeightBps);
   if (sort === "count") return funds.toSorted((a, b) => b.holdingsCount - a.holdingsCount);
   if (sort === "effective") return funds.toSorted((a, b) => a.effectiveHoldings - b.effectiveHoldings || a.name.localeCompare(b.name, "ko"));
+  if (sort === "activity") {
+    return funds.toSorted(
+      (a, b) => activityScore(b.recentActivity) - activityScore(a.recentActivity) || a.name.localeCompare(b.name, "ko"),
+    );
+  }
   return funds.toSorted((a, b) => a.name.localeCompare(b.name, "ko"));
 }
 
@@ -219,9 +232,23 @@ export function fullRangePair(pairs: readonly EtfChangePair[]): { before: string
   return { before: pairs[pairs.length - 1]!.before, after: pairs[0]!.after };
 }
 
+export function isMaInverseAligned(ma: EtfMaStates): boolean {
+  return ma.ma20 === "below" && ma.ma60 === "below" && ma.ma120 === "below";
+}
+
 export type RadarChipFilter = "all" | "added" | "aligned" | "multi";
 
-export function filterAccumulationRows(rows: readonly EtfAccumulationRow[], chip: RadarChipFilter): EtfAccumulationRow[] {
+export function filterAccumulationRows(
+  rows: readonly EtfAccumulationRow[],
+  chip: RadarChipFilter,
+  direction: EtfAccumulationDirection = "buy",
+): EtfAccumulationRow[] {
+  if (direction === "sell") {
+    if (chip === "added") return rows.filter((row) => row.removedEtfCount > 0);
+    if (chip === "aligned") return rows.filter((row) => isMaInverseAligned(row.ma));
+    if (chip === "multi") return rows.filter((row) => row.sellingEtfCount >= 3);
+    return [...rows];
+  }
   if (chip === "added") return rows.filter((row) => row.addedEtfCount > 0);
   if (chip === "aligned") return rows.filter((row) => maAlignedCount(row.ma) === 3);
   if (chip === "multi") return rows.filter((row) => row.buyingEtfCount >= 3);
@@ -230,21 +257,30 @@ export function filterAccumulationRows(rows: readonly EtfAccumulationRow[], chip
 
 export interface RadarSummary {
   total: number;
-  addedStocks: number;
-  alignedStocks: number;
+  edgeStocks: number;
+  trendStocks: number;
   topRow: EtfAccumulationRow | null;
 }
 
-export function radarSummary(rows: readonly EtfAccumulationRow[]): RadarSummary {
-  let addedStocks = 0;
-  let alignedStocks = 0;
+export function radarSummary(
+  rows: readonly EtfAccumulationRow[],
+  direction: EtfAccumulationDirection = "buy",
+): RadarSummary {
+  let edgeStocks = 0;
+  let trendStocks = 0;
   let topRow: EtfAccumulationRow | null = null;
   for (const row of rows) {
-    if (row.addedEtfCount > 0) addedStocks += 1;
-    if (maAlignedCount(row.ma) === 3) alignedStocks += 1;
-    if (topRow === null || row.buyingEtfCount > topRow.buyingEtfCount) topRow = row;
+    if (direction === "sell") {
+      if (row.removedEtfCount > 0) edgeStocks += 1;
+      if (isMaInverseAligned(row.ma)) trendStocks += 1;
+      if (topRow === null || row.sellingEtfCount > topRow.sellingEtfCount) topRow = row;
+    } else {
+      if (row.addedEtfCount > 0) edgeStocks += 1;
+      if (maAlignedCount(row.ma) === 3) trendStocks += 1;
+      if (topRow === null || row.buyingEtfCount > topRow.buyingEtfCount) topRow = row;
+    }
   }
-  return { total: rows.length, addedStocks, alignedStocks, topRow };
+  return { total: rows.length, edgeStocks, trendStocks, topRow };
 }
 
 export type HistoryKindFilter = "all" | "changed" | "buy" | "sell";

@@ -19,7 +19,7 @@ import {
 const MAX_HEAT_PERCENT = 38;
 const FULL_BPS = 10_000;
 
-interface Pair {
+export interface OverlapPair {
   rowCode: string;
   columnCode: string;
 }
@@ -34,6 +34,7 @@ const VIEW_OPTIONS: readonly SegmentedOption<CompareView>[] = [
 interface OverlapTabProps {
   basket: readonly string[];
   funds: readonly EtfFundSummary[];
+  initialPair?: OverlapPair | null;
   onRemove: (code: string) => void;
   onOpenReverse: (stockCode: string) => void;
 }
@@ -126,7 +127,9 @@ function ButterflyCard({
                 aria-label={`${a.fund.name} ${holding.name} ${formatPercent(holding.weightABps)}`}
               >
                 <span className="etf-bar-value">{formatPercent(holding.weightABps)}</span>
-                <i style={{ width: `${(holding.weightABps / scale) * 100}%` }} />
+                <span className="etf-bar-track">
+                  <i style={{ width: `${(holding.weightABps / scale) * 100}%` }} />
+                </span>
               </span>
               <button
                 type="button"
@@ -141,7 +144,9 @@ function ButterflyCard({
                 role="img"
                 aria-label={`${b.fund.name} ${holding.name} ${formatPercent(holding.weightBBps)}`}
               >
-                <i style={{ width: `${(holding.weightBBps / scale) * 100}%` }} />
+                <span className="etf-bar-track">
+                  <i style={{ width: `${(holding.weightBBps / scale) * 100}%` }} />
+                </span>
                 <span className="etf-bar-value">{formatPercent(holding.weightBBps)}</span>
               </span>
             </li>
@@ -224,8 +229,10 @@ function PairComparison({
   );
 }
 
-export function OverlapTab({ basket, funds, onRemove, onOpenReverse }: OverlapTabProps) {
-  const [pair, setPair] = useState<Pair | null>(null);
+export function OverlapTab({ basket, funds, initialPair = null, onRemove, onOpenReverse }: OverlapTabProps) {
+  const initialKey = initialPair === null ? "" : `${initialPair.rowCode}:${initialPair.columnCode}`;
+  const [picked, setPicked] = useState<{ key: string; pair: OverlapPair } | null>(null);
+  const pair = picked !== null && picked.key === initialKey ? picked.pair : initialPair;
   const details = useQueries({ queries: basket.map((code) => etfFundQuery(code)) });
   const nameOf = (code: string) => funds.find((fund) => fund.code === code)?.name ?? code;
 
@@ -279,65 +286,77 @@ export function OverlapTab({ basket, funds, onRemove, onOpenReverse }: OverlapTa
             text="두 ETF가 함께 담은 종목마다 더 작은 비중을 골라 모두 더한 값입니다. Σmin(비중 A, 비중 B)"
           />
         </h3>
-        <table className="etf-matrix" aria-label="겹침 행렬">
-          <thead>
-            <tr>
-              <td />
-              {loaded.map((detail) => (
-                <th key={detail.fund.code} scope="col">
-                  {detail.fund.name}
-                  <button
-                    type="button"
-                    className="etf-chip-remove"
-                    aria-label={`${nameOf(detail.fund.code)} 바구니에서 빼기`}
-                    onClick={() => onRemove(detail.fund.code)}
-                  >
-                    ×
-                  </button>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loaded.map((rowFund, row) => (
-              <tr key={rowFund.fund.code}>
-                <th scope="row">{rowFund.fund.name}</th>
-                {loaded.map((columnFund, column) => {
-                  const bps = overlapBps(rowFund.holdings, columnFund.holdings);
-                  const selected =
-                    active !== null &&
-                    ((active.a.fund.code === rowFund.fund.code && active.b.fund.code === columnFund.fund.code) ||
-                      (active.a.fund.code === columnFund.fund.code && active.b.fund.code === rowFund.fund.code));
-                  return (
-                    <td key={columnFund.fund.code}>
-                      <button
-                        type="button"
-                        className="etf-matrix-cell"
-                        data-row={rowFund.fund.code}
-                        data-column={columnFund.fund.code}
-                        data-bps={bps}
-                        aria-pressed={selected}
-                        aria-label={`${rowFund.fund.name}와 ${columnFund.fund.name} 겹침 ${formatPercent(bps)}`}
-                        style={
-                          {
-                            "--heat": `${Math.min(MAX_HEAT_PERCENT, (bps / 100) * (MAX_HEAT_PERCENT / 100))}%`,
-                          } as React.CSSProperties
-                        }
-                        disabled={row === column}
-                        onClick={() => setPair({ rowCode: rowFund.fund.code, columnCode: columnFund.fund.code })}
-                      >
-                        {row === column ? "—" : formatPercent(bps)}
-                      </button>
-                    </td>
-                  );
-                })}
+        <div className="etf-table-wrap">
+          <table className="etf-matrix" aria-label="겹침 행렬">
+            <thead>
+              <tr>
+                <td />
+                {loaded.map((detail) => (
+                  <th key={detail.fund.code} scope="col">
+                    {detail.fund.name}
+                    <button
+                      type="button"
+                      className="etf-chip-remove"
+                      aria-label={`${nameOf(detail.fund.code)} 바구니에서 빼기`}
+                      onClick={() => onRemove(detail.fund.code)}
+                    >
+                      ×
+                    </button>
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loaded.map((rowFund, row) => (
+                <tr key={rowFund.fund.code}>
+                  <th scope="row">{rowFund.fund.name}</th>
+                  {loaded.map((columnFund, column) => {
+                    const bps = overlapBps(rowFund.holdings, columnFund.holdings);
+                    const selected =
+                      active !== null &&
+                      ((active.a.fund.code === rowFund.fund.code && active.b.fund.code === columnFund.fund.code) ||
+                        (active.a.fund.code === columnFund.fund.code && active.b.fund.code === rowFund.fund.code));
+                    return (
+                      <td key={columnFund.fund.code}>
+                        <button
+                          type="button"
+                          className="etf-matrix-cell"
+                          data-row={rowFund.fund.code}
+                          data-column={columnFund.fund.code}
+                          data-bps={bps}
+                          aria-pressed={selected}
+                          aria-label={`${rowFund.fund.name}와 ${columnFund.fund.name} 겹침 ${formatPercent(bps)}`}
+                          style={
+                            {
+                              "--heat": `${Math.min(MAX_HEAT_PERCENT, (bps / 100) * (MAX_HEAT_PERCENT / 100))}%`,
+                            } as React.CSSProperties
+                          }
+                          disabled={row === column}
+                          onClick={() =>
+                            setPicked({
+                              key: initialKey,
+                              pair: { rowCode: rowFund.fund.code, columnCode: columnFund.fund.code },
+                            })
+                          }
+                        >
+                          {row === column ? "—" : formatPercent(bps)}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
       {active ? (
-        <PairComparison a={active.a} b={active.b} onOpenReverse={onOpenReverse} />
+        <PairComparison
+          key={`${active.a.fund.code}:${active.b.fund.code}`}
+          a={active.a}
+          b={active.b}
+          onOpenReverse={onOpenReverse}
+        />
       ) : (
         <Notice title="행렬의 칸을 누르세요">두 ETF의 공통 종목과 고유 베팅이 보입니다</Notice>
       )}

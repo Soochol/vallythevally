@@ -8,6 +8,7 @@ import { PageFrame } from "../pages/PageFrame";
 import { EtfDetail, tabOf } from "./EtfDetail";
 import { EtfList } from "./EtfList";
 import { Notice } from "./EtfStates";
+import type { OverlapPair } from "./OverlapTab";
 import {
   BASKET_LIMIT,
   NO_FILTER,
@@ -33,6 +34,7 @@ export function EtfPage() {
   const [filter, setFilter] = useState<FundFilter>(NO_FILTER);
   const [sort, setSort] = useState<FundSort>("name");
   const [basketNotice, setBasketNotice] = useState<string | null>(null);
+  const [overlapPair, setOverlapPair] = useState<OverlapPair | null>(null);
   const code = params.get("code");
   const rawTab = params.get("tab");
   const basket = parseBasket(params.get("basket"));
@@ -84,6 +86,9 @@ export function EtfPage() {
   const toggleBasket = (next: string) => {
     if (basket.includes(next)) {
       setBasketNotice(null);
+      if (overlapPair !== null && (overlapPair.rowCode === next || overlapPair.columnCode === next)) {
+        setOverlapPair(null);
+      }
       go({ basket: basket.filter((entry) => entry !== next) });
     } else if (basket.length >= BASKET_LIMIT) {
       setBasketNotice(`비교 바구니는 ${BASKET_LIMIT}개까지 담을 수 있습니다. 하나를 빼고 담으세요`);
@@ -95,14 +100,23 @@ export function EtfPage() {
 
   const clearBasket = () => {
     setBasketNotice(null);
+    setOverlapPair(null);
     go({ basket: [] });
   };
 
   const handleSelectFund = (next: string) => {
-    go({ code: next, tab: effectiveTab === "history" ? "history" : "holdings" });
+    setOverlapPair(null);
+    go({ code: next, tab: effectiveTab === "history" || effectiveTab === "similar" ? effectiveTab : "holdings" });
+  };
+
+  const handleComparePair = (codeA: string, codeB: string) => {
+    setBasketNotice(null);
+    setOverlapPair({ rowCode: codeA, columnCode: codeB });
+    go({ code: null, tab: "overlap", basket: [codeA, codeB] });
   };
 
   const handleTab = (next: TabId) => {
+    if (next !== "overlap") setOverlapPair(null);
     if (!isGlobalTab(next) && selected === null && list !== null && list.length > 0) {
       go({ code: list[0]!.code, tab: next });
       return;
@@ -136,12 +150,22 @@ export function EtfPage() {
             basketNotice={basketNotice}
             onToggleBasket={toggleBasket}
             onClearBasket={clearBasket}
-            onShowOverlap={() => go({ tab: "overlap", code: null })}
+            onShowOverlap={() => {
+              setOverlapPair(null);
+              go({ tab: "overlap", code: null });
+            }}
           />
           <div className="etf-main">
             {list !== null && (
               <>
-                <button type="button" className="btn etf-back" onClick={() => go({ code: null, tab: null })}>
+                <button
+                  type="button"
+                  className="btn etf-back"
+                  onClick={() => {
+                    setOverlapPair(null);
+                    go({ code: null, tab: null });
+                  }}
+                >
                   목록
                 </button>
                 {missingCode ? (
@@ -157,12 +181,20 @@ export function EtfPage() {
                     basketNotice={basketNotice}
                     stock={stock}
                     pair={pair}
+                    overlapPair={overlapPair}
                     onPair={(next) => go({ pair: next })}
                     onTab={handleTab}
                     onToggleBasket={toggleBasket}
                     onStock={(next) => go({ stock: next })}
-                    onOpenFund={(next) => go({ code: next, tab: "holdings" })}
-                    onOpenReverse={(stockCode) => go({ tab: "reverse", stock: stockCode })}
+                    onOpenFund={(next) => {
+                      setOverlapPair(null);
+                      go({ code: next, tab: "holdings" });
+                    }}
+                    onOpenReverse={(stockCode) => {
+                      setOverlapPair(null);
+                      go({ tab: "reverse", stock: stockCode });
+                    }}
+                    onComparePair={handleComparePair}
                   />
                 )}
               </>

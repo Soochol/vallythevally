@@ -8,8 +8,10 @@ import type { EtfFundList } from "../../src/api/generated/EtfFundList";
 import type { EtfFundSummary } from "../../src/api/generated/EtfFundSummary";
 import type { EtfHistory } from "../../src/api/generated/EtfHistory";
 import type { EtfHolding } from "../../src/api/generated/EtfHolding";
-import type { EtfStockHolders } from "../../src/api/generated/EtfStockHolders";
 import type { EtfMaStates } from "../../src/api/generated/EtfMaStates";
+import type { EtfSimilarFund } from "../../src/api/generated/EtfSimilarFund";
+import type { EtfSimilarFunds } from "../../src/api/generated/EtfSimilarFunds";
+import type { EtfStockHolders } from "../../src/api/generated/EtfStockHolders";
 import type { FixtureReply } from "./scenario";
 
 export const NO_MA: EtfMaStates = { ma20: null, ma60: null, ma120: null };
@@ -47,17 +49,38 @@ const effectiveHoldings = (holdings: readonly EtfHolding[]) => {
   return 1 / holdings.reduce((sum, h) => sum + (h.weightBps / total) ** 2, 0);
 };
 
-const summary = (base: Pick<EtfFundSummary, "code" | "name" | "issuer" | "style" | "benchmark" | "status">, holdings: readonly EtfHolding[]): EtfFundSummary => ({
+const summary = (
+  base: Pick<EtfFundSummary, "code" | "name" | "issuer" | "style" | "benchmark" | "status"> & {
+    recentActivity?: EtfFundSummary["recentActivity"];
+  },
+  holdings: readonly EtfHolding[],
+): EtfFundSummary => ({
   ...base,
   holdingsCount: holdings.length,
   top5WeightBps: holdings.toSorted((a, b) => b.weightBps - a.weightBps).slice(0, 5).reduce((sum, h) => sum + h.weightBps, 0),
   effectiveHoldings: effectiveHoldings(holdings),
+  recentActivity: base.recentActivity ?? null,
 });
 
 const SNAPSHOT_STATUS = { source: "snapshot", holdingsAsOf: "2026-10-30", lastAttemptAt: null, refreshFailed: false } as const;
 
 export const ETF_DETAILS: readonly EtfFundDetail[] = [
-  { fund: summary({ code: "444200", name: "SOL 코리아메가테크액티브", issuer: "신한자산운용", style: "active", benchmark: "KRX 메가테크", status: SNAPSHOT_STATUS }, MEGA_TECH), holdings: MEGA_TECH, maAsOf: null },
+  {
+    fund: summary(
+      {
+        code: "444200",
+        name: "SOL 코리아메가테크액티브",
+        issuer: "신한자산운용",
+        style: "active",
+        benchmark: "KRX 메가테크",
+        status: SNAPSHOT_STATUS,
+        recentActivity: { added: 1, removed: 1, increased: 1, decreased: 1 },
+      },
+      MEGA_TECH,
+    ),
+    holdings: MEGA_TECH,
+    maAsOf: null,
+  },
   { fund: summary({ code: "091160", name: "KODEX 반도체", issuer: "삼성자산운용", style: "passive", benchmark: "KRX 반도체", status: SNAPSHOT_STATUS }, SEMICONDUCTOR), holdings: SEMICONDUCTOR, maAsOf: null },
   {
     fund: summary({ code: "426030", name: "TIME 미국나스닥100액티브", issuer: "타임폴리오자산운용", style: "active", benchmark: "나스닥100", status: { source: "collected", holdingsAsOf: "2026-11-17", lastAttemptAt: 1_795_000_000, refreshFailed: true } }, NASDAQ),
@@ -88,6 +111,28 @@ export const etfHoldersOf = (code: string): EtfStockHolders => {
   });
   const name = ETF_DETAILS.flatMap((detail) => detail.holdings).find((h) => h.code === code)?.name ?? null;
   return { code, name, ma: NO_MA, maAsOf: null, holders };
+};
+
+export const etfSimilarOf = (code: string): EtfSimilarFunds | null => {
+  const target = ETF_DETAILS.find((entry) => entry.fund.code === code);
+  if (!target) return null;
+  const targetWeights = new Map(target.holdings.map((h) => [h.code, h.weightBps]));
+  const items: EtfSimilarFund[] = [];
+  for (const other of ETF_DETAILS) {
+    if (other.fund.code === code) continue;
+    let overlapBps = 0;
+    let commonCount = 0;
+    for (const h of other.holdings) {
+      const targetWeight = targetWeights.get(h.code);
+      if (targetWeight !== undefined) {
+        overlapBps += Math.min(targetWeight, h.weightBps);
+        commonCount += 1;
+      }
+    }
+    if (overlapBps > 0) items.push({ fund: other.fund, overlapBps, commonCount });
+  }
+  items.sort((a, b) => b.overlapBps - a.overlapBps || b.commonCount - a.commonCount || a.fund.code.localeCompare(b.fund.code));
+  return { code, items };
 };
 
 const changeRow = (code: string, name: string, beforeQuantity: number | null, afterQuantity: number | null, realChange: number | null, kind: EtfChangeRow["kind"]): EtfChangeRow => ({ code, name, beforeQuantity, afterQuantity, realChange, kind });
@@ -129,6 +174,7 @@ const NO_HISTORY = (code: string): EtfHistory => ({ code, firstCollectedOn: null
 export const ACCUMULATION_5_ACTIVE: EtfAccumulation = {
   window: 5,
   style: "active",
+  direction: "buy",
   fromDate: "2026-11-11",
   toDate: "2026-11-18",
   collectedDays: 6,
@@ -140,11 +186,14 @@ export const ACCUMULATION_5_ACTIVE: EtfAccumulation = {
       buyingEtfCount: 2,
       addedEtfCount: 1,
       increasedEtfCount: 1,
+      sellingEtfCount: 0,
+      removedEtfCount: 0,
+      decreasedEtfCount: 0,
       medianRealChange: 0.2766,
       ma: { ma20: "above", ma60: "above", ma120: "above" },
       contributors: [
-        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "added", realChange: null, afterWeightBps: 650 },
-        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.2766, afterWeightBps: 1800 },
+        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "added", realChange: null, beforeWeightBps: null, afterWeightBps: 650 },
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.2766, beforeWeightBps: 1410, afterWeightBps: 1800 },
       ],
     },
     {
@@ -153,10 +202,13 @@ export const ACCUMULATION_5_ACTIVE: EtfAccumulation = {
       buyingEtfCount: 1,
       addedEtfCount: 1,
       increasedEtfCount: 0,
+      sellingEtfCount: 0,
+      removedEtfCount: 0,
+      decreasedEtfCount: 0,
       medianRealChange: null,
       ma: { ma20: "above", ma60: "equal", ma120: "below" },
       contributors: [
-        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "added", realChange: null, afterWeightBps: 520 },
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "added", realChange: null, beforeWeightBps: null, afterWeightBps: 520 },
       ],
     },
   ],
@@ -165,6 +217,7 @@ export const ACCUMULATION_5_ACTIVE: EtfAccumulation = {
 export const ACCUMULATION_5_ALL: EtfAccumulation = {
   window: 5,
   style: "all",
+  direction: "buy",
   fromDate: "2026-11-11",
   toDate: "2026-11-18",
   collectedDays: 6,
@@ -176,12 +229,15 @@ export const ACCUMULATION_5_ALL: EtfAccumulation = {
       buyingEtfCount: 3,
       addedEtfCount: 1,
       increasedEtfCount: 2,
+      sellingEtfCount: 0,
+      removedEtfCount: 0,
+      decreasedEtfCount: 0,
       medianRealChange: 0.2133,
       ma: { ma20: "above", ma60: "above", ma120: "above" },
       contributors: [
-        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "added", realChange: null, afterWeightBps: 650 },
-        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.2766, afterWeightBps: 1800 },
-        { fundCode: "091160", fundName: "KODEX 반도체", style: "passive", kind: "increased", realChange: 0.15, afterWeightBps: 2600 },
+        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "added", realChange: null, beforeWeightBps: null, afterWeightBps: 650 },
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.2766, beforeWeightBps: 1410, afterWeightBps: 1800 },
+        { fundCode: "091160", fundName: "KODEX 반도체", style: "passive", kind: "increased", realChange: 0.15, beforeWeightBps: 2260, afterWeightBps: 2600 },
       ],
     },
     {
@@ -190,10 +246,13 @@ export const ACCUMULATION_5_ALL: EtfAccumulation = {
       buyingEtfCount: 1,
       addedEtfCount: 0,
       increasedEtfCount: 1,
+      sellingEtfCount: 0,
+      removedEtfCount: 0,
+      decreasedEtfCount: 0,
       medianRealChange: 0.085,
       ma: { ma20: "above", ma60: "below", ma120: "equal" },
       contributors: [
-        { fundCode: "091160", fundName: "KODEX 반도체", style: "passive", kind: "increased", realChange: 0.085, afterWeightBps: 3100 },
+        { fundCode: "091160", fundName: "KODEX 반도체", style: "passive", kind: "increased", realChange: 0.085, beforeWeightBps: 2860, afterWeightBps: 3100 },
       ],
     },
   ],
@@ -202,6 +261,7 @@ export const ACCUMULATION_5_ALL: EtfAccumulation = {
 export const ACCUMULATION_20_ACTIVE: EtfAccumulation = {
   window: 20,
   style: "active",
+  direction: "buy",
   fromDate: "2026-10-21",
   toDate: "2026-11-18",
   collectedDays: 21,
@@ -213,11 +273,14 @@ export const ACCUMULATION_20_ACTIVE: EtfAccumulation = {
       buyingEtfCount: 2,
       addedEtfCount: 0,
       increasedEtfCount: 2,
+      sellingEtfCount: 0,
+      removedEtfCount: 0,
+      decreasedEtfCount: 0,
       medianRealChange: 0.315,
       ma: { ma20: "above", ma60: "above", ma120: "above" },
       contributors: [
-        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.42, afterWeightBps: 1100 },
-        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "increased", realChange: 0.21, afterWeightBps: 1500 },
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "increased", realChange: 0.42, beforeWeightBps: 775, afterWeightBps: 1100 },
+        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "increased", realChange: 0.21, beforeWeightBps: 1240, afterWeightBps: 1500 },
       ],
     },
     ACCUMULATION_5_ACTIVE.rows[0]!,
@@ -230,13 +293,88 @@ export const ACCUMULATION_20_ALL: EtfAccumulation = {
   rows: [ACCUMULATION_5_ALL.rows[0]!, ACCUMULATION_20_ACTIVE.rows[0]!, ACCUMULATION_5_ALL.rows[1]!],
 };
 
+export const ACCUMULATION_5_ACTIVE_SELL: EtfAccumulation = {
+  window: 5,
+  style: "active",
+  direction: "sell",
+  fromDate: "2026-11-11",
+  toDate: "2026-11-18",
+  collectedDays: 6,
+  maAsOf: "2026-11-18",
+  rows: [
+    {
+      code: "086520",
+      name: "에코프로",
+      buyingEtfCount: 0,
+      addedEtfCount: 0,
+      increasedEtfCount: 0,
+      sellingEtfCount: 2,
+      removedEtfCount: 1,
+      decreasedEtfCount: 1,
+      medianRealChange: -0.245,
+      ma: { ma20: "below", ma60: "below", ma120: "below" },
+      contributors: [
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "removed", realChange: null, beforeWeightBps: 380, afterWeightBps: null },
+        { fundCode: "426030", fundName: "TIME 미국나스닥100액티브", style: "active", kind: "decreased", realChange: -0.245, beforeWeightBps: 620, afterWeightBps: 450 },
+      ],
+    },
+    {
+      code: "005930",
+      name: "삼성전자",
+      buyingEtfCount: 0,
+      addedEtfCount: 0,
+      increasedEtfCount: 0,
+      sellingEtfCount: 1,
+      removedEtfCount: 0,
+      decreasedEtfCount: 1,
+      medianRealChange: -0.2021,
+      ma: { ma20: "above", ma60: "below", ma120: "equal" },
+      contributors: [
+        { fundCode: "444200", fundName: "SOL 코리아메가테크액티브", style: "active", kind: "decreased", realChange: -0.2021, beforeWeightBps: 2750, afterWeightBps: 2200 },
+      ],
+    },
+  ],
+};
+
+export const ACCUMULATION_5_ALL_SELL: EtfAccumulation = {
+  window: 5,
+  style: "all",
+  direction: "sell",
+  fromDate: "2026-11-11",
+  toDate: "2026-11-18",
+  collectedDays: 6,
+  maAsOf: "2026-11-18",
+  rows: [
+    {
+      ...ACCUMULATION_5_ACTIVE_SELL.rows[0]!,
+      sellingEtfCount: 3,
+      decreasedEtfCount: 2,
+      contributors: [
+        ...ACCUMULATION_5_ACTIVE_SELL.rows[0]!.contributors,
+        { fundCode: "091160", fundName: "KODEX 반도체", style: "passive", kind: "decreased", realChange: -0.18, beforeWeightBps: 490, afterWeightBps: 400 },
+      ],
+    },
+    ACCUMULATION_5_ACTIVE_SELL.rows[1]!,
+  ],
+};
+
 export function etfBaseline(path: string, method: string, query: URLSearchParams = new URLSearchParams()): FixtureReply | null {
   if (method !== "GET") return null;
   if (path === "/api/etf/accumulation") {
     const window = query.get("window") ?? "5";
     const style = query.get("style") ?? "active";
+    const direction = query.get("direction") ?? "buy";
+    if (direction === "sell") {
+      return { body: style === "all" ? ACCUMULATION_5_ALL_SELL : ACCUMULATION_5_ACTIVE_SELL };
+    }
     if (window === "20") return { body: style === "all" ? ACCUMULATION_20_ALL : ACCUMULATION_20_ACTIVE };
     return { body: style === "all" ? ACCUMULATION_5_ALL : ACCUMULATION_5_ACTIVE };
+  }
+  const similar = /^\/api\/etf\/funds\/([^/]+)\/similar$/.exec(path);
+  if (similar) {
+    const code = decodeURIComponent(similar[1]!);
+    const payload = etfSimilarOf(code);
+    return payload ? { body: payload } : notFound(code);
   }
   const history = /^\/api\/etf\/funds\/([^/]+)\/history$/.exec(path);
   if (history) {

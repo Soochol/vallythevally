@@ -136,3 +136,45 @@ test("역추적은 유형 필터로 담은 ETF를 거르고 비교 바구니에 
   await page.getByRole("button", { name: `${MEGA.fund.name} 비교 담기` }).click();
   await expect(page.getByText("비교 바구니 1/4")).toBeVisible();
 });
+
+test("유사 ETF 탭은 겹침 순으로 보여 주고 나비 비교 클릭으로 3-칼럼 알파 뷰를 즉시 연다", async ({ page }) => {
+  await page.goto("/etf?code=444200&tab=similar");
+  await expect(page.getByRole("tab", { name: "유사 ETF" })).toHaveAttribute("aria-selected", "true");
+
+  const table = page.getByRole("table", { name: "유사 ETF 표" });
+  const rows = table.locator("tbody tr");
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toHaveAttribute("data-code", "426030");
+  await expect(rows.nth(0)).toContainText("51.00%");
+  await expect(rows.nth(0)).toContainText("49.00%");
+  await expect(rows.nth(0)).toContainText("4개");
+  await expect(rows.nth(1)).toHaveAttribute("data-code", "091160");
+  await expect(rows.nth(1)).toContainText("43.00%");
+
+  await rows.nth(1).getByRole("button", { name: `${SEMI.fund.name} 나비 비교` }).click();
+  await expect(page).toHaveURL(/tab=overlap&basket=444200%2C091160$/);
+  await expect(page.getByRole("region", { name: "겹침 대비 차별화 요약" })).toBeVisible();
+  await expect(page.getByRole("region", { name: `${MEGA.fund.name} 고유 베팅` })).toContainText("현대차");
+  await expect(page.getByRole("region", { name: `${SEMI.fund.name} 고유 베팅` })).toContainText("SK스퀘어");
+  await expect(page.getByRole("region", { name: "공통 종목 나비 막대" })).toBeVisible();
+});
+
+test.describe("390px", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("모바일에서 겹침 행렬과 나비 막대가 가로 오버플로 없이 표시된다", async ({ page }) => {
+    await page.goto("/etf?tab=overlap&basket=444200,091160,426030");
+    await expect(matrix(page)).toBeVisible();
+    const wrapOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(wrapOverflow).toBe(true);
+
+    await matrix(page).locator('[data-row="444200"][data-column="091160"]').click();
+    const butterfly = page.getByRole("region", { name: "공통 종목 나비 막대" });
+    await expect(butterfly.locator(".etf-butterfly-row").first()).toBeVisible();
+    const trackWidths = await butterfly.locator(".etf-bar-track").evaluateAll((nodes) =>
+      nodes.map((node) => node.getBoundingClientRect().width),
+    );
+    expect(trackWidths.length).toBeGreaterThan(0);
+    for (const width of trackWidths) expect(width).toBeGreaterThanOrEqual(20);
+  });
+});

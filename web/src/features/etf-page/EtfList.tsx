@@ -145,6 +145,10 @@ export function EtfList({
         <ul className="etf-list" aria-label="ETF">
           {shown.map((fund) => {
             const picked = basket.includes(fund.code);
+            const activity = fund.recentActivity;
+            const buys = activity === null ? 0 : activity.added + activity.increased;
+            const sells = activity === null ? 0 : activity.removed + activity.decreased;
+            const hasActivity = buys > 0 || sells > 0;
             return (
               <li key={fund.code} className="etf-item">
                 <button
@@ -161,6 +165,15 @@ export function EtfList({
                       {fund.style === "active" ? "액티브" : "패시브"}
                     </Badge>
                     <span className="etf-fund-issuer">{fund.issuer}</span>
+                    {hasActivity && (
+                      <span
+                        className="etf-fund-activity"
+                        aria-label={`최근 리밸런싱${buys > 0 ? ` 매수 ${buys}건` : ""}${sells > 0 ? ` 매도 ${sells}건` : ""}`}
+                      >
+                        {buys > 0 && <span className="etf-act-up">▲{buys}</span>}
+                        {sells > 0 && <span className="etf-act-down">▼{sells}</span>}
+                      </span>
+                    )}
                     <span
                       className="etf-conc"
                       role="img"
