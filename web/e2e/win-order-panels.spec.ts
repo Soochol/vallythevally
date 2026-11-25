@@ -1307,10 +1307,16 @@ function linkedArrangement(orderLink: LinkColor | null, orderSymbol?: string): (
 test("내 체결 목록은 최근 체결이 맨 위다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario);
-  api.executions = [{ ...FILL, orderNo: "0000001", time: "090000" }, { ...FILL, orderNo: "0000003", time: "150000" }, { ...FILL, orderNo: "0000002", time: "101500" }, { ...FILL, orderNo: "0000004", time: "150000" }];
+  api.executions = [
+    { ...FILL, orderNo: "0000001", time: "09:00:00", quantity: 1 },
+    { ...FILL, orderNo: "0000003", time: "15:00:00", quantity: 3 },
+    { ...FILL, orderNo: "0000002", time: "10:15:00", quantity: 2 },
+    { ...FILL, orderNo: "0000004", time: "15:00:00", quantity: 4 },
+  ];
   await openOrderWindow(page, scenario);
   await page.getByTestId("account-tab-fills").click();
   await expect(page.getByTestId("account-fill").locator(".od-time")).toHaveText(["15:00:00", "15:00:00", "10:15:00", "09:00:00"]);
+  await expect(page.getByTestId("account-fill").locator("span.od-figure")).toHaveText(["4", "3", "2", "1"]);
 });
 
 test("보유종목 이름을 누르면 같은 연동 색의 차트와 따르는 창이 모두 그 종목으로 바뀐다", async ({ page, scenario }) => {
@@ -1498,7 +1504,55 @@ test("유지를 끄면 종목을 바꿀 때 10과 수량 방식으로 시작한�
   expect(keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { quantity: 37 } });
 });
 
-test("막힌 주문(한도 초과)·정정·취소는 유지 값을 바꾸지 않고 줄여 보내기는 줄인 수량을 남긴다", async ({ page, scenario }) => {
+test("유지가 켜져 있으면 주문 없이 수량·금액 버튼과 프리셋을 누르기만 해도 창·종목별로 유지된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  await openOrderWindow(page, scenario, true);
+  lastTrade(scenario, BASE);
+  await expectStart(page, "10", "수량");
+  await presetKindButton(page, "금액").click();
+  await amountPresetButtons(page).first().click();
+  await expectStart(page, "14", "금액");
+  expect(writesTo(api, "place")).toHaveLength(0);
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 14 } });
+
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await expectStart(page, "10", "수량");
+  await amountPresetButtons(page).nth(1).click();
+  await expectStart(page, "50", "수량");
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order", OTHER)]: { presetKind: "sharePresets", quantity: 50 } });
+
+  await cell(page, 1).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await expectStart(page, "14", "금액");
+
+  await page.reload();
+  await expect(win(page)).toBeVisible();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await expectStart(page, "14", "금액");
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await expectStart(page, "50", "수량");
+});
+
+test("수량 칸이 비었을 때 수량·금액을 바꿔도 직전 양수 수량과 새 방식이 유지된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario, true);
+  await amountPresetButtons(page).nth(1).click();
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "sharePresets", quantity: 50 } });
+  await quantityField(page).fill("");
+  await presetKindButton(page, "금액").click();
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 50 } });
+  await cell(page, 2).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", OTHER);
+  await cell(page, 1).click();
+  await expect(win(page)).toHaveAttribute("data-symbol", CODE);
+  await expectStart(page, "50", "금액");
+});
+
+test("정정·취소는 유지 값을 바꾸지 않고 막힌 주문 뒤 줄여 보내기는 줄인 수량을 남긴다", async ({ page, scenario }) => {
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 69_800, 5)]);
   api.orderable = { cashAmount: 700_000, cashQuantity: 10 };
@@ -1518,10 +1572,10 @@ test("막힌 주문(한도 초과)·정정·취소는 유지 값을 바꾸지 �
   await presetKindButton(page, "금액").click();
   await expect(presetKindButton(page, "금액")).toHaveAttribute("aria-pressed", "true");
   await quantityField(page).fill("11");
+  await pollSaved(() => keptEntries(scenario)).toMatchObject({ [entryKeyOf("order")]: { presetKind: "amountPresets", quantity: 11 } });
   await cellAt(page, "buy", BASE).dblclick();
   await expect(status(page)).toContainText("최대 10");
   expect(writesTo(api, "place")).toHaveLength(1);
-  expect(keptEntries(scenario)).toEqual({ [entryKeyOf("order")]: expect.objectContaining({ presetKind: "sharePresets", quantity: 7 }) });
 
   await page.getByTestId("order-status-action").click();
   await pollSaved(() => writesTo(api, "place")).toHaveLength(2);
