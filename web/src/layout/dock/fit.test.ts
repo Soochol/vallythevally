@@ -106,16 +106,18 @@ test("빈 레이아웃에 창 열 가지를 차례로 더해도 어느 묶음도
     dock = selectTab(fitDock(dock, windows), added.id);
     expect({ kind, low: lowGroups(dock, { area, gap: 6, windows }) }).toEqual({ kind, low: [] });
   }
-  expect(listGroups(dock.root).flatMap((node) => node.tabs)).toHaveLength(11);
+  expect(listGroups(dock.root).flatMap((node) => node.tabs)).toHaveLength(12);
 });
 
-test("창 열 가지를 한꺼번에 기본 배치해도 어느 묶음도 고른 탭 종류의 최소 높이보다 낮게 그려지지 않는다", () => {
+test("창 열한 가지를 한꺼번에 기본 배치해도 어느 묶음도 고른 탭 종류의 최소 높이보다 낮게 그려지지 않는다", () => {
   const windows: WindowList = [c1, ...WINDOW_KIND_LIST.filter((kind) => kind !== "chart").map((kind) => ref(kind, kind))];
   const area = { w: 1392, h: 790 };
-  for (const dock of [defaultDock(windows), defaultDock(windows, { h: area.h, gap: 6 })]) {
-    expect(listGroups(dock.root).map((node) => node.tabs)).toEqual([["c1"], ["brokers"], ["watchlist", "screener", "indicators", "trades", "book", "program", "order", "ranking"]]);
-    expect(lowGroups(dock, { area, gap: 6, windows })).toEqual([]);
-  }
+  const sideTabs = ["watchlist", "screener", "indicators", "trades", "book", "program", "order", "ranking"];
+  const unconstrained = defaultDock(windows);
+  expect(listGroups(unconstrained.root).map((node) => node.tabs)).toEqual([["c1"], ["brokers"], ["premarket"], sideTabs]);
+  const fitted = defaultDock(windows, { h: area.h, gap: 6 });
+  expect(listGroups(fitted.root).map((node) => node.tabs)).toEqual([["c1"], ["brokers", "premarket"], sideTabs]);
+  expect(lowGroups(fitted, { area, gap: 6, windows })).toEqual([]);
 });
 
 test("넓은 자리 종류를 세로로 쌓아 최소 높이를 못 지키면 둘째부터 한 묶음의 탭으로 둔다", () => {

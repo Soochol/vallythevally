@@ -60,7 +60,7 @@ const MAX_SCREEN_ID_BYTES = 64;
 const absent = (v: unknown): boolean => v === undefined || v === null;
 const isId = (v: unknown, maxBytes: number): v is string => typeof v === "string" && v.length > 0 && new TextEncoder().encode(v).length <= maxBytes;
 const isPin = (v: unknown): boolean => absent(v) || (typeof v === "string" && STOCK_CODE.test(v));
-const PINNABLE_KINDS: readonly WindowKind[] = ["trades", "book", "program", "brokers", "order"];
+const PINNABLE_KINDS: readonly WindowKind[] = ["trades", "book", "program", "brokers", "order", "premarket"];
 const BROKER_VIEWS: readonly unknown[] = ["board", "list"];
 const BROKER_CARDS: readonly unknown[] = ["bars", "both", "numbers"];
 const isBrokerView = (v: unknown): v is BrokerView => BROKER_VIEWS.includes(v);
@@ -176,6 +176,7 @@ function restoreWindow(raw: LayoutWindow): WindowState {
     case "trades":
     case "book":
     case "program":
+    case "premarket":
       return { ...base, kind: raw.kind, ...optional("symbol", raw.symbol) };
     case "brokers":
       return {

@@ -66,6 +66,27 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
       },
     );
     scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/premarket\/days$/.test(url.pathname),
+      (request) => {
+        const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
+        return { body: { symbol, days: [] } };
+      },
+    );
+    scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/premarket\/compare$/.test(url.pathname),
+      (request) => {
+        const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
+        return { body: { symbol, series: [] } };
+      },
+    );
+    scenario.on(
+      (url) => url.pathname === "/api/premarket/snapshot",
+      (request) => {
+        const date = new URL(request.url()).searchParams.get("date") ?? "";
+        return { body: { date, availableDates: [], source: "none", rows: [] } };
+      },
+    );
+    scenario.on(
       (url) => /^\/api\/symbols\/[^/]+\/tick-cvd$/.test(url.pathname),
       (request) => {
         if (scenario.publicMode.kind === "public") {

@@ -138,6 +138,40 @@ impl DayIndexCache {
         Ok((Some(stamp), state))
     }
 
+    pub(crate) fn available_dates(&self, data_dir: &Path) -> Result<Vec<String>, String> {
+        let store_dir = data_dir.join("store");
+        let entries = match std::fs::read_dir(&store_dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(format!("{}를 읽을 수 없습니다: {e}", store_dir.display())),
+        };
+        let mut dates: Vec<String> = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("{} 항목을 읽을 수 없습니다: {e}", store_dir.display()))?;
+            let Ok(name) = entry.file_name().into_string() else { continue };
+            if KstDate::parse_yyyymmdd(&name).is_none() {
+                continue;
+            }
+            if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+                dates.push(name);
+            }
+        }
+        dates.sort_unstable_by(|a, b| b.cmp(a));
+        dates.truncate(MAX_DAY_FOLDERS);
+        dates.reverse();
+        let mut ready = Vec::new();
+        for date in dates {
+            match self.load(data_dir, &date) {
+                Ok((_, DayIndexState::Ready(_))) => ready.push(date),
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!(date = %date, reason = %e, "complete.json을 읽지 못해 날짜 목록에서 건너뜁니다");
+                }
+            }
+        }
+        Ok(ready)
+    }
+
     pub(crate) fn collected_days(&self, data_dir: &Path, stock_code: &str) -> Result<Vec<String>, String> {
         let store_dir = data_dir.join("store");
         let entries = match std::fs::read_dir(&store_dir) {
