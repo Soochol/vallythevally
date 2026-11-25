@@ -79,10 +79,15 @@ export function Workspace() {
 
   useLayoutEffect(() => {
     const state = useLayoutStore.getState();
+    state.setWorkspaceArea(area);
     state.setCanvasArea(mode === "canvas" ? canvasArea : null);
     if ((mode === "canvas" || (placement.dock === null && placement.canvas !== null)) && canvasArea && area) state.settlePlacement(placementForMode(placement, refs, mode, { dock: { area, gap: DOCK_GAP }, canvas: canvasArea }));
   }, [mode, canvasArea, area, placement, refs]);
-  useLayoutEffect(() => () => useLayoutStore.getState().setCanvasArea(null), []);
+  useLayoutEffect(() => () => {
+    const state = useLayoutStore.getState();
+    state.setWorkspaceArea(null);
+    state.setCanvasArea(null);
+  }, []);
 
   const boxes = space && layoutDock(shown.root, space.area, space.gap);
   const maximizedGroup = boxes?.groups.find(({ group }) => group.id === maximize.maximized);

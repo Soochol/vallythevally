@@ -13,33 +13,32 @@ import { useSelectionStore } from "../../stores/selection";
 import { ladderRateHidden, useUiStore } from "../../stores/ui";
 import { commandAt, evaluateView, type DockCommand, type DockPlan } from "./dockCommands";
 import { closeWindow } from "./manage";
-import { watchPointerCapture } from "./pointerCapture";
 import { focusWithoutActivation, isProgrammaticFocus } from "./focus";
 import type { FrameBindings } from "./WindowFrame";
+import {
+  applyArrowGeometry,
+  ARROWS,
+  isInteractiveTarget,
+  minimumWindowNotice,
+  NO_GUIDES,
+  type Point,
+  topologyOf,
+  usePointerGesture,
+} from "./windowGesture";
 
 export type TabMenu = { window: WindowId; x: number; y: number };
-type Point = { x: number; y: number };
 type Operation = { kind: "tab" } | { kind: "float-move"; rect: Rect } | { kind: "float-resize"; rect: Rect; handle: ResizeHandle };
 type Start = { pointer: number; window: WindowState; operation: Operation; point: Point; area: Area; dock: DockPlacement; saved: DockPlacement; expected: DockPlacement | null; session: number; topology: string; capture: HTMLElement };
 export type TabGrab = { window: WindowId; point: Point };
 type Outcome = { draft: DockPlacement; next: DockPlacement; preview: DockPlan; guides: Guides; atMinimum: boolean; grab: TabGrab | null };
-type Gesture = { kind: "idle" } | { kind: "pressed"; start: Start } | { kind: "dragging"; start: Start; point: Point; shift: boolean };
-const NO_GUIDES: Guides = { x: null, y: null };
-const ARROWS: Record<string, Point> = { ArrowLeft: { x: -16, y: 0 }, ArrowRight: { x: 16, y: 0 }, ArrowUp: { x: 0, y: -16 }, ArrowDown: { x: 0, y: 16 } };
-const topologyOf = (windows: readonly WindowState[]) => windows.map((window) => window.id).join("\n");
 export const floatPanelId = (id: WindowId) => `float-panel-${id}`;
 export const focusTab = (id: WindowId) => requestAnimationFrame(() => focusWithoutActivation(document.getElementById(`window-tab-${id}`) ?? document.querySelector<HTMLElement>(`[data-window-header="${id}"]`)));
 
 function choose(id: WindowId) {
   if (useLayoutStore.getState().layout.windows.some((window) => window.id === id && window.kind === "chart")) useSelectionStore.getState().setActiveCell(id);
 }
-function minimumNotice(window: WindowState) {
-  const min = minWindowSize(window.kind, ladderRateHidden());
-  useSelectionStore.getState().showToast(`${windowName(useLayoutStore.getState().layout.windows, window)} 창은 ${min.w}×${min.h}보다 작게 줄일 수 없습니다`);
-}
 
 export function useDockInteraction({ root, dock, saved, space, enabled, onPick }: { root: RefObject<HTMLElement | null>; dock: DockPlacement; saved: DockPlacement; space: DockSpace | null; enabled: boolean; onPick(window: WindowId): void }) {
-  const gesture = useRef<Gesture>({ kind: "idle" });
   const current = useRef({ dock, saved, space, enabled, onPick });
   current.current = { dock, saved, space, enabled, onPick };
   const selectTab = (id: WindowId) => {
@@ -51,31 +50,16 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<TabMenu | null>(null);
-  const suppressedPointer = useRef<number | null>(null);
   const session = useLayoutStore((s) => s.session);
   const windows = useLayoutStore((s) => s.layout.windows);
   const topology = topologyOf(windows);
 
-  const finish = (restoreFocus: boolean) => {
-    const previous = gesture.current;
-    gesture.current = { kind: "idle" };
-    setOutcome(null);
-    setDragging(false);
-    document.documentElement.classList.remove("dock-dragging");
-    if (previous.kind === "idle") return;
-    if (previous.kind === "dragging") suppressedPointer.current = previous.start.pointer;
-    if (previous.start.capture.hasPointerCapture(previous.start.pointer)) previous.start.capture.releasePointerCapture(previous.start.pointer);
-    if (restoreFocus) focusTab(previous.start.window.id);
-  };
-  const finishRef = useRef(finish);
-  finishRef.current = finish;
   const valid = (start: Start) => {
     const state = useLayoutStore.getState();
     const latest = current.current;
     return latest.enabled && useUiStore.getState().prefs.layoutMode === "dock" && state.session === start.session && state.layout.placement.dock === start.expected && latest.space !== null && root.current !== null && root.current.clientWidth > 0 && root.current.clientHeight > 0 && topologyOf(state.layout.windows) === start.topology && (start.operation.kind === "tab" || (latest.space?.area.w === start.area.w && latest.space.area.h === start.area.h && root.current?.clientWidth === start.area.w && root.current.clientHeight === start.area.h));
   };
-  const validRef = useRef(valid);
-  validRef.current = valid;
+
   const evaluate = (start: Start, point: Point, shift: boolean): Outcome => {
     const room = current.current.space!;
     const area = start.operation.kind === "tab" ? workArea(root.current!.clientWidth, root.current!.clientHeight)! : start.area;
@@ -102,8 +86,42 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
     const preview = planned?.plan ?? idle.preview;
     return { ...moved, preview, next: preview.kind === "change" && planned ? planned.next : preview.kind === "blocked" ? start.saved : moved.next };
   };
-  const evaluateRef = useRef(evaluate);
-  evaluateRef.current = evaluate;
+
+  const gesture = usePointerGesture<Start>({
+    className: "dock-dragging",
+    classOnPress: false,
+    shieldWhilePressed: false,
+    suppressOnCancel: false,
+    trackShift: true,
+    exceedsThreshold: (dx, dy) => Math.hypot(dx, dy) > 5,
+    preventUp: (start, wasDragging) => wasDragging || start.operation.kind !== "tab",
+    valid,
+    onDrag(start, point, shift) {
+      setOutcome(evaluate(start, point, shift));
+      setDragging(true);
+      setMenu(null);
+    },
+    onFinish(start, reason) {
+      setOutcome(null);
+      setDragging(false);
+      if (reason === "cancel") focusTab(start.window.id);
+    },
+    onComplete(start, point, shift, wasDragging, accepted) {
+      if (!accepted) return;
+      const result = wasDragging ? evaluate(start, point, shift) : null;
+      if (result) {
+        if (result.preview.kind === "blocked") useSelectionStore.getState().showToast(result.preview.label, { tone: "warning" });
+        if (result.next !== start.saved) useLayoutStore.getState().commitDock({ session: start.session, expected: start.expected, next: result.next });
+        if (result.atMinimum) minimumWindowNotice(start.window);
+        if (start.operation.kind !== "tab" || result.next !== start.saved) choose(start.window.id);
+        focusTab(start.window.id);
+      } else if (start.operation.kind === "tab") {
+        selectTab(start.window.id);
+      } else {
+        useLayoutStore.getState().commitDock({ session: start.session, expected: start.expected, next: frontFloat(start.saved, start.window.id) });
+      }
+    },
+  });
 
   const execute = (command: DockCommand) => {
     const latest = current.current;
@@ -117,100 +135,22 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
   };
 
   useEffect(() => {
-    const update = (event: globalThis.PointerEvent) => {
-      const active = gesture.current;
-      if (active.kind === "idle" || active.start.pointer !== event.pointerId) return;
-      if (!validRef.current(active.start)) { finishRef.current(true); return; }
-      if (active.kind === "pressed" && Math.hypot(event.clientX - active.start.point.x, event.clientY - active.start.point.y) <= 5) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const point = { x: event.clientX, y: event.clientY };
-      gesture.current = { kind: "dragging", start: active.start, point, shift: event.shiftKey };
-      setOutcome(evaluateRef.current(active.start, point, event.shiftKey));
-      setDragging(true);
-      setMenu(null);
-      document.documentElement.classList.add("dock-dragging");
-    };
-    const up = (event: globalThis.PointerEvent) => {
-      const active = gesture.current;
-      if (active.kind === "idle" || active.start.pointer !== event.pointerId) return;
-      const accepted = validRef.current(active.start);
-      const result = accepted && active.kind === "dragging" ? evaluateRef.current(active.start, { x: event.clientX, y: event.clientY }, event.shiftKey) : null;
-      if (active.kind === "dragging" || active.start.operation.kind !== "tab") { event.preventDefault(); event.stopImmediatePropagation(); }
-      finishRef.current(false);
-      if (!accepted) return;
-      if (result) {
-        if (result.preview.kind === "blocked") useSelectionStore.getState().showToast(result.preview.label, { tone: "warning" });
-        if (result.next !== active.start.saved) useLayoutStore.getState().commitDock({ session: active.start.session, expected: active.start.expected, next: result.next });
-        if (result.atMinimum) minimumNotice(active.start.window);
-        if (active.start.operation.kind !== "tab" || result.next !== active.start.saved) choose(active.start.window.id);
-        focusTab(active.start.window.id);
-      } else if (active.start.operation.kind === "tab") selectTab(active.start.window.id);
-      else useLayoutStore.getState().commitDock({ session: active.start.session, expected: active.start.expected, next: frontFloat(active.start.saved, active.start.window.id) });
-    };
-    const cancel = () => { if (gesture.current.kind !== "idle") finishRef.current(true); };
-    const cancelPointer = (event: globalThis.PointerEvent) => { const active = gesture.current; if (active.kind !== "idle" && active.start.pointer === event.pointerId) cancel(); };
-    const key = (event: globalThis.KeyboardEvent) => {
-      const active = gesture.current;
-      if (active.kind === "idle") return;
-      if (!validRef.current(active.start)) { cancel(); return; }
-      if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); cancel(); }
-      else if (active.kind === "dragging") {
-        if (event.key === "Shift") {
-          gesture.current = { ...active, shift: event.type === "keydown" };
-          setOutcome(evaluateRef.current(active.start, active.point, event.type === "keydown"));
-        }
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
-    };
-    const shield = (event: Event) => {
-      if (event.type === "pointerdown" && event instanceof globalThis.PointerEvent && event.pointerId === suppressedPointer.current) suppressedPointer.current = null;
-      const trailing = event.type === "click" && event instanceof globalThis.PointerEvent && event.pointerId === suppressedPointer.current && event.detail > 0;
-      if (trailing) suppressedPointer.current = null;
-      if (gesture.current.kind !== "dragging" && !trailing) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-    document.addEventListener("pointermove", update, { capture: true, passive: false });
-    document.addEventListener("pointerup", up, true);
-    document.addEventListener("pointercancel", cancelPointer, true);
-    document.addEventListener("keydown", key, true);
-    document.addEventListener("keyup", key, true);
-    const blocked = ["pointerdown", "click", "dblclick", "contextmenu", "wheel"];
-    blocked.forEach((type) => document.addEventListener(type, shield, { capture: true, passive: false }));
-    window.addEventListener("blur", cancel);
-    return () => {
-      cancel();
-      document.removeEventListener("pointermove", update, true);
-      document.removeEventListener("pointerup", up, true);
-      document.removeEventListener("pointercancel", cancelPointer, true);
-      document.removeEventListener("keydown", key, true);
-      document.removeEventListener("keyup", key, true);
-      blocked.forEach((type) => document.removeEventListener(type, shield, true));
-      window.removeEventListener("blur", cancel);
-    };
-  }, []);
-
-  useEffect(() => {
-    const active = gesture.current;
-    if (active.kind !== "idle" && !validRef.current(active.start)) finishRef.current(true);
-    else if (active.kind === "dragging" && active.start.operation.kind === "tab") setOutcome(evaluateRef.current(active.start, active.point, active.shift));
+    const active = gesture.current();
+    if (active.kind !== "idle" && !valid(active.start)) gesture.cancel();
+    else if (active.kind === "dragging" && active.start.operation.kind === "tab") setOutcome(evaluate(active.start, active.point, active.shift));
     if (!enabled) setMenu(null);
   }, [dock, session, topology, space?.area.w, space?.area.h, enabled]);
 
   const press = (event: PointerEvent<HTMLElement>, window: WindowState, operation: Operation) => {
-    if (!enabled || event.button !== 0 || !event.isPrimary || gesture.current.kind !== "idle" || !space) return;
-    if (operation.kind === "float-move" && event.target instanceof Element && event.target.closest("button, input, a, select")) return;
+    if (!enabled || event.button !== 0 || !event.isPrimary || gesture.current().kind !== "idle" || !space) return;
+    if (operation.kind === "float-move" && isInteractiveTarget(event.target)) return;
     const area = workArea(space.area.w, space.area.h);
     const state = useLayoutStore.getState();
     if (!area || (state.layout.placement.dock !== null && state.layout.placement.dock !== saved)) return;
     const capture = operation.kind === "tab" ? root.current! : event.currentTarget;
     const start: Start = { pointer: event.pointerId, window, operation, point: { x: event.clientX, y: event.clientY }, dock, saved, expected: state.layout.placement.dock, area, session: state.session, topology: topologyOf(state.layout.windows), capture };
-    gesture.current = { kind: "pressed", start };
     focusWithoutActivation(event.currentTarget);
-    capture.setPointerCapture(event.pointerId);
-    watchPointerCapture(capture, start.pointer, () => gesture.current.kind !== "idle" && gesture.current.start === start, () => finishRef.current(true));
+    gesture.begin(start);
     if (operation.kind !== "tab") { choose(window.id); setOutcome({ draft: frontFloat(dock, window.id), next: saved, preview: { kind: "unchanged" }, guides: NO_GUIDES, atMinimum: false, grab: null }); }
   };
   const openMenu = (window: WindowId, x: number, y: number) => {
@@ -235,13 +175,13 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
     const rect = detachedRect(dock, window, space, area);
     if (rect && state.commitDock({ session: state.session, expected: state.layout.placement.dock, next: detachWindow(saved, window, rect) })) { choose(window); focusTab(window); }
   };
-  const lostCapture = (event: PointerEvent<HTMLElement>) => { const active = gesture.current; if (active.kind !== "idle" && active.start.pointer === event.pointerId) finishRef.current(true); };
+  const lostCapture = (event: PointerEvent<HTMLElement>) => gesture.lostCapture(event.pointerId);
   const floatBindings = (window: WindowState): FrameBindings => {
     const area = space && workArea(space.area.w, space.area.h);
     const rect = area && floatRects(saved, space!.windows, area)[window.id];
     return {
       activate: (event) => {
-        if (!enabled || gesture.current.kind !== "idle") return;
+        if (!enabled || gesture.current().kind !== "idle") return;
         const target = event.target;
         if (target instanceof Element && (target.closest("[data-resize-handle]") || (target.closest("[data-window-header]") && !target.closest("button")))) return;
         choose(window.id);
@@ -250,7 +190,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
       },
       header: {
         onFocus: (event) => {
-          if (!enabled || isProgrammaticFocus(event.target) || !(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current.kind !== "idle") return;
+          if (!enabled || isProgrammaticFocus(event.target) || !(event.target instanceof HTMLElement) || !event.target.matches(":focus-visible") || gesture.current().kind !== "idle") return;
           const state = useLayoutStore.getState();
           const expected = state.layout.placement.dock;
           if (!expected) return;
@@ -267,10 +207,10 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
           event.preventDefault();
           const boxes = floatRects(saved, space!.windows, area);
           const others = saved.floats.filter((float) => float.window !== window.id).map((float) => boxes[float.window]!);
-          const result = event.shiftKey ? resizeRect(rect, offset.x ? "e" : "s", offset, minWindowSize(window.kind, ladderRateHidden()), others, area) : { ...moveRect(rect, offset, others, area), atMinimum: false };
+          const result = applyArrowGeometry(rect, window, others, area, offset, event.shiftKey);
           useLayoutStore.getState().commitDock({ session, expected: saved, next: moveFloat(frontFloat(saved, window.id), window.id, toRatio(result.rect, area)) });
           choose(window.id);
-          if (result.atMinimum) minimumNotice(window);
+          if (result.atMinimum) minimumWindowNotice(window);
         },
       },
       resize: (handle) => (event) => { if (rect) press(event, window, { kind: "float-resize", rect, handle }); },

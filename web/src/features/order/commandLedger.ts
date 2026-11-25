@@ -1,3 +1,5 @@
+import { registerWindowReclaim } from "../../stores/windowReclaim";
+
 export type Settlement = "answered" | "unanswered";
 
 export interface Issued {
@@ -78,6 +80,12 @@ export function createLedger(newId: (action: string) => string): CommandLedger {
 export const newIdFor = (action: string): string => `${action.startsWith("batch|") ? "batch" : "cmd"}-${crypto.randomUUID()}`;
 
 export const orderLedger: CommandLedger = createLedger(newIdFor);
+
+registerWindowReclaim<WindowResends>({
+  empty: newWindowResends,
+  take: (_layoutId, windowId) => orderLedger.takeWindowResends(windowId),
+  restore: (_layoutId, windowId, resends) => orderLedger.restoreWindowResends(windowId, resends),
+});
 
 export const placeAction = (code: string, side: string, price: number, quantity: number, venue: string): string => `place|${code}|${side}|${price}|${quantity}|${venue}`;
 export const modifyAction = (orderNo: string, price: number): string => `modify|${orderNo}|${price}`;
