@@ -5,4 +5,4 @@ mod source;
 mod store;
 
 pub use routes::routes;
-pub use source::Collected;
+pub use source::{Collected, DaySlice};
