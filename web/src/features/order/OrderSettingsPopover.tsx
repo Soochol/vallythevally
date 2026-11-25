@@ -19,7 +19,7 @@ interface Props {
 }
 
 const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount"; readonly label: string; readonly note?: string; readonly title?: string }[] = [
-  { key: "keepLastEntry", label: KEEP_LAST_ENTRY_LABEL, note: "창·종목마다 따로 기억합니다", title: "주문을 보낼 때의 수량과 수량·금액 방식을 그 창의 그 종목마다 기억해 다시 열 때 그 값으로 시작합니다" },
+  { key: "keepLastEntry", label: KEEP_LAST_ENTRY_LABEL, note: "창·종목마다 따로 기억합니다", title: "마지막으로 선택한 수량과 수량·금액 방식을 그 창의 그 종목마다 기억해 다시 열 때 그 값으로 시작합니다" },
   { key: "averageDot", label: "평단가 점" },
   { key: "divider", label: "구분선" },
   { key: "rate", label: "등락률 표시" },

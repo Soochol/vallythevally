@@ -1,13 +1,23 @@
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 
-const HAS_CLOCK_TIME = /^\d{6}$/;
+const clockKey = (time: string): string | null => {
+  const trimmed = time.trim();
+  if (/^\d{6}$/.test(trimmed)) return trimmed;
+  if (/^\d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed.replaceAll(":", "");
+  return null;
+};
 
 export function newestFirst(executions: readonly TradingExecution[]): TradingExecution[] {
-  const timed = executions.filter((fill) => HAS_CLOCK_TIME.test(fill.time));
-  const untimed = executions.filter((fill) => !HAS_CLOCK_TIME.test(fill.time));
-  const byRecency = (a: TradingExecution, b: TradingExecution) =>
-    a.time !== b.time ? (a.time < b.time ? 1 : -1) : a.orderNo === b.orderNo ? 0 : orderNoValue(b.orderNo) - orderNoValue(a.orderNo);
-  return [...timed.sort(byRecency), ...untimed];
+  const timed: { readonly fill: TradingExecution; readonly clock: string }[] = [];
+  const untimed: TradingExecution[] = [];
+  for (const fill of executions) {
+    const clock = clockKey(fill.time);
+    if (clock === null) untimed.push(fill);
+    else timed.push({ fill, clock });
+  }
+  const byRecency = (a: { readonly fill: TradingExecution; readonly clock: string }, b: { readonly fill: TradingExecution; readonly clock: string }) =>
+    a.clock !== b.clock ? (a.clock < b.clock ? 1 : -1) : a.fill.orderNo === b.fill.orderNo ? 0 : orderNoValue(b.fill.orderNo) - orderNoValue(a.fill.orderNo);
+  return [...timed.sort(byRecency).map((entry) => entry.fill), ...untimed];
 }
 
 function orderNoValue(orderNo: string): number {
