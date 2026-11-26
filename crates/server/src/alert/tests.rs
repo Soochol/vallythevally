@@ -178,3 +178,76 @@ async fn pipeline_persists_only_delivered_alerts_and_recovers_from_corrupt_state
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(sink.messages().len(), 1);
 }
+
+#[tokio::test(start_paused = true)]
+async fn deferred_p2_persists_across_restart_for_morning_brief() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = StateStore::in_folder(folder.path(), "supervise");
+    let sink = Arc::new(MemorySink::new());
+    let clock = Clock::fake(kst(day(26), 2, 0, 0));
+
+    let first = AlertPipeline::spawn(AlertRouter::single(sink.clone()), Some(store.clone()), clock.clone());
+    let p2 = AlertEvent::active(AlertSource::Supervise, AlertCode::StageDegraded, "holiday_key", "특일정보 키 없음", "캐시 사용");
+    first.emit(p2, off_hours_ctx(20261126));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(sink.messages().is_empty());
+    assert!(store.path().exists());
+
+    let restarted = AlertPipeline::spawn(AlertRouter::single(sink), Some(store), clock);
+    let deferred = restarted.peek_deferred_p2();
+    assert_eq!(deferred.len(), 1);
+    assert_eq!(deferred[0].fingerprint.target, "holiday_key");
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_fired_and_digest_deliveries_remain_retryable_in_same_process() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = StateStore::in_folder(folder.path(), "supervise");
+    let sink = Arc::new(MemorySink::new());
+    sink.set_fail(true);
+    let clock = Clock::fake(kst(day(26), 9, 0, 0));
+    let pipeline = AlertPipeline::spawn(AlertRouter::single(sink.clone()), Some(store), clock);
+
+    let p1 = AlertEvent::active(AlertSource::Supervise, AlertCode::KeyStopped, "collect-01", "키 멈춤", "재시작 한도 초과");
+    let p2 = AlertEvent::active(AlertSource::Financials, AlertCode::FinancialsRateLimited, "opendart", "호출 한도", "다음 확인 10:00");
+    let brief = AlertEvent::active(AlertSource::Supervise, AlertCode::MorningBrief, "morning:20261126", "장전 점검", "준비 완료");
+
+    pipeline.emit(p1.clone(), live_ctx(20261126));
+    pipeline.emit(p2.clone(), live_ctx(20261126));
+    assert!(pipeline.emit_digest_clearing_deferred("morning_brief", brief.clone(), live_ctx(20261126)));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(sink.messages().is_empty());
+
+    sink.set_fail(false);
+    pipeline.emit(p1, live_ctx(20261126));
+    pipeline.emit(p2, live_ctx(20261126));
+    assert!(pipeline.emit_digest_clearing_deferred("morning_brief", brief, live_ctx(20261126)));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(sink.messages().len(), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_resolved_delivery_does_not_resurrect_zombie_p1_after_restart() {
+    let folder = tempfile::tempdir().unwrap();
+    let store = StateStore::in_folder(folder.path(), "supervise");
+    let sink = Arc::new(MemorySink::new());
+    let clock = Clock::fake(kst(day(26), 9, 0, 0));
+
+    let first = AlertPipeline::spawn(AlertRouter::single(sink.clone()), Some(store.clone()), clock.clone());
+    let fired = AlertEvent::active(AlertSource::Supervise, AlertCode::KeyStopped, "collect-01", "키 멈춤", "재시작 한도 초과");
+    first.emit(fired, live_ctx(20261126));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(sink.messages().len(), 1);
+
+    sink.set_fail(true);
+    let resolved = AlertEvent::resolved(AlertSource::Supervise, AlertCode::KeyStopped, "collect-01", "키 복구", "정상 수신");
+    first.emit(resolved, live_ctx(20261126));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let after_sink = Arc::new(MemorySink::new());
+    let restarted = AlertPipeline::spawn(AlertRouter::single(after_sink.clone()), Some(store), clock.clone());
+    clock.jump(2100);
+    restarted.tick(live_ctx(20261126));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(after_sink.messages().is_empty());
+}

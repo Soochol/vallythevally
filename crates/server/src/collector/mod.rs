@@ -194,6 +194,8 @@ fn server_market_context(clock: &Clock) -> MarketContext {
 }
 
 fn apply_judgment(pipeline: &AlertPipeline, judgment: DaemonJudgment, ctx: MarketContext) {
+    let down_fp = crate::alert::Fingerprint::new(AlertSource::ServerWatch, AlertCode::DaemonDown, "supervise");
+    let silent_fp = crate::alert::Fingerprint::new(AlertSource::ServerWatch, AlertCode::DaemonUnresponsive, "supervise");
     match judgment {
         DaemonJudgment::Down => {
             let event = AlertEvent::active(AlertSource::ServerWatch, AlertCode::DaemonDown, "supervise", "감독 데몬이 꺼져 있습니다", "상태 소켓(supervise.sock) 연결이 45초 이상 실패했습니다")
@@ -202,18 +204,23 @@ fn apply_judgment(pipeline: &AlertPipeline, judgment: DaemonJudgment, ctx: Marke
             pipeline.emit(event, ctx);
         }
         DaemonJudgment::Unresponsive => {
+            pipeline.retire_silently(&down_fp);
             let event = AlertEvent::active(AlertSource::ServerWatch, AlertCode::DaemonUnresponsive, "supervise", "감독 데몬이 응답하지 않습니다", "소켓 연결은 열려 있으나 하트비트가 15초 이상 끊겼습니다")
                 .with_impact("감독 데몬이 멈췄거나 과부하 상태일 수 있습니다")
                 .with_action("collector status --state ~/.local/state/vallythevally/collector");
             pipeline.emit(event, ctx);
         }
+        DaemonJudgment::VersionMismatch => {
+            pipeline.retire_silently(&down_fp);
+            pipeline.retire_silently(&silent_fp);
+        }
         DaemonJudgment::Healthy => {
-            let down_ok = AlertEvent::resolved(AlertSource::ServerWatch, AlertCode::DaemonDown, "supervise", "감독 데몬 연결 복구", "상태 소켓 하트비트가 정상 수신되고 있습니다");
-            let silent_ok = AlertEvent::resolved(AlertSource::ServerWatch, AlertCode::DaemonUnresponsive, "supervise", "감독 데몬 응답 복구", "상태 소켓 하트비트가 정상 수신되고 있습니다");
+            let down_ok = AlertEvent::resolved(AlertSource::ServerWatch, AlertCode::DaemonDown, "supervise", "감독 데몬 연결 복구", "상태 소켓이 다시 연결됐습니다");
+            let silent_ok = AlertEvent::resolved(AlertSource::ServerWatch, AlertCode::DaemonUnresponsive, "supervise", "감독 데몬 응답 복구", "상태 소켓이 다시 응답하고 있습니다");
             pipeline.emit(down_ok, ctx);
             pipeline.emit(silent_ok, ctx);
         }
-        DaemonJudgment::Checking | DaemonJudgment::VersionMismatch => {}
+        DaemonJudgment::Checking => {}
     }
 }
 
@@ -292,5 +299,30 @@ mod tests {
         let sent = sink.messages();
         assert_eq!(sent.len(), 2);
         assert!(sent[1].html.contains("복구 완료") && sent[1].silent);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn brief_down_followed_by_version_mismatch_or_unresponsive_does_not_fire_false_daemon_down() {
+        let sink = Arc::new(MemorySink::new());
+        let clock = Clock::fake(kst(domain::KstDate::new(2026, 11, 26).unwrap(), 9, 0, 0));
+        let pipeline = AlertPipeline::spawn(AlertRouter::single(sink.clone()), None, clock.clone());
+
+        apply_judgment(&pipeline, DaemonJudgment::Down, server_market_context(&clock));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        apply_judgment(&pipeline, DaemonJudgment::VersionMismatch, server_market_context(&clock));
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        pipeline.tick(server_market_context(&clock));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(sink.messages().is_empty(), "{:?}", sink.messages());
+
+        apply_judgment(&pipeline, DaemonJudgment::Down, server_market_context(&clock));
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        apply_judgment(&pipeline, DaemonJudgment::Unresponsive, server_market_context(&clock));
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        pipeline.tick(server_market_context(&clock));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent = sink.messages();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].html.contains("감독 데몬이 응답하지 않습니다") && !sent[0].html.contains("꺼져 있습니다"));
     }
 }

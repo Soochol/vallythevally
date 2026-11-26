@@ -172,7 +172,8 @@ impl AlertCode {
             AlertCode::DiskCritical => PolicyRule { pending_secs: 120, backoff_secs: P1_HOURLY_BACKOFF, escalate_after_secs: None },
             AlertCode::DiskWarning => PolicyRule { pending_secs: 120, backoff_secs: NO_BACKOFF, escalate_after_secs: None },
             AlertCode::FinancialsCrashed | AlertCode::SharedJobHalted => PolicyRule { pending_secs: 0, backoff_secs: P1_HOURLY_BACKOFF, escalate_after_secs: None },
-            AlertCode::KeyAuthHalted | AlertCode::FinalizeFailed | AlertCode::FinancialsStorageHalted => PolicyRule { pending_secs: 0, backoff_secs: P1_LONG_BACKOFF, escalate_after_secs: None },
+            AlertCode::KeyAuthHalted | AlertCode::FinancialsStorageHalted => PolicyRule { pending_secs: 0, backoff_secs: P1_LONG_BACKOFF, escalate_after_secs: None },
+            AlertCode::FinalizeFailed => PolicyRule { pending_secs: 0, backoff_secs: NO_BACKOFF, escalate_after_secs: None },
             AlertCode::FinancialsAuthHalted => PolicyRule { pending_secs: 0, backoff_secs: P1_AUTH_BACKOFF, escalate_after_secs: None },
             AlertCode::DaemonCrashed
             | AlertCode::DaemonUnresponsive

@@ -146,8 +146,16 @@ impl AlertEngine {
         (p1, p2)
     }
 
+    pub fn peek_deferred_p2(&self) -> Vec<DeferredP2> {
+        self.state.deferred_p2.clone()
+    }
+
     pub fn take_deferred_p2(&mut self) -> Vec<DeferredP2> {
         std::mem::take(&mut self.state.deferred_p2)
+    }
+
+    pub fn clear_deferred_p2(&mut self) {
+        self.state.deferred_p2.clear();
     }
 
     pub fn deferred_p2_count(&self) -> usize {
@@ -156,6 +164,79 @@ impl AlertEngine {
 
     pub fn has_active(&self, fingerprint: &Fingerprint) -> bool {
         self.state.incidents.contains_key(fingerprint)
+    }
+
+    pub fn has_firing(&self, fingerprint: &Fingerprint) -> bool {
+        self.state.incidents.get(fingerprint).is_some_and(|record| matches!(record.phase, IncidentPhase::Firing { .. }))
+    }
+
+    pub fn retire_silently(&mut self, fingerprint: &Fingerprint) -> bool {
+        self.state.deferred_p2.retain(|item| &item.fingerprint != fingerprint);
+        self.state.incidents.remove(fingerprint).is_some()
+    }
+
+    pub fn activate_deferred_p2(&mut self) {
+        for record in self.state.incidents.values_mut() {
+            if let IncidentPhase::Firing { deferred, .. } = &mut record.phase
+                && *deferred
+            {
+                *deferred = false;
+            }
+        }
+        self.state.deferred_p2.clear();
+    }
+
+    pub fn rollback_fired(&mut self, fingerprint: &Fingerprint) {
+        self.state.incidents.remove(fingerprint);
+    }
+
+    pub fn rollback_escalation(&mut self, fingerprint: &Fingerprint) {
+        if let Some(record) = self.state.incidents.get_mut(fingerprint) {
+            record.severity = Severity::P2Warning;
+        }
+    }
+
+    pub fn rollback_reminder(&mut self, fingerprint: &Fingerprint, previous_last_sent: i64) {
+        if let Some(record) = self.state.incidents.get_mut(fingerprint)
+            && let IncidentPhase::Firing { last_sent_at, reminders_sent, .. } = &mut record.phase
+        {
+            *last_sent_at = previous_last_sent;
+            *reminders_sent = reminders_sent.saturating_sub(1);
+        }
+    }
+
+    pub fn rollback_digest(&mut self, key: &str, previous_date: Option<u32>) {
+        match previous_date {
+            Some(date) => {
+                self.state.digest_sent.insert(key.to_owned(), date);
+            }
+            None => {
+                self.state.digest_sent.remove(key);
+            }
+        }
+    }
+
+    pub fn digest_date(&self, key: &str) -> Option<u32> {
+        self.state.digest_sent.get(key).copied()
+    }
+
+    pub fn evaluate_immediate(&mut self, event: AlertEvent, ctx: MarketContext, now: KstTime) -> Vec<AlertDispatch> {
+        self.ensure_day(ctx.date);
+        let code = event.fingerprint.code;
+        let saved = self.custom_policies.get(&code).copied();
+        let mut policy = self.policy_for(code);
+        policy.pending_secs = 0;
+        self.custom_policies.insert(code, policy);
+        let dispatches = self.evaluate(event, ctx, now);
+        match saved {
+            Some(old) => {
+                self.custom_policies.insert(code, old);
+            }
+            None => {
+                self.custom_policies.remove(&code);
+            }
+        }
+        dispatches
     }
 
     pub fn record_stat_for_fired(&mut self, severity: Severity) {
