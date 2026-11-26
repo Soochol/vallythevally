@@ -114,7 +114,7 @@ test("입력창에서 값을 바꾸면 자동 저장되고 Esc는 선과 저장�
   await pollSaved(async () => settings(scenario)).toEqual(before);
 });
 
-test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추가 탭으로 넘어가며 탭으로 비교 종목을 오간다", async ({ page, scenario }) => {
+test("지표 창은 띄운 지표·지표 추가 두 탭으로 열고 통합 이동평균선 편집기와 별도 비교 모드를 지원한다", async ({ page, scenario }) => {
   useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -122,7 +122,9 @@ test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추�
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
   const tab = (name: RegExp) => dialog.getByRole("tab", { name });
   const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
+  await expect(dialog.getByRole("tab")).toHaveCount(2);
   await expect(tab(/^이 칸에 띄운 지표/)).toHaveAttribute("aria-selected", "true");
+  await expect(tab(/^비교 종목$/)).toHaveCount(0);
   await expect(dialog.getByRole("listbox")).toContainText("아래 패널");
   await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
   await expect(dialog.getByRole("option", { name: /추가 후보$/ })).toHaveCount(0);
@@ -133,23 +135,27 @@ test("지표 창은 띄운 지표 탭으로 열고 글자를 치면 지표 추�
   await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "ma"]);
   await input.fill("");
   await expect(dialog.getByRole("listbox")).toContainText("재무지표");
-  await tab(/^비교 종목$/).click();
-  await expect(input).toBeFocused();
-  await expect(dialog).toContainText("비교 종목 0/3");
-  await expect(dialog.getByRole("option", { name: /추가 후보$/ })).toHaveCount(0);
-  await tab(/^비교 종목$/).press("ArrowLeft");
-  await expect(tab(/^지표 추가$/)).toHaveAttribute("aria-selected", "true");
-  await expect(tab(/^지표 추가$/)).toBeFocused();
-  await tab(/^이 칸에 띄운 지표/).click();
+  await tab(/^지표 추가$/).press("ArrowLeft");
+  await expect(tab(/^이 칸에 띄운 지표/)).toHaveAttribute("aria-selected", "true");
+  await expect(tab(/^이 칸에 띄운 지표/)).toBeFocused();
   await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
   await expect(dialog.getByRole("listbox")).toContainText("가격 패널");
-  await dialog.getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).click();
+  await dialog.getByRole("button", { name: "이동평균선 설정", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "변경 적용", exact: true })).toHaveCount(0);
-  await dialog.getByRole("textbox", { name: "기간", exact: true }).fill("15");
+  await dialog.getByRole("textbox", { name: "이동평균 단순 20 기간", exact: true }).fill("15");
   await pollSaved(async () => (await settings(scenario)).indicators.find((i) => i.spec.kind === "ma")?.spec).toEqual({ kind: "ma", method: "sma", period: 15 });
+  await dialog.getByRole("textbox", { name: "추가할 이동평균 기간", exact: true }).fill("60");
+  await dialog.getByRole("button", { name: "이동평균선 추가", exact: true }).click();
+  await pollSaved(async () => (await settings(scenario)).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.spec)).toEqual([
+    { kind: "ma", method: "sma", period: 15 },
+    { kind: "ma", method: "sma", period: 60 },
+  ]);
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume"]);
   await page.getByRole("button", { name: "비교", exact: true }).click();
-  await expect(tab(/^비교 종목$/)).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tab")).toHaveCount(0);
+  await expect(dialog).toContainText("비교 종목");
+  await expect(dialog).toContainText("0/3");
 });

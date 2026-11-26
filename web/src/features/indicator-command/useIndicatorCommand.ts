@@ -50,10 +50,11 @@ export function useIndicatorCommand(cellId: WindowId, initialMode: IndicatorComm
   };
 
   return {
-    cell, mode, input, rows, selected, symbols, search, selectedSymbol, compareButton, editor, submit, addCompareSymbol,
+    cell, mode, input, chosen, rows, selected, symbols, search, selectedSymbol, compareButton, editor, submit, addCompareSymbol,
     type(value: string) { setInput(value); setChosen(""); setMode((mode) => modeAfterInput(mode, value)); },
     show(next: IndicatorCommandMode, indicator: string | null = null) { setMode(next); setInput(""); setChosen(indicator ? currentKey(indicator) : ""); },
     select(row: CommandRow) { if (row.kind !== "symbol" || row.selectable) setChosen(row.key); },
+    selectKey(key: string) { setChosen(key); },
   };
 }
 

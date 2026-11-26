@@ -126,9 +126,13 @@ test("가운데 지표 창은 폭이 760px 이하로 화면 가운데에 열리�
   const footer = dialog.locator("footer");
   await expect(footer.getByText("Tab", { exact: true })).toBeVisible();
   await expect(footer.getByRole("button")).toHaveCount(0);
-  await dialog.getByRole("tab", { name: "비교 종목", exact: true }).click();
-  await expect(footer.getByText("Tab", { exact: true })).toHaveCount(0);
-  await expect(footer.getByRole("button")).toHaveCount(0);
+  await expect(dialog.getByRole("tab", { name: "비교 종목", exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await toolbar(page).getByRole("button", { name: "비교", exact: true }).click();
+  const compareDialog = commandDialog(page);
+  const compareFooter = compareDialog.locator("footer");
+  await expect(compareFooter.getByText("Tab", { exact: true })).toHaveCount(0);
+  await expect(compareFooter.getByRole("button")).toHaveCount(0);
 });
 
 test("범례에서 연 지표 팝오버는 높이가 360px 이하이고 색 더 보기를 누르면 색상표가 보인다", async ({ page, scenario }) => {
@@ -159,7 +163,7 @@ test("지표와 드로잉에서 연 색 창의 제목이 같다", async ({ page,
   await indicatorButton(page).click();
   const command = commandDialog(page);
   await command.getByRole("tab", { name: "지표 추가", exact: true }).click();
-  await command.getByRole("button", { name: "직접 고르기", exact: true }).click();
+  await command.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
   await expect(colorWindow(page)).toBeVisible();
   const indicatorTitle = await colorWindow(page).getByRole("heading").first().textContent();
   await page.keyboard.press("Escape");
