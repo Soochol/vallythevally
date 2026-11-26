@@ -18,11 +18,12 @@ export interface SeriesKey {
 export interface BarsQuery extends SeriesKey {
   /** 없으면 최신 페이지. */
   before?: UnixSeconds;
+  limit?: number;
 }
 
 /** `GET /api/bars`. 봉은 React Query가 아니라 칸의 컨트롤러가 갖는다(frontend.md §5.2). */
 export function fetchBarsPage(q: BarsQuery, signal?: AbortSignal): Promise<BarsPage> {
-  const params = new URLSearchParams({ symbol: q.symbol, period: q.period, limit: "500" });
+  const params = new URLSearchParams({ symbol: q.symbol, period: q.period, limit: String(q.limit ?? 500) });
   if (q.venue !== null) params.set("venue", q.venue);
   if (q.before !== undefined) params.set("before", String(q.before));
   return getJson<BarsPage>(`/api/bars?${params}`, signal);
