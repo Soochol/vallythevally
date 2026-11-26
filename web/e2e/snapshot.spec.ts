@@ -112,7 +112,10 @@ async function openSamsung(page: Page, scenario: Scenario, name = "삼성전자"
 }
 
 async function expectSnapshotImage(page: Page, png: Buffer, chart: Locator): Promise<{ lines: number; drawn: DrawnText[] }> {
-  const box = (await chart.boundingBox())!;
+  const hostBox = (await chart.boundingBox())!;
+  const box = (await chart.locator("table").boundingBox())!;
+  expect(Math.abs(hostBox.width - box.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(hostBox.height - box.height)).toBeLessThanOrEqual(1);
   const dpr = await page.evaluate(() => devicePixelRatio);
   const size = pngSize(png);
   expect(size.width).toBe(Math.round(box.width * dpr));

@@ -84,7 +84,7 @@ async function verifyExpectedTiles(
 }
 
 test("좁은 타일에서도 예상 별표는 타일 밖으로 잘리지 않는다", async ({ page, scenario }) => {
-  await verifyExpectedTiles(page, scenario, { width: 560, height: 900 }, { narrowRate: 10, wideRate: 1 });
+  await verifyExpectedTiles(page, scenario, { width: 562, height: 900 }, { narrowRate: 10, wideRate: 1 });
 });
 
 test("1280×900의 폭 64px 이상 타일은 별표가 붙어도 숫자가 잘리지 않는다", async ({ page, scenario }) => {

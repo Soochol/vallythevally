@@ -3,7 +3,7 @@ import type { Period } from "../api/generated/Period";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
 import type { PaneBounds } from "./indicators/legendRows";
-import { legendTier, reserveLegendFields, type LegendField, type LegendProjection, type LegendTier } from "./legendProjection";
+import { denserTier, legendTier, reserveLegendFields, type LegendField, type LegendProjection, type LegendTier } from "./legendProjection";
 import { OptionalTrackedValues, TrackedValues } from "./legendShapes";
 import type { ChartSettings } from "./settings";
 import { formatBarTime, formatKstClock } from "./time";
@@ -639,23 +639,32 @@ export class Legend {
       this.presentation = { kind: "settled", inputs };
       return;
     }
-    this.applyTier(legendTier({ chartWidth: chartBox.width, paneHeight: viewport.pricePane.height, phone: !inputs.desktop }), inputs.desktop);
-    const projection = this.projection();
-    this.parent.append(projection.root);
-    try {
+    const paneBottom = chartBox.y + viewport.pricePane.top + viewport.pricePane.height;
+    const plotRight = chartBox.x + chartBox.width - viewport.axisWidth;
+    const measureProjection = () => {
+      const projection = this.projection();
+      this.parent.append(projection.root);
       reserveLegendFields(projection.fields);
-      const paneBottom = chartBox.y + viewport.pricePane.top + viewport.pricePane.height;
-      if (this.tier === "full" && this.contentBounds(projection.root).bottom > paneBottom + 0.5) {
-        this.applyTier("compact", inputs.desktop);
-        const priceRow = projection.root.querySelector("[data-price-row]");
-        if (priceRow) projection.root.querySelector("[data-legend-head]")?.append(priceRow);
-        reserveLegendFields(projection.fields);
+      return { root: projection.root, content: this.contentBounds(projection.root), origin: projection.root.getBoundingClientRect() };
+    };
+    this.applyTier(legendTier({ chartWidth: chartBox.width, paneHeight: viewport.pricePane.height, phone: !inputs.desktop }), inputs.desktop);
+    let measured = measureProjection();
+    try {
+      const nextFromFull = this.tier === "full" && measured.content.bottom > paneBottom + 0.5 ? denserTier(this.tier) : null;
+      if (nextFromFull) {
+        measured.root.remove();
+        this.applyTier(nextFromFull, inputs.desktop);
+        measured = measureProjection();
       }
-      const content = this.contentBounds(projection.root);
-      const origin = projection.root.getBoundingClientRect();
-      this.avoidBox = { left: origin.left - chartBox.x, top: origin.top - chartBox.y, right: content.right - chartBox.x, bottom: content.bottom - chartBox.y };
+      const nextFromCompact = this.tier === "compact" && measured.content.right > plotRight + 0.5 ? denserTier(this.tier) : null;
+      if (nextFromCompact) {
+        measured.root.remove();
+        this.applyTier(nextFromCompact, inputs.desktop);
+        measured = measureProjection();
+      }
+      this.avoidBox = { left: measured.origin.left - chartBox.x, top: measured.origin.top - chartBox.y, right: measured.content.right - chartBox.x, bottom: measured.content.bottom - chartBox.y };
     } finally {
-      projection.root.remove();
+      measured.root.remove();
     }
     this.presentationHost.reserveTop(this.avoidBox.bottom - viewport.pricePane.top, viewport.pricePane.height);
     this.presentation = { kind: "settled", inputs };
