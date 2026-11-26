@@ -4,7 +4,6 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { WindowId } from "../../layout/kinds";
 import { formatPrice } from "../../lib/format";
-import { PERIOD_LABEL } from "../../lib/symbol";
 import { type BrokerCards, type BrokerView, useLayoutStore } from "../../stores/layout";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { SyncIcon } from "../icons";
@@ -17,8 +16,9 @@ import { pageOfPath } from "../page-rail/pages";
 import { BoardView } from "./BoardView";
 import { DetailTable } from "./DetailTable";
 import { ListView } from "./ListView";
+import { TableView } from "./TableView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "./board";
-import { type BrokerSyncTarget, gapContaining, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
+import { type BrokerSyncTarget, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
 import { formatMonthDay, kstDateOf, priceAt } from "./history";
 import { useBrokerDay, useBrokerMinuteBars } from "./useBrokerDay";
 import "./brokers.css";
@@ -26,6 +26,7 @@ import "./brokers.css";
 const VIEW_OPTIONS: readonly SegmentOption<BrokerView>[] = [
   { value: "board", label: "입체" },
   { value: "list", label: "거래원" },
+  { value: "table", label: "기본" },
 ];
 
 const CARD_OPTIONS: readonly SegmentOption<BrokerCards>[] = [
@@ -38,41 +39,15 @@ const EMPTY_RUNS: ReadonlyMap<string, readonly TrackRun[]> = new Map();
 const CLOCK_TICK_MS = 60_000;
 
 interface SyncStripView {
-  readonly kind: "past" | "none";
+  readonly kind: "none";
   readonly text: string;
 }
 
-function buildSyncStrip(
-  target: BrokerSyncTarget,
-  shownTime: UnixSeconds | null,
-  cursor: UnixSeconds | null,
-  showEmpty: boolean,
-  activeGap: readonly [UnixSeconds, UnixSeconds] | null,
-  fetching: boolean,
-): SyncStripView | null {
-  if (target.kind === "off" || target.kind === "waiting") return null;
+function buildSyncStrip(target: BrokerSyncTarget): SyncStripView | null {
   if (target.kind === "unsupported") {
     return { kind: "none", text: "분봉 또는 일봉 차트에서 날짜·시각이 동기화됩니다" };
   }
-  const dateLabel = formatMonthDay(target.date);
-  if (showEmpty && !fetching) {
-    return { kind: "none", text: `${dateLabel} 수집된 거래원 자료가 없습니다` };
-  }
-  const suffix = fetching ? " · 불러오는 중" : "";
-  if (activeGap !== null && cursor !== null) {
-    return {
-      kind: "none",
-      text: `수집 끊김 시각 · ${dateLabel} ${formatClock(cursor).slice(0, 5)}${suffix}`,
-    };
-  }
-  if (target.period === "D") {
-    return { kind: "past", text: `차트 동기화 · ${dateLabel} 장마감 (일봉)${suffix}` };
-  }
-  const clock = shownTime === null ? "" : ` ${formatClock(shownTime).slice(0, 5)}`;
-  return {
-    kind: "past",
-    text: `차트 동기화 · ${dateLabel}${clock} (${PERIOD_LABEL[target.period]})${suffix}`,
-  };
+  return null;
 }
 
 export function BrokersWindow({ id }: { id: WindowId }) {
@@ -168,8 +143,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const retry = day.retry;
   const showEmpty = !failed && day.mode !== "loading" && grid.times.length === 0;
   const showContent = !failed && grid.times.length > 0;
-  const activeGap = useMemo(() => gapContaining(gaps, displayCursor), [gaps, displayCursor]);
-  const syncStrip = buildSyncStrip(syncTarget, shownTime, displayCursor, showEmpty, activeGap, day.fetching);
+  const syncStrip = buildSyncStrip(syncTarget);
 
   return (
     <div className="br" data-testid="brokers-window" data-symbol={code} data-chart-sync={chartSync ? syncTarget.kind : undefined}>
@@ -228,6 +202,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       )}
       {showContent && view === "list" && (
         <ListView tracks={tracks} runsByCode={runsByCode} axis={axis} cursor={displayCursor} onCursor={setLocalCursor} />
+      )}
+      {showContent && view === "table" && (
+        <TableView snapshots={grid.snapshots} cursor={displayCursor} />
       )}
     </div>
   );

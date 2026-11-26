@@ -3,9 +3,9 @@ import type { FeedBroker } from "../../api/generated/FeedBroker";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { MINUS } from "../../lib/format";
-import { isForeignBroker } from "../brokers/board";
-import { snapshotAtOrBefore } from "../brokers/model";
 import { formatClock, formatQuantity, withSign } from "../market-window/format";
+import { isForeignBroker } from "./board";
+import { snapshotAtOrBefore } from "./model";
 
 const TOP_SLOTS = [0, 1, 2, 3, 4] as const;
 
@@ -39,12 +39,13 @@ function computeForeignNet(snapshot: FeedBrokers | null): number | null {
   return observed ? total : null;
 }
 
-interface Props {
+interface TableViewProps {
   readonly snapshots: readonly FeedBrokers[];
   readonly cursor: UnixSeconds | null;
+  readonly testIdPrefix?: string;
 }
 
-export function ReplayBrokerTable({ snapshots, cursor }: Props) {
+export function TableView({ snapshots, cursor, testIdPrefix = "broker" }: TableViewProps) {
   const active = useMemo(() => snapshotAtOrBefore(snapshots, cursor), [snapshots, cursor]);
   const firstTime = snapshots[0]?.t ?? null;
 
@@ -71,17 +72,17 @@ export function ReplayBrokerTable({ snapshots, cursor }: Props) {
   const foreignTone = foreignNet === null ? "none" : foreignNet >= 0 ? "up" : "down";
 
   return (
-    <div className="rp-brt" data-testid="replay-broker-table">
-      <div className="rp-brt-head" role="row">
-        <span className="rp-brt-side-sell">매도 상위 5</span>
-        <span className="rp-brt-num">증감</span>
-        <span className="rp-brt-num rp-brt-split">매도량</span>
-        <span className="rp-brt-side-buy">매수 상위 5</span>
-        <span className="rp-brt-num">증감</span>
-        <span className="rp-brt-num">매수량</span>
+    <div className="br-tbl" data-testid={`${testIdPrefix}-table`}>
+      <div className="br-tbl-head" role="row">
+        <span className="br-tbl-side-sell">매도 상위 5</span>
+        <span className="br-tbl-num">증감</span>
+        <span className="br-tbl-num br-tbl-split">매도량</span>
+        <span className="br-tbl-side-buy">매수 상위 5</span>
+        <span className="br-tbl-num">증감</span>
+        <span className="br-tbl-num">매수량</span>
       </div>
 
-      <div className="rp-brt-body rp-mono">
+      <div className="br-tbl-body">
         {TOP_SLOTS.map((slot) => {
           const sell = sells[slot] ?? null;
           const buy = buys[slot] ?? null;
@@ -89,72 +90,72 @@ export function ReplayBrokerTable({ snapshots, cursor }: Props) {
           const buyRatio = buy !== null && maxQty > 0 ? Math.min(100, (buy.qty / maxQty) * 100) : 0;
 
           return (
-            <div key={slot} className="rp-brt-row" data-testid="replay-broker-table-row">
-              <span className="rp-brt-name" data-testid="replay-broker-sell-name">
+            <div key={slot} className="br-tbl-row" data-testid={`${testIdPrefix}-table-row`}>
+              <span className="br-tbl-name" data-testid={`${testIdPrefix}-sell-name`}>
                 {sell ? (
                   <>
-                    <span className="rp-brt-label">{sell.name}</span>
+                    <span className="br-tbl-label">{sell.name}</span>
                     {isForeignBroker(sell.name) && <span className="br-fb">외</span>}
                   </>
                 ) : (
-                  <span className="rp-muted">-</span>
+                  <span className="br-tbl-empty">-</span>
                 )}
               </span>
-              <span className="rp-brt-chg" data-tone={sell && sell.qtyChange !== 0 ? "down" : "none"}>
+              <span className="br-tbl-chg" data-tone={sell && sell.qtyChange !== 0 ? "down" : "none"}>
                 {sell ? formatDelta(sell.qtyChange) : "-"}
               </span>
-              <span className="rp-brt-qty rp-brt-split" data-side="sell" data-testid="replay-broker-sell-qty">
-                {sellRatio > 0 && <i className="rp-brt-bar" style={{ width: `${sellRatio}%` }} aria-hidden />}
+              <span className="br-tbl-qty br-tbl-split" data-side="sell" data-testid={`${testIdPrefix}-sell-qty`}>
+                {sellRatio > 0 && <i className="br-tbl-bar" style={{ width: `${sellRatio}%` }} aria-hidden />}
                 <span>{sell ? formatQuantity(sell.qty) : "-"}</span>
               </span>
 
-              <span className="rp-brt-name" data-testid="replay-broker-buy-name">
+              <span className="br-tbl-name" data-testid={`${testIdPrefix}-buy-name`}>
                 {buy ? (
                   <>
-                    <span className="rp-brt-label">{buy.name}</span>
+                    <span className="br-tbl-label">{buy.name}</span>
                     {isForeignBroker(buy.name) && <span className="br-fb">외</span>}
                   </>
                 ) : (
-                  <span className="rp-muted">-</span>
+                  <span className="br-tbl-empty">-</span>
                 )}
               </span>
-              <span className="rp-brt-chg" data-tone={buy && buy.qtyChange !== 0 ? "up" : "none"}>
+              <span className="br-tbl-chg" data-tone={buy && buy.qtyChange !== 0 ? "up" : "none"}>
                 {buy ? formatDelta(buy.qtyChange) : "-"}
               </span>
-              <span className="rp-brt-qty" data-side="buy" data-testid="replay-broker-buy-qty">
-                {buyRatio > 0 && <i className="rp-brt-bar" style={{ width: `${buyRatio}%` }} aria-hidden />}
+              <span className="br-tbl-qty" data-side="buy" data-testid={`${testIdPrefix}-buy-qty`}>
+                {buyRatio > 0 && <i className="br-tbl-bar" style={{ width: `${buyRatio}%` }} aria-hidden />}
                 <span>{buy ? formatQuantity(buy.qty) : "-"}</span>
               </span>
             </div>
           );
         })}
 
-        <div className="rp-brt-totals" data-testid="replay-broker-table-totals">
-          <span className="rp-brt-tot-label">매도합계</span>
-          <span className="rp-brt-tot-val rp-brt-split" data-tone="down">
+        <div className="br-tbl-totals" data-testid={`${testIdPrefix}-table-totals`}>
+          <span className="br-tbl-tot-label">매도합계</span>
+          <span className="br-tbl-tot-val br-tbl-split" data-tone="down">
             {active ? formatQuantity(sellTotal) : "-"}
           </span>
-          <span className="rp-brt-tot-label">매수합계</span>
-          <span className="rp-brt-tot-val" data-tone="up">
+          <span className="br-tbl-tot-label">매수합계</span>
+          <span className="br-tbl-tot-val" data-tone="up">
             {active ? formatQuantity(buyTotal) : "-"}
           </span>
         </div>
       </div>
 
-      <div className="br-foot rp-mono">
-        <span data-testid="replay-broker-table-stamp">
+      <div className="br-foot">
+        <span data-testid={`${testIdPrefix}-table-stamp`}>
           {active !== null
             ? `기준 ${formatClock(active.t)}`
             : firstTime !== null
               ? `첫 스냅샷 ${formatClock(firstTime)}`
               : "스냅샷 없음"}
         </span>
-        <span className="rp-brt-foot-net" data-tone={netTone}>
+        <span className="br-tbl-foot-net" data-tone={netTone}>
           {`상위5 순매수 ${active ? signed(netTotal) : "-"}`}
         </span>
         <span
           className="br-foot-r"
-          data-testid="replay-broker-table-foreign"
+          data-testid={`${testIdPrefix}-table-foreign`}
           data-tone={foreignTone}
         >
           {`외국계 ${foreignNet === null ? "-" : signed(foreignNet)}`}

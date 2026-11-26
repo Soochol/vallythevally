@@ -13,8 +13,7 @@ export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "c
 const ROW =
   "group pointer-events-auto flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
   "bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
-const BTN = "grid size-[18px] place-items-center rounded-s text-xs text-text-2 hover:bg-raised hover:text-text disabled:opacity-40";
-const TOOL_FADE = "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100";
+const BTN = "grid size-[18px] place-items-center rounded-s text-xs text-text-2 hover:bg-raised hover:text-text";
 const FOLD_BUTTON = "pointer-events-auto flex min-h-6 w-max items-center gap-1 rounded-s px-1.5 text-xs text-text-2 hover:text-text bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
 const ROWS_BOX = "flex flex-col gap-px";
 
@@ -424,10 +423,11 @@ export class IndicatorLegend {
     const tools = el("span", "flex gap-px");
     tools.dataset.indicatorTools = "";
     const button = (icon: MarkupIcon, label: string, command: IndicatorCommand) => {
-      const b = el("button", `${BTN} ${TOOL_FADE}`);
+      const b = el("button", BTN);
       b.innerHTML = iconMarkup(icon);
       b.type = "button";
       b.dataset.chartControl = "";
+      b.dataset.fade = "";
       labelButton(b, label);
       b.dataset.indicatorCommand = command;
       if (command === "edit") b.dataset.indicatorEdit = id;
@@ -539,6 +539,8 @@ export class IndicatorLegend {
       r.collapse.setAttribute("aria-expanded", String(!collapsed));
       const collapseIcon = collapsed ? "up" : "down";
       if (r.collapse.dataset.icon !== collapseIcon) { r.collapse.innerHTML = iconMarkup(collapseIcon); r.collapse.dataset.icon = collapseIcon; }
+      if (collapsed) delete r.collapse.dataset.fade;
+      else r.collapse.dataset.fade = "";
       r.root.classList.toggle("indicator-collapsed", collapsed);
       if (interactive && collapsed) r.root.dataset.chartControl = "";
       else delete r.root.dataset.chartControl;
@@ -558,8 +560,8 @@ export class IndicatorLegend {
       const hidden = row.state === "hidden";
       const icon = hidden ? "eyeOff" : "eye";
       if (r.toggle.dataset.icon !== icon) { r.toggle.innerHTML = iconMarkup(icon); r.toggle.dataset.icon = icon; }
-      const toggleClass = hidden ? BTN : `${BTN} ${TOOL_FADE}`;
-      if (r.toggle.className !== toggleClass) r.toggle.className = toggleClass;
+      if (hidden) delete r.toggle.dataset.fade;
+      else r.toggle.dataset.fade = "";
       labelButton(r.toggle, hidden ? "보이기" : "숨기기");
       r.labelsDirty = true;
     }

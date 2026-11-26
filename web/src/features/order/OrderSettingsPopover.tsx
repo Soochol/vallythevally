@@ -4,7 +4,7 @@ import { CogIcon } from "../icons";
 import { Popover } from "../overlay/Popover";
 import { setLadderRate } from "../workspace/canvasCommands";
 import { Segmented } from "../market-window/parts";
-import { AMOUNT_PRESET_COUNT, KEEP_LAST_ENTRY_LABEL, ORDER_ROUTES, ORDER_SOUND_LABEL, type OrderSettings, routeLabel, withAmountPreset } from "./orderSettings";
+import { AMOUNT_PRESET_COUNT, KEEP_LAST_ENTRY_LABEL, LADDER_DENSITIES, LADDER_DENSITY_LABEL, ORDER_ROUTES, ORDER_SOUND_LABEL, type OrderSettings, routeLabel, withAmountPreset } from "./orderSettings";
 import { primeOrderSound } from "./orderSound";
 import { MOCK_KRX_ONLY_TEXT, REJECT_TEXT } from "./statusText";
 
@@ -73,6 +73,10 @@ export function OrderSettingsPopover({ settings, venue, mock, nxtNotTraded, hold
             <legend>주문 경로</legend>
             <Segmented label="주문 경로" options={ORDER_ROUTES} value={venue} disabled={mock ? MOCK_DISABLED_ROUTES : undefined} onChange={(next) => onChange({ ...settings, venue: next })} />
             {mock && <p className="od-route-note" data-testid="order-route-note">{MOCK_KRX_ONLY_TEXT}</p>}
+          </fieldset>
+          <fieldset title="10호가창에도 적용">
+            <legend>{LADDER_DENSITY_LABEL}</legend>
+            <Segmented label={LADDER_DENSITY_LABEL} options={LADDER_DENSITIES} value={settings.ladderDensity} onChange={(ladderDensity) => onChange({ ...settings, ladderDensity })} />
           </fieldset>
           <fieldset>
             <legend>금액 프리셋 (만원)</legend>

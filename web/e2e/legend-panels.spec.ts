@@ -371,4 +371,33 @@ test.describe("범례 패널 회귀", () => {
     await page.keyboard.press("Escape");
     await expect(row(page, "ma0")).toContainText("단순 9");
   });
+
+  test("보조지표 범례의 접기·이동 화살표는 평소 숨겨지고 호버 시 나타나며 접힌 상태에서는 펼치기 화살표만 보인다", async ({ page, scenario }) => {
+    await open(page, scenario);
+    const box = await cell(page).boundingBox();
+    if (!box) throw new Error("차트가 없습니다");
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.3);
+
+    const opacityOf = (id: string, command: string) =>
+      row(page, id).locator(`[data-indicator-command="${command}"]`).evaluate((node) => getComputedStyle(node).opacity);
+
+    for (const [id, command] of [["volume", "collapse"], ["volume", "up"], ["volume", "down"], ["rsi", "collapse"], ["rsi", "up"], ["rsi", "down"]] as const) {
+      await expect.poll(() => opacityOf(id, command)).toBe("0");
+    }
+
+    await row(page, "volume").hover();
+    await expect.poll(() => opacityOf("volume", "collapse")).toBe("1");
+    await expect.poll(() => opacityOf("volume", "up")).toBe("0.4");
+    await expect.poll(() => opacityOf("volume", "down")).toBe("1");
+
+    await row(page, "rsi").hover();
+    await expect.poll(() => opacityOf("rsi", "collapse")).toBe("1");
+    await expect.poll(() => opacityOf("rsi", "up")).toBe("1");
+    await expect.poll(() => opacityOf("rsi", "down")).toBe("0.4");
+
+    await row(page, "rsi").getByRole("button", { name: /패널 접기/ }).click();
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.3);
+    await expect.poll(() => opacityOf("rsi", "collapse")).toBe("1");
+    await expect.poll(() => opacityOf("rsi", "down")).toBe("0");
+  });
 });

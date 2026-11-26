@@ -149,3 +149,20 @@ test("360px 좁은 창에서도 상단 3줄이 래핑 없이 96px 고정이고 �
   await expectCompactHeaderHeight(page);
   expect(await label(page).evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
 });
+
+test("계좌 탭 호버는 배경만 바뀌고 밑줄은 열렸을 때만 표시된다", async ({ page, scenario }) => {
+  await openBand(page, scenario);
+  const holdings = tab(page, "holdings");
+  await holdings.hover();
+  const hovered = await holdings.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { bg: style.backgroundColor, shadow: style.boxShadow };
+  });
+  expect(hovered.bg).not.toBe("rgba(0, 0, 0, 0)");
+  expect(hovered.shadow).toBe("none");
+
+  await holdings.click();
+  await expect(holdings).toHaveAttribute("aria-expanded", "true");
+  const expandedShadow = await holdings.evaluate((element) => getComputedStyle(element).boxShadow);
+  expect(expandedShadow).not.toBe("none");
+});

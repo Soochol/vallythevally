@@ -1654,6 +1654,7 @@ impl TS for ChartFeed {
 pub enum BrokerView {
     Board,
     List,
+    Table,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

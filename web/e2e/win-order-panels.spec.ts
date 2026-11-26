@@ -231,6 +231,46 @@ test("설정 ⚙의 값이 창 설정으로 저장되고 새로고침해도 유�
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.some((w) => w.kind === "order")).toBe(true);
 });
 
+test("호가주문 설정에서 호가 간격을 바꾸면 행 높이·카드·전체호가 높이가 바뀌고 새로고침해도 유지된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const rowHeight = () => ladderRows(page).first().evaluate((row) => Math.round(row.getBoundingClientRect().height * 10) / 10);
+  const cardHeight = () => infoCard(page).evaluate((card) => Math.round(card.getBoundingClientRect().height * 10) / 10);
+
+  await expect(win(page)).toHaveAttribute("data-ladder-density", "normal");
+  await expect.poll(rowHeight).toBe(24);
+  await expect.poll(cardHeight).toBe(240);
+
+  await openSettings(page);
+  const density = page.getByTestId("order-settings").getByRole("group", { name: "호가 간격" });
+  await expect(density.getByRole("button", { name: "보통" })).toHaveAttribute("aria-pressed", "true");
+
+  await density.getByRole("button", { name: "촘촘" }).click();
+  await expect(win(page)).toHaveAttribute("data-ladder-density", "compact");
+  await expect.poll(rowHeight).toBe(20);
+  await expect.poll(cardHeight).toBe(200);
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "compact" });
+
+  await density.getByRole("button", { name: "여유" }).click();
+  await expect(win(page)).toHaveAttribute("data-ladder-density", "spacious");
+  await expect.poll(rowHeight).toBe(30);
+  await expect.poll(cardHeight).toBe(300);
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "spacious" });
+
+  await page.keyboard.press("Escape");
+  lastTrade(scenario, BASE);
+  await page.getByTestId("order-explorer").click();
+  await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.getByTestId("order-ladder").evaluate((el) => el.scrollHeight)).toBeGreaterThanOrEqual(fullTickCount * 30);
+
+  await page.reload();
+  await expect(win(page)).toBeVisible();
+  await expect(win(page)).toHaveAttribute("data-ladder-density", "spacious");
+  await expect.poll(rowHeight).toBe(30);
+  await expect.poll(cardHeight).toBe(300);
+});
+
 
 const openSettings = async (page: Page) => {
   await page.getByTestId("order-settings-button").click();

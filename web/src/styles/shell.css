@@ -1,5 +1,5 @@
 .minute-menu { display:flex; flex-direction:column; gap:var(--size-1); min-width:var(--size-140); }
-.minute-menu button { display:flex; align-items:center; gap:var(--size-8); height:var(--size-34); padding-inline:var(--size-8) var(--size-10); border-radius:var(--r-m); font-size:var(--fs-s); }
+.minute-menu button { display:flex; align-items:center; gap:var(--size-8); height:var(--size-34); padding-inline:var(--size-8) var(--size-10); border-radius:var(--r-m); font-size:var(--fs-s); transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .minute-menu button:hover,.minute-menu button:focus-visible { background:var(--hover); }
 .minute-menu button>svg { color:var(--accent); opacity:0; }
 .minute-menu button>span { flex:1; text-align:left; }
@@ -18,8 +18,8 @@
 .app-brand svg { color:var(--accent); }
 .mock-badge { flex:none; padding:0 var(--s2); border:0; border-radius:0; background:transparent; color:var(--warning); font-size:var(--fs-xs); font-weight:700; white-space:nowrap; }
 .desktop-topbar .topbar-search-slot { display:flex; flex:1 1 0; justify-content:center; min-width:var(--size-320); }
-.desktop-topbar .shell-search { display:flex; align-items:center; gap:var(--size-8); width:100%; max-width:var(--size-480); min-width:0; height:var(--ctl-m); padding-inline:var(--size-4); border:0; border-bottom:var(--size-1) solid var(--line-strong); border-radius:0; background:transparent; color:var(--text-2); font-size:var(--fs-s); text-align:left; }
-.desktop-topbar .shell-search:hover { border-bottom-color:var(--accent); }
+.desktop-topbar .shell-search { display:flex; align-items:center; gap:var(--size-8); width:100%; max-width:var(--size-480); min-width:0; height:var(--ctl-m); padding-inline:var(--size-4); border:0; border-bottom:var(--size-1) solid var(--line-strong); border-radius:0; background:transparent; color:var(--text-2); font-size:var(--fs-s); text-align:left; transition:background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.desktop-topbar .shell-search:hover { background:var(--hover); border-bottom-color:var(--line-strong); color:var(--text); }
 .shell-search svg { flex:none; }
 .shell-search-symbol { display:inline-flex; flex:0 1 auto; align-items:center; gap:var(--size-5); min-width:0; padding:0; border-radius:0; background:transparent; }
 .shell-search-symbol b { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--text); font-weight:600; }
