@@ -18,17 +18,17 @@ test.each(TOOLS.map((t) => [t.tool, t] as const))("%s의 점 수는 서버 표(�
   expect(countOf(tool.placement)).toEqual(TOOL_POINTS[id]);
 });
 
-test("서버 표는 도구 36개다", () => {
-  expect(Object.keys(TOOL_POINTS)).toHaveLength(36);
+test("서버 표는 도구 44개다", () => {
+  expect(Object.keys(TOOL_POINTS)).toHaveLength(44);
 });
 
 const FINAL_TABLE: readonly (readonly [Tool["group"], readonly (readonly [DrawingTool, string])[]])[] = [
-  ["line", [["trendline", "추세선"], ["ray", "반직선"], ["extline", "연장선"], ["hline", "수평선"], ["hray", "수평 반직선"], ["vline", "수직선"], ["crossline", "십자선"], ["channel", "평행 채널"], ["regression", "회귀 채널"], ["pitchfork", "피치포크"]]],
+  ["line", [["trendline", "추세선"], ["ray", "반직선"], ["extline", "연장선"], ["hline", "수평선"], ["hray", "수평 반직선"], ["vline", "수직선"], ["crossline", "십자선"], ["channel", "평행 채널"], ["disjointchannel", "분리 채널"], ["regression", "회귀 채널"], ["pitchfork", "피치포크"]]],
   ["fib", [["fib", "피보나치 되돌림"], ["fibext", "피보나치 확장"], ["fibfan", "피보나치 팬"], ["fibtime", "피보나치 시간대"], ["gannfan", "갠 팬"], ["gannbox", "갠 상자"]]],
-  ["shape", [["rect", "사각형"], ["ellipse", "타원"], ["triangle", "삼각형"], ["path", "꺾은선"], ["brush", "붓"]]],
-  ["note", [["text", "글자"], ["callout", "말풍선"], ["pricelabel", "가격 라벨"], ["arrow", "화살표"]]],
+  ["shape", [["rect", "사각형"], ["ellipse", "타원"], ["triangle", "삼각형"], ["curve", "곡선"], ["path", "꺾은선"], ["brush", "붓"], ["highlighter", "형광펜"]]],
+  ["note", [["text", "글자"], ["anchoredtext", "고정 글자"], ["callout", "말풍선"], ["pricelabel", "가격 라벨"], ["pricenote", "가격 노트"], ["arrow", "화살표"], ["arrowup", "매수 화살표"], ["arrowdown", "매도 화살표"]]],
   ["measure", [["pricerange", "가격 범위"], ["daterange", "날짜 범위"], ["datepricerange", "날짜·가격 범위"], ["long", "매수 포지션"], ["short", "매도 포지션"], ["avwap", "기준봉 VWAP"], ["volprofile", "구간 거래량 프로파일"]]],
-  ["pattern", [["elliott", "엘리엇 충격 파동"], ["elliottabc", "엘리엇 조정 파동"], ["xabcd", "XABCD 패턴"], ["headshoulders", "헤드앤숄더"]]],
+  ["pattern", [["elliott", "엘리엇 충격 파동"], ["elliottabc", "엘리엇 조정 파동"], ["xabcd", "XABCD 패턴"], ["headshoulders", "헤드앤숄더"], ["barspattern", "봉 패턴"]]],
 ];
 
 test("최종 도구 표는 서버 표의 도구를 한 번씩 담는다", () => {

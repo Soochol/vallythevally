@@ -1,6 +1,7 @@
 import type { Tool } from "../../toolSpec";
 import { channel } from "../channel";
 import { crossline } from "../crossline";
+import { disjointchannel } from "../disjointchannel";
 import { extline } from "../extline";
 import { hline } from "../hline";
 import { hray } from "../hray";
@@ -19,6 +20,7 @@ export const LINE_TOOLS: readonly Tool[] = [
   vline,
   crossline,
   channel,
+  disjointchannel,
   regression,
   pitchfork,
 ];

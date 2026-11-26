@@ -12,10 +12,10 @@ const drawing = (e: KeyLike) => matchDrawingHotkey(e, DEFAULT_KEYS);
 const keysOf = (o: HotkeyOverrides, id: string) => actualKeys(o)[id];
 
 describe("동작 목록", () => {
-  test("ID는 겹치지 않고 봉 주기 12개와 도구 36개를 모두 담는다", () => {
+  test("ID는 겹치지 않고 봉 주기 12개와 도구 44개를 모두 담는다", () => {
     expect(new Set(HOTKEY_ACTIONS.map((a) => a.id)).size).toBe(HOTKEY_ACTIONS.length);
     expect(PERIODS.every((p) => hotkeyAction(periodActionId(p)))).toBe(true);
-    expect(TOOLS).toHaveLength(36);
+    expect(TOOLS).toHaveLength(44);
     expect(TOOLS.every((t) => hotkeyAction(toolActionId(t.tool))?.group === "tool")).toBe(true);
   });
 

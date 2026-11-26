@@ -378,8 +378,10 @@ mod tests {
             (Fibfan, 2, 2), (Fibtime, 2, 2), (Gannfan, 2, 2), (Gannbox, 2, 2),
             (Triangle, 3, 3), (Datepricerange, 2, 2), (Avwap, 1, 1), (Volprofile, 2, 2),
             (Elliott, 6, 6), (Elliottabc, 4, 4), (Xabcd, 5, 5), (Headshoulders, 7, 7),
+            (Highlighter, 2, 1000), (Anchoredtext, 1, 1), (Curve, 3, 3), (Disjointchannel, 3, 3),
+            (Pricenote, 2, 2), (Arrowup, 1, 1), (Arrowdown, 1, 1), (Barspattern, 3, 3),
         ];
-        assert_eq!(table.len(), 36);
+        assert_eq!(table.len(), 44);
         for (tool, min, max) in table {
             let with = |n: usize| DrawingInput { tool, points: vec![DrawingPoint { t: UnixSeconds(0), price: 1.0 }; n], ..input("A", "005930", 0.0, DrawingScope::Symbol, 1) };
             for n in [min, max] {

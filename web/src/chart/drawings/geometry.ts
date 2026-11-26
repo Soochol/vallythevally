@@ -158,9 +158,9 @@ export type ShapeHit = "line" | "fill" | null;
 export function hitShape(s: Shape, p: ScreenPoint, pane: Pane, measure: TextMeasure = approxTextMeasure): ShapeHit {
   switch (s.kind) {
     case "segment":
-      return distanceToSegment(s.a, s.b, p, s.extend) <= LINE_HIT_PX ? "line" : null;
+      return distanceToSegment(s.a, s.b, p, s.extend) <= Math.max(LINE_HIT_PX, (s.stroke.pixelWidth ?? s.stroke.width) / 2) ? "line" : null;
     case "polyline":
-      if (s.stroke !== undefined && polylineDistance(s.points, s.closed, p) <= LINE_HIT_PX) return "line";
+      if (s.stroke !== undefined && polylineDistance(s.points, s.closed, p) <= Math.max(LINE_HIT_PX, (s.stroke.pixelWidth ?? s.stroke.width) / 2)) return "line";
       return s.fill?.on === true && insidePolygon(s.points, p) ? "fill" : null;
     case "rect": {
       const box = rectEdges(s.a, s.b, s.extend ?? "none", pane);

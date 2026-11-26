@@ -77,6 +77,7 @@ export interface ToolContext {
 export interface HandleSpec {
   at: ScreenPoint;
   move(points: readonly DrawingPoint[], to: DrawingPoint, ctx: ToolContext): DrawingPoint[];
+  moveStyle?(style: unknown, toScreen: ScreenPoint, ctx: ToolContext): unknown;
   constrain?: { rule: "angle45" | "square"; pivot: ScreenPoint };
 }
 
@@ -152,6 +153,9 @@ export interface ToolSpec<S> {
   bar: BarFields<S>;
   settings: SettingsTabs<S>;
   finalize?(placed: readonly DrawingPoint[], ctx: ToolContext): DrawingPoint[];
+  initStyle?(points: readonly DrawingPoint[], style: S, ctx: ToolContext): S;
+  moveBody?(d: ToolDrawing<S>, delta: ScreenPoint, ctx: ToolContext): { points: DrawingPoint[]; style: S };
+  anchors?(d: ToolDrawing<S>, ctx: ToolContext): ScreenPoint[];
   setPoint?(points: readonly DrawingPoint[], index: number, to: DrawingPoint, ctx: ToolContext): DrawingPoint[];
   shapes(d: ToolDrawing<S>, ctx: ToolContext): Shape[];
   handles(d: ToolDrawing<S>, ctx: ToolContext): HandleSpec[];
@@ -198,11 +202,14 @@ export function defineTool<S>(spec: ToolSpec<S>): Tool {
   const typed = (d: ToolDrawing<unknown>): ToolDrawing<S> => ({ ...d, style: parse(d.style) });
   const fields = (list: readonly StyleField<S>[] | undefined) => list?.map((f) => eraseField(f, parse));
   const maybe = <V>(lens: Lens<S, V> | undefined) => (lens === undefined ? undefined : eraseLens(lens, parse));
-  const { bar, settings, fineRange } = spec;
+  const { bar, settings, fineRange, initStyle, moveBody, anchors } = spec;
   return {
     ...spec,
     defaultStyle: () => spec.defaultStyle(),
     parseStyle: parse,
+    initStyle: initStyle && ((points, raw, ctx) => initStyle(points, parse(raw), ctx)),
+    moveBody: moveBody && ((d, delta, ctx) => moveBody(typed(d), delta, ctx)),
+    anchors: anchors && ((d, ctx) => anchors(typed(d), ctx)),
     bar: {
       lineColor: maybe(bar.lineColor),
       lineOpacity: maybe(bar.lineOpacity),

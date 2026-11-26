@@ -20,8 +20,8 @@ async function collapseDock(page: Page) {
 
 const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 const COLUMNS = 9;
-const ROWS = 4;
-const CELL = { left: 0.06, top: 0.22, width: 0.085, height: 0.12 };
+const ROWS = 5;
+const CELL = { left: 0.06, top: 0.2, width: 0.085, height: 0.1 };
 const SPOTS: readonly At[] = [[0.15, 0.75], [0.6, 0.25], [0.85, 0.6], [0.35, 0.4], [0.05, 0.05], [0.95, 0.95], [0.5, 0.6]];
 const menuGroups = () => [...toolsByGroup()].filter(([, tools]) => tools.length > 1);
 
@@ -119,9 +119,9 @@ const toolNames = (slice: Slice) => slice.placed.map(({ tool }) => tool.tool).so
 const sliceKeys = () => SLICES.flatMap((slice) => slice.placed.map(({ tool }) => toolKindKey(tool))).sort();
 const allKeys = () => [...new Set(TOOLS.map(toolKindKey))].sort();
 
-test("등록된 도구는 36개이고, 대표 시험 묶음이 모든 그룹·배치 형태를 빠짐없이 받는다", () => {
-  expect(TOOLS).toHaveLength(36);
-  expect(tools()).toHaveLength(36);
+test("등록된 도구는 44개이고, 대표 시험 묶음이 모든 그룹·배치 형태를 빠짐없이 받는다", () => {
+  expect(TOOLS).toHaveLength(44);
+  expect(tools()).toHaveLength(44);
   expect(sliceKeys()).toEqual(allKeys());
   expect(Math.max(...SLICES.map((slice) => slice.placed.length))).toBeLessThanOrEqual(SLICE_SIZE);
 });

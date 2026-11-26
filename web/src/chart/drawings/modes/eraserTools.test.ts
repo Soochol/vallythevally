@@ -41,8 +41,8 @@ const modeOf = (items: NonNullable<ReturnType<typeof bodyOf>>[]): ModeContext =>
 const FAR: ScreenPoint = { x: 790, y: 590 };
 
 describe("지우개는 모든 도구를 몸통을 눌러 지운다", () => {
-  test("도구는 36개다", () => {
-    expect(TOOLS).toHaveLength(36);
+  test("도구는 44개다", () => {
+    expect(TOOLS).toHaveLength(44);
   });
 
   test.each(TOOLS.map((tool) => [tool.tool, tool] as const))("%s", (_, tool) => {

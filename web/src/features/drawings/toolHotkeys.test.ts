@@ -4,8 +4,8 @@ import { TOOLS } from "../../chart/drawings/tools";
 import { toolTitle } from "./DrawingToolbar";
 
 describe("도구 제목의 단축키", () => {
-  test("도구는 36개다", () => {
-    expect(TOOLS).toHaveLength(36);
+  test("도구는 44개다", () => {
+    expect(TOOLS).toHaveLength(44);
   });
 
   test.each(TOOLS.map((tool) => [tool.tool, tool] as const))("%s 제목에는 빈 단축키 괄호가 없다", (_, tool) => {
