@@ -266,7 +266,10 @@ fn skipped_items_are_counted_and_a_cut_off_file_is_reported() {
         writer.write(&RawLine::Frame { recv_ms: at(9, 0, offset as i64), text: &frame.to_string() }).unwrap();
     }
     writer.flush().unwrap();
-    drop(writer);
+    let path = data.path().join("raw/20260720/0900-000.jsonl.zst");
+    let cut_off = std::fs::read(&path).unwrap();
+    writer.close().unwrap();
+    std::fs::write(&path, cut_off).unwrap();
     let report = build(data.path());
     assert_eq!((report.skipped.not_trade, report.skipped.unsupported), (1, 1));
     assert_eq!(report.read_errors.truncated_files, 1);
