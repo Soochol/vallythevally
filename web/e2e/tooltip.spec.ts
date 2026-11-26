@@ -166,3 +166,67 @@ test("마우스를 올린 동안 화면이 title을 바꾸거나 지우면 툴�
   await probe.hover();
   await expect(tip).toHaveCount(0);
 });
+
+test("차트 지표 범례의 이름과 단추에 마우스를 올리면 커스텀 툴팁만 하나 뜨고 조상에 기본 title이 남지 않는다", async ({ page }) => {
+  await open(page);
+  const row = cell(page).locator("[data-indicator-row]").first();
+  await expect(row).toBeVisible();
+  await expect(row).not.toHaveAttribute("title");
+  const name = row.locator("[data-indicator-edit]").first();
+  const label = (await name.textContent())?.trim() ?? "";
+  expect(label).not.toBe("");
+  const tip = page.getByRole("tooltip");
+
+  await name.hover();
+  await expect(tip).toHaveCount(1);
+  await expect(tip).toHaveText(label);
+  expect(await name.evaluate((node) => node.closest("[title]") !== null)).toBe(false);
+
+  const toggle = row.locator('[data-indicator-command="toggle"]');
+  await toggle.hover();
+  await expect(tip).toHaveCount(1);
+  await expect(tip).toHaveText("숨기기");
+  expect(await toggle.evaluate((node) => node.closest("[title]") !== null)).toBe(false);
+
+  await page.mouse.move(AWAY.x, AWAY.y);
+  await expect(tip).toHaveCount(0);
+  await expect(name).toHaveAttribute("title", label);
+  await expect(toggle).toHaveAttribute("title", "숨기기");
+});
+
+test("중첩된 title 요소의 자식에 마우스를 올리면 조상의 기본 title도 함께 숨겨 툴팁이 두 개 뜨지 않고 떠나면 둘 다 복원된다", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => {
+    const outer = document.createElement("div");
+    outer.dataset.testid = "nested-tip-outer";
+    outer.title = "바깥 안내";
+    outer.style.cssText = "position:fixed;left:40px;top:40px;padding:24px;z-index:2147483647";
+    const inner = document.createElement("button");
+    inner.type = "button";
+    inner.dataset.testid = "nested-tip-inner";
+    inner.title = "안쪽 안내";
+    inner.textContent = "단추";
+    outer.append(inner);
+    document.body.append(outer);
+  });
+  const outer = page.getByTestId("nested-tip-outer");
+  const inner = page.getByTestId("nested-tip-inner");
+  const tip = page.getByRole("tooltip");
+
+  await inner.hover();
+  await expect(tip).toHaveCount(1);
+  await expect(tip).toHaveText("안쪽 안내");
+  await expect(inner).not.toHaveAttribute("title");
+  await expect(outer).not.toHaveAttribute("title");
+
+  await outer.hover({ position: { x: 4, y: 4 } });
+  await expect(tip).toHaveCount(1);
+  await expect(tip).toHaveText("바깥 안내");
+  await expect(inner).toHaveAttribute("title", "안쪽 안내");
+  await expect(outer).not.toHaveAttribute("title");
+
+  await page.mouse.move(AWAY.x, AWAY.y);
+  await expect(tip).toHaveCount(0);
+  await expect(inner).toHaveAttribute("title", "안쪽 안내");
+  await expect(outer).toHaveAttribute("title", "바깥 안내");
+});

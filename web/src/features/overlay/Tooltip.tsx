@@ -5,6 +5,40 @@ interface HeldTitle { target: HTMLElement; text: string | null; restore: (() => 
 
 const dropTitle = (target: HTMLElement) => Element.prototype.removeAttribute.call(target, "title");
 
+function suppressElementTitle(target: HTMLElement, onChange?: (text: string | null) => void): () => void {
+  let text: string | null = target.getAttribute("title");
+  let mirrored: string | null = null;
+  const ownsDescription = () => target.getAttribute("aria-description") === mirrored;
+  const describe = (nextText: string | null) => {
+    if (!ownsDescription()) return;
+    mirrored = nextText && nextText !== target.innerText ? nextText : null;
+    if (mirrored) target.setAttribute("aria-description", mirrored); else target.removeAttribute("aria-description");
+  };
+  const follow = (nextText: string | null) => {
+    text = nextText;
+    describe(nextText);
+    onChange?.(nextText);
+  };
+  const takeTitle = () => {
+    const current = target.getAttribute("title");
+    dropTitle(target);
+    follow(current);
+  };
+  const watcher = new MutationObserver(() => { if (target.hasAttribute("title")) takeTitle(); });
+  target.removeAttribute = (name: string) => {
+    if (name.toLowerCase() === "title") follow(null);
+    Element.prototype.removeAttribute.call(target, name);
+  };
+  takeTitle();
+  watcher.observe(target, { attributes: true, attributeFilter: ["title"] });
+  return () => {
+    watcher.disconnect();
+    Reflect.deleteProperty(target, "removeAttribute");
+    if (mirrored !== null && ownsDescription()) target.removeAttribute("aria-description");
+    if (text !== null && !target.hasAttribute("title")) target.title = text;
+  };
+}
+
 export function TooltipHost() {
   const [tip, setTip] = useState<{ target: HTMLElement; text: string } | null>(null);
   const id = useId();
@@ -22,35 +56,17 @@ export function TooltipHost() {
     };
     const suppressNativeTip = (next: HeldTitle) => {
       const { target } = next;
-      let mirrored: string | null = null;
-      const ownsDescription = () => target.getAttribute("aria-description") === mirrored;
-      const describe = (text: string | null) => {
-        if (!ownsDescription()) return;
-        mirrored = text && text !== target.innerText ? text : null;
-        if (mirrored) target.setAttribute("aria-description", mirrored); else target.removeAttribute("aria-description");
-      };
-      const follow = (text: string | null) => {
-        next.text = text;
-        describe(text);
-        setTip((shown) => shown && (text ? { target, text } : null));
-      };
-      const takeTitle = () => {
-        const text = target.getAttribute("title");
-        dropTitle(target);
-        follow(text);
-      };
-      const watcher = new MutationObserver(() => { if (target.hasAttribute("title")) takeTitle(); });
-      target.removeAttribute = (name: string) => {
-        if (name.toLowerCase() === "title") follow(null);
-        Element.prototype.removeAttribute.call(target, name);
-      };
-      takeTitle();
-      watcher.observe(target, { attributes: true, attributeFilter: ["title"] });
+      const restores: (() => void)[] = [
+        suppressElementTitle(target, (text) => {
+          next.text = text;
+          setTip((shown) => shown && (text ? { target, text } : null));
+        }),
+      ];
+      for (let ancestor = target.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        if (ancestor.hasAttribute("title")) restores.push(suppressElementTitle(ancestor));
+      }
       next.restore = () => {
-        watcher.disconnect();
-        Reflect.deleteProperty(target, "removeAttribute");
-        if (mirrored !== null && ownsDescription()) target.removeAttribute("aria-description");
-        if (next.text !== null && !target.hasAttribute("title")) target.title = next.text;
+        for (const restore of restores) restore();
       };
     };
     const hold = (target: HTMLElement, byPointer: boolean) => {
