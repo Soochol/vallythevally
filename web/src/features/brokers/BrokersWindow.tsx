@@ -16,6 +16,7 @@ import { pageOfPath } from "../page-rail/pages";
 import { BoardView } from "./BoardView";
 import { DetailTable } from "./DetailTable";
 import { ListView } from "./ListView";
+import { TableView } from "./TableView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "./board";
 import { type BrokerSyncTarget, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
 import { formatMonthDay, kstDateOf, priceAt } from "./history";
@@ -25,6 +26,7 @@ import "./brokers.css";
 const VIEW_OPTIONS: readonly SegmentOption<BrokerView>[] = [
   { value: "board", label: "입체" },
   { value: "list", label: "거래원" },
+  { value: "table", label: "기본" },
 ];
 
 const CARD_OPTIONS: readonly SegmentOption<BrokerCards>[] = [
@@ -200,6 +202,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       )}
       {showContent && view === "list" && (
         <ListView tracks={tracks} runsByCode={runsByCode} axis={axis} cursor={displayCursor} onCursor={setLocalCursor} />
+      )}
+      {showContent && view === "table" && (
+        <TableView snapshots={grid.snapshots} cursor={displayCursor} />
       )}
     </div>
   );

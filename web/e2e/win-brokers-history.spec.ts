@@ -304,11 +304,16 @@ test("당일 자료가 없으면 직전 마감일을 배지와 함께 바로 보
   await expect(window_(page).getByTestId("brokers-price")).toHaveText("70,900");
   expect(jumpedDate).toBe("2026-11-06");
 
+  await window_(page).getByRole("group", { name: "보기" }).getByRole("button", { name: "기본", exact: true }).click();
+  await expect(window_(page).getByTestId("broker-table")).toBeVisible();
+  await expect(window_(page).getByTestId("broker-buy-qty").first()).toHaveText("8,000");
+  await expect(window_(page).getByTestId("brokers-fallback-date")).toHaveText("11-06 마감");
+
   await expect.poll(() => brokerFeeds(scenario).length).toBe(1);
   const request = brokerFeeds(scenario)[0]!;
   if (request.type !== "subscribe_feed") throw new Error("거래원 구독이 없습니다");
   scenario.live.emit({ type: "feed_brokers", sub: request.sub, brokers: kiwoom(at("09:32:00"), 300) });
 
-  await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+300");
+  await expect(window_(page).getByTestId("broker-buy-qty").first()).toHaveText("300");
   await expect(window_(page).getByTestId("brokers-fallback-date")).toHaveCount(0);
 });

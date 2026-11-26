@@ -61,7 +61,7 @@ const absent = (v: unknown): boolean => v === undefined || v === null;
 const isId = (v: unknown, maxBytes: number): v is string => typeof v === "string" && v.length > 0 && new TextEncoder().encode(v).length <= maxBytes;
 const isPin = (v: unknown): boolean => absent(v) || (typeof v === "string" && STOCK_CODE.test(v));
 const PINNABLE_KINDS: readonly WindowKind[] = ["trades", "book", "program", "brokers", "order", "premarket"];
-const BROKER_VIEWS: readonly unknown[] = ["board", "list"];
+const BROKER_VIEWS: readonly unknown[] = ["board", "list", "table"];
 const BROKER_CARDS: readonly unknown[] = ["bars", "both", "numbers"];
 const isBrokerView = (v: unknown): v is BrokerView => BROKER_VIEWS.includes(v);
 const isBrokerCards = (v: unknown): v is BrokerCards => BROKER_CARDS.includes(v);
