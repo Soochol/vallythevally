@@ -1307,6 +1307,81 @@ pub struct BookReplayBook {
     pub total_bid: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BookReplayResolution {
+    Tick,
+    MinuteOnly,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplaySpanSummary {
+    pub start_minute: u32,
+    pub book_rows: u32,
+    pub trade_rows: u32,
+    pub program_rows: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayMinuteCheckpoint {
+    pub minute: u32,
+    #[ts(type = "number | null")]
+    pub open: Option<u64>,
+    #[ts(type = "number | null")]
+    pub high: Option<u64>,
+    #[ts(type = "number | null")]
+    pub low: Option<u64>,
+    #[ts(type = "number | null")]
+    pub close: Option<u64>,
+    #[ts(type = "number")]
+    pub volume: u64,
+    #[ts(type = "number")]
+    pub cum_vol: u64,
+    #[ts(type = "number")]
+    pub cum_val: u64,
+    #[ts(type = "number")]
+    pub cum_buy_qty: u64,
+    #[ts(type = "number")]
+    pub cum_sell_qty: u64,
+    #[ts(type = "number | null")]
+    pub day_open: Option<u64>,
+    #[ts(type = "number | null")]
+    pub day_high: Option<u64>,
+    #[ts(type = "number | null")]
+    pub day_low: Option<u64>,
+    #[ts(type = "number | null")]
+    pub total_ask: Option<u64>,
+    #[ts(type = "number | null")]
+    pub total_bid: Option<u64>,
+    #[ts(type = "number | null")]
+    pub program_net_qty: Option<i64>,
+    #[ts(type = "number | null")]
+    pub program_net_amt_million: Option<i64>,
+    pub single_price: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayMeta {
+    pub symbol: SymbolCode,
+    pub date: String,
+    pub coverage: BookReplayCoverage,
+    pub resolution: BookReplayResolution,
+    pub span_minutes: u32,
+    #[ts(type = "[number, number][]")]
+    pub covered: Vec<[u32; 2]>,
+    #[ts(type = "[number, number][]")]
+    pub gaps_ms: Vec<[i64; 2]>,
+    pub spans: Vec<BookReplaySpanSummary>,
+    pub minutes: Vec<BookReplayMinuteCheckpoint>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

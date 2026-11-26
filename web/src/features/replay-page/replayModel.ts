@@ -1,6 +1,8 @@
 import type { Bar } from "../../api/generated/Bar";
 import type { BookReplayBook } from "../../api/generated/BookReplayBook";
 import type { BookReplayDay } from "../../api/generated/BookReplayDay";
+import type { BookReplayMeta } from "../../api/generated/BookReplayMeta";
+import type { BookReplaySpanSummary } from "../../api/generated/BookReplaySpanSummary";
 import type { ProgramSeriesPoint } from "../../api/generated/ProgramSeriesPoint";
 import type { QuoteTotalPoint } from "../../api/generated/QuoteTotalPoint";
 import type { SymbolKind } from "../../api/generated/SymbolKind";
@@ -83,6 +85,7 @@ export interface ReplaySession {
   readonly books: readonly BookReplayBook[];
   readonly frames: readonly ReplayFrame[];
   readonly minutes: readonly ReplayMinutePoint[];
+  readonly spans: readonly BookReplaySpanSummary[];
   readonly gapWindows: readonly ReplayWindow[];
   readonly singlePriceWindows: readonly ReplayWindow[];
 }
@@ -524,6 +527,144 @@ export function buildReplaySession(input: BuildSessionInput): ReplaySession {
     books: day.books,
     frames,
     minutes,
+    spans: [],
+    gapWindows: collapseMinuteWindows(gapMinutes),
+    singlePriceWindows: collapseMinuteWindows(singlePriceMinutes),
+  };
+}
+
+export interface BuildSessionFromMetaInput {
+  readonly meta: BookReplayMeta;
+  readonly bars1m: readonly Bar[];
+  readonly quoteTotals: readonly QuoteTotalPoint[];
+  readonly programPoints: readonly ProgramSeriesPoint[];
+  readonly previousClose: number | null;
+  readonly symbolKind: SymbolKind | null;
+}
+
+export function buildReplaySessionFromMeta(input: BuildSessionFromMetaInput): ReplaySession {
+  const { meta, bars1m, quoteTotals, programPoints, previousClose, symbolKind } = input;
+  const dayStartUnix = kstMidnightUnix(meta.date);
+
+  const firstCovered = meta.covered.length > 0 ? meta.covered[0]![0] : (meta.spans[0]?.startMinute ?? REGULAR_START_MIN);
+  const lastCovered = meta.covered.length > 0
+    ? meta.covered[meta.covered.length - 1]![1]
+    : (meta.spans.length > 0 ? meta.spans[meta.spans.length - 1]!.startMinute + meta.spanMinutes - 1 : REGULAR_END_MIN - 1);
+  const startMin = Math.min(REGULAR_START_MIN, firstCovered);
+  const endMin = Math.max(REGULAR_END_MIN - 1, lastCovered);
+  const sessionStartSec = startMin * 60;
+  const sessionEndSec = (endMin + 1) * 60;
+
+  const ckByMin = new Map(meta.minutes.map((m) => [m.minute, m]));
+  const barByMin = new Map<number, Bar>();
+  for (const bar of bars1m) {
+    if (kstDateOf(bar.t) !== meta.date) continue;
+    const m = kstMinuteOfUnix(bar.t, dayStartUnix);
+    if (m >= 0 && m < 1440) barByMin.set(m, bar);
+  }
+  const quoteTotalByMin = new Map<number, QuoteTotalPoint>();
+  for (const pt of quoteTotals) {
+    const m = kstMinuteOfUnix(pt.t, dayStartUnix);
+    if (m >= 0 && m < 1440) quoteTotalByMin.set(m, pt);
+  }
+  const programByMin = new Map<number, ProgramSeriesPoint>();
+  for (const pt of programPoints) {
+    const m = kstMinuteOfUnix(pt.t, dayStartUnix);
+    if (m >= 0 && m < 1440) programByMin.set(m, pt);
+  }
+
+  const minutes: ReplayMinutePoint[] = [];
+  const gapMinutes: number[] = [];
+  const singlePriceMinutes: number[] = [];
+  let coveredCount = 0;
+  let lastPrice: number | null = null;
+  let lastProgramQty: number | null = null;
+  let lastProgramAmt: number | null = null;
+  let lastCumVol = 0;
+  let lastCumVal = 0;
+  let lastStrength = 100;
+
+  for (let m = startMin; m <= endMin; m++) {
+    const covered = meta.covered.length === 0 ? false : isMinuteCovered(meta.covered, m);
+    const inGap = !covered && m >= firstCovered && m <= lastCovered;
+    if (covered) coveredCount += 1;
+    if (inGap) gapMinutes.push(m);
+
+    const ck = ckByMin.get(m);
+    const apiBar = barByMin.get(m);
+    const qt = quoteTotalByMin.get(m);
+    const prog = programByMin.get(m);
+
+    const open: number | null = ck?.open ?? apiBar?.o ?? lastPrice;
+    const high: number | null = ck?.high ?? apiBar?.h ?? lastPrice;
+    const low: number | null = ck?.low ?? apiBar?.l ?? lastPrice;
+    const close: number | null = ck?.close ?? apiBar?.c ?? lastPrice;
+    const volume = ck ? ck.volume : (apiBar?.v ?? 0);
+    if (close !== null) lastPrice = close;
+
+    if (ck !== undefined) {
+      lastCumVol = ck.cumVol + ck.volume;
+      lastCumVal = ck.cumVal + (close !== null ? close * ck.volume : 0);
+      if (ck.cumBuyQty > 0 || ck.cumSellQty > 0) {
+        lastStrength = ck.cumSellQty === 0 ? 300 : Math.min(500, (ck.cumBuyQty / ck.cumSellQty) * 100);
+      }
+      if (ck.programNetQty !== null) lastProgramQty = ck.programNetQty;
+      if (ck.programNetAmtMillion !== null) lastProgramAmt = ck.programNetAmtMillion;
+    }
+    if (prog !== undefined) {
+      lastProgramQty = prog.netBuyQty;
+      lastProgramAmt = prog.netBuyAmountMillionWon;
+    }
+
+    const singlePrice = !inGap && Boolean(ck?.singlePrice);
+    if (singlePrice) singlePriceMinutes.push(m);
+
+    const totalAsk = inGap ? null : (ck?.totalAsk ?? qt?.ask ?? null);
+    const totalBid = inGap ? null : (ck?.totalBid ?? qt?.bid ?? null);
+    const totalSum = totalAsk !== null && totalBid !== null ? totalAsk + totalBid : 0;
+    const obi = totalSum > 0 && totalAsk !== null && totalBid !== null ? ((totalBid - totalAsk) / totalSum) * 100 : null;
+    const vwap = lastCumVol > 0 ? lastCumVal / lastCumVol : close;
+
+    minutes.push({
+      minute: m,
+      sec: m * 60,
+      open,
+      high,
+      low,
+      close,
+      volume,
+      vwap,
+      totalAsk,
+      totalBid,
+      obi,
+      strength: covered ? lastStrength : null,
+      programNetQty: lastProgramQty,
+      programNetAmtMillion: lastProgramAmt,
+      inGap,
+      singlePrice,
+    });
+  }
+
+  const samplePrices = meta.minutes
+    .slice(0, 10)
+    .map((m) => m.close ?? m.open ?? 0)
+    .filter((p) => p > 0);
+  const rule = tickRuleOf(symbolKind, samplePrices.length > 0 ? samplePrices : (previousClose ? [previousClose] : []));
+  const totalRangeMinutes = Math.max(1, endMin - startMin + 1);
+  const coveragePct = Math.min(100, Math.round((coveredCount / totalRangeMinutes) * 1000) / 10);
+
+  return {
+    date: meta.date,
+    dayStartUnix,
+    sessionStartSec,
+    sessionEndSec,
+    previousClose,
+    coveragePct,
+    tickStepOf: (price: number) => tickSize(price, rule),
+    books: [],
+    frames: [],
+    minutes,
+    spans: meta.spans,
     gapWindows: collapseMinuteWindows(gapMinutes),
     singlePriceWindows: collapseMinuteWindows(singlePriceMinutes),
   };

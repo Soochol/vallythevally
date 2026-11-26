@@ -14,17 +14,19 @@ import { ReplayCharts } from "./ReplayCharts";
 import { type LoopRange, ReplayDeck, type TimelineZoom } from "./ReplayDeck";
 import { ReplayLadder } from "./ReplayLadder";
 import {
-  clampCursorSec,
-  computeLadderSnapshot,
+  type PlaybackMode,
+  ReplayEngine,
+  type ReplayEngineControlState,
+  type ReplayEngineFrame,
+  TICK_REPLAY_RATES,
+  TIME_REPLAY_SPEEDS,
+} from "./replayEngine";
+import {
   type DeltaMode,
-  filterRecentTrades,
   formatReplayClock,
   formatShortDay,
   formatSignedQty,
   formatWonCompact,
-  frameIndexAt,
-  REPLAY_SPEEDS,
-  stepTickSec,
 } from "./replayModel";
 import { ReplaySymbolDialog } from "./ReplaySymbolDialog";
 import { ReplayTapeAndBrokers } from "./ReplayTapeAndBrokers";
@@ -33,14 +35,7 @@ import "./replayPage.css";
 
 const DEFAULT_SYMBOL: SymbolCode = "005930";
 const MAX_VISIBLE_DATES = 6;
-const SPEED_BY_KEY: Readonly<Record<string, number>> = {
-  "1": REPLAY_SPEEDS[0],
-  "2": REPLAY_SPEEDS[1],
-  "3": REPLAY_SPEEDS[2],
-  "4": REPLAY_SPEEDS[3],
-  "5": REPLAY_SPEEDS[4],
-  "6": REPLAY_SPEEDS[5],
-};
+const DEFAULT_MODE: PlaybackMode = { kind: "time", speed: 1, skipIdleMs: null };
 
 function initialSymbol(param: string | null): SymbolCode {
   if (param && !isIndexCode(param)) return param;
@@ -49,6 +44,10 @@ function initialSymbol(param: string | null): SymbolCode {
   if (activeChart && !isIndexCode(activeChart.symbol)) return activeChart.symbol;
   const recent = useUiStore.getState().prefs.recentSymbols.find((code) => !isIndexCode(code));
   return recent ?? DEFAULT_SYMBOL;
+}
+
+function setText(el: HTMLElement | null, value: string): void {
+  if (el && el.textContent !== value) el.textContent = value;
 }
 
 export function ReplayPage() {
@@ -60,39 +59,93 @@ export function ReplayPage() {
   });
   const [symbolDialogOpen, setSymbolDialogOpen] = useState(false);
 
-  const [cursorSec, setCursorSec] = useState(9 * 3600);
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<number>(1);
   const [deltaMode, setDeltaMode] = useState<DeltaMode>("tick");
   const [tapeMinWon, setTapeMinWon] = useState(0);
   const [blindMode, setBlindMode] = useState(false);
   const [bookmarks, setBookmarks] = useState<readonly number[]>([]);
   const [loop, setLoop] = useState<LoopRange | null>(null);
   const [zoom, setZoom] = useState<TimelineZoom>("day");
+  const [control, setControl] = useState<ReplayEngineControlState>({
+    playing: false,
+    buffering: false,
+    mode: DEFAULT_MODE,
+    activeSecond: 9 * 3600,
+    loadedSpanCount: 0,
+  });
+
+  const headPriceRef = useRef<HTMLSpanElement>(null);
+  const headDiffRef = useRef<HTMLSpanElement>(null);
+  const headValRef = useRef<HTMLElement>(null);
 
   const palette = useCanvasPalette();
   const showToast = useSelectionStore((s) => s.showToast);
   const data = useReplayData(code, requestedDate);
   const session = data.session;
+  const replayMeta = data.replayMeta;
 
-  const sessionKey = session ? `${code}-${session.date}` : "";
-  const initializedKeyRef = useRef("");
+  const engine = useMemo(() => {
+    if (!session) return null;
+    return new ReplayEngine({ code, session, meta: replayMeta });
+  }, [code, session, replayMeta]);
 
   useEffect(() => {
-    if (!session || sessionKey === initializedKeyRef.current) return;
-    initializedKeyRef.current = sessionKey;
-    const firstFrameSec = session.frames[0]?.t ?? session.sessionStartSec;
-    setCursorSec(firstFrameSec);
-    setPlaying(false);
+    if (!engine) return;
     setBookmarks([]);
     setLoop(null);
-  }, [session, sessionKey]);
+    return () => {
+      engine.dispose();
+    };
+  }, [engine]);
+
+  useEffect(() => {
+    if (!engine) return;
+    return engine.subscribeControl(setControl);
+  }, [engine]);
+
+  useEffect(() => {
+    engine?.setDeltaMode(deltaMode);
+  }, [engine, deltaMode]);
+
+  useEffect(() => {
+    engine?.setTapeMinWon(tapeMinWon);
+  }, [engine, tapeMinWon]);
+
+  useEffect(() => {
+    engine?.setLoop(loop ? { aMs: loop.a * 1000, bMs: loop.b * 1000 } : null);
+  }, [engine, loop]);
+
+  useEffect(() => {
+    if (!engine || !session) return;
+    const prevClose = session.previousClose;
+    const applyHead = (frame: ReplayEngineFrame) => {
+      const p = frame.price;
+      const diff = p !== null && prevClose !== null && prevClose > 0 ? p - prevClose : null;
+      const rate = diff !== null && prevClose !== null && prevClose > 0 ? (diff / prevClose) * 100 : null;
+      const tone = diff === null ? "" : diff > 0 ? "rp-up" : diff < 0 ? "rp-down" : "";
+      if (headPriceRef.current) {
+        const cls = tone ? `rp-head-price ${tone}` : "rp-head-price";
+        if (headPriceRef.current.className !== cls) headPriceRef.current.className = cls;
+        setText(headPriceRef.current, p !== null ? formatPrice(p, false) : "-");
+      }
+      if (headDiffRef.current) {
+        if (diff !== null && rate !== null) {
+          headDiffRef.current.hidden = false;
+          const cls = tone ? `rp-head-diff ${tone}` : "rp-head-diff";
+          if (headDiffRef.current.className !== cls) headDiffRef.current.className = cls;
+          setText(headDiffRef.current, `${formatSignedQty(diff)} (${formatPercent(rate)})`);
+        } else {
+          headDiffRef.current.hidden = true;
+        }
+      }
+      setText(headValRef.current, formatWonCompact(frame.cumVal));
+    };
+    return engine.subscribeFrame(applyHead);
+  }, [engine, session]);
 
   const updateSymbol = useCallback(
     (nextCode: SymbolCode) => {
       setCode(nextCode);
       setRequestedDate(null);
-      setPlaying(false);
       setSearchParams({ symbol: nextCode }, { replace: true });
     },
     [setSearchParams],
@@ -101,55 +154,41 @@ export function ReplayPage() {
   const updateDate = useCallback(
     (nextDate: string) => {
       setRequestedDate(nextDate);
-      setPlaying(false);
       setSearchParams({ symbol: code, date: nextDate }, { replace: true });
     },
     [code, setSearchParams],
   );
 
-  const setClampedCursor = useCallback(
-    (sec: number) => {
-      if (!session) return;
-      setCursorSec(clampCursorSec(sec, session.sessionStartSec, session.sessionEndSec));
-    },
-    [session],
-  );
+  const scrubSec = useCallback((sec: number) => {
+    engine?.seekSec(sec);
+  }, [engine]);
 
   const togglePlay = useCallback(() => {
-    if (!session) return;
-    setPlaying((prev) => {
-      if (!prev && cursorSec >= session.sessionEndSec - 1) {
-        setCursorSec(session.frames[0]?.t ?? session.sessionStartSec);
-      }
-      return !prev;
-    });
-  }, [session, cursorSec]);
+    engine?.togglePlay();
+  }, [engine]);
 
-  const stepTick = useCallback(
-    (dir: -1 | 1) => {
-      if (!session) return;
-      setPlaying(false);
-      setCursorSec((prev) => stepTickSec(session.frames, prev, dir));
-    },
-    [session],
-  );
+  const stepTick = useCallback((dir: -1 | 1) => {
+    engine?.stepTick(dir);
+  }, [engine]);
 
-  const stepSec = useCallback(
-    (delta: number) => {
-      if (!session) return;
-      setCursorSec((prev) => clampCursorSec(prev + delta, session.sessionStartSec, session.sessionEndSec));
-    },
-    [session],
-  );
+  const stepSec = useCallback((delta: number) => {
+    engine?.stepSec(delta);
+  }, [engine]);
+
+  const changeMode = useCallback((next: PlaybackMode) => {
+    engine?.setMode(next);
+  }, [engine]);
 
   const addBookmark = useCallback(() => {
-    if (!session) return;
+    if (!engine) return;
+    const cursorSec = engine.getFrame().cursorMs / 1000;
     setBookmarks((prev) => [...prev, cursorSec]);
     showToast(`${formatReplayClock(cursorSec, false)}에 북마크를 추가했습니다`);
-  }, [session, cursorSec, showToast]);
+  }, [engine, showToast]);
 
   const toggleLoop = useCallback(() => {
-    if (!session) return;
+    if (!engine || !session) return;
+    const cursorSec = engine.getFrame().cursorMs / 1000;
     setLoop((prev) => {
       if (prev !== null) {
         showToast("A-B 구간 반복을 해제했습니다");
@@ -160,29 +199,7 @@ export function ReplayPage() {
       showToast(`A-B 루프 (${formatReplayClock(a, false)} ~ ${formatReplayClock(b, false)})`);
       return { a, b };
     });
-  }, [session, cursorSec, showToast]);
-
-  useEffect(() => {
-    if (!playing || !session) return;
-    let rafId = 0;
-    let lastTs = performance.now();
-    const tick = (now: number) => {
-      const dt = Math.min(0.15, (now - lastTs) / 1000);
-      lastTs = now;
-      setCursorSec((prev) => {
-        const next = prev + dt * speed;
-        if (loop && next >= loop.b) return loop.a;
-        if (next >= session.sessionEndSec - 0.1) {
-          setPlaying(false);
-          return session.sessionEndSec - 0.1;
-        }
-        return next;
-      });
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  }, [playing, session, speed, loop]);
+  }, [engine, session, showToast]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -195,7 +212,7 @@ export function ReplayPage() {
         setSymbolDialogOpen(true);
         return;
       }
-      if (!session) return;
+      if (!engine) return;
       if (event.key === " ") {
         event.preventDefault();
         togglePlay();
@@ -226,34 +243,38 @@ export function ReplayPage() {
       } else if (event.key === "h" || event.key === "H") {
         event.preventDefault();
         setBlindMode((prev) => !prev);
-      } else if (event.key in SPEED_BY_KEY) {
-        const nextSpeed = SPEED_BY_KEY[event.key]!;
-        setSpeed(nextSpeed);
-        showToast(`재생 배속 ${nextSpeed}x`);
+      } else if (event.key === "m" || event.key === "M") {
+        event.preventDefault();
+        const curMode = engine.getControlState().mode;
+        if (curMode.kind === "time") {
+          engine.setMode({ kind: "tick", rateHz: 5, filter: "all" });
+          showToast("틱 단위 재생 모드로 전환했습니다");
+        } else {
+          engine.setMode({ kind: "time", speed: 1, skipIdleMs: null });
+          showToast("시간 단위 재생 모드로 전환했습니다");
+        }
+      } else if (/^[1-7]$/.test(event.key)) {
+        const idx = Number(event.key) - 1;
+        const curMode = engine.getControlState().mode;
+        if (curMode.kind === "time" && idx < TIME_REPLAY_SPEEDS.length) {
+          const nextSpeed = TIME_REPLAY_SPEEDS[idx]!;
+          engine.setMode({ ...curMode, speed: nextSpeed });
+          showToast(`재생 배속 ${nextSpeed}x`);
+        } else if (curMode.kind === "tick" && idx < TICK_REPLAY_RATES.length) {
+          const nextRate = TICK_REPLAY_RATES[idx]!;
+          engine.setMode({ ...curMode, rateHz: nextRate });
+          showToast(`틱 재생 속도 ${nextRate}틱/s`);
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [session, symbolDialogOpen, togglePlay, stepTick, stepSec, addBookmark, toggleLoop, showToast]);
-
-  const frameIdx = useMemo(() => (session ? frameIndexAt(session.frames, cursorSec) : -1), [session, cursorSec]);
-  const currentFrame = session && frameIdx >= 0 ? (session.frames[frameIdx] ?? null) : null;
-  const ladderSnapshot = useMemo(
-    () => (session ? computeLadderSnapshot(session, frameIdx, deltaMode) : null),
-    [session, frameIdx, deltaMode],
-  );
-  const tradeSummary = useMemo(
-    () => (session ? filterRecentTrades(session.frames, frameIdx, tapeMinWon) : { rows: [], net1mQty: 0, whaleBuy: 0, whaleSell: 0 }),
-    [session, frameIdx, tapeMinWon],
-  );
+  }, [engine, symbolDialogOpen, togglePlay, stepTick, stepSec, addBookmark, toggleLoop, showToast]);
 
   const recentDates = useMemo(() => data.days.slice(-MAX_VISIBLE_DATES).reverse(), [data.days]);
   const symbolName = data.symbolInfo?.name ?? code;
-  const headPrice = currentFrame?.price ?? null;
   const prevClose = session?.previousClose ?? null;
-  const headDiff = headPrice !== null && prevClose !== null && prevClose > 0 ? headPrice - prevClose : null;
-  const headRate = headDiff !== null && prevClose !== null && prevClose > 0 ? (headDiff / prevClose) * 100 : null;
-  const headTone = headDiff === null ? "" : headDiff > 0 ? "rp-up" : headDiff < 0 ? "rp-down" : "";
+  const resolution = engine?.getResolution() ?? "minute_only";
 
   const body = (() => {
     if (data.publicMode) {
@@ -277,10 +298,11 @@ export function ReplayPage() {
     if (data.replayFailed) {
       return <ErrorState message="호가 복기 자료를 불러오지 못했습니다" retry={data.retryReplay} />;
     }
-    if (data.replayDay?.coverage === "symbol_not_collected") {
+    const coverage = data.replayMeta?.coverage ?? data.replayDay?.coverage;
+    if (coverage === "symbol_not_collected") {
       return <EmptyState title="이 종목은 수집 대상이 아닙니다" />;
     }
-    if (data.replayDay?.coverage === "day_not_collected" || !session || !ladderSnapshot) {
+    if (coverage === "day_not_collected" || !session || !engine) {
       return <EmptyState title="이 날의 수집 호가 자료가 없습니다" />;
     }
 
@@ -289,30 +311,28 @@ export function ReplayPage() {
         <div className="rp-workspace">
           <ReplayCharts
             session={session}
-            frame={currentFrame}
-            cursorSec={cursorSec}
+            engine={engine}
             blindMode={blindMode}
             bookmarks={bookmarks}
             palette={palette}
-            onScrub={setClampedCursor}
+            onScrub={scrubSec}
           />
           <ReplayLadder
-            snapshot={ladderSnapshot}
+            engine={engine}
             previousClose={session.previousClose}
             deltaMode={deltaMode}
             onDeltaMode={setDeltaMode}
           />
           <ReplayTapeAndBrokers
-            frame={currentFrame}
+            engine={engine}
             previousClose={session.previousClose}
             dayStartUnix={session.dayStartUnix}
-            cursorSec={cursorSec}
-            tradeSummary={tradeSummary}
+            activeSecond={control.activeSecond}
             tapeMinWon={tapeMinWon}
             onTapeMinWon={setTapeMinWon}
-            onJumpSec={(sec) => {
-              setPlaying(false);
-              setClampedCursor(sec);
+            onJumpMs={(ms) => {
+              engine.setPlaying(false);
+              engine.seekMs(ms);
             }}
             brokerDay={data.brokerDay}
             bars1m={data.bars1m}
@@ -321,10 +341,10 @@ export function ReplayPage() {
 
         <ReplayDeck
           session={session}
-          frame={currentFrame}
-          cursorSec={cursorSec}
-          playing={playing}
-          speed={speed}
+          engine={engine}
+          playing={control.playing}
+          buffering={control.buffering}
+          mode={control.mode}
           bookmarks={bookmarks}
           loop={loop}
           zoom={zoom}
@@ -332,11 +352,11 @@ export function ReplayPage() {
           onTogglePlay={togglePlay}
           onStepTick={stepTick}
           onStepSec={stepSec}
-          onSpeed={setSpeed}
+          onMode={changeMode}
           onAddBookmark={addBookmark}
           onToggleLoop={toggleLoop}
           onZoom={setZoom}
-          onScrub={setClampedCursor}
+          onScrub={scrubSec}
         />
       </div>
     );
@@ -376,24 +396,20 @@ export function ReplayPage() {
 
           {session && (
             <div className="rp-head-quote rp-mono">
-              <span className={`rp-head-price ${headTone}`} data-testid="replay-head-price">
-                {headPrice !== null ? formatPrice(headPrice, false) : "-"}
-              </span>
-              {headDiff !== null && headRate !== null && (
-                <span className={`rp-head-diff ${headTone}`} data-testid="replay-head-diff">
-                  {`${formatSignedQty(headDiff)} (${formatPercent(headRate)})`}
-                </span>
-              )}
+              <span ref={headPriceRef} className="rp-head-price" data-testid="replay-head-price">-</span>
+              <span ref={headDiffRef} className="rp-head-diff" data-testid="replay-head-diff" hidden />
               <div className="rp-head-meta">
                 <span>기준가 <b data-testid="replay-prev-close">{prevClose !== null ? formatPrice(prevClose, false) : "-"}</b></span>
-                <span>누적대금 <b>{currentFrame ? formatWonCompact(currentFrame.cumVal) : "-"}</b></span>
+                <span>누적대금 <b ref={headValRef}>-</b></span>
                 <span>커버리지 <b>{`${session.coveragePct.toFixed(1)}%`}</b></span>
               </div>
             </div>
           )}
 
           <div className="rp-context-right">
-            <span className="rp-badge-mini">통합 · 수집 호가</span>
+            <span className="rp-badge-mini" data-testid="replay-resolution-badge" data-resolution={resolution}>
+              {resolution === "tick" ? "통합 · 틱 복기" : "장중 1분 요약 · 마감 후 틱 복기"}
+            </span>
             {session && (
               <button
                 type="button"

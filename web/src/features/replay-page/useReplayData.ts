@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { fetchBarsPage, fetchJumpPage, jumpAsBarsPage } from "../../api/bars";
-import { useBookReplayAccess, useBookReplayDay, useBookReplayDays } from "../../api/bookReplay";
+import { useBookReplayAccess, useBookReplayDay, useBookReplayDays, useBookReplayMeta } from "../../api/bookReplay";
 import type { Bar } from "../../api/generated/Bar";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { fetchProgramSeries } from "../../api/microSeries";
@@ -15,6 +15,7 @@ import { dayBars, kstDateOf } from "../brokers/history";
 import { useBrokerDay } from "../brokers/useBrokerDay";
 import {
   buildReplaySession,
+  buildReplaySessionFromMeta,
   formatIsoDay,
   kstMidnightUnix,
   REGULAR_END_MIN,
@@ -49,7 +50,14 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
   const isoDate = activeDate ? formatIsoDay(activeDate) : null;
   const dayStartUnix = activeDate ? kstMidnightUnix(activeDate) : 0;
 
-  const replayDayQuery = useBookReplayDay(code, activeDate, { enabled: loadEnabled });
+  const metaQuery = useBookReplayMeta(code, activeDate, { enabled: loadEnabled, isToday });
+  const needsMinuteFallback =
+    loadEnabled &&
+    metaQuery.data !== undefined &&
+    metaQuery.data.coverage === "collected" &&
+    (metaQuery.data.resolution === "minute_only" || metaQuery.data.spans.length === 0);
+
+  const replayDayQuery = useBookReplayDay(code, activeDate, { enabled: needsMinuteFallback });
   const symbolInfo = useSymbolInfo(code).data;
 
   const dailyBarsQuery = useQuery({
@@ -126,6 +134,18 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
   const bars1m = bars1mQuery.data ?? EMPTY_BARS;
 
   const session: ReplaySession | null = useMemo(() => {
+    const meta = metaQuery.data;
+    if (!meta || meta.coverage !== "collected") return null;
+    if (meta.resolution === "tick" && meta.spans.length > 0) {
+      return buildReplaySessionFromMeta({
+        meta,
+        bars1m,
+        quoteTotals: quoteTotalsQuery.data?.points ?? [],
+        programPoints: programQuery.data?.points ?? [],
+        previousClose,
+        symbolKind: symbolInfo?.kind ?? null,
+      });
+    }
     const day = replayDayQuery.data;
     if (!day || day.coverage !== "collected") return null;
     return buildReplaySession({
@@ -136,7 +156,12 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
       previousClose,
       symbolKind: symbolInfo?.kind ?? null,
     });
-  }, [replayDayQuery.data, bars1m, quoteTotalsQuery.data, programQuery.data, previousClose, symbolInfo?.kind]);
+  }, [metaQuery.data, replayDayQuery.data, bars1m, quoteTotalsQuery.data, programQuery.data, previousClose, symbolInfo?.kind]);
+
+  const replayPending =
+    loadEnabled &&
+    (metaQuery.isPending || (needsMinuteFallback && replayDayQuery.isPending));
+  const replayFailed = metaQuery.isError || (needsMinuteFallback && replayDayQuery.isError);
 
   return {
     publicMode,
@@ -146,10 +171,14 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
     daysPending: daysQuery.isPending,
     activeDate,
     isToday,
+    replayMeta: metaQuery.data ?? null,
     replayDay: replayDayQuery.data ?? null,
-    replayPending: replayDayQuery.isPending && loadEnabled,
-    replayFailed: replayDayQuery.isError,
-    retryReplay: () => void replayDayQuery.refetch(),
+    replayPending,
+    replayFailed,
+    retryReplay: () => {
+      void metaQuery.refetch();
+      if (needsMinuteFallback) void replayDayQuery.refetch();
+    },
     symbolInfo,
     bars1m,
     brokerDay,

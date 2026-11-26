@@ -4,6 +4,7 @@ import { usePublicMode } from "../public-mode/serverMode";
 import type { BookReplayAccess } from "./generated/BookReplayAccess";
 import type { BookReplayDay } from "./generated/BookReplayDay";
 import type { BookReplayDays } from "./generated/BookReplayDays";
+import type { BookReplayMeta } from "./generated/BookReplayMeta";
 import type { SymbolCode } from "./generated/SymbolCode";
 import { getJson } from "./http";
 
@@ -48,6 +49,22 @@ export function useBookReplayDay(code: SymbolCode, date: string | null, options:
     queryFn: ({ signal }) => getJson<BookReplayDay>(`/api/symbols/${encodeURIComponent(code)}/book-replay?date=${date}`, signal),
     enabled: !publicMode && options.enabled && date !== null,
     staleTime: Infinity,
+    gcTime: GC_TIME_MS,
+    retry: false,
+  });
+}
+
+export function bookReplaySpanUrl(code: SymbolCode, date: string, startMinute: number): string {
+  return `/api/symbols/${encodeURIComponent(code)}/book-replay/span?date=${encodeURIComponent(date)}&startMinute=${startMinute}`;
+}
+
+export function useBookReplayMeta(code: SymbolCode, date: string | null, options: { readonly enabled: boolean; readonly isToday?: boolean }) {
+  const publicMode = usePublicMode();
+  return useQuery({
+    queryKey: ["book-replay", "meta", code, date],
+    queryFn: ({ signal }) => getJson<BookReplayMeta>(`/api/symbols/${encodeURIComponent(code)}/book-replay/meta?date=${date}`, signal),
+    enabled: !publicMode && options.enabled && date !== null,
+    staleTime: options.isToday ? TODAY_REFETCH_MS : Infinity,
     gcTime: GC_TIME_MS,
     retry: false,
   });

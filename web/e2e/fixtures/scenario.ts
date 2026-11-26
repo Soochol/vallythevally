@@ -303,6 +303,15 @@ export class Scenario {
   async fulfill(route: Route): Promise<void> {
     const reply = await this.respond(route.request());
     if (reply.status === 204) { await route.fulfill({ status: 204 }); return; }
+    if (reply.body instanceof Uint8Array) {
+      await route.fulfill({
+        status: reply.status ?? 200,
+        body: Buffer.from(reply.body),
+        contentType: "application/octet-stream",
+        headers: { date: new Date(this.now).toUTCString(), ...reply.headers },
+      });
+      return;
+    }
     await route.fulfill({ status: reply.status ?? 200, json: reply.body ?? null, headers: { date: new Date(this.now).toUTCString(), ...reply.headers } });
   }
   async respond(request: Request): Promise<FixtureReply> {
