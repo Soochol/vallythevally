@@ -107,3 +107,17 @@ test("setLayoutRows는 같은 모양 갱신에는 false, 모양·상태·줄 바
   expect(legend.setLayoutRows([{ ...row, state: "hidden" }], [{ id: row.id, slots: [] }])).toBe(true);
   expect(legend.setLayoutRows([{ ...row, state: "hidden" }], [{ id: row.id, slots: [] }])).toBe(false);
 });
+
+test("지표 범례 줄은 이름과 단추에만 title을 두고 줄 컨테이너에는 중복 title을 두지 않는다", () => {
+  const overlay = new FakeElement("div");
+  const legend = new IndicatorLegend(overlay as unknown as HTMLElement, () => {});
+  const ma = movingAverage(20);
+  legend.render([ma, VOLUME_PANE], []);
+  const rowsBox = legend.priceBox.children[1] as unknown as FakeElement;
+  const priceRow = rowsBox.children[0]!;
+  const panelRow = overlay.children[0]!;
+  expect(priceRow.title).toBe("");
+  expect(priceRow.children[1]!.title).toBe(ma.name);
+  expect(panelRow.title).toBe("");
+  expect(panelRow.children[1]!.title).toBe(VOLUME_PANE.name);
+});
