@@ -92,6 +92,7 @@ test("히트맵을 더하면 값이 보이고 기준을 바꾸면 그 기준으�
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "호가 잔량 히트맵 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "호가 잔량 히트맵 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const heatRow = page.locator("[data-indicator-row]").filter({ hasText: "호가 잔량 히트맵" });

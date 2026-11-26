@@ -78,7 +78,9 @@ test("1분봉에서 계층별 CVD와 프로그램 수급을 추가하고 실시�
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
@@ -163,6 +165,7 @@ test("수집 폴더 미설정과 일봉 전환 시 깔끔한 상태 문구를 �
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
@@ -249,7 +252,9 @@ test("60분봉에서 31일 초과 구간을 31일 이하 청크로 분할 조회
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
@@ -296,6 +301,7 @@ test("계층별 CVD 없이 프로그램 수급 비중을 켜면 0B trades를 구
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const programRow = page.locator("[data-indicator-row]").filter({ hasText: "프로그램 수급" });
@@ -371,7 +377,9 @@ test("계층별 CVD 마지막 활성 계층은 끌 수 없고 아래 프로그�
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
