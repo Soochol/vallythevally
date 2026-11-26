@@ -132,6 +132,7 @@ struct DailyClose {
     provisional: bool,
     close: Price,
     previous: Option<Price>,
+    traded_million_won: u64,
 }
 
 fn today_bar(batch: &SummaryBatch, code: &StockCode) -> Option<Bar> {
@@ -259,6 +260,7 @@ pub(super) fn screen(edition: &Edition, screen: &RunnableScreen, batch: &Summary
             matched_date: api::KstDate(matched_on),
             latest_bar_date: api::KstDate(daily.day),
             provisional: daily.provisional,
+            traded_million_won: Some(daily.traded_million_won),
             program_net_million_won,
             whale_net_million_won,
             vi_count,
@@ -364,12 +366,13 @@ fn daily_close(edition: &Edition, stock: &Stock<'_>, as_of: KstDate) -> Result<O
     let bars = edition.bars(ScreenPeriod::Day);
     let range = bars.range(stock.stored);
     let close = bars.column(BarField::Close);
+    let traded = bars.column(BarField::TradedValue);
     let stored_close = |from_end: usize| (range.len() > from_end).then(|| close.at(range.end - 1 - from_end) as u64).map(price_of).transpose();
     if let Some(today) = stock.today.filter(|bar| bar.volume > 0) {
-        return Ok(Some(DailyClose { day: as_of, provisional: true, close: price_of(today.close)?, previous: stored_close(0)? }));
+        return Ok(Some(DailyClose { day: as_of, provisional: true, close: price_of(today.close)?, previous: stored_close(0)?, traded_million_won: today.traded }));
     }
     let Some(&cell) = bars.cells(range.clone()).last() else { return Ok(None) };
-    Ok(Some(DailyClose { day: edition.calendar_days[cell as usize], provisional: false, close: price_of(close.at(range.end - 1) as u64)?, previous: stored_close(1)? }))
+    Ok(Some(DailyClose { day: edition.calendar_days[cell as usize], provisional: false, close: price_of(close.at(range.end - 1) as u64)?, previous: stored_close(1)?, traded_million_won: traded.at(range.end - 1) as u64 }))
 }
 
 fn change_rate(close: Price, previous: Price) -> f64 {

@@ -5,7 +5,7 @@ import type { ScreenerResult } from "../api/generated/ScreenerResult";
 import type { ScreenerStatus } from "../api/generated/ScreenerStatus";
 import { ApiRequestError } from "../api/http";
 import { runScreen } from "../api/screener";
-import { DEFAULT_SORT, isUpdating, type ResultSort } from "../lib/screener";
+import { DEFAULT_SORT, isUpdating, type ResultSort, type ScreenerExtraColumn } from "../lib/screener";
 
 interface CompletedRun {
   result: ScreenerResult;
@@ -29,7 +29,13 @@ interface ScreenerState {
   sort: ResultSort;
   storeVersion: number;
   seen: SeenStore | null;
+  extraColumns: readonly ScreenerExtraColumn[];
+  hiddenAutoColumns: readonly ScreenerExtraColumn[];
+  showBars: boolean;
   setSort(sort: ResultSort): void;
+  toggleColumn(column: ScreenerExtraColumn, autoShown: boolean): void;
+  resetColumns(): void;
+  setShowBars(show: boolean): void;
   run(screen: Screen): Promise<void>;
   seeStatus(status: ScreenerStatus): void;
 }
@@ -76,7 +82,28 @@ export const useScreenerStore = create<ScreenerState>()((set, get) => {
     sort: DEFAULT_SORT,
     storeVersion: 0,
     seen: null,
+    extraColumns: [],
+    hiddenAutoColumns: [],
+    showBars: true,
     setSort: (sort) => set({ sort }),
+    toggleColumn: (column, autoShown) =>
+      set((s) => {
+        const currentlyOn = autoShown ? !s.hiddenAutoColumns.includes(column) : s.extraColumns.includes(column);
+        if (autoShown) {
+          return {
+            hiddenAutoColumns: currentlyOn
+              ? [...s.hiddenAutoColumns, column]
+              : s.hiddenAutoColumns.filter((c) => c !== column),
+          };
+        }
+        return {
+          extraColumns: currentlyOn
+            ? s.extraColumns.filter((c) => c !== column)
+            : [...s.extraColumns, column],
+        };
+      }),
+    resetColumns: () => set({ extraColumns: [], hiddenAutoColumns: [], showBars: true }),
+    setShowBars: (showBars) => set({ showBars }),
     run: async (screen) => {
       const snapshot = structuredClone(screen);
       const key = screenKey(snapshot);

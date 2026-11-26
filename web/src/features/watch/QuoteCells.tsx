@@ -1,9 +1,18 @@
 import { useEffect, useRef } from "react";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
-import { direction, formatChange, formatPercent, formatPrice, formatVolume } from "../../lib/format";
+import {
+  direction,
+  formatChange,
+  formatMillionWonCompact,
+  formatPercent,
+  formatPrice,
+  formatSignedMillionWonCompact,
+  formatVolume,
+} from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
-import type { WatchColumn } from "../../lib/watchlist";
+import { isMicroWatchColumn, type WatchColumn } from "../../lib/watchlist";
+import { useWatchMicro, type WatchMicroEntry } from "../../stores/watchMicro";
 import { useWatchQuote } from "../../stores/watchQuote";
 import { DIRECTION_TEXT, RateBadge } from "../list/listRow";
 
@@ -17,16 +26,22 @@ export const quoteCellIds = (base: string, columns: readonly WatchColumn[]) => (
   labelledBy: [`${base}-name`, `${base}-kvi`, `${base}-nvi`, ...columns.map((c) => `${base}-${c}`), `${base}-expected`, `${base}-limited`].join(" "),
 });
 
-function cellText(column: WatchColumn, quote: Quote, isIndex: boolean): string {
+function cellText(column: WatchColumn, quote: Quote | undefined, micro: WatchMicroEntry, isIndex: boolean): string | null {
   switch (column) {
     case "price":
-      return formatPrice(quote.price, isIndex);
+      return quote && Number.isFinite(quote.price) ? formatPrice(quote.price, isIndex) : null;
     case "change":
-      return formatChange(quote.change, isIndex);
+      return quote && Number.isFinite(quote.change) ? formatChange(quote.change, isIndex) : null;
     case "changeRate":
-      return formatPercent(quote.changeRate);
+      return quote && Number.isFinite(quote.changeRate) ? formatPercent(quote.changeRate) : null;
+    case "tradedValue":
+      return quote?.tradedMillionWon !== undefined && Number.isFinite(quote.tradedMillionWon) ? formatMillionWonCompact(quote.tradedMillionWon) : null;
     case "volume":
-      return formatVolume(quote.volume);
+      return quote && Number.isFinite(quote.volume) ? formatVolume(quote.volume) : null;
+    case "program":
+      return micro.programNetMillionWon !== undefined && Number.isFinite(micro.programNetMillionWon) ? formatSignedMillionWonCompact(micro.programNetMillionWon) : null;
+    case "whale":
+      return micro.whaleNetMillionWon !== undefined && Number.isFinite(micro.whaleNetMillionWon) ? formatSignedMillionWonCompact(micro.whaleNetMillionWon) : null;
   }
 }
 
@@ -40,18 +55,35 @@ export function parseDurationMs(raw: string): number {
 }
 
 let tickDurationMs: number | undefined;
-const tickDuration = () => (tickDurationMs ??= parseDurationMs(getComputedStyle(document.documentElement).getPropertyValue("--dur")));
+
+function tickDuration(): number {
+  if (tickDurationMs !== undefined) return tickDurationMs;
+  const parsed = parseDurationMs(getComputedStyle(document.documentElement).getPropertyValue("--dur"));
+  if (parsed > 0) tickDurationMs = parsed;
+  return parsed;
+}
+
 const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function useTickColor(price: number | undefined) {
+function useTickColor(code: SymbolCode, price: number | undefined) {
   const element = useRef<HTMLSpanElement>(null);
-  const previous = useRef(price);
+  const previous = useRef<{ code: SymbolCode; price: number | undefined }>({ code, price });
   useEffect(() => {
     const before = previous.current;
-    previous.current = price;
-    if (before === undefined || price === undefined || price === before || reducedMotion()) return;
-    element.current?.animate([{ color: price > before ? "var(--up)" : "var(--down)" }, {}], { duration: tickDuration(), easing: "ease-out" });
-  }, [price]);
+    previous.current = { code, price };
+    if (before.code !== code) return;
+    if (before.price === undefined || price === undefined || !Number.isFinite(price) || !Number.isFinite(before.price) || price === before.price) return;
+    if (reducedMotion()) return;
+    const node = element.current;
+    if (!node) return;
+    for (const animation of node.getAnimations()) animation.cancel();
+    const duration = tickDuration();
+    if (duration <= 0) return;
+    const fromColor = getComputedStyle(document.documentElement).getPropertyValue(price > before.price ? "--up" : "--down").trim();
+    const toColor = getComputedStyle(node).color.trim();
+    if (!fromColor || !toColor) return;
+    node.animate([{ color: fromColor }, { color: toColor }], { duration, easing: "ease-out" });
+  }, [code, price]);
   return element;
 }
 
@@ -65,21 +97,22 @@ interface QuoteCellsProps {
 
 export function QuoteCells({ code, columns, ids }: QuoteCellsProps) {
   const { quote, limited } = useWatchQuote(code);
+  const needsMicro = columns.some(isMicroWatchColumn);
+  const micro = useWatchMicro(code, needsMicro);
   const isIndex = isIndexCode(code);
   const isExpected = quote?.source === "expected";
-  const priceTick = useTickColor(quote?.price);
+  const priceTick = useTickColor(code, quote?.price);
   const rowDirection = quote ? direction(quote.change) : "flat";
   const directionOnPrice = !limited && !columns.includes("changeRate") && !columns.includes("change");
-  const text = (column: WatchColumn) => (quote ? cellText(column, quote, isIndex) : null);
 
   return (
     <>
       {columns.map((column) => {
-        const value = text(column);
+        const value = cellText(column, quote, micro, isIndex);
         if (column === "price")
           return (
-            <span key={column} data-cell={column} className="flex min-w-0 flex-col items-end justify-center text-m leading-none">
-              <span ref={priceTick} className={`whitespace-nowrap text-right ${directionOnPrice ? DIRECTION_TEXT[rowDirection] : limited ? "text-text-2" : ""}`}>
+            <span key={column} data-cell={column} className="flex min-w-0 flex-col items-end justify-center text-b font-[500] leading-none">
+              <span ref={priceTick} className={`whitespace-nowrap text-right ${directionOnPrice ? DIRECTION_TEXT[rowDirection] : limited ? "text-text-2" : "text-text-price"}`}>
                 <span id={ids.column(column)}>{value ?? MISSING}</span>
                 {isExpected && <span aria-hidden="true" title="예상체결가">*</span>}
               </span>
@@ -87,12 +120,27 @@ export function QuoteCells({ code, columns, ids }: QuoteCellsProps) {
           );
         if (column === "changeRate")
           return value === null ? (
-            <span key={column} data-cell={column} className="text-right text-text-3"><span id={ids.column(column)}>{MISSING}</span></span>
+            <span key={column} data-cell={column} className="text-right text-xs text-text-3"><span id={ids.column(column)}>{MISSING}</span></span>
           ) : (
             <RateBadge key={column} cell={column} id={ids.column(column)} direction={rowDirection}>{value}</RateBadge>
           );
+        if (column === "change")
+          return (
+            <span key={column} data-cell={column} className={`whitespace-nowrap text-right text-xs ${value === null ? "text-text-3" : `font-[600] ${DIRECTION_TEXT[rowDirection]}`}`}>
+              <span id={ids.column(column)}>{value ?? MISSING}</span>
+            </span>
+          );
+        if (column === "program" || column === "whale") {
+          const raw = column === "program" ? micro.programNetMillionWon : micro.whaleNetMillionWon;
+          const tone = raw === undefined ? "text-text-3" : `font-[500] ${DIRECTION_TEXT[direction(raw)]}`;
+          return (
+            <span key={column} data-cell={column} className={`whitespace-nowrap text-right text-xs ${tone}`}>
+              <span id={ids.column(column)}>{value ?? MISSING}</span>
+            </span>
+          );
+        }
         return (
-          <span key={column} data-cell={column} className={`whitespace-nowrap text-right ${column === "change" && quote ? `text-s font-[600] ${DIRECTION_TEXT[rowDirection]}` : ""}`}>
+          <span key={column} data-cell={column} className={`whitespace-nowrap text-right text-xs ${value === null ? "text-text-3" : "text-text-2"}`}>
             <span id={ids.column(column)}>{value ?? MISSING}</span>
           </span>
         );

@@ -19,6 +19,7 @@ pub const MID_MIN_WON: u64 = 5_000_000;
 pub const LARGE_MIN_WON: u64 = 30_000_000;
 pub const WHALE_MIN_WON: u64 = 100_000_000;
 pub const MAX_RANGE_DAYS: i64 = 31;
+pub const MAX_WATCH_MICRO_SYMBOLS: usize = 200;
 
 const WON_PER_MILLION: f64 = 1_000_000.0;
 const MINUTES_PER_DAY: usize = 1440;
@@ -98,6 +99,27 @@ pub struct ProgramSeriesPage {
     pub period: api::Period,
     pub state: MicroSeriesState,
     pub points: Vec<ProgramSeriesPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WatchMicroRow {
+    pub symbol: SymbolCode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub program_net_million_won: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub whale_net_million_won: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WatchMicroPage {
+    pub state: MicroSeriesState,
+    pub rows: Vec<WatchMicroRow>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -523,6 +545,7 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/symbols/{code}/tick-cvd", get(tick_cvd))
         .route("/api/symbols/{code}/program-series", get(program_series))
+        .route("/api/watch/micro", get(watch_micro))
         .layer(Extension(cache))
 }
 
@@ -757,6 +780,125 @@ async fn program_series(
         state: MicroSeriesState::Ready,
         points,
     }))
+}
+
+fn parse_watch_symbols(q: &HashMap<String, String>) -> Result<Vec<StockCode>, ApiFailure> {
+    let raw = q.get("symbols").map(String::as_str).unwrap_or("");
+    let tokens: Vec<&str> = raw.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    if tokens.len() > MAX_WATCH_MICRO_SYMBOLS {
+        return Err(ApiFailure::bad_request(format!("종목은 한 번에 {MAX_WATCH_MICRO_SYMBOLS}개까지입니다")));
+    }
+    let mut stocks = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        let symbol = Symbol::parse(token).map_err(|e| ApiFailure::bad_request(format!("{e}: {token}")))?;
+        if let Symbol::Stock(stock) = symbol
+            && !stocks.contains(&stock)
+        {
+            stocks.push(stock);
+        }
+    }
+    Ok(stocks)
+}
+
+async fn latest_program_net(
+    st: &AppState,
+    cache: &MicroSeriesCache,
+    paths: CollectorPaths,
+    stock: StockCode,
+    today: KstDate,
+    today_str: &str,
+    now: KstTime,
+) -> Result<Option<f64>, ApiFailure> {
+    let (collected, minutes) = cache
+        .load_program_minutes(st, paths.clone(), stock, today, today_str, now)
+        .await
+        .map_err(|e| internal_error("수집 프로그램 자료를 읽지 못했습니다", e))?;
+    if collected {
+        return Ok(minutes.last().map(|bucket| bucket.net_buy_amount_million_won as f64));
+    }
+    let available = st
+        .collected
+        .program_days(paths.clone(), stock, now)
+        .await
+        .map_err(|e| internal_error("프로그램 수집 날짜 목록을 읽지 못했습니다", e))?;
+    let Some(latest_str) = available.last() else {
+        return Ok(None);
+    };
+    let Some(latest) = KstDate::parse_yyyymmdd(latest_str) else {
+        return Err(internal_error("프로그램 수집 날짜 형식이 잘못되었습니다", latest_str));
+    };
+    let latest_fmt = format_yyyymmdd(latest);
+    let (_, latest_minutes) = cache
+        .load_program_minutes(st, paths, stock, latest, &latest_fmt, now)
+        .await
+        .map_err(|e| internal_error("수집 프로그램 자료를 읽지 못했습니다", e))?;
+    Ok(latest_minutes.last().map(|bucket| bucket.net_buy_amount_million_won as f64))
+}
+
+async fn latest_whale_net(
+    st: &AppState,
+    cache: &MicroSeriesCache,
+    paths: CollectorPaths,
+    stock: StockCode,
+    today: KstDate,
+    today_str: &str,
+    now: KstTime,
+) -> Result<Option<f64>, ApiFailure> {
+    let (collected, minutes) = cache
+        .load_tick_minutes(st, paths.clone(), stock, today, today_str, now)
+        .await
+        .map_err(|e| internal_error("수집 체결 자료를 읽지 못했습니다", e))?;
+    if collected {
+        return Ok((!minutes.is_empty()).then(|| minutes.iter().map(|bucket| bucket.whale_won).sum::<i128>() as f64 / WON_PER_MILLION));
+    }
+    let available = st
+        .collected
+        .ticks_days(paths.clone(), stock, now)
+        .await
+        .map_err(|e| internal_error("체결 수집 날짜 목록을 읽지 못했습니다", e))?;
+    let Some(latest_str) = available.last() else {
+        return Ok(None);
+    };
+    let Some(latest) = KstDate::parse_yyyymmdd(latest_str) else {
+        return Err(internal_error("체결 수집 날짜 형식이 잘못되었습니다", latest_str));
+    };
+    let latest_fmt = format_yyyymmdd(latest);
+    let (_, latest_minutes) = cache
+        .load_tick_minutes(st, paths, stock, latest, &latest_fmt, now)
+        .await
+        .map_err(|e| internal_error("수집 체결 자료를 읽지 못했습니다", e))?;
+    Ok((!latest_minutes.is_empty()).then(|| latest_minutes.iter().map(|bucket| bucket.whale_won).sum::<i128>() as f64 / WON_PER_MILLION))
+}
+
+async fn watch_micro(
+    State(st): State<Arc<AppState>>,
+    Extension(cache): Extension<Arc<MicroSeriesCache>>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<WatchMicroPage>, ApiFailure> {
+    let stocks = parse_watch_symbols(&q)?;
+    let paths = st.collector_paths.snapshot();
+    if !paths_enabled(&paths) {
+        return Ok(Json(WatchMicroPage { state: MicroSeriesState::Disabled, rows: Vec::new() }));
+    }
+    if stocks.is_empty() {
+        return Ok(Json(WatchMicroPage { state: MicroSeriesState::Ready, rows: Vec::new() }));
+    }
+    let now = st.clock.now();
+    let today = now.kst_date();
+    let today_str = format_yyyymmdd(today);
+    let mut rows = Vec::with_capacity(stocks.len());
+    for stock in stocks {
+        let program_net_million_won = latest_program_net(&st, &cache, paths.clone(), stock, today, &today_str, now).await?;
+        let whale_net_million_won = latest_whale_net(&st, &cache, paths.clone(), stock, today, &today_str, now).await?;
+        if program_net_million_won.is_some() || whale_net_million_won.is_some() {
+            rows.push(WatchMicroRow {
+                symbol: symbol_code(stock),
+                program_net_million_won,
+                whale_net_million_won,
+            });
+        }
+    }
+    Ok(Json(WatchMicroPage { state: MicroSeriesState::Ready, rows }))
 }
 
 #[cfg(test)]

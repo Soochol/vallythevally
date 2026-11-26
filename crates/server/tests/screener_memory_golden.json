@@ -15,7 +15,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -24,7 +25,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -33,7 +35,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -42,7 +45,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -51,7 +55,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -60,7 +65,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -69,7 +75,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -90,7 +97,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -99,7 +107,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -108,7 +117,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       }
     ],
     "universe": 12
@@ -129,7 +139,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -138,7 +149,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -147,7 +159,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -156,7 +169,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -165,7 +179,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -174,7 +189,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -183,7 +199,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -192,7 +209,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       },
       {
         "changeRate": -10.0,
@@ -201,7 +219,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       }
     ],
     "universe": 12
@@ -222,7 +241,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 0.99,
@@ -231,7 +251,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": -3.11,
@@ -240,7 +261,8 @@
         "matchedDate": "2026-11-03",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       }
     ],
     "universe": 12
@@ -261,7 +283,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -270,7 +293,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 0.99,
@@ -279,7 +303,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       }
     ],
     "universe": 12
@@ -300,7 +325,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -321,7 +347,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -342,7 +369,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -351,7 +379,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -360,7 +389,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -369,7 +399,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -378,7 +409,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -387,7 +419,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -396,7 +429,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -405,7 +439,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -426,7 +461,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -435,7 +471,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -444,7 +481,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -453,7 +491,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -462,7 +501,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -471,7 +511,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -480,7 +521,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -489,7 +531,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -510,7 +553,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -519,7 +563,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -528,7 +573,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 0.99,
@@ -537,7 +583,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -546,7 +593,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -567,7 +615,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -576,7 +625,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": -3.11,
@@ -585,7 +635,8 @@
         "matchedDate": "2026-11-03",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       }
     ],
     "universe": 10
@@ -606,7 +657,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -615,7 +667,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -624,7 +677,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -633,7 +687,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -642,7 +697,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -651,7 +707,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -660,7 +717,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -681,7 +739,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -702,7 +761,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -711,7 +771,8 @@
         "matchedDate": "2026-10-01",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       }
     ],
     "universe": 12
@@ -732,7 +793,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -741,7 +803,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -750,7 +813,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -759,7 +823,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -768,7 +833,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 1.0,
@@ -777,7 +843,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       },
       {
         "changeRate": 0.99,
@@ -786,7 +853,8 @@
         "matchedDate": "2026-10-01",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       }
     ],
     "universe": 12
@@ -807,7 +875,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -816,7 +885,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -825,7 +895,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       }
     ],
     "universe": 12
@@ -857,7 +928,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -878,7 +950,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -910,7 +983,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -919,7 +993,8 @@
         "matchedDate": "2026-10-01",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -928,7 +1003,8 @@
         "matchedDate": "2026-10-01",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -949,7 +1025,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -958,7 +1035,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -967,7 +1045,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -976,7 +1055,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -985,7 +1065,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -994,7 +1075,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -1003,7 +1085,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -1024,7 +1107,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -1033,7 +1117,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       }
     ],
     "universe": 12
@@ -1054,7 +1139,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -1063,7 +1149,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1072,7 +1159,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -1081,7 +1169,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -1090,7 +1179,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -1099,7 +1189,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -1108,7 +1199,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -1117,7 +1209,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       },
       {
         "changeRate": -10.0,
@@ -1126,7 +1219,8 @@
         "matchedDate": "2026-11-02",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       }
     ],
     "universe": 12
@@ -1147,7 +1241,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -1156,7 +1251,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1165,7 +1261,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 1.0,
@@ -1174,7 +1271,8 @@
         "matchedDate": "2026-11-02",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       }
     ],
     "universe": 12
@@ -1195,7 +1293,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -1204,7 +1303,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       }
     ],
     "universe": 12
@@ -1225,7 +1325,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -1246,7 +1347,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -1267,7 +1369,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -1276,7 +1379,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1285,7 +1389,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -1294,7 +1399,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -1303,7 +1409,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -1312,7 +1419,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -1321,7 +1429,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -1330,7 +1439,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -1351,7 +1461,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -1360,7 +1471,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1369,7 +1481,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -1378,7 +1491,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -1387,7 +1501,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -1396,7 +1511,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -1405,7 +1521,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -1426,7 +1543,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -1435,7 +1553,8 @@
         "matchedDate": "2026-11-02",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 0.99,
@@ -1444,7 +1563,8 @@
         "matchedDate": "2026-11-02",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       }
     ],
     "universe": 12
@@ -1465,7 +1585,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -1474,7 +1595,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -1483,7 +1605,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": -10.0,
@@ -1492,7 +1615,8 @@
         "matchedDate": "2026-11-04",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -1501,7 +1625,8 @@
         "matchedDate": "2026-11-04",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": -3.11,
@@ -1510,7 +1635,8 @@
         "matchedDate": "2026-11-03",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1519,7 +1645,8 @@
         "matchedDate": "2026-11-03",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       },
       {
         "changeRate": 1.0,
@@ -1528,7 +1655,8 @@
         "matchedDate": "2026-10-30",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 0.99,
@@ -1537,7 +1665,8 @@
         "matchedDate": "2026-10-23",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       }
     ],
     "universe": 12
@@ -1558,7 +1687,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -1579,7 +1709,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       }
     ],
     "universe": 12
@@ -1600,7 +1731,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -10.0,
@@ -1609,7 +1741,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": -3.11,
@@ -1618,7 +1751,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1627,7 +1761,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -1636,7 +1771,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -1645,7 +1781,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -1654,7 +1791,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -1663,7 +1801,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -1672,7 +1811,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -1693,7 +1833,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -1714,7 +1855,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -10.0,
@@ -1723,7 +1865,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": -3.11,
@@ -1732,7 +1875,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1741,7 +1885,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 1.0,
@@ -1750,7 +1895,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -1759,7 +1905,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -1768,7 +1915,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 0.99,
@@ -1777,7 +1925,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": 1.0,
@@ -1786,7 +1935,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -1807,7 +1957,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       }
     ],
     "universe": 12
@@ -1828,7 +1979,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -1837,7 +1989,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 1.0,
@@ -1846,7 +1999,8 @@
         "matchedDate": "2026-10-26",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -1867,7 +2021,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300002",
         "provisional": true,
-        "symbol": "300002"
+        "symbol": "300002",
+        "tradedMillionWon": 64
       },
       {
         "changeRate": 1.0,
@@ -1876,7 +2031,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300004",
         "provisional": true,
-        "symbol": "300004"
+        "symbol": "300004",
+        "tradedMillionWon": 101095
       },
       {
         "changeRate": 0.99,
@@ -1885,7 +2041,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300008",
         "provisional": true,
-        "symbol": "300008"
+        "symbol": "300008",
+        "tradedMillionWon": 82305
       },
       {
         "changeRate": -3.11,
@@ -1894,7 +2051,8 @@
         "matchedDate": "2026-10-29",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       }
     ],
     "universe": 12
@@ -1915,7 +2073,8 @@
         "matchedDate": "2026-11-04",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -1924,7 +2083,8 @@
         "matchedDate": "2026-11-04",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": -3.11,
@@ -1933,7 +2093,8 @@
         "matchedDate": "2026-11-02",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       }
     ],
     "universe": 12
@@ -1954,7 +2115,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -1963,7 +2125,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -1972,7 +2135,8 @@
         "matchedDate": "2026-11-01",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       }
     ],
     "universe": 12
@@ -1993,7 +2157,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -2002,7 +2167,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -2011,7 +2177,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -2020,7 +2187,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": 1.0,
@@ -2029,7 +2197,8 @@
         "matchedDate": "2026-11-05",
         "name": "가상300011",
         "provisional": true,
-        "symbol": "300011"
+        "symbol": "300011",
+        "tradedMillionWon": 86630
       }
     ],
     "universe": 12
@@ -2050,7 +2219,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": -3.11,
@@ -2059,7 +2229,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       },
       {
         "changeRate": 1.0,
@@ -2068,7 +2239,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300006",
         "provisional": true,
-        "symbol": "300006"
+        "symbol": "300006",
+        "tradedMillionWon": 172590
       },
       {
         "changeRate": 1.0,
@@ -2077,7 +2249,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       }
     ],
     "universe": 12
@@ -2109,7 +2282,8 @@
         "matchedDate": "2026-11-09",
         "name": "가상300001",
         "provisional": true,
-        "symbol": "300001"
+        "symbol": "300001",
+        "tradedMillionWon": 6190200
       },
       {
         "changeRate": 1.0,
@@ -2118,7 +2292,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300005",
         "provisional": true,
-        "symbol": "300005"
+        "symbol": "300005",
+        "tradedMillionWon": 179175
       },
       {
         "changeRate": 1.0,
@@ -2127,7 +2302,8 @@
         "matchedDate": "2026-11-06",
         "name": "가상300007",
         "provisional": true,
-        "symbol": "300007"
+        "symbol": "300007",
+        "tradedMillionWon": 121615
       },
       {
         "changeRate": -3.11,
@@ -2136,7 +2312,8 @@
         "matchedDate": "2026-11-03",
         "name": "가상300003",
         "provisional": true,
-        "symbol": "300003"
+        "symbol": "300003",
+        "tradedMillionWon": 264775
       }
     ],
     "universe": 11

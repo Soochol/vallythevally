@@ -27,7 +27,7 @@ const MIN_SERIES_DISTANCE = 14;
 
 const WINDOW_AND_PICKED_SURFACES = surfacesOf("--bg", "--surface", "--raised", "--glass-solid", "--glass(--bg 위)");
 
-const TEXT_TOKENS = ["--text", "--text-2", "--up", "--down", "--danger", "--warning", "--success", "--accent"] as const;
+const TEXT_TOKENS = ["--text", "--text-name", "--text-price", "--text-2", "--up", "--down", "--danger", "--warning", "--success", "--accent"] as const;
 
 const CHIP_TEXT_PAIRS = [
   ["--on-data", "--up"],

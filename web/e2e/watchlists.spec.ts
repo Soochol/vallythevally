@@ -162,3 +162,27 @@ test("값 열을 모두 꺼도 패널의 기본 폭을 유지하고 종목 이�
   await expect(stock).toContainText("삼성전자");
   await expect(panel(page).getByRole("region", { name: "종목 정보" })).toHaveCount(0);
 });
+
+test("열 설정 팝오버로 프리셋·순서 변경과 수급(프로그램·고래) 열 표시를 바꾼다", async ({ scenario, page }) => {
+  await seed(scenario, [{ id: "L0", name: "기본", symbols: ["005930"] }]);
+  scenario.on("/api/watch/micro", () => ({
+    body: { state: "ready", rows: [{ symbol: "005930", programNetMillionWon: 350, whaleNetMillionWon: -120 }] },
+  }));
+  await page.goto("/?symbol=005930");
+  await panel(page).evaluate((el) => { el.style.flex = "none"; el.style.width = "480px"; });
+
+  await panel(page).getByRole("button", { name: "관심종목 열 설정" }).click();
+  const dialog = page.getByRole("dialog", { name: "관심종목 열 설정" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "수급 모니터링" }).click();
+  await expect(panel(page).locator('div[aria-hidden="true"]').filter({ hasText: /^종목/ }).locator("span")).toHaveText(["종목", "현재가", "등락률", "프로그램", "고래"]);
+  const stock = panel(page).locator('li[data-code="005930"]');
+  await expect(stock.locator('[data-cell="program"]')).toHaveText("+3.5억");
+  await expect(stock.locator('[data-cell="whale"]')).toHaveText("−1.2억");
+
+  await dialog.getByRole("button", { name: "프로그램 위로" }).click();
+  const uiSaved = page.waitForResponse((r) => r.request().method() === "PUT" && r.url().endsWith("/api/ui-state") && r.ok());
+  await page.keyboard.press("Escape");
+  await uiSaved;
+  await expect(panel(page).locator('div[aria-hidden="true"]').filter({ hasText: /^종목/ }).locator("span")).toHaveText(["종목", "현재가", "프로그램", "등락률", "고래"]);
+});

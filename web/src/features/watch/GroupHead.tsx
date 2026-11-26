@@ -9,10 +9,10 @@ import { ArrowIcon, ChevronIcon, CloseIcon, MoreIcon, PlusIcon } from "../icons"
 import { Menu, type MenuItem } from "../menu/Menu";
 import { type GroupNaming, setCollapsed } from "./groupActions";
 
-const GROUP_HEAD = "flex h-7 items-center gap-1.5 border-t border-line pl-1 pr-1.5 text-s font-[600] text-text-2 max-md:h-11 max-md:pl-3";
+const GROUP_HEAD = "sticky top-0 z-[1] flex h-7 items-center gap-1.5 border-y border-line pl-1 pr-1.5 text-xs font-[600] text-text-2 max-md:h-11 max-md:pl-3";
 type HeadDropState = "idle" | "accept" | "refuse";
 const HEAD_FILL: Record<HeadDropState, string> = {
-  idle: "bg-transparent",
+  idle: "bg-[color-mix(in_srgb,var(--raised)_55%,var(--surface))]",
   accept: "bg-accent-soft shadow-[inset_0_0_0_1px_var(--accent)]",
   refuse: "bg-[color-mix(in_srgb,var(--danger)_15%,transparent)] shadow-[inset_0_0_0_1px_var(--danger)]",
 };
@@ -26,7 +26,7 @@ export interface HeadDrop {
   drop(e: React.DragEvent): void;
 }
 
-const COUNT_BADGE = "flex-none rounded-full bg-white/10 px-1.5 text-xs font-[600] leading-4 text-text";
+const COUNT_BADGE = "flex-none rounded-full bg-[var(--hover)] px-1.5 text-xs font-[600] leading-4 text-text-2";
 
 function DropNote({ drop }: { drop: HeadDrop }) {
   return drop.note === null ? null : <span className="flex-none text-xs font-[600] text-danger">{drop.note}</span>;

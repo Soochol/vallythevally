@@ -64,9 +64,10 @@ test("객체가 아니면 기본값으로 연다", () => {
   expect(parseUiState([1, 2])).toEqual({ prefs: DEFAULT_UI_PREFS, extra: {} });
 });
 
-test("고른 열은 정해진 차례로 읽고, 겹치면 틀린 값으로 본다", () => {
+test("고른 열은 저장한 차례를 지키고, 겹치면 틀린 값으로 본다", () => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
-  expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["volume", "price"] }).prefs.watchColumns).toEqual(["price", "volume"]);
+  expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["volume", "price"] }).prefs.watchColumns).toEqual(["volume", "price"]);
+  expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["price", "tradedValue", "program", "whale"] }).prefs.watchColumns).toEqual(["price", "tradedValue", "program", "whale"]);
   expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: [] }).prefs.watchColumns).toEqual([]);
   expect(parseUiState({ lastLayoutId: null, theme: "dark", watchColumns: ["price", "price"] }).prefs.watchColumns).toEqual(DEFAULT_UI_PREFS.watchColumns);
 });

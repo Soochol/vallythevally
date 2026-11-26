@@ -2,7 +2,7 @@ import { type KeyboardEvent, type ReactNode, type RefObject, useLayoutEffect, us
 import { isTypingTarget } from "../../lib/typingTarget";
 import { Popover } from "../overlay/Popover";
 import type { Screen } from "../../api/generated/Screen";
-import { conditionSentence, EXCLUDE_LABEL, excludedInOrder, MARKET_LABEL, marketsInOrder, NO_CONDITIONS_SENTENCE } from "../../lib/screener";
+import { conditionSentence, EXCLUDE_LABEL, excludedInOrder, MARKET_LABEL, marketsInOrder, NO_CONDITIONS_SENTENCE, SCREENER_QUICK_PRESETS, type ScreenerQuickPreset } from "../../lib/screener";
 import type { MenuItem } from "../menu/Menu";
 import { ChevronIcon, CloseIcon, PenIcon, PlayIcon, SpinnerIcon, Icon, DRAWING_ICONS, PlusIcon, CopyIcon } from "../icons";
 import { ChangedBadge } from "./ChangedBadge";
@@ -11,7 +11,7 @@ import { SentenceFields } from "./SentenceFields";
 import { dropPendingOpen } from "./resultActions";
 import { type ChosenScreen, FIX_INVALID, type ScreenEditing, type ScreenEntry } from "./screenEditing";
 import { removeChosen } from "./useScreenEditing";
-import type { ScreenDraft } from "../screen-dialog/screenForm";
+import { draftOf, type ScreenDraft } from "../screen-dialog/screenForm";
 
 const KEEPS_DRAFT = "닫아도 편집 내용은 남습니다";
 const BLOCKED_HINT = "자료 상태를 확인한 뒤 실행하세요";
@@ -66,7 +66,7 @@ export function SentenceEditor({ screenEditing, chosen, entries, blocked, menu, 
       <RunButton running={running} disabled={blocked || running || busy || invalid} title={blocked ? BLOCKED_HINT : undefined} onRun={onRun} />
       {menu(screenItems)}
     </div>
-    <p data-screen-summary title={summary.full} className="-mt-1 truncate px-3 pb-2 text-s text-text-2">{summary.line}</p>
+    <p data-screen-summary title={summary.full} className="mx-2.5 mb-2 truncate rounded-s border border-line-subtle bg-[color-mix(in_srgb,var(--raised)_35%,transparent)] px-2 py-1 text-xs text-text-2">{summary.line}</p>
     {rename !== null && <Popover anchor={head} focusTarget={renameOpener} role="dialog" aria-label="조건식 이름 바꾸기" onClose={() => setRename(null)} className="p-3">
       <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); change((d) => ({ ...d, name: rename })); setRename(null); }}>
         <label className="text-s">조건식 이름<input autoFocus aria-label="조건식 이름" value={rename} onChange={(e) => setRename(e.target.value)} className="ui-field mt-1 w-full px-2" /></label>
@@ -135,6 +135,24 @@ function EditorWindow({ draft, section, opener, flagged, nameError, canSave, bus
       <input aria-label="조건식 이름" aria-invalid={nameError !== null} disabled={busy} autoComplete="off" value={draft.name} onChange={(e) => onChange((d) => ({ ...d, name: e.target.value }))} className="min-w-0 flex-1 rounded-m border border-transparent bg-transparent px-2 py-1 text-l font-semibold text-text outline-none hover:border-line focus:border-accent aria-invalid:border-danger" />
       <button type="button" className="icon-btn flex-none" aria-label="닫기" title="닫기 (Esc)" onClick={onClose}><CloseIcon /></button>
     </header>
+    <div role="group" aria-label="빠른 조건 프리셋" className="flex flex-none flex-wrap items-center gap-1 border-b border-line-subtle bg-[color-mix(in_srgb,var(--raised)_35%,transparent)] px-3 py-1.5">
+      <span className="mr-1 text-xs text-text-3">프리셋</span>
+      {SCREENER_QUICK_PRESETS.map((preset: ScreenerQuickPreset) => (
+        <button
+          key={preset.id}
+          type="button"
+          disabled={busy}
+          className="h-6 rounded-s bg-raised px-2 text-xs text-text-2 hover:bg-overlay hover:text-text disabled:opacity-40"
+          onClick={() => onChange((current) => {
+            const next = draftOf({ id: "", ...preset.screen });
+            const keepName = current.name.trim() !== "" && current.name.trim() !== "새 조건식" && !SCREENER_QUICK_PRESETS.some((p) => p.screen.name === current.name.trim());
+            return keepName ? { ...next, name: current.name } : next;
+          })}
+        >
+          {preset.label}
+        </button>
+      ))}
+    </div>
     <div ref={body} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto pt-3 outline-none">
       <SentenceFields draft={draft} locked={busy} onChange={onChange} />
     </div>

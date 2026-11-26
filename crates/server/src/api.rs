@@ -2071,6 +2071,9 @@ pub struct ScreenerRow {
     pub provisional: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "number", optional)]
+    pub traded_million_won: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number", optional)]
     pub program_net_million_won: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(type = "number", optional)]
@@ -3097,7 +3100,7 @@ mod tests {
             missing_summary: 3,
             universe: 3957,
             excluded: ScreenerExcluded { listed_too_short: 14, history_short: 120, unconfirmed: 2 },
-            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9), latest_bar_date: day(2026, 11, 10), provisional: true, program_net_million_won: None, whale_net_million_won: None, vi_count: None }],
+            rows: vec![ScreenerRow { symbol: SymbolCode("005930".into()), name: "삼성전자".into(), close: 193_400.0, change_rate: None, matched_date: day(2026, 11, 9), latest_bar_date: day(2026, 11, 10), provisional: true, traded_million_won: None, program_net_million_won: None, whale_net_million_won: None, vi_count: None }],
         };
         let result_json = json!({"asOf": "2026-11-10", "collectionStartedAt": 1, "collectionCompletedAt": 2, "missingSummary": 3, "universe": 3957, "excluded": {"listedTooShort": 14, "historyShort": 120, "unconfirmed": 2},
                                  "rows": [{"symbol": "005930", "name": "삼성전자", "close": 193_400.0, "changeRate": null, "matchedDate": "2026-11-09", "latestBarDate": "2026-11-10", "provisional": true}]});

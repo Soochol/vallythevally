@@ -139,8 +139,8 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
       onDrop={(e) => drag.drop(e, row, index)}
       onDragEnd={drag.end}
       onContextMenu={variant === "desktop" ? (e) => { e.preventDefault(); context(e.clientX, e.clientY); } : undefined}
-      className={`group relative ${listRowFill(active)} ${dragging ? "opacity-40" : ""} ${
-        dropBefore ? "shadow-[inset_0_2px_0_var(--accent)]" : index > 0 ? "shadow-[inset_0_1px_0_var(--line)]" : ""
+      className={`group relative ${listRowFill(active)} ${active ? "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-accent" : ""} ${dragging ? "opacity-40" : ""} ${
+        dropBefore ? "shadow-[inset_0_2px_0_var(--accent)]" : index > 0 ? "shadow-[inset_0_1px_0_var(--line-subtle)]" : ""
       }`}
     >
       <button

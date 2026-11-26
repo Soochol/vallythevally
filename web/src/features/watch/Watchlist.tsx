@@ -9,6 +9,7 @@ import {
   type DropTarget,
   rowKey,
   type WatchRowRef,
+  isMicroWatchColumn,
   MAX_WATCH_GROUPS,
   MAX_WATCHLIST_NAME,
   MAX_WATCHLISTS,
@@ -25,6 +26,7 @@ import type { WindowId } from "../../layout/kinds";
 import { quoteBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
+import { watchMicroBook } from "../../stores/watchMicro";
 import { chooseWatchlist, useWatchlistStore, useWindowWatchlist } from "../../stores/watchlist";
 import { ChevronIcon, CloseIcon, CopyIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
@@ -33,6 +35,7 @@ import { ListHead } from "../list/listRow";
 import { columnTemplate, fitColumns, type WatchVariant } from "./columns";
 import { GroupHead, type HeadDrop, REFUSAL_NOTE, UngroupedHead } from "./GroupHead";
 import { type GroupNaming, setCollapsed, startGroup } from "./groupActions";
+import { WatchColumnPicker } from "./WatchColumnPicker";
 import { type RowDrag, WatchRow } from "./WatchRow";
 import { createRowPreviewStore, useWatchKeys } from "./watchKeys";
 import { useFitted } from "../list/useFitted";
@@ -104,6 +107,7 @@ function WatchHead({ window, hidden, children, onNaming }: { window: WindowId | 
           <span className="flex-none text-s text-text-3">{list.symbols.length}종목</span>
           {offline && <span className="min-w-0 shrink-[8] truncate border-l border-line pl-2 text-xs text-text-3">저장된 목록 · 시세 없음</span>}
           <span className="flex-1" />
+          <WatchColumnPicker hidden={hidden} />
           <button
             type="button"
             className="inline-flex h-7 flex-none items-center gap-1 rounded-m pl-1.5 pr-[9px] text-s font-[600] text-text shadow-[inset_0_0_0_1px_var(--line-strong)] hover:bg-[var(--hover)] hover:shadow-[inset_0_0_0_1px_var(--accent)] max-md:h-9 max-md:pl-[9px] max-md:pr-3"
@@ -271,8 +275,11 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
   const template = useMemo(() => ({ gridTemplateColumns: columnTemplate(variant, columns) }), [variant, columns]);
   const sections = watchSections(list);
 
+  const needsMicro = columns.some(isMicroWatchColumn);
+
   useWatchKeys({ enabled: variant === "desktop" && sender !== null && onScreen, sender, list, collapsed, scroller, preview });
   useEffect(() => (onScreen ? quoteBook.lease(symbols) : undefined), [onScreen, symbols]);
+  useEffect(() => (onScreen && needsMicro ? watchMicroBook.lease(symbols) : undefined), [onScreen, needsMicro, symbols]);
 
   useEffect(() => {
     if (focusRow === null) return;

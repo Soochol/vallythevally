@@ -240,7 +240,83 @@ export function matchedDateText(screen: Screen, matchedDate: KstDate, asOf: KstD
   return { text: sameYear(matchedDate, asOf) ? month : `${matchedDate.slice(0, 4)}년 ${month}`, current: false };
 }
 
-export type ResultSortKey = "name" | "close" | "changeRate" | "matchedDate" | "programNetMillionWon" | "whaleNetMillionWon" | "viCount";
+export type ResultSortKey = "name" | "close" | "changeRate" | "tradedMillionWon" | "matchedDate" | "programNetMillionWon" | "whaleNetMillionWon" | "viCount";
+
+export type ScreenerExtraColumn = "tradedMillionWon" | "programNetMillionWon" | "whaleNetMillionWon" | "viCount" | "matchedDate";
+
+export const SCREENER_EXTRA_COLUMNS: readonly ScreenerExtraColumn[] = [
+  "tradedMillionWon",
+  "programNetMillionWon",
+  "whaleNetMillionWon",
+  "viCount",
+  "matchedDate",
+];
+
+export const SCREENER_COLUMN_LABEL: Record<ScreenerExtraColumn, string> = {
+  tradedMillionWon: "거래대금",
+  programNetMillionWon: "프로그램",
+  whaleNetMillionWon: "고래",
+  viCount: "VI",
+  matchedDate: "매칭일",
+};
+
+export interface ScreenerQuickPreset {
+  readonly id: string;
+  readonly label: string;
+  readonly screen: Omit<Screen, "id">;
+}
+
+export const SCREENER_QUICK_PRESETS: readonly ScreenerQuickPreset[] = [
+  {
+    id: "new-high-60",
+    label: "60일 신고가",
+    screen: {
+      name: "고가 60일 신고가",
+      markets: [],
+      exclude: ["etf", "spac", "managed", "trading_halted"],
+      conditions: [{ kind: "new_high", period: "D", recentBars: 5, field: "high", n: 60 }],
+    },
+  },
+  {
+    id: "volume-surge",
+    label: "거래 급증",
+    screen: {
+      name: "거래량 급증 + 100억",
+      markets: [],
+      exclude: ["etf", "spac", "managed", "trading_halted"],
+      conditions: [
+        { kind: "surge", period: "D", recentBars: 3, field: "volume", n: 20, times: 3 },
+        { kind: "value_range", period: "D", recentBars: 1, field: "traded_value", min: 10_000_000_000, max: null },
+      ],
+    },
+  },
+  {
+    id: "program-buy",
+    label: "프로그램 순매수",
+    screen: {
+      name: "프로그램 순매수 10억+",
+      markets: [],
+      exclude: ["etf", "spac", "managed", "trading_halted"],
+      conditions: [
+        { kind: "program_net_buy", days: 5, minMillionWon: 1000, maxMillionWon: null },
+        { kind: "new_high", period: "D", recentBars: 5, field: "high", n: 20 },
+      ],
+    },
+  },
+  {
+    id: "ma-bullish",
+    label: "이평 정배열",
+    screen: {
+      name: "정배열 + 시총 3000억",
+      markets: [],
+      exclude: ["etf", "spac", "managed", "trading_halted"],
+      conditions: [
+        { kind: "ma_alignment", period: "D", recentBars: 1, method: "sma", lengths: [5, 20, 60], order: "bullish" },
+        { kind: "market_cap", min: 300_000_000_000, max: null },
+      ],
+    },
+  },
+];
 
 export interface ResultSort {
   key: ResultSortKey;
@@ -253,6 +329,7 @@ const FIRST_DESCENDING: Record<ResultSortKey, boolean> = {
   name: false,
   close: true,
   changeRate: true,
+  tradedMillionWon: true,
   matchedDate: true,
   programNetMillionWon: true,
   whaleNetMillionWon: true,
@@ -268,6 +345,7 @@ const COMPARE: Record<ResultSortKey, (a: ScreenerRow, b: ScreenerRow) => number>
   name: (a, b) => a.name.localeCompare(b.name, "ko"),
   close: (a, b) => a.close - b.close,
   changeRate: (a, b) => (a.changeRate ?? 0) - (b.changeRate ?? 0),
+  tradedMillionWon: (a, b) => (a.tradedMillionWon ?? 0) - (b.tradedMillionWon ?? 0),
   matchedDate: (a, b) => byText(a.matchedDate, b.matchedDate),
   programNetMillionWon: (a, b) => (a.programNetMillionWon ?? 0) - (b.programNetMillionWon ?? 0),
   whaleNetMillionWon: (a, b) => (a.whaleNetMillionWon ?? 0) - (b.whaleNetMillionWon ?? 0),
@@ -276,6 +354,7 @@ const COMPARE: Record<ResultSortKey, (a: ScreenerRow, b: ScreenerRow) => number>
 
 const isMissing = (row: ScreenerRow, key: ResultSortKey): boolean => {
   if (key === "changeRate") return row.changeRate === null;
+  if (key === "tradedMillionWon") return row.tradedMillionWon === undefined;
   if (key === "programNetMillionWon") return row.programNetMillionWon === undefined;
   if (key === "whaleNetMillionWon") return row.whaleNetMillionWon === undefined;
   if (key === "viCount") return row.viCount === undefined;
