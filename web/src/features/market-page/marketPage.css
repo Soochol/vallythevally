@@ -41,7 +41,8 @@
   .mk-lines { min-height: var(--mk-flow-lines-body); }
   .mk-turnover-chart { min-height: var(--mk-turnover-body); }
   .mk-stock-panel { min-height: var(--mk-stocks-body); }
-  .mk-grid > section { grid-column: 1 / -1 !important; min-height: 0 !important; }
+  .mk-grid > section { grid-column: 1 / -1 !important; }
+  .mk-grid > [data-card="index"], .mk-grid > [data-card="flow"], .mk-grid > [data-card="sector"], .mk-grid > [data-card="turnover"], .mk-grid > [data-card="stocks"] { min-height: 0 !important; }
   .mk-grid > [data-card="sector"] { container-type: inline-size; }
   .mk-card .ui-skeleton { padding-block: 0; }
 }
