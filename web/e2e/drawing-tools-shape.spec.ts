@@ -111,7 +111,10 @@ test("꺾은선: 꼭짓점 사이에 차트를 확대하면 같은 화면 자리
   await page.mouse.click(a!.x, a!.y);
   await page.mouse.click(b!.x, b!.y);
   await page.mouse.move(far!.x, far!.y);
-  for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(150); }
+  for (let i = 0; i < 3; i++) {
+    await page.mouse.wheel(0, -300);
+    await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  }
   await page.mouse.click(b!.x + 1, b!.y);
   await page.mouse.click(c!.x, c!.y);
   await page.mouse.dblclick(c!.x, c!.y);

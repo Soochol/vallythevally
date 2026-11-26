@@ -1182,3 +1182,77 @@ test.describe("시간외 종가 잔량", () => {
     });
   });
 });
+
+test.describe("10호가 창 높이 축소", () => {
+  const BOOK_BASE = 70_000;
+  const LADDER_ROW_HEIGHT = 24;
+  const FULL_LADDER_ROWS = 20;
+
+  const bookFitSnapshot = (): OrderBook => ({
+    symbol: CODE,
+    asks: Array.from({ length: 10 }, (_, index) => ({ price: BOOK_BASE + 100 * (index + 1), quantity: 10 + index })),
+    bids: Array.from({ length: 10 }, (_, index) => ({ price: BOOK_BASE - 100 * index, quantity: 20 + index })),
+    totalAskQuantity: 1000,
+    totalBidQuantity: 3000,
+    afterHoursAskQuantity: null,
+    afterHoursBidQuantity: null,
+    bookTime: null,
+    expected: null,
+  });
+
+  async function openFitBookWindow(page: Page, scenario: Scenario) {
+    const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+    const chart: LayoutWindow = { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS };
+    const windows: LayoutWindow[] = [chart, ...layout.windows.filter((window) => window.kind !== "chart"), { id: "book", link: null, kind: "book" }];
+    scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/fundamentals`, { body: { symbol: CODE, upperLimit: 91000, lowerLimit: 49000, ...FUNDAMENTAL_FIGURES } });
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/order-book`, { body: bookFitSnapshot() });
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/trades`, { body: { symbol: CODE, venue: "combined", trades: [], skippedRows: 0 } });
+    pinQuote(scenario, CODE, BOOK_BASE, 1000);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/");
+    await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+    await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+    await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(FULL_LADDER_ROWS);
+  }
+
+  const bookGroup = (page: Page) => page.locator("[data-dock-group]").filter({ has: page.getByTestId("book-window") });
+  const setBookGroupHeight = (page: Page, height: number | null) =>
+    bookGroup(page).evaluate((group, value) => {
+      group.dataset.originalStyle ??= group.getAttribute("style") ?? "";
+      group.setAttribute("style", value === null ? group.dataset.originalStyle : `${group.dataset.originalStyle};flex:none;height:${value}px`);
+    }, height);
+  const ladderHeight = (page: Page) => page.locator(".bk-ladder").evaluate((ladder) => ladder.clientHeight);
+  const expectedRowsPerSide = (ladderHeightPx: number) => Math.min(10, Math.max(2, Math.floor((ladderHeightPx - 12) / (2 * LADDER_ROW_HEIGHT))));
+  const ladderFit = (page: Page) =>
+    page.getByTestId("book-window").evaluate((el) => {
+      const frame = el.getBoundingClientRect();
+      const rows = [...el.querySelectorAll<HTMLElement>(".mw-lr")];
+      const outside = rows.filter((row) => {
+        const box = row.getBoundingClientRect();
+        return box.top < frame.top - 0.5 || box.bottom > frame.bottom + 0.5 || box.bottom > el.querySelector(".bk-ladder")!.getBoundingClientRect().bottom + 0.5;
+      }).length;
+      return { total: rows.length, asks: rows.filter((row) => row.dataset.side === "ask").length, bids: rows.filter((row) => row.dataset.side === "bid").length, outside };
+    });
+
+  test("10호가 창 높이가 모자라면 매도·매수 단수를 같이 줄인다", async ({ page, scenario }) => {
+    await openFitBookWindow(page, scenario);
+    await setBookGroupHeight(page, FULL_LADDER_ROWS * LADDER_ROW_HEIGHT - 3 * LADDER_ROW_HEIGHT);
+    await expect.poll(async () => (await ladderFit(page)).total).toBeLessThan(FULL_LADDER_ROWS);
+    const shownPerSide: number[] = [];
+    for (const height of [420, 360, 300]) {
+      await setBookGroupHeight(page, height);
+      await expect.poll(async () => (await ladderFit(page)).asks, { message: `${height}px` }).toBe(expectedRowsPerSide(await ladderHeight(page)));
+      const fit = await ladderFit(page);
+      const expected = expectedRowsPerSide(await ladderHeight(page));
+      expect(fit, `${height}px 사다리 ${await ladderHeight(page)}px`).toEqual({ total: 2 * expected, asks: expected, bids: expected, outside: 0 });
+      shownPerSide.push(expected);
+    }
+    expect(new Set(shownPerSide).size, `높이마다 단수 ${shownPerSide}`).toBe(shownPerSide.length);
+    expect(shownPerSide).toEqual([...shownPerSide].sort((a, b) => b - a));
+
+    await setBookGroupHeight(page, null);
+    await expect(page.getByTestId("price-ladder").locator(".mw-lr")).toHaveCount(FULL_LADDER_ROWS);
+    expect(await ladderFit(page)).toEqual({ total: FULL_LADDER_ROWS, asks: 10, bids: 10, outside: 0 });
+  });
+});

@@ -11,7 +11,7 @@
 - 대상을 그룹(한 그룹 4개 이하)으로 나누고 그룹마다 `test`를 만든다. 파일 최상위 `for` 안에서 `test(...)`를 호출한다.
 - 그룹 목록을 합치면 전체 목록과 같다는 빠짐없음 시험을 함께 둔다. 대상이 늘어도 그룹에서 빠지면 이 시험이 실패한다.
 
-예는 [`web/e2e/drawing-tools-all.spec.ts`](../web/e2e/drawing-tools-all.spec.ts)다. `SLICES`의 `slice`마다 `test(\`모든 도구 ${slice.name}: …\`)`를 만들고, 빠짐없음 시험이 `TOOLS` 길이와 `SLICES.flatMap(toolNames).sort()`가 `TOOLS`와 같은지, 한 묶음이 `SLICE_SIZE`를 넘지 않는지 확인한다.
+예는 [`web/e2e/drawing-tools-all.spec.ts`](../web/e2e/drawing-tools-all.spec.ts)다. `SLICES`의 `slice`마다 `test(\`모든 도구 ${slice.name}: …\`)`를 만들고, 빠짐없음 시험이 `TOOLS` 36개와 모든 그룹·배치 형태를 `SLICES`가 빠짐없이 담는지, 한 묶음이 `SLICE_SIZE`를 넘지 않는지 확인한다.
 
 ## 시간 예산은 30초다
 

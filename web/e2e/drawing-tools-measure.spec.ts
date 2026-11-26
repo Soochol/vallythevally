@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { isMinutePeriod } from "../src/lib/symbol";
 import { isVenue } from "../src/lib/venue";
-import { cell, chartOf, expect, test, type Scenario, pollSaved } from "./harness";
+import { cell, chartOf, expect, fixedWait, test, type Scenario, pollSaved } from "./harness";
 import { chartPoint, drawings, mirror, open, pickTool, settledMirror, expandDock, drawingDock } from "./drawing-probe";
 
 async function dragBetween(page: Page, from: [number, number], to: [number, number]) {
@@ -271,7 +271,7 @@ test("일봉 차트의 구간 거래량 프로파일은 분봉을 받아 계산�
   await page.mouse.down();
   await page.mouse.move(r.x + start.x - 150, r.y + start.y, { steps: 15 });
   await expect.poll(async () => (await mirror(page)).find((m) => m.id === profile.id)!.handles[0]!.x).toBeLessThan(start.x - 100);
-  await page.waitForTimeout(500);
+  await fixedWait(page, 500, "드래그 중에는 손을 떼기 전까지 분봉 추가 조회가 나가지 않음을 본다");
   expect(fineRequests(scenario)).toHaveLength(sent);
   await page.mouse.up();
   await pollSaved(async () => scenario.documents.drawings(FINE_SYMBOL)[0]!.points[0]!.t).toBeLessThan(profile.points[0]!.t);

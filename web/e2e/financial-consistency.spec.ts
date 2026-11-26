@@ -129,9 +129,9 @@ test.describe("재무 시각과 가격 시각", () => {
     await writeFile(info.outputPath("prepend-evidence.json"), JSON.stringify({ before, after, initial, current, count: await chartOf(cell(page)).getAttribute("data-bar-count") }, null, 2));
   });
 
-  test("재무 과거·미래 시각에서도 양방향 배치와 자석·핸들 편집은 실제 가격 시각을 저장한다", async ({ page, scenario }, info) => {
+  test("재무 차트에서 자석 스냅과 핸들 드래그는 실제 가격 시각을 저장한다", async ({ page, scenario }, info) => {
     await seed(scenario); await years(scenario); await marker(scenario); await open(page);
-    await expect(row(page)).toContainText("확인 완료", { timeout: 45000 });
+    await expect(row(page)).toContainText("확인 완료");
     await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 0, to: 13 }));
     await frames(page);
     const box = (await chartOf(cell(page)).boundingBox())!;
@@ -153,20 +153,36 @@ test.describe("재무 시각과 가격 시각", () => {
     const handle = await move(2023, 150);
     await page.mouse.move(handle.x, handle.y); await page.mouse.down(); await page.mouse.move(target.x, target.y, { steps: 8 }); await page.mouse.up();
     await pollSaved(async () => (await drawings(scenario)).find((d) => d.id === created.id)!.points[1]).toEqual({ t: kst("2024-01-01"), price: 165 });
-    await page.keyboard.press("Escape");
+    await writeFile(info.outputPath("magnet-editing-evidence.json"), JSON.stringify({ created, edited: (await drawings(scenario)).find((d) => d.id === created.id) }, null, 2));
+  });
+
+  test("재무 과거·미래 여백 영역에 그린 드로잉도 실제 시각을 저장한다", async ({ page, scenario }, info) => {
+    await seed(scenario); await years(scenario); await marker(scenario); await open(page);
+    await expect(row(page)).toContainText("확인 완료");
+    await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 0, to: 13 }));
+    await frames(page);
+    const box = (await chartOf(cell(page)).boundingBox())!;
+    const move = async (year: number, price: number) => {
+      const point = await page.evaluate(({ t, price }) => ({ x: window.chartProbe.chart.timeScale().timeToCoordinate(t), y: window.chartProbe.main.priceToCoordinate(price) }), { t: toChartTime(kst(`${year}-01-01`)), price });
+      if (point.x === null || point.y === null) throw new Error("실제 시각의 좌표가 없습니다");
+      return { x: box.x + point.x, y: box.y + point.y };
+    };
     await expandDock(page);
-    const magnet = page.getByRole("button", { name: "자석", exact: true });
+    await page.getByRole("button", { name: "자석", exact: true }).click({ button: "right" });
+    await page.getByRole("menuitemradio", { name: "강", exact: true }).click();
     const old = await move(2015, 150);
     old.x += await page.evaluate(() => window.chartProbe.chart.timeScale().options().barSpacing / 4);
     await cell(page).focus(); await page.keyboard.press("T");
     await page.mouse.move(old.x, old.y); await page.mouse.down(); await page.mouse.move(old.x + 1, old.y - 20); await page.mouse.up();
-    await pollSaved(async () => (await drawings(scenario)).length).toBe(3);
-    const historical = (await drawings(scenario)).find((d) => d.id !== markerId && d.id !== created.id)!;
+    await pollSaved(async () => (await drawings(scenario)).length).toBe(2);
+    const historical = (await drawings(scenario)).find((d) => d.id !== markerId)!;
     expect(Math.abs(historical.points[0]!.t - (kst("2015-01-01") + 365 * 86400 / 4))).toBeLessThan(7 * 86400);
     const projected = (await mirror(page)).find((d) => d.id === historical.id)!;
     expect(projected.points[0]!.x).toBeCloseTo(old.x - box.x, 1);
+
     await page.keyboard.press("Escape");
     await expandDock(page);
+    const magnet = page.getByRole("button", { name: "자석", exact: true });
     await expect(magnet).toHaveAttribute("aria-pressed", "true");
     await magnet.click();
     await expect(magnet).toHaveAttribute("aria-pressed", "false");
@@ -181,10 +197,10 @@ test.describe("재무 시각과 가격 시각", () => {
     if (future.x === null || future.y === null) throw new Error("미래 좌표가 없습니다");
     await cell(page).focus(); await page.keyboard.press("T");
     await page.mouse.move(box.x + future.x, box.y + future.y); await page.mouse.down(); await page.mouse.move(box.x + future.x + 1, box.y + future.y - 20); await page.mouse.up();
-    await pollSaved(async () => (await drawings(scenario)).length).toBe(4);
-    const futureDrawing = (await drawings(scenario)).find((d) => ![markerId, created.id, historical.id].includes(d.id))!;
+    await pollSaved(async () => (await drawings(scenario)).length).toBe(3);
+    const futureDrawing = (await drawings(scenario)).find((d) => d.id !== markerId && d.id !== historical.id)!;
     expect(Math.abs(futureDrawing.points[0]!.t - kst("2028-01-01"))).toBeLessThan(7 * 86400);
-    await writeFile(info.outputPath("editing-evidence.json"), JSON.stringify({ created, edited: (await drawings(scenario)).find((d) => d.id === created.id), historical, projected, futureDrawing }, null, 2));
+    await writeFile(info.outputPath("margin-editing-evidence.json"), JSON.stringify({ historical, projected, futureDrawing }, null, 2));
   });
 });
 

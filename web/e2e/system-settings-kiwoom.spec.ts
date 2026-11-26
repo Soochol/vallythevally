@@ -298,7 +298,7 @@ test.describe("1440×900", () => {
 
     scenario.on(route("POST", "/api/system/kiwoom/ip-check"), () => ({ body: checked, headers: { date: new Date(scenario.now + 600_000).toUTCString() } }));
     await panel(page).getByRole("button", { name: "내 공인 IP 확인" }).click();
-    await expect(reconnect).toBeEnabled({ timeout: 5000 });
+    await expect(reconnect).toBeEnabled();
     await expect(reconnect).toHaveText("다시 연결");
     expect(callsTo(scenario, "POST", "/api/system/kiwoom/connect")).toHaveLength(0);
 
@@ -336,8 +336,9 @@ test.describe("1440×900", () => {
   });
 
   test("확인한 연결이 간격 안이라 대기로 돌아와도 확인은 남고, 간격 뒤 acknowledged로 다시 보낸다", async ({ page, scenario }) => {
+    await page.clock.install({ time: scenario.now });
     scenario.live.kiwoomLink = failed("authBlocked8050", null, BLOCKED_MESSAGE, { needsAcknowledgement: true });
-    const waiting = failed("issueIntervalWait", serverSeconds(scenario) + 3, "키움 토큰은 발급 사이를 10분 띄웁니다", { needsAcknowledgement: true });
+    const waiting = failed("issueIntervalWait", serverSeconds(scenario) + 10, "키움 토큰은 발급 사이를 10분 띄웁니다", { needsAcknowledgement: true });
     const bodies: KiwoomConnectInput[] = [];
     scenario.on(route("POST", "/api/system/kiwoom/connect"), (request) => {
       bodies.push(request.postDataJSON());
@@ -355,7 +356,8 @@ test.describe("1440×900", () => {
     const reconnect = panel(page).getByRole("button", { name: /^다시 연결/ });
     await expect(reconnect).toContainText("뒤 가능");
     await expect(panel(page).getByLabel("반복 발급 잠금이 풀렸는지 확인했습니다")).toBeChecked();
-    await expect(reconnect).toBeEnabled({ timeout: 8000 });
+    await page.clock.runFor(11_000);
+    await expect(reconnect).toBeEnabled();
     await reconnect.click();
     await pollSaved(() => bodies).toEqual([{ acknowledged: true }, { acknowledged: true }]);
   });
@@ -1154,4 +1156,34 @@ test.describe("360px 폭", () => {
     expect(sizes.content).toBeLessThanOrEqual(0);
     await shot(page, "kiwoom-360x800-blocked-8050.png");
   });
+});
+
+test("계좌가 바뀐 주문 사용 스위치는 꺼짐으로 보인다", async ({ page, scenario }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  scenario.live.kiwoomKeys = keyListOf(keyEntry("k1", "주계좌", CONNECTED_KIWOOM, { market: true }), keyEntry("k2", "보조", { ...CONNECTED_KIWOOM, appKeyTail: "5678" }));
+  scenario.live.orders = {
+    state: "on", accountRef: "ref-k1", accountTail: "12", message: "주문 사용이 켜져 있습니다",
+    accounts: [
+      { keyId: "k1", broker: "kiwoom", alias: "주계좌", market: true, state: "on", accountRef: "ref-k1", accountTail: "12" },
+      { keyId: "k2", broker: "kiwoom", alias: "보조", market: false, state: "account_changed", accountRef: "ref-k2", accountTail: "47" },
+    ],
+  } satisfies OrdersStatus;
+  scenario.live.ordersAccountTails = { k2: "47" };
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
+  await accounts(page).getByRole("button", { name: "보조", exact: false }).first().click();
+  const orders = accounts(page).getByRole("listitem").nth(1).getByRole("region", { name: "주문 사용" });
+  const toggle = orders.getByRole("switch", { name: "주문 사용" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(toggle).toBeEnabled();
+  await toggle.click();
+  await expect(orders.getByRole("group", { name: "주문 켜기 확인" })).toBeVisible();
+  await expect(orders).toContainText("계좌번호(8자리) 끝 2자리: 47");
+  const switchCalls = () => scenario.requests.filter((r) => r.method() === "PUT" && new URL(r.url()).pathname === "/api/system/orders");
+  expect(switchCalls()).toHaveLength(0);
+  await orders.getByRole("group", { name: "주문 켜기 확인" }).getByRole("button", { name: "취소", exact: true }).click();
+  await orders.getByRole("button", { name: "주문 끄기", exact: true }).click();
+  await pollSaved(switchCalls).toHaveLength(1);
+  expect(switchCalls()[0]!.postDataJSON()).toEqual({ enabled: false, confirmAccountTail: null, keyId: "k2" } satisfies OrdersSwitchInput);
 });

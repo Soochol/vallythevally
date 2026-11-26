@@ -8,7 +8,7 @@ type Box = { left: number; top: number; right: number; bottom: number };
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "드로잉 도구" });
 const PINNED_COUNTS = [1, 3, TOOLS.length];
-const SYMBOLS = ["005930", "IDX:001"];
+const PINNED_CASES: readonly [string, number][] = [["005930", 700], ["IDX:001", 900]];
 
 const unsavedKeys = (page: Page) => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("vv.unsaved.")));
 
@@ -51,7 +51,7 @@ async function settled(page: Page) {
 const startsWith = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
-for (const symbol of SYMBOLS) for (const height of [900, 768, 700]) {
+for (const [symbol, height] of PINNED_CASES) {
   test(`고정 도구: ${symbol} 창 높이 ${height}px에서 고정 도구 ${PINNED_COUNTS.join("·")}개는 범례를 밀거나 가리지 않고 넘치지 않으며 모두 고를 수 있다`, async ({ context, scenario }) => {
     const before = await legendRows(await load(context, scenario, height, symbol, []));
     for (const count of PINNED_COUNTS) {

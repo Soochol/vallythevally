@@ -1,8 +1,10 @@
 import type { Page } from "@playwright/test";
-import { anyMarketOverviewCall, indexCardWithoutBreadth, marketOverviewBaseline, marketOverviewCalls, marketOverviewScopedCalls, SECTOR_NAMES, serveMarketRankings } from "./fixtures/market-data";
+import type { RankingPage } from "../src/api/generated/RankingPage";
+import type { RankingRow } from "../src/api/generated/RankingRow";
+import { anyMarketOverviewCall, indexCardWithoutBreadth, marketOverviewBaseline, marketOverviewCalls, marketOverviewScopedCalls, RANKING_ROWS, SECTOR_NAMES, serveMarketRankings } from "./fixtures/market-data";
 import { KIS_MARKET_SOURCE, KIWOOM_MARKET_SOURCE } from "./fixtures/market-source";
 import { CONNECTED_KIWOOM } from "./fixtures/scenario";
-import { cell, expect, fixedWait, test } from "./harness";
+import { cell, expect, fixedWait, type Scenario, test } from "./harness";
 
 const main = (page: Page) => page.getByRole("main", { name: "시장 종합", exact: true });
 const card = (page: Page, name: string) => main(page).getByRole("region", { name });
@@ -745,4 +747,96 @@ test("핵심 공시 레이더의 칩 카운트는 실제 필터 가능한 항목
   await expect(disc.locator(".mk-disc-item")).toHaveCount(30);
   await capitalBtn.click();
   await expect(disc.locator(".mk-disc-item")).toHaveCount(0);
+});
+
+test.describe("시장 종합 레이아웃", () => {
+  const OVERVIEW_ROUTES = ["sectors", "flow", "flow/intraday", "turnover"] as const;
+  const ROWS_OF_A_LONG_RANKING = 14;
+  const longRanking = (): RankingRow[] => Array.from({ length: ROWS_OF_A_LONG_RANKING }, (_, index) => ({ ...RANKING_ROWS.kospi.tradeAmount[0]!, rank: index + 1, code: `00${1000 + index}`, name: `종목${index + 1}` }));
+  const rankingPage = (scenario: Scenario, rows: RankingRow[]): RankingPage => ({ rows, pages: 1, end: true, limited: false, hidden: 0, fetchedAt: Math.floor(scenario.now / 1000), source: "kiwoom" });
+  const heightsOfCards = (page: Page) => page.locator(".mk-grid > [data-card]").evaluateAll((cards) => Object.fromEntries(cards.map((c) => [c.getAttribute("data-card")!, c.getBoundingClientRect().height])));
+
+  async function expectSameCardHeightsBeforeAndAfterLoading(page: Page, scenario: Scenario, rankingRows: number) {
+    await page.setViewportSize({ width: 1024, height: 900 });
+    const indexKospi = scenario.hold((url) => url.pathname === "/api/market-overview/index" && url.searchParams.get("market") === "kospi");
+    const indexKosdaq = scenario.hold((url) => url.pathname === "/api/market-overview/index" && url.searchParams.get("market") === "kosdaq");
+    const derived = scenario.hold((url) => url.pathname === "/api/market-overview/derived");
+    const pro = scenario.hold((url) => url.pathname === "/api/market-overview/pro");
+    const overview = OVERVIEW_ROUTES.map((route) => ({ route, held: scenario.hold((url) => url.pathname === `/api/market-overview/${route}`) }));
+    const ranking = scenario.hold((url, request) => url.pathname === "/api/rankings" && request.method() === "POST");
+    await page.goto("/market");
+    await Promise.all([indexKospi.received, indexKosdaq.received, derived.received, pro.received, ...overview.map(({ held }) => held.received), ranking.received]);
+    await expect(main(page).getByRole("status").first()).toBeVisible();
+    const loading = await heightsOfCards(page);
+
+    indexKospi.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/index?market=kospi"), "GET")!);
+    indexKosdaq.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/index?market=kosdaq"), "GET")!);
+    derived.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/derived?scope=all"), "GET")!);
+    pro.reply(marketOverviewBaseline(new URL("http://host/api/market-overview/pro?scope=all"), "GET")!);
+    for (const { route, held } of overview) held.reply(marketOverviewBaseline(new URL(`http://host/api/market-overview/${route}?market=kospi`), "GET")!);
+    ranking.reply({ body: rankingPage(scenario, longRanking().slice(0, rankingRows)) });
+    const stocks = main(page).getByRole("region", { name: "종목", exact: true });
+    await expect(rankingRows === 0 ? stocks.getByText("순위가 비어 있습니다") : stocks.getByRole("button", { name: "종목1", exact: true })).toBeVisible();
+    await expect(main(page).getByRole("region", { name: "지수·폭" }).getByText("코스피", { exact: true })).toBeVisible();
+    await expect(main(page).getByRole("region", { name: "지수·폭" }).getByText("코스닥", { exact: true })).toBeVisible();
+    await expect(main(page).getByRole("region", { name: "업종 지도" }).getByRole("button").first()).toBeVisible();
+    await expect(main(page).getByRole("region", { name: "거래대금 추이" }).locator(".mk-turnover li").first()).toBeVisible();
+    await expect(main(page).getByRole("region", { name: "누가 사고 파나" }).locator(".mk-line").first()).toBeVisible();
+    await expect(main(page).getByRole("region", { name: "시장 체력 X-Ray" }).getByText("KRX 정규장")).toBeVisible();
+    await expect(main(page).getByRole("region", { name: "핵심 공시 레이더" }).locator(".mk-disc-item").first()).toBeVisible();
+    const loaded = await heightsOfCards(page);
+
+    expect(Object.keys(loaded).sort()).toEqual(Object.keys(loading).sort());
+    const drift = Object.fromEntries(Object.keys(loaded).map((c) => [c, `${Math.round(loading[c]!)} → ${Math.round(loaded[c]!)}`]));
+    for (const c of Object.keys(loaded)) expect(Math.abs(loaded[c]! - loading[c]!), `순위 ${rankingRows}줄 ${JSON.stringify(drift)}`).toBeLessThanOrEqual(1);
+  }
+
+  for (const rankingRows of [ROWS_OF_A_LONG_RANKING, 10, 5, 0]) {
+    test(`시장 종합 1024px 카드 높이는 불러오기 전후가 같다 (순위 ${rankingRows}줄)`, async ({ page, scenario }) => {
+      await expectSameCardHeightsBeforeAndAfterLoading(page, scenario, rankingRows);
+    });
+  }
+
+  test("390px 시장 종합 조작 묶음은 묶음 안에서 줄을 바꾸지 않는다", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/market");
+    const controls = page.locator(".mk-controls");
+    const scopeBar = page.locator(".mk-scope-bar");
+    await expect(controls.getByRole("group", { name: "기간" })).toBeVisible();
+    await expect(scopeBar.getByRole("group", { name: "시장 범위" })).toBeVisible();
+    const measureGroup = (selector: string) =>
+      page.locator(selector).evaluate((row) => {
+        const rowBox = row.getBoundingClientRect();
+        const bundles = [...row.querySelectorAll<HTMLElement>('[role="group"]')].map((bundle) => {
+          const bundleBox = bundle.getBoundingClientRect();
+          const tops = [...bundle.querySelectorAll("button")].map((button) => button.getBoundingClientRect().top);
+          return { label: bundle.getAttribute("aria-label"), spread: Math.max(...tops) - Math.min(...tops), overflowRight: bundleBox.right - rowBox.right, overflowLeft: rowBox.left - bundleBox.left };
+        });
+        return { bundles, rowOverflow: row.scrollWidth - row.clientWidth };
+      });
+    const controlLayout = await measureGroup(".mk-controls");
+    const scopeLayout = await measureGroup(".mk-scope-bar");
+    expect(controlLayout.bundles.map((bundle) => bundle.label)).toEqual(["기간"]);
+    expect(scopeLayout.bundles.map((bundle) => bundle.label)).toEqual(["시장 범위"]);
+    for (const layout of [controlLayout, scopeLayout]) {
+      for (const bundle of layout.bundles) {
+        expect(bundle.spread, JSON.stringify(layout)).toBeLessThanOrEqual(1);
+        expect(bundle.overflowRight, JSON.stringify(layout)).toBeLessThanOrEqual(1);
+        expect(bundle.overflowLeft, JSON.stringify(layout)).toBeLessThanOrEqual(1);
+      }
+      expect(layout.rowOverflow, JSON.stringify(layout)).toBeLessThanOrEqual(0);
+    }
+    const documentOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(documentOverflow).toBeLessThanOrEqual(0);
+  });
+
+  test("시장 종합 종목 표의 더 보기는 남은 종목을 모두 펼친다", async ({ page, scenario }) => {
+    scenario.reply((url, request) => url.pathname === "/api/rankings" && request.method() === "POST", { body: rankingPage(scenario, longRanking()) });
+    await page.goto("/market");
+    const stocks = main(page).getByRole("region", { name: "종목", exact: true });
+    await expect(stocks.locator(".mk-stock-row")).toHaveCount(10);
+    await stocks.getByRole("button", { name: `더 보기 (${ROWS_OF_A_LONG_RANKING - 10})` }).click();
+    await expect(stocks.locator(".mk-stock-row")).toHaveCount(ROWS_OF_A_LONG_RANKING);
+    await expect(stocks.getByRole("button", { name: /^더 보기/ })).toHaveCount(0);
+  });
 });

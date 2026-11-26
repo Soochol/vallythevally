@@ -101,9 +101,11 @@ for (const limit of ["minimum", "maximum"] satisfies Limit[]) financialTest(`a w
     const box = (await chartOf(cell(page)).boundingBox())!;
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.35);
     const direction = limit === "minimum" ? 120 : -120;
-    for (let index = 0; index < 50; index++) {
-      await page.mouse.wheel(0, direction);
+    for (let burst = 0; burst < 5; burst++) {
+      for (let step = 0; step < 15; step++) await page.mouse.wheel(0, direction);
       await frame(page);
+      const current = await viewport(page);
+      if (current.spacing === (limit === "minimum" ? 0.5 : current.width / 2)) break;
     }
     const limited = await viewport(page);
     expect(limited.spacing).toBe(limit === "minimum" ? 0.5 : limited.width / 2);

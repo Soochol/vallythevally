@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createServer } from "vite";
 import type { fontRefreshControl, layoutControls } from "./text-layout-controls-probe";
+import type { textProbe } from "./text-layout-probe";
 
 test("wrapped, padded and rotated text shares paint, hit and bounds for every frame path", async ({ page }, info) => {
   const server = await createServer({ configFile: false, envDir: false, appType: "custom", root: process.cwd(), server: { host: "127.0.0.1", port: 0 } });
@@ -31,5 +32,27 @@ test("wrapped, padded and rotated text shares paint, hit and bounds for every fr
     expect(result.fonts.afterReady).toBeGreaterThan(2);
     expect(result.fonts.afterLoad).toBe(result.fonts.afterReady + 1);
     expect(result.fonts.afterDetach).toBe(result.fonts.afterLoad);
+  } finally { await server.close(); }
+});
+
+test("visible hline glyph pixels share the painted text hit and bounds", async ({ page }, info) => {
+  const server = await createServer({ configFile: false, envDir: false, appType: "custom", root: process.cwd(), server: { host: "127.0.0.1", port: 0 } });
+  server.middlewares.use("/__text_probe", (_request, response) => { response.setHeader("Content-Type", "text/html"); response.end("<!doctype html><body></body>"); });
+  try {
+    await server.listen();
+    const address = server.httpServer?.address();
+    if (!address || typeof address === "string") throw new Error("Probe server unavailable");
+    await page.goto(`http://127.0.0.1:${address.port}/__text_probe`);
+    const result: ReturnType<typeof textProbe> = await page.evaluate(async () => {
+      const modulePath = "/e2e/text-layout-probe.ts";
+      const module = await import(modulePath);
+      return module.textProbe();
+    });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("hline-text-hit.png") });
+    await info.attach("text-hit.json", { body: JSON.stringify(result), contentType: "application/json" });
+    expect(result.ink).toBeGreaterThan(0);
+    expect(result.hit).toBe("fill");
+    expect(result.bounds.x1).toBeLessThanOrEqual(result.at.x);
+    expect(result.bounds.x2).toBeGreaterThanOrEqual(result.at.x);
   } finally { await server.close(); }
 });
