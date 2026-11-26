@@ -25,7 +25,7 @@ test("지표 창은 비교 종목 탭 없이 두 탭과 띄운 지표 목록을 
   for (const label of ["이 칸에 띄운 지표", "지표 추가"]) expect(html).toContain(label);
   expect(html).not.toContain("비교 종목");
   expect(html).toContain('aria-label="거래량 설정"');
-  expect(html).toContain('aria-label="거래량 숨기기"');
+  expect(html).not.toContain('aria-label="거래량 숨기기"');
   expect(html).toContain('aria-label="거래량 지우기"');
   expect(html).toContain("아래 패널");
   expect(html).not.toContain("변경 적용");
@@ -64,7 +64,8 @@ test("지표 추가 탭은 분류 필터와 서브텍스트 없는 후보 목록
   expect(html).toContain('aria-label="이동평균 단순 20 추가 후보"');
   expect(html).not.toContain("ic-row-sub");
   for (const group of ["가격 패널", "아래 패널", "재무지표"]) expect(html).toContain(group);
-  expect(html).not.toContain("btn-primary");
+  expect(html).toContain("btn-primary");
+  expect(html).toContain("이동평균 단순 20 추가");
   expect(html).toContain('aria-label="선 미리보기"');
   expect(html).toContain('aria-label="선 색 및 굵기 설정"');
   expect(html).not.toContain('aria-label="거래량 숨기기"');

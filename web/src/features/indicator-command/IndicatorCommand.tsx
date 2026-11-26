@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { isFinancial, isMicro, isQuote, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
@@ -6,9 +6,9 @@ import { symbolSub } from "../../lib/symbol";
 import { chartWindow, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { CommandFrame } from "../commands/CommandFrame";
-import { CloseIcon, EyeIcon, SearchIcon } from "../icons";
+import { CloseIcon, SearchIcon } from "../icons";
 import { stepIndex } from "../indicator-dialog/compareForm";
-import { hasColor, panelLabel } from "../indicator-dialog/indicatorForm";
+import { hasColor, panelLabel, primaryLabel } from "../indicator-dialog/indicatorForm";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
 import { isMaConfig, MaGroupEditor } from "../indicator-dialog/MaGroupEditor";
@@ -32,7 +32,7 @@ import {
   type IndicatorCommandMode,
 } from "./model";
 import { useIndicatorPreview } from "./preview";
-import { useAutoCandidateDraft, useIndicatorCommand, type CandidateRow, type EditorAction } from "./useIndicatorCommand";
+import { useIndicatorCommand, useIndicatorDraft, type CandidateRow, type EditorAction } from "./useIndicatorCommand";
 
 export function IndicatorCommand() {
   const dialog = useSelectionStore((s) => s.dialog);
@@ -62,7 +62,6 @@ function maGroupSummary(lines: readonly IndicatorConfig[]): string {
 export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = null }: { cellId: WindowId; initialMode: IndicatorCommandMode; initialIndicator?: string | null }) {
   const close = useSelectionStore((s) => s.closeDialog);
   const [initialSettings] = useState(() => chartWindow(useLayoutStore.getState().layout, cellId).chartSettings);
-  const [candidateClick, setCandidateClick] = useState<{ key: string; seq: number } | null>(null);
   const [category, setCategory] = useState<AddCategory>("all");
   const command = useIndicatorCommand(cellId, initialMode, initialIndicator);
   const { cell, mode, input, chosen, rows: rawRows, symbols, search, compareButton, editor } = command;
@@ -92,7 +91,6 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
   const show = (value: IndicatorCommandMode) => {
     command.show(value);
     setCategory("all");
-    setCandidateClick(null);
     inputRef.current?.focus();
   };
   const selectRow = (row: DialogRow) => {
@@ -101,15 +99,10 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
   };
   const clickOption = (row: DialogRow) => {
     selectRow(row);
-    if (row.kind === "symbol") {
-      if (row.selectable) command.addCompareSymbol(row.info);
-      return;
-    }
-    if (row.kind === "candidate") {
-      setCandidateClick((prev) => ({ key: row.key, seq: (prev?.seq ?? 0) + 1 }));
+    if (row.kind === "symbol" && row.selectable) {
+      command.addCompareSymbol(row.info);
     }
   };
-  const clickedThis = selected?.kind === "candidate" && candidateClick?.key === selected.key;
 
   return <CommandFrame solid scrim={false} width="ic-frame" labelledBy={`${ids}-title`} onClose={handleClose}>
     <div data-chart-control="" className="flex min-h-0 flex-1 flex-col" onKeyDown={(event) => {
@@ -122,16 +115,16 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
         <label className="ic-search">
           <SearchIcon size={16} />
           <input ref={inputRef} autoFocus role="combobox" aria-label="지표·비교 찾기" aria-expanded={rows.length > 0} aria-controls={`${ids}-list`} aria-activedescendant={index >= 0 ? optionId(index) : undefined} aria-autocomplete="list"
-            value={input} onChange={(event) => { command.type(event.target.value); setCandidateClick(null); }} onKeyDown={(event) => {
+            value={input} onChange={(event) => command.type(event.target.value)} onKeyDown={(event) => {
               if (event.key === "Tab" && !event.shiftKey && editor.current) { event.preventDefault(); event.stopPropagation(); editor.current.focus(); return; }
               const action = commandKey(event.nativeEvent);
               if (action.kind !== "move") return;
               event.preventDefault();
               const next = rows[stepIndex(index, action.step, rows.length)];
-              if (next) { selectRow(next); setCandidateClick(null); }
+              if (next) selectRow(next);
             }} placeholder={mode === "compare" ? "비교할 종목 이름·코드" : "이평 20, bb 20 2, rsi 14"} autoComplete="off" spellCheck={false} />
           {input !== "" && (
-            <button type="button" className="ic-search-clear" aria-label="검색어 지우기" onClick={() => { command.type(""); setCandidateClick(null); inputRef.current?.focus(); }}>
+            <button type="button" className="ic-search-clear" aria-label="검색어 지우기" onClick={() => { command.type(""); inputRef.current?.focus(); }}>
               <CloseIcon size={12} />
             </button>
           )}
@@ -146,7 +139,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
         </div>
       ) : (
         <div onClick={(event) => { if (event.detail > 0 && event.target instanceof Element && event.target.closest("[role=tab]")) inputRef.current?.focus(); }}>
-          <Tabs label="지표 창 보기" idPrefix={ids} value={mode} className="ic-tabs" onChange={(next) => { command.show(next as IndicatorCommandMode); setCategory("all"); setCandidateClick(null); }}
+          <Tabs label="지표 창 보기" idPrefix={ids} value={mode} className="ic-tabs" onChange={(next) => { command.show(next as IndicatorCommandMode); setCategory("all"); }}
             items={INDICATOR_DIALOG_TABS.map((tab) => tab.mode === "current" ? { id: tab.mode, label: tab.label, count: currentTabCount, ariaLabel: `${tab.label} ${currentTabCount}개` } : { id: tab.mode, label: tab.label })} />
         </div>
       )}
@@ -156,7 +149,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
           {mode === "add" && !hasQuery && (
             <div role="group" aria-label="지표 분류" className="ic-cats">
               {ADD_CATEGORIES.map((item) => (
-                <button key={item.id} type="button" className="ic-cat" aria-pressed={category === item.id} onClick={() => { setCategory(item.id); setCandidateClick(null); }}>
+                <button key={item.id} type="button" className="ic-cat" aria-pressed={category === item.id} onClick={() => setCategory(item.id)}>
                   {item.label}
                 </button>
               ))}
@@ -176,13 +169,6 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
                       <span className="ic-row-sub">{maGroupSummary(row.lines)}</span>
                     </button>
                     <div className="ic-row-actions">
-                      <button type="button" className="icon-btn size-6" aria-label={`이동평균선 ${hidden ? "보이기" : "숨기기"}`} onClick={(event) => {
-                        event.stopPropagation();
-                        const nextVisible = hidden;
-                        const store = useLayoutStore.getState();
-                        const nextIndicators = cell.chartSettings.indicators.map((item) => isMaConfig(item) ? { ...item, visible: nextVisible } : item);
-                        store.setChartSettings(cellId, { ...cell.chartSettings, indicators: nextIndicators });
-                      }}><EyeIcon size={14} off={hidden} /></button>
                       <button type="button" className="icon-btn size-6" aria-label="이동평균선 지우기" onClick={(event) => {
                         event.stopPropagation();
                         const store = useLayoutStore.getState();
@@ -195,7 +181,6 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
                       {specSummary(row.config.spec) !== "" && <span className="ic-row-sub">{specSummary(row.config.spec)}</span>}
                     </button>
                     <div className="ic-row-actions">
-                      <button type="button" className="icon-btn size-6" aria-label={`${specName(row.config.spec)} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={(event) => { event.stopPropagation(); useLayoutStore.getState().updateIndicator(cellId, row.config.id, { visible: !row.config.visible }); }}><EyeIcon size={14} off={!row.config.visible} /></button>
                       <button type="button" className="icon-btn size-6" aria-label={`${specName(row.config.spec)} 지우기`} onClick={(event) => { event.stopPropagation(); removeIndicatorWithUndo(cellId, row.config); }}><CloseIcon size={14} /></button>
                     </div>
                   </> : row.kind === "candidate" ? (() => {
@@ -228,7 +213,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
         </>
           : selected?.kind === "maGroup" ? <MaGroupEditorHost cellId={cellId} mode={mode} actionRef={editor} />
           : selected?.kind === "current" ? <CurrentIndicatorEditor key={selected.key} config={selected.config} cellId={cellId} mode={mode} actionRef={editor} />
-          : selected?.kind === "candidate" ? <CandidateIndicatorEditor key={clickedThis ? `${selected.key}:${candidateClick.seq}` : selected.key} row={selected} autoAdd={clickedThis} cellId={cellId} mode={mode} actionRef={editor} />
+          : selected?.kind === "candidate" ? <CandidateIndicatorEditor key={selected.key} row={selected} cellId={cellId} mode={mode} actionRef={editor} onCommitted={refocus} />
           : <>
             <aside className="ic-editor text-s text-text-3">{mode === "current" ? "지표를 고르면 설정을 바꿀 수 있습니다." : "추가할 지표를 고르면 설정을 확인할 수 있습니다."}</aside>
             <CommandFooter mode={mode} />
@@ -238,9 +223,10 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
   </CommandFrame>;
 }
 
-function CommandFooter({ mode }: { mode: IndicatorCommandMode }) {
+function CommandFooter({ mode, children }: { mode: IndicatorCommandMode; children?: ReactNode }) {
   return <footer className="ic-foot">
     <span className="ic-hints">{commandHints(mode).map((hint) => <span key={hint.keys}><Kbd>{hint.keys}</Kbd> {hint.action}</span>)}</span>
+    {children}
   </footer>;
 }
 
@@ -284,10 +270,10 @@ function CurrentIndicatorEditor({ config, cellId, mode, actionRef }: { config: I
   </>;
 }
 
-function CandidateIndicatorEditor({ row, autoAdd, cellId, mode, actionRef }: { row: CandidateRow; autoAdd: boolean; cellId: WindowId; mode: IndicatorCommandMode; actionRef: Ref<EditorAction> }) {
+function CandidateIndicatorEditor({ row, cellId, mode, actionRef, onCommitted }: { row: CandidateRow; cellId: WindowId; mode: IndicatorCommandMode; actionRef: Ref<EditorAction>; onCommitted(): void }) {
   const controls = useRef<HTMLElement>(null);
   const focus = () => controls.current?.querySelector<HTMLElement>("button:not(:disabled),input:not(:disabled)")?.focus();
-  const { draft, setDraft, validator, errors, valid, color, saved } = useAutoCandidateDraft(cellId, row, autoAdd, actionRef, focus);
+  const { draft, setDraft, validator, check, errors, valid, color, commit } = useIndicatorDraft(cellId, row, actionRef, focus);
   const kind = KINDS[draft.form.kind];
   const place = draft.placement === "price" ? PRICE_GROUP : candidateGroup(row.candidate);
 
@@ -297,13 +283,17 @@ function CandidateIndicatorEditor({ row, autoAdd, cellId, mode, actionRef }: { r
         <h3 className="text-l font-semibold">{kind.label}</h3>
         <span className="ic-place-badge">{place}</span>
         <span className="flex-1" />
-        <p className="inline-flex items-center gap-1.5 text-s text-accent"><span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />{saved && valid ? "자동 저장됨" : valid ? "차트에 미리보기 중" : validator === "loading" ? "미리보기 준비 중" : "설정을 확인하세요"}</p>
+        <p className="inline-flex items-center gap-1.5 text-s text-accent"><span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />{valid ? "차트에 미리보기 중" : validator === "loading" ? "미리보기 준비 중" : "설정을 확인하세요"}</p>
       </div>
       <IndicatorSettingsForm draft={draft} color={color} errors={errors} onChange={setDraft} colorControl="popover" />
       {errors.filter((error) => !kind.fields.some((field) => field.key === error.field)).map((error, i) => <p key={i} className="text-s text-danger">{error.message}</p>)}
       {validator === "failed" && <p role="alert" className="text-s text-danger">지표 설정 검사기를 불러오지 못했습니다. 새로고침해 보세요.</p>}
       {hasColor(draft.form) && <p className="text-xs text-text-3">테마 색은 테마를 바꾸면 함께 바뀝니다</p>}
     </aside>
-    <CommandFooter mode={mode} />
+    <CommandFooter mode={mode}>
+      <button type="button" className="btn-primary disabled:opacity-50" disabled={!valid} onClick={() => commit(onCommitted)}>
+        {primaryLabel(false, draft.form.kind, check.spec)}
+      </button>
+    </CommandFooter>
   </>;
 }

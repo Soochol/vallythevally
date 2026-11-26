@@ -30,7 +30,15 @@ test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨
     { kind: "rsi", period: 9, signal: null },
   ]);
   await page.getByRole("button", { name: "지표", exact: true }).click();
+  await expect(dialog.getByRole("listbox").getByRole("button", { name: /숨기기|보이기/ })).toHaveCount(0);
   await dialog.getByRole("button", { name: "이동평균 단순 7 숨기기", exact: true }).click();
+  const rsiRow = dialog.getByRole("option").filter({ has: page.getByRole("button", { name: "RSI 9 설정", exact: true }) });
+  const rsiActions = rsiRow.locator(".ic-row-actions");
+  await expect(rsiActions).toHaveCSS("opacity", "0");
+  await expect(rsiActions).toHaveCSS("pointer-events", "none");
+  await rsiRow.hover();
+  await expect(rsiActions).toHaveCSS("opacity", "1");
+  await expect(rsiActions).toHaveCSS("pointer-events", "auto");
   await dialog.getByRole("button", { name: "RSI 9 지우기", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await pollSaved(async () => (await settings(scenario)).indicators.map((i) => [i.spec.kind, i.visible])).toEqual([["volume", true], ["ma", false], ["bollinger", true]]);
@@ -90,7 +98,7 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 그 뒤 다른 후
   expect((await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume"]);
 });
 
-test("입력창에서 값을 바꾸면 자동 저장되고 Esc는 선과 저장값을 이전 상태로 복원한다", async ({ page, scenario }) => {
+test("입력창 설정 미리보기는 실제 선을 바꾸고 추가 버튼 전에는 저장하지 않으며 Esc는 미리보기를 지운다", async ({ page, scenario }) => {
   useCenterIndicatorWindow(scenario);
   await page.addInitScript(installFrameProbe);
   await page.goto("/?symbol=005930");
@@ -105,15 +113,12 @@ test("입력창에서 값을 바꾸면 자동 저장되고 Esc는 선과 저장�
   const first = await customLines();
   await dialog.getByRole("textbox", { name: "기간", exact: true }).fill("11");
   await expect.poll(async () => (await customLines())[0]?.data).not.toEqual(first[0]?.data);
-  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec)).toEqual([
-    { kind: "volume", maPeriod: null },
-    { kind: "ma", method: "sma", period: 11 },
-  ]);
+  expect(await settings(scenario)).toEqual(before);
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect.poll(customLines).toHaveLength(0);
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await pollSaved(async () => settings(scenario)).toEqual(before);
+  expect(await settings(scenario)).toEqual(before);
 });
 
 test("지표 창은 띄운 지표·지표 추가 두 탭으로 열고 통합 이동평균선 편집기와 별도 비교 모드를 지원한다", async ({ page, scenario }) => {
@@ -160,4 +165,39 @@ test("지표 창은 띄운 지표·지표 추가 두 탭으로 열고 통합 이
   await expect(dialog.getByRole("tab")).toHaveCount(0);
   await expect(dialog).toContainText("비교 종목");
   await expect(dialog).toContainText("0/3");
+});
+
+test("지표 창 선택 행은 왼쪽 세로 막대 없이 배경으로 구분되고 단순·지수 토글은 은은한 테두리를 쓴다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.getByRole("button", { name: "지표", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+
+  const selectedCurrent = dialog.getByRole("option", { selected: true });
+  expect(await selectedCurrent.evaluate((el) => getComputedStyle(el, "::before").content)).toBe("none");
+
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
+  const selectedAdd = dialog.getByRole("option", { selected: true });
+  expect(await selectedAdd.evaluate((el) => getComputedStyle(el, "::before").content)).toBe("none");
+
+  const methodGroup = dialog.getByRole("group", { name: "계산 방식", exact: true });
+  const borderInfo = await methodGroup.evaluate((el) => {
+    const style = getComputedStyle(el);
+    const probe = document.createElement("div");
+    probe.style.borderColor = "var(--line)";
+    document.body.appendChild(probe);
+    const expected = getComputedStyle(probe).borderTopColor;
+    probe.remove();
+    return { actual: style.borderTopColor, expected, text: style.color };
+  });
+  expect(borderInfo.actual).toBe(borderInfo.expected);
+  expect(borderInfo.actual).not.toBe(borderInfo.text);
+
+  await dialog.getByRole("option", { name: "RSI 14 추가 후보", exact: true }).click();
+  expect((await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume"]);
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 1개", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "RSI 14 추가", exact: true }).click();
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "rsi"]);
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
 });

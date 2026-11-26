@@ -25,7 +25,7 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await picker.getByRole("slider", { name: "색조", exact: true }).press("Enter");
   await expect(picker).toBeVisible();
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 1개", exact: true })).toBeVisible();
   await picker.getByRole("button", { name: "직접 고르기", exact: true }).click();
   await picker.getByRole("textbox", { name: "HEX", exact: true }).fill("#oops");
   await expect(picker.getByRole("button", { name: "선택", exact: true })).toBeDisabled();
@@ -33,6 +33,8 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await picker.getByRole("button", { name: "선택", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
+  await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
+  await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
   await dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
   await expect(dialog.getByRole("button", { name: "이동평균선 설정", exact: true })).toBeVisible();
   await pollSaved(async () => {
