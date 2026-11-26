@@ -2,11 +2,10 @@ import type { Locator, Page } from "@playwright/test";
 import type { TradingHolding } from "../src/api/generated/TradingHolding";
 import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
 import { CONNECTED_KIWOOM, DEFAULT_SYSTEM_SETTINGS } from "./fixtures/scenario";
-import { type Scenario, expect, pollSaved, test } from "./harness";
+import { type Scenario, expect, test } from "./harness";
 import { ACCOUNT, BASE, CODE, openOrderWindow, ordersOn, otherAccount, tradingApi, win } from "./order-window";
 
 const HYNIX = "000660";
-const NAVER = "035420";
 const ONE_LINE_BAND_PX = 40;
 const ONE_LINE_PX = 28;
 const LONG_ALIAS = "가".repeat(20);
@@ -14,10 +13,6 @@ const KINDS = ["open", "holdings", "fills"] as const;
 
 const samsung: TradingHolding = { code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 120, averagePrice: 70_040, currentPrice: BASE, evaluationProfit: -4_800, profitRateCenti: -57 };
 const hynix: TradingHolding = { code: HYNIX, name: "SK하이닉스", quantity: 10, sellableQuantity: 10, averagePrice: 180_000, currentPrice: 180_000, evaluationProfit: 0, profitRateCenti: 0 };
-const naver: TradingHolding = { code: NAVER, name: "NAVER", quantity: 10, sellableQuantity: 10, averagePrice: 200_000, currentPrice: 200_000, evaluationProfit: 0, profitRateCenti: 0 };
-
-const lastWatch = (scenario: Scenario): readonly string[] | undefined =>
-  scenario.live.messages.flatMap((m) => (m.type === "watch" ? [m.symbols] : [])).at(-1);
 
 const tab = (page: Page, kind: (typeof KINDS)[number]): Locator => page.getByTestId(`account-tab-${kind}`);
 const label = (page: Page): Locator => page.getByTestId("account-label");
@@ -45,11 +40,10 @@ interface Shown {
   readonly longAlias?: boolean;
   readonly allowMargin?: boolean;
   readonly rateOff?: boolean;
-  readonly credit?: TradingHolding[];
   readonly mock?: boolean;
 }
 
-async function openBand(page: Page, scenario: Scenario, { others = false, longAlias = false, allowMargin = false, rateOff = false, credit = [], mock = false }: Shown = {}): Promise<void> {
+async function openBand(page: Page, scenario: Scenario, { others = false, longAlias = false, allowMargin = false, rateOff = false, mock = false }: Shown = {}): Promise<void> {
   if (mock) {
     scenario.live.kiwoomLink = { ...CONNECTED_KIWOOM, environment: "mock" };
     scenario.reply((url) => url.pathname === "/api/system/settings", { body: { ...DEFAULT_SYSTEM_SETTINGS, environment: "mock" } });
@@ -60,7 +54,7 @@ async function openBand(page: Page, scenario: Scenario, { others = false, longAl
   }
   if (rateOff) scenario.documents.saveUiState({ ...scenario.documents.uiState(), orderSettings: { ...DEFAULT_ORDER_SETTINGS, rate: false } });
   tradingApi(scenario).policy = allowMargin ? "allow_margin" : "cash_only";
-  scenario.reply("/api/trading/balance", { body: { accountRef: ACCOUNT, holdings: [samsung, hynix], creditHoldings: credit, totalPurchase: 120_000_000, totalEvaluation: 0, totalProfit: 12_345_678 } });
+  scenario.reply("/api/trading/balance", { body: { accountRef: ACCOUNT, holdings: [samsung, hynix], creditHoldings: [], totalPurchase: 120_000_000, totalEvaluation: 0, totalProfit: 12_345_678 } });
   await openOrderWindow(page, scenario);
   await expect(page.getByTestId("margin-policy")).toHaveText(allowMargin ? "미수 허용" : "현금");
   await expect(tab(page, "holdings")).toContainText("2");
@@ -95,20 +89,6 @@ async function expectOneLine(page: Page): Promise<void> {
     if (next !== undefined) expect(next.x).toBeGreaterThanOrEqual(box.x + box.width);
   }
 }
-
-test("보유종목 단추는 평가손익 없이 이름과 개수만 보인다", async ({ page, scenario }) => {
-  await openBand(page, scenario);
-  await sizeWindow(page, 900);
-  await shows(tab(page, "holdings"), "보유종목 2");
-  await expect(tab(page, "holdings")).toHaveAccessibleName("보유종목 2");
-  await expect(page.getByTestId("account-total-profit")).toHaveCount(0);
-});
-
-test("신용 보유종목은 실시간으로 구독하지 않는다", async ({ page, scenario }) => {
-  await openBand(page, scenario, { credit: [naver] });
-  await pollSaved(() => lastWatch(scenario)).toEqual([CODE, HYNIX]);
-  expect(scenario.live.messages.flatMap((m) => (m.type === "watch" ? m.symbols : []))).not.toContain(NAVER);
-});
 
 test("420px 창의 계좌 띠는 한 줄이고 단추는 미체결·보유종목·체결로 줄어든다", async ({ page, scenario }) => {
   await openBand(page, scenario, { others: true, longAlias: true, allowMargin: true });

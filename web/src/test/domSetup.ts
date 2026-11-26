@@ -30,7 +30,7 @@ export function installDomShims() {
     );
   }
   vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: query.includes("min-width"),
+    matches: query.includes("min-width") || query.includes("width >="),
     media: query,
     onchange: null,
     addListener: () => {},
