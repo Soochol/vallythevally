@@ -1,7 +1,7 @@
 .br { container:brokers / inline-size; display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; font-variant-numeric:tabular-nums; }
 .br-bar { display:flex; flex:none; flex-wrap:wrap; align-items:center; gap:var(--s3); padding:var(--size-6) var(--s4); border-bottom:var(--size-1) solid var(--line); }
 .br-bar .ui-seg .ui-seg-item { white-space:nowrap; }
-.br-sync-btn { display:inline-flex; align-items:center; gap:var(--size-4); height:var(--size-28); padding:0 var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:var(--chart-bg); color:var(--text-2); font-size:var(--fs-xs); font-weight:500; white-space:nowrap; }
+.br-sync-btn { display:inline-flex; align-items:center; gap:var(--size-4); height:var(--ctl-s); padding:0 var(--s3); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); background:var(--chart-bg); color:var(--text-2); font-size:var(--fs-xs); font-weight:500; white-space:nowrap; }
 .br-sync-btn:hover { background:var(--hover); color:var(--text); }
 .br-sync-btn[aria-pressed=true] { border-color:color-mix(in srgb, var(--accent) 45%, transparent); background:var(--accent-soft); color:var(--accent); font-weight:600; }
 .br-sync-btn:focus-visible { outline:var(--size-2) solid var(--accent); outline-offset:var(--size-1); }
@@ -10,13 +10,13 @@
 .br-time { color:var(--text); font-weight:600; }
 .br-price { color:var(--text-2); }
 .br-body { flex:1; min-height:0; overflow:auto; position:relative; }
-.br-cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:var(--size-1); background:var(--line); }
+.br-cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:0; background:var(--bg); }
 @container brokers (width < 460px) {
   .br-bar { gap:var(--size-6); }
   .br-bar .ui-seg .ui-seg-item { padding:0 var(--s3); }
   .br-cards { grid-template-columns:repeat(2, minmax(0, 1fr)); }
 }
-.br-card { display:grid; align-content:start; gap:var(--size-3); min-width:0; padding:var(--size-6) var(--size-10); background:var(--surface); text-align:left; font-size:var(--fs-s); line-height:1.3; }
+.br-card { display:grid; align-content:start; gap:var(--size-3); min-width:0; padding:var(--size-6) var(--size-10); border-right:var(--size-1) solid var(--line); border-bottom:var(--size-1) solid var(--line); background:var(--surface); text-align:left; font-size:var(--fs-s); line-height:1.3; }
 .br-card:hover { background:color-mix(in srgb, var(--surface) 92%, var(--text)); }
 .br-card[aria-pressed=true] { background:var(--accent-soft); }
 .br-card:focus-visible { outline:var(--size-2) solid var(--accent); outline-offset:calc(-1 * var(--size-2)); }

@@ -84,8 +84,8 @@
   --success: #12633D; --warning: #7A4F00; --danger: #9E3E00; --on-data: #FAF9F6;
   --danger-soft: rgba(158, 62, 0, 0.12); --warning-soft: rgba(122, 79, 0, 0.12); --success-soft: rgba(18, 99, 61, 0.12); --up-soft: rgba(182, 30, 49, 0.11); --down-soft: rgba(20, 83, 189, 0.11);
   --up: #B61E31; --down: #1453BD; --tile-up: #EC8491; --tile-down: #82B0F8; --tile-ink-strong: #0B0B0A; --up-vol: rgba(182, 30, 49, 0.30); --down-vol: rgba(20, 83, 189, 0.30);
-  --series-1: #BB00BB; --series-2: #447700; --series-3: #552200; --series-4: #007799; --series-5: #000033;
-  --series-6: #002211; --series-7: #776666; --series-8: #660033; --series-9: #0011CC; --series-10: #444411;
+  --series-1: #0C6E80; --series-2: #6B3FA0; --series-3: #5C6B14; --series-4: #9E2A6E; --series-5: #0E0038;
+  --series-6: #46000E; --series-7: #706262; --series-8: #0E2A00; --series-9: #003846; --series-10: #382A00;
   --crosshair: #6E6A62; --series-line: #141412; --series-fill: rgba(20, 20, 18, 0.08);
   --ind-1: #8C6214; --ind-2: #463599; --ind-3: #1A6E5C; --ind-4: #A84A1E; --ind-5: #4F613A;
   --cmp-1: #965300; --cmp-2: #9E2B6B; --cmp-3: #0F6C80;

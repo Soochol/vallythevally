@@ -91,7 +91,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
                       aria-controls={showContent ? `${ids}-panel` : undefined}
                       tabIndex={m.id === current.id ? 0 : -1}
                       onClick={() => dispatch({ type: "choose", menu: m.id })}
-                      className="flex h-9 items-center gap-2 rounded-m px-2 text-left text-text-2 hover:bg-hover hover:text-text disabled:cursor-not-allowed disabled:text-text-3 disabled:hover:bg-transparent aria-selected:bg-accent-soft aria-selected:font-semibold aria-selected:text-accent max-md:h-12 max-md:rounded-none max-md:border-t max-md:border-line max-md:px-4 max-md:aria-selected:bg-transparent max-md:aria-selected:text-text"
+                      className="flex h-9 items-center gap-2 rounded-s px-2 text-left text-text-2 hover:bg-hover hover:text-text disabled:cursor-not-allowed disabled:text-text-3 disabled:hover:bg-transparent aria-selected:bg-hover aria-selected:font-semibold aria-selected:text-text aria-selected:shadow-[inset_2px_0_0_var(--accent)] max-md:h-12 max-md:rounded-none max-md:border-t max-md:border-line max-md:px-4 max-md:aria-selected:bg-transparent max-md:aria-selected:text-text max-md:aria-selected:shadow-none"
                     >
                       <span aria-hidden="true" className="flex-none">{MENU_ICON[m.id]}</span>
                       <span className="min-w-0 flex-1 truncate">{m.label}</span>

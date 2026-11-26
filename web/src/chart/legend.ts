@@ -21,7 +21,7 @@ const OHLC_WITH_VENUE_AND_NOTICE = {
   values: `grow basis-0 ${OHLC}`,
 };
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
-const STATUS_PILL = "self-center rounded-[9px] border px-1.5 text-xs";
+const STATUS_PILL = "self-center rounded-s border px-1.5 text-xs";
 const NEUTRAL_PILL = `${STATUS_PILL} border-line text-text-2`;
 const WARNING_PILL = `${STATUS_PILL} border-warning text-warning`;
 

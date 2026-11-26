@@ -10,7 +10,7 @@
 .etf-seg .ui-seg-item[aria-pressed="true"] { background: transparent; color: var(--text); border-bottom-color: var(--accent); box-shadow: none; }
 .etf-selects { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--size-8); }
 .etf-selects > span { width: 100%; }
-.etf-select { width: 100%; height: var(--ctl-m); padding: 0 var(--size-8); border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-s); }
+.etf-select { width: 100%; height: var(--ctl-m); padding: 0 var(--size-8); border: var(--size-1) solid var(--line-strong); border-radius: var(--r-m); background: var(--bg); color: var(--text); font-size: var(--fs-s); }
 .etf-select > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .etf-list { flex: 1; margin: 0; padding: var(--size-4); overflow-y: auto; list-style: none; }
 .etf-list-loading { flex: 1; padding: var(--size-8); overflow: hidden; }
@@ -104,7 +104,6 @@
 .etf-state { display: grid; min-height: var(--size-140); }
 .etf-state .ui-state { align-self: center; }
 
-.etf-lens-seg .ui-seg-item[aria-pressed="true"] { background: var(--surface); color: var(--accent); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .etf-lens-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-8); min-height: var(--size-24); padding: var(--size-2) var(--size-8); border-radius: var(--r-s); background: var(--surface); color: var(--text-2); font-size: var(--fs-xs); }
 .etf-lens-bar[data-hover="true"] { background: var(--raised); color: var(--text); }
 .etf-lens-focus-name { font-weight: 600; color: var(--text); }
@@ -137,7 +136,7 @@
 .etf-curve-hover-label { fill: var(--accent); font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .etf-table-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-8); margin-bottom: var(--size-8); }
-.etf-inline-search { width: var(--size-180); height: var(--ctl-s); min-height: var(--ctl-s); padding: 0 var(--size-8); background: var(--raised); font-size: var(--fs-xs); }
+.etf-inline-search { width: var(--size-180); height: var(--ctl-s); min-height: var(--ctl-s); padding: 0 var(--size-4); border: 0; border-bottom: var(--size-1) solid var(--line-strong); border-radius: 0; background: transparent; font-size: var(--fs-xs); }
 .etf-table-tools .etf-ma-legend { margin: 0 0 0 auto; }
 .etf-table-wrap { overflow-x: auto; }
 .etf-table-wrap[data-scroll] { max-height: 440px; overflow: auto; }
@@ -157,8 +156,8 @@
 .etf-stock-cell { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--size-4); }
 .etf-row-name { margin-right: var(--size-4); color: var(--text); text-align: left; }
 .etf-row-code { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-.etf-mini-btn { height: var(--size-20); padding: 0 var(--size-6); border: var(--size-1) solid var(--line); border-radius: var(--r-s); background: var(--raised); color: var(--text-2); font-size: var(--fs-xs); }
-.etf-mini-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.etf-mini-btn { height: var(--size-20); padding: 0 var(--size-6); border: var(--size-1) solid var(--line-strong); border-radius: var(--r-s); background: var(--bg); color: var(--text-2); font-size: var(--fs-xs); }
+.etf-mini-btn:hover { background: var(--hover); border-color: var(--accent); color: var(--text); }
 .etf-flow-up { color: var(--up); font-variant-numeric: tabular-nums; }
 .etf-flow-down { color: var(--down); font-variant-numeric: tabular-nums; }
 .etf-muted { color: var(--text-3); }
@@ -223,7 +222,7 @@
 .etf-radar-tt-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--size-8); margin-bottom: var(--size-6); }
 .etf-radar-tt-head strong { font-size: var(--fs-m); font-weight: 700; color: var(--text); }
 .etf-radar-tt-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--size-6); margin: 0 0 var(--size-8); }
-.etf-radar-tt-stats > div { padding: var(--size-5) var(--size-6); border-radius: var(--r-s); background: var(--raised); }
+.etf-radar-tt-stats > div { padding: var(--size-5) var(--size-6); border: var(--size-1) solid var(--line); border-radius: var(--r-s); background: var(--surface); }
 .etf-radar-tt-stats dt { color: var(--text-3); font-size: var(--fs-xs); }
 .etf-radar-tt-stats dd { margin: var(--size-2) 0 0; color: var(--text); font-size: var(--fs-s); font-weight: 700; }
 .etf-radar-tt-stats dd[data-direction="up"] { color: var(--up); }
@@ -273,18 +272,18 @@
 
 .etf-quick-picks { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-6); }
 .etf-quick-label { color: var(--text-3); font-size: var(--fs-xs); }
-.etf-quick-btn { height: var(--size-24); padding: 0 var(--size-8); border-radius: var(--r-pill); background: var(--raised); color: var(--text-2); font-size: var(--fs-xs); }
-.etf-quick-btn:hover { color: var(--text); background: var(--overlay); }
-.etf-quick-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.etf-quick-btn { height: var(--size-24); padding: 0 var(--size-8); border: var(--size-1) solid var(--line); border-radius: var(--r-pill); background: var(--surface); color: var(--text-2); font-size: var(--fs-xs); }
+.etf-quick-btn:hover { color: var(--text); background: var(--hover); border-color: var(--line-strong); }
+.etf-quick-btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .etf-stock-results { display: flex; flex-wrap: wrap; gap: var(--size-5); margin: 0; padding: 0; list-style: none; }
-.etf-stock-results button { display: flex; gap: var(--size-8); padding: var(--size-5) var(--size-10); border-radius: var(--r-m); background: var(--raised); font-size: var(--fs-s); }
-.etf-stock-results button[aria-pressed="true"] { background: var(--accent-soft); }
+.etf-stock-results button { display: flex; gap: var(--size-8); padding: var(--size-5) var(--size-10); border: var(--size-1) solid var(--line); border-radius: var(--r-m); background: var(--surface); font-size: var(--fs-s); }
+.etf-stock-results button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .etf-stock-results button[aria-pressed="true"] .etf-row-code { color: var(--text-2); }
 .etf-reverse-stock-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-8); }
 .etf-reverse-top-name { font-size: var(--fs-m); }
 
 .etf-timeline { display: flex; flex-wrap: wrap; gap: var(--size-6); margin: 0; padding: 0; list-style: none; }
-.etf-timeline button { display: flex; flex-direction: column; gap: var(--size-3); padding: var(--size-6) var(--size-10); border: var(--size-1) solid transparent; border-radius: var(--r-m); background: var(--raised); text-align: left; font-size: var(--fs-xs); min-width: var(--size-168); }
+.etf-timeline button { display: flex; flex-direction: column; gap: var(--size-3); padding: var(--size-6) var(--size-10); border: var(--size-1) solid var(--line); border-radius: var(--r-m); background: var(--surface); text-align: left; font-size: var(--fs-xs); min-width: var(--size-168); }
 .etf-timeline button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .etf-pair-range { font-size: var(--fs-s); font-weight: 500; font-variant-numeric: tabular-nums; }
 .etf-pair-counts { display: flex; gap: var(--size-8); color: var(--text-2); }
@@ -299,7 +298,6 @@
 .etf-xray-copy { flex: 1; min-width: var(--size-220); }
 .etf-xray-copy h4 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-4); margin: 0 0 var(--size-3); color: var(--text); font-size: var(--fs-s); font-weight: 600; }
 .etf-xray-copy p { margin: 0; color: var(--text-2); font-size: var(--fs-xs); }
-.etf-xray-seg .ui-seg-item[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .etf-scale { margin-left: var(--size-4); color: var(--accent); font-variant-numeric: tabular-nums; }
 .etf-diverge-head { min-width: var(--size-120); text-align: center; }
 .etf-diverge-cell { min-width: var(--size-120); }
@@ -316,8 +314,8 @@
 .etf-table td[data-direction="down"] { color: var(--down); }
 .etf-table tr[data-kind="unchanged"] td { color: var(--text-2); }
 
-.etf-acc-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-8); }
-.etf-acc-seg .ui-seg-item[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.etf-acc-controls { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-10); }
+.etf-controls-sep { width: var(--size-1); height: var(--size-16); background: var(--line-strong); flex: none; }
 .etf-acc-period { margin-left: auto; color: var(--text-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .etf-acc-ma-date { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .etf-acc-stock-cell { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--size-4); }
@@ -331,7 +329,7 @@
 .etf-table tbody tr.etf-acc-detail-row:hover { background: var(--surface); }
 .etf-acc-contrib { padding: var(--size-6) 0; }
 .etf-acc-contrib-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--size-8); margin: 0; padding: 0; list-style: none; }
-.etf-acc-contrib-item { display: flex; flex-direction: column; gap: var(--size-6); padding: var(--size-8) var(--size-10); border-radius: var(--r-m); background: var(--raised); }
+.etf-acc-contrib-item { display: flex; flex-direction: column; gap: var(--size-6); padding: var(--size-8) var(--size-10); border: var(--size-1) solid var(--line); border-radius: var(--r-m); background: var(--bg); }
 .etf-acc-contrib-top { display: flex; align-items: center; justify-content: space-between; gap: var(--size-8); }
 .etf-acc-fund-link { display: inline-flex; min-width: 0; align-items: center; gap: var(--size-6); color: var(--text); font-size: var(--fs-s); text-align: left; }
 .etf-acc-fund-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -346,7 +344,7 @@
 .etf-acc-contrib-bar i[data-direction="sell"] { background: var(--down); }
 .etf-similar-issuer { color: var(--text-3); font-size: var(--fs-xs); }
 
-.etf-flow-sort { height: var(--ctl-s); padding: 0 var(--size-8); border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-xs); }
+.etf-flow-sort { height: var(--ctl-s); padding: 0 var(--size-8); border: var(--size-1) solid var(--line-strong); border-radius: var(--r-m); background: var(--bg); color: var(--text); font-size: var(--fs-xs); }
 .etf-flow-kpi[data-direction="up"] { color: var(--up); }
 .etf-flow-kpi[data-direction="down"] { color: var(--down); }
 .etf-flow-kpi-link { color: var(--text); text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -363,7 +361,7 @@
 .etf-flow-bar-info { display: flex; flex-direction: column; gap: var(--size-2); min-width: 0; }
 .etf-flow-bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-s); font-weight: 600; }
 .etf-flow-bar-meta { display: flex; gap: var(--size-6); color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-.etf-flow-bar-track { display: block; height: var(--size-10); border-radius: var(--r-s); background: var(--surface); overflow: hidden; }
+.etf-flow-bar-track { display: block; height: var(--size-10); border-radius: var(--r-s); background: var(--line); overflow: hidden; }
 .etf-flow-bar-track i { display: block; height: 100%; border-radius: var(--r-s); }
 .etf-flow-bar-track i[data-direction="up"] { background: var(--up); }
 .etf-flow-bar-track i[data-direction="down"] { background: var(--down); }

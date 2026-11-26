@@ -112,14 +112,14 @@ function InspectorBody({ cellId }: { cellId: WindowId }) {
       {COMMAND_TABS.map((tab) => <button key={tab.mode} id={tabId(tab.mode)} type="button" role="tab" aria-selected={mode === tab.mode} aria-controls={`${ids}-panel`} tabIndex={mode === tab.mode ? 0 : -1}
         aria-label={tab.mode === "current" ? `${tab.label} ${cell.chartSettings.indicators.length}개` : undefined} onClick={() => { show(tab.mode); inputRef.current?.focus(); }}
         className="-mb-px inline-flex h-[38px] items-center gap-1.5 border-b-2 border-transparent text-s text-text-2 aria-selected:border-accent aria-selected:font-semibold aria-selected:text-accent">
-        {tab.label}{tab.mode === "current" && <span className="rounded-full bg-[var(--hover)] px-1.5 text-xs font-normal leading-4 text-text-2">{cell.chartSettings.indicators.length}</span>}
+        {tab.label}{tab.mode === "current" && <span className="rounded-s bg-[var(--hover)] px-1.5 text-xs font-normal leading-4 text-text-2">{cell.chartSettings.indicators.length}</span>}
       </button>)}
     </div>
     <div id={`${ids}-panel`} role="tabpanel" aria-labelledby={tabId(mode)} className="flex min-h-0 flex-1 flex-col overflow-auto px-2 pb-2 pt-1">
       <ul aria-label={mode === "compare" ? "비교 후보" : "지표 목록"} className="flex flex-col gap-0.5">
         {rows.map((row, i) => <Fragment key={row.key}>
           {row.group !== rows[i - 1]?.group && <li role="presentation" className="px-2 pb-1 pt-2 text-xs text-text-3">{row.group}</li>}
-          <li id={rowId(row)} className={`rounded-l ${open?.key === row.key ? "bg-raised shadow-[inset_0_0_0_1px_var(--accent-soft)]" : ""}`}>
+          <li id={rowId(row)} className={`rounded-l ${open?.key === row.key ? "bg-surface shadow-[inset_0_0_0_1px_var(--line-strong)]" : ""}`}>
             {row.kind === "symbol"
               ? <button type="button" aria-pressed={open?.key === row.key} disabled={!row.selectable} onClick={() => toggle(row)}
                 className="flex h-9 w-full items-center gap-2 rounded-l px-2 text-left text-s hover:bg-raised disabled:opacity-50 aria-pressed:bg-accent-soft">

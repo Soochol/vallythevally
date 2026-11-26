@@ -113,14 +113,15 @@ function TileCard({ row, rect, themeName, themeTraded }: CardProps) {
   const traded = row.tradedMillionWon === null ? "–" : tradedText(row.tradedMillionWon);
   const share = row.tradedMillionWon === null || themeTraded <= 0 ? null : `${((row.tradedMillionWon / themeTraded) * 100).toFixed(1)}%`;
   const right = rect.x + rect.w / 2 > MAP_WIDTH / 2;
-  const below = rect.y + rect.h / 2 < MAP_HEIGHT / 2;
+  const below = rect.y + rect.h / 2 <= MAP_HEIGHT / 2;
+  const topPct = below ? Math.min(rect.y + rect.h, MAP_HEIGHT) : Math.max(rect.y, 0);
   return (
     <div
       role="tooltip"
       className="hm-tile-card"
       data-flip-x={right}
       data-flip-y={!below}
-      style={{ left: `${((right ? rect.x : rect.x + rect.w) / MAP_WIDTH) * 100}%`, top: `${((below ? rect.y + rect.h : rect.y) / MAP_HEIGHT) * 100}%` }}
+      style={{ left: `${((right ? rect.x : rect.x + rect.w) / MAP_WIDTH) * 100}%`, top: `${(topPct / MAP_HEIGHT) * 100}%` }}
     >
       <strong>{row.name}</strong>
       <span>{row.code}</span>

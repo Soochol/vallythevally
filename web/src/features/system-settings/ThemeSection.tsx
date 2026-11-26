@@ -5,7 +5,7 @@ import { Segmented } from "../ui/Segmented";
 export function ThemeSection() {
   const theme = useSyncExternalStore(subscribeTheme, () => appliedTheme(), () => DEFAULT_THEME);
   return (
-    <section aria-label="화면 테마" className="flex flex-col gap-3 border-t border-line bg-bg py-4">
+    <section aria-label="화면 테마" className="flex flex-col gap-3 border-t border-line bg-transparent py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-m font-semibold">화면 테마</h3>

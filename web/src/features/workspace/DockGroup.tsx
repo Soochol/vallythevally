@@ -140,7 +140,7 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
   useLayoutEffect(() => {
     const selected = strip.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]');
     if (selected) revealTab(selected);
-  }, [group.active, group.tabs.length]);
+  }, [group.active, group.tabs.length, stripOverflow.overflowing]);
   if (!shown) return null;
   const { overflow } = WINDOW_CONTENT[shown.kind];
   const select = interaction.selectTab;

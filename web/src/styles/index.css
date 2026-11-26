@@ -118,7 +118,7 @@
   .btn-primary:hover { opacity: 0.88; }
   .btn:disabled, .btn-ghost:disabled, .btn-danger:disabled, .btn-primary:disabled,
   .btn[aria-disabled="true"], .btn-ghost[aria-disabled="true"], .btn-danger[aria-disabled="true"], .btn-primary[aria-disabled="true"] {
-    background: var(--raised); border-color: var(--line); color: var(--text-3); filter: none; opacity: 1 !important; cursor: not-allowed;
+    background: var(--raised); border-color: var(--line); border-style: dashed; color: var(--text-3); filter: none; opacity: 1 !important; cursor: not-allowed;
   }
   .tb-sep { width: 1px; height: 20px; background: var(--line); margin: 0 var(--s2); flex: none; }
 

@@ -144,8 +144,8 @@ function HealthRadar({
             />
           );
         })}
-        <text className="mk-radar-tick" x={RADAR_CX + 4} y={RADAR_CY - RADAR_RADIUS * 0.5 + 3}>50</text>
-        <text className="mk-radar-tick" x={RADAR_CX + 4} y={RADAR_CY - RADAR_RADIUS + 10}>100</text>
+        <text className="mk-radar-tick" x={RADAR_CX + 8} y={RADAR_CY - RADAR_RADIUS * 0.5 - 3}>50</text>
+        <text className="mk-radar-tick" x={RADAR_CX + 8} y={RADAR_CY - RADAR_RADIUS + 9}>100</text>
         <polygon
           className="mk-radar-shape"
           data-tone={tone}

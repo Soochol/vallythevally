@@ -608,16 +608,18 @@ function ResultList({ screen, result, rows, filteredRows, filter, running, rerun
   const hasBothMicro = rows.some((row) => row.programNetMillionWon !== undefined) && rows.some((row) => row.whaleNetMillionWon !== undefined);
   return (
     <section aria-label="결과" aria-busy={running} className={`flex flex-col ${running ? "opacity-50" : ""}`}>
-      <div className="flex h-7 flex-none items-center gap-1 pl-3 pr-1.5 text-s">
-        <span className="min-w-0 flex-1 truncate text-text-2">
+      <div className="flex h-7 flex-none items-center gap-1.5 pl-3 pr-1.5 text-s">
+        <span className="flex-none whitespace-nowrap text-text-2">
           <span className="font-[600] text-text">{hasFilter ? `${count(filteredRows.length)} / ${count(rows.length)}` : count(rows.length)}종목</span> · {dayLabel(result.asOf, result.asOf)} 기준
         </span>
-        <DataAgeNote recordedAt={result.collectionCompletedAt} cadence="screener" />
+        <span className="min-w-0 flex-1 truncate text-right">
+          <DataAgeNote recordedAt={result.collectionCompletedAt} cadence="screener" />
+        </span>
         {rows.length > 0 && <ScreenerColumnPicker rows={rows} />}
         <ResultInfo result={result} />
       </div>
       {rows.length > 0 && (
-        <div className="flex h-8 flex-none items-center gap-1 border-t border-line-subtle bg-[color-mix(in_srgb,var(--raised)_28%,var(--surface))] px-2.5">
+        <div className="flex h-8 flex-none items-center gap-1 border-t border-line-subtle bg-bg px-2.5">
           <label className="relative flex min-w-0 flex-1 items-center">
             <span className="pointer-events-none absolute left-1.5 text-text-3"><SearchIcon size={12} /></span>
             <input
@@ -626,7 +628,7 @@ function ResultList({ screen, result, rows, filteredRows, filter, running, rerun
               placeholder="종목명·코드"
               value={filter.query}
               onChange={(e) => filter.onQuery(e.target.value)}
-              className="h-[var(--ctl-xs)] w-full min-w-0 rounded-s border border-line bg-surface pl-6 pr-5 text-xs text-text outline-none placeholder:text-text-3 focus:border-accent"
+              className="h-[var(--ctl-xs)] w-full min-w-0 rounded-s border border-line-strong bg-bg pl-6 pr-5 text-xs text-text outline-none placeholder:text-text-3 focus:border-accent"
             />
             {filter.query && (
               <button
@@ -646,7 +648,7 @@ function ResultList({ screen, result, rows, filteredRows, filter, running, rerun
             className={`h-[var(--ctl-xs)] flex-none rounded-s px-2 text-xs font-[500] ${
               filter.onlyRising
                 ? "bg-up-soft text-up shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--up)_35%,transparent)]"
-                : "bg-raised text-text-2 hover:bg-overlay hover:text-text"
+                : "border border-line bg-bg text-text-2 hover:bg-hover hover:text-text"
             }`}
           >
             상승
@@ -659,7 +661,7 @@ function ResultList({ screen, result, rows, filteredRows, filter, running, rerun
               className={`h-[var(--ctl-xs)] flex-none rounded-s px-2 text-xs font-[500] ${
                 filter.onlyBothBuy
                   ? "bg-accent-soft text-accent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_35%,transparent)]"
-                  : "bg-raised text-text-2 hover:bg-overlay hover:text-text"
+                  : "border border-line bg-bg text-text-2 hover:bg-hover hover:text-text"
               }`}
             >
               양매수
