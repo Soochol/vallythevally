@@ -101,7 +101,14 @@ test("동시 매집 요약·필터 칩·버블 레이더 클릭과 역추적 이
   await expect(rankedRows(page).first()).toHaveAttribute("data-code", "000660");
 
   const radar = page.getByRole("region", { name: "컨빅션 버블 레이더" });
-  await radar.locator('[data-bubble-code="000660"]').click();
+  const radarSvgBox = (await radar.locator(".etf-radar-svg").boundingBox())!;
+  expect(radarSvgBox.height).toBeGreaterThanOrEqual(480);
+  const hynixBubble = radar.locator('[data-bubble-code="000660"]');
+  await hynixBubble.hover();
+  const tooltip = radar.getByTestId("etf-radar-tooltip");
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toContainText("SK하이닉스");
+  await hynixBubble.click();
   await expect(page.getByRole("region", { name: "SK하이닉스 매집 ETF 목록" })).toBeVisible();
 
   await table(page).getByRole("button", { name: "SK하이닉스 역추적" }).click();
