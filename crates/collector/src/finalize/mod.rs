@@ -23,7 +23,7 @@ mod raw_files;
 mod scan;
 pub mod schema;
 
-pub use complete::{COMPLETE_FILE_NAME, COMPLETE_FORMAT_VERSION, CompleteFile, REPLACED_SUFFIX, publish_store, recover_interrupted_swap};
+pub use complete::{COMPLETE_FILE_NAME, COMPLETE_FORMAT_VERSION, CompleteFile, REPLACED_SUFFIX, publish_store, recover_all_interrupted_swaps, recover_interrupted_swap};
 pub use coverage::{CoverageInput, Gap, Handoff, JournalFact, KeyTimeline, KeyTimelines, StockCoverage, build_coverage};
 pub use daily_micro::{DailyMicroReport, DailyMicroRow, write_daily_micro};
 pub use observation::{IndexCheckResult, IndexCheckSummary, JudgedVerdict, JudgmentSummary, MarketOpenSummary, ObservationSummary, TreatedAs};
@@ -31,7 +31,7 @@ pub use prune::{
     CompleteState, DayFacts, KeepReason, PRUNE_LOG_NAME, PruneReport, PrunePlan, RetentionSettings, UnfinalizedCount, delete_planned_day, delete_raw_day,
     RawState, first_complete_day, plan_prune, prune_raw, raw_days_without_complete, read_day_facts,
 };
-pub use quotes::{QuotesReport, fill_closed_days, fill_missing_closed_days, missing_closed_quote_days, write_closed_day};
+pub use quotes::{QuotesReport, fill_closed_days, fill_missing_closed_days, missing_closed_quote_days, recover_all_interrupted_quote_swaps, write_closed_day};
 pub use raw_files::RawFiles;
 pub use check::{Mismatch, StatJson, VERIFY_FILE_NAME, VerifyReport, bucket_count_of, verify_store};
 pub use merge::{ROW_GROUP_ROWS, WrittenFile, bucket_file};

@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use collector::finalize::schema::{self, ColumnKind};
-use collector::finalize::{DEFAULT_SPILL_BUDGET_BYTES, Options, bucket_of, store_dir, temporary_store_dir, tally_day, verify_store, write_store};
+use collector::finalize::{
+    COMPLETE_FILE_NAME, DEFAULT_SPILL_BUDGET_BYTES, Options, REPLACED_SUFFIX, bucket_of, publish_store, recover_all_interrupted_quote_swaps,
+    recover_all_interrupted_swaps, store_dir, tally_day, temporary_store_dir, verify_store, write_store,
+};
 use collector::raw_write::{RawLine, RawWriter};
 use duckdb::Connection;
 use duckdb::types::Value;
@@ -715,4 +718,94 @@ fn rows_with_the_same_symbol_and_time_keep_their_raw_order_for_any_thread_count(
     let quantities: Vec<Cellular> = single.iter().map(|row| row["f15"].clone()).collect();
     let wanted: Vec<Cellular> = (0..6_000).flat_map(|index| [Cellular::Int(index), Cellular::Int(-index)]).collect();
     assert_eq!(quantities, wanted);
+}
+
+#[test]
+fn publish_store_replaces_existing_published_directory_atomically() {
+    let data = tempdir().unwrap();
+    let published = store_dir(data.path(), DATE);
+    let temporary = temporary_store_dir(data.path(), DATE);
+    fs::create_dir_all(published.join("0B")).unwrap();
+    fs::write(published.join("0B/old.parquet"), b"old-parquet").unwrap();
+    fs::write(published.join(COMPLETE_FILE_NAME), b"{\"version\":\"old\"}").unwrap();
+    fs::create_dir_all(temporary.join("0B")).unwrap();
+    fs::write(temporary.join("0B/000.parquet"), b"new-parquet").unwrap();
+    fs::write(temporary.join(COMPLETE_FILE_NAME), b"{\"version\":\"new\"}").unwrap();
+
+    publish_store(data.path(), DATE).unwrap();
+
+    assert_eq!(fs::read(published.join(COMPLETE_FILE_NAME)).unwrap(), b"{\"version\":\"new\"}");
+    assert_eq!(fs::read(published.join("0B/000.parquet")).unwrap(), b"new-parquet");
+    assert!(!published.join("0B/old.parquet").exists());
+    let entries: Vec<String> = fs::read_dir(data.path().join("store"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(entries, vec![DATE_TEXT]);
+}
+
+#[test]
+fn recover_all_interrupted_swaps_handles_multiple_dates() {
+    let data = tempdir().unwrap();
+    let store = data.path().join("store");
+    let restore_date = 20_261_117;
+    let promote_date = 20_261_118;
+    let cleanup_date = 20_261_119;
+
+    fs::create_dir_all(store.join(format!("{restore_date}{REPLACED_SUFFIX}100"))).unwrap();
+    fs::write(store.join(format!("{restore_date}{REPLACED_SUFFIX}100/tag")), b"older").unwrap();
+    fs::create_dir_all(store.join(format!("{restore_date}{REPLACED_SUFFIX}200"))).unwrap();
+    fs::write(store.join(format!("{restore_date}{REPLACED_SUFFIX}200/tag")), b"newer").unwrap();
+    fs::create_dir_all(temporary_store_dir(data.path(), restore_date)).unwrap();
+
+    fs::create_dir_all(store.join(format!("{promote_date}{REPLACED_SUFFIX}100"))).unwrap();
+    fs::write(store.join(format!("{promote_date}{REPLACED_SUFFIX}100/tag")), b"old").unwrap();
+    let promote_tmp = temporary_store_dir(data.path(), promote_date);
+    fs::create_dir_all(&promote_tmp).unwrap();
+    fs::write(promote_tmp.join(COMPLETE_FILE_NAME), b"{}").unwrap();
+    fs::write(promote_tmp.join("tag"), b"promoted").unwrap();
+
+    let cleanup_dir = store_dir(data.path(), cleanup_date);
+    fs::create_dir_all(&cleanup_dir).unwrap();
+    fs::write(cleanup_dir.join("tag"), b"current").unwrap();
+    fs::create_dir_all(store.join(format!("{cleanup_date}{REPLACED_SUFFIX}100"))).unwrap();
+
+    recover_all_interrupted_swaps(data.path()).unwrap();
+
+    assert_eq!(fs::read(store_dir(data.path(), restore_date).join("tag")).unwrap(), b"newer");
+    assert_eq!(fs::read(store_dir(data.path(), promote_date).join("tag")).unwrap(), b"promoted");
+    assert_eq!(fs::read(store_dir(data.path(), cleanup_date).join("tag")).unwrap(), b"current");
+    let leftover_old: Vec<String> = fs::read_dir(&store)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.contains(REPLACED_SUFFIX))
+        .collect();
+    assert!(leftover_old.is_empty(), "{leftover_old:?}");
+}
+
+#[test]
+fn recover_all_interrupted_quote_swaps_restores_orphaned_directories() {
+    let shared = tempdir().unwrap();
+    let sample = server::shared_data::closed_day_dir(shared.path(), "0");
+    let quotes_root = sample.parent().unwrap();
+
+    fs::create_dir_all(quotes_root.join(format!("20261117{REPLACED_SUFFIX}100"))).unwrap();
+    fs::write(quotes_root.join(format!("20261117{REPLACED_SUFFIX}100/005930.json.gz")), b"older").unwrap();
+    fs::create_dir_all(quotes_root.join(format!("20261117{REPLACED_SUFFIX}200"))).unwrap();
+    fs::write(quotes_root.join(format!("20261117{REPLACED_SUFFIX}200/005930.json.gz")), b"newer").unwrap();
+
+    fs::create_dir_all(quotes_root.join("20261118")).unwrap();
+    fs::write(quotes_root.join("20261118/005930.json.gz"), b"live").unwrap();
+    fs::create_dir_all(quotes_root.join(format!("20261118{REPLACED_SUFFIX}100"))).unwrap();
+
+    recover_all_interrupted_quote_swaps(shared.path()).unwrap();
+
+    assert_eq!(fs::read(quotes_root.join("20261117/005930.json.gz")).unwrap(), b"newer");
+    assert_eq!(fs::read(quotes_root.join("20261118/005930.json.gz")).unwrap(), b"live");
+    let leftover_old: Vec<String> = fs::read_dir(quotes_root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.contains(REPLACED_SUFFIX))
+        .collect();
+    assert!(leftover_old.is_empty(), "{leftover_old:?}");
 }

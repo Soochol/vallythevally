@@ -115,6 +115,7 @@ fn write_bucket(
         writer.flush().map_err(into_io)?;
     }
     writer.close().map_err(into_io)?;
+    File::open(&path)?.sync_all()?;
     let bytes = fs::metadata(&path)?.len();
     Ok(WrittenFile { type_index, bucket, path, rows: order.len() as u64, bytes })
 }

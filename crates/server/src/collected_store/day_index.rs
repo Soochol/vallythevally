@@ -16,6 +16,7 @@ const MAX_DAY_FOLDERS: usize = 60;
 pub(crate) struct FileStamp {
     pub len: u64,
     pub modified: Option<SystemTime>,
+    pub ino: Option<u64>,
 }
 
 impl FileStamp {
@@ -24,7 +25,7 @@ impl FileStamp {
             .modified
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map_or(0u128, |d| d.as_nanos());
-        format!("{}-{nanos}", self.len)
+        format!("{}-{nanos}-{}", self.len, self.ino.unwrap_or(0))
     }
 }
 
@@ -100,7 +101,16 @@ struct RawHandoff {
 
 pub(crate) fn read_path_stamp(path: &Path) -> Result<Option<FileStamp>, String> {
     match std::fs::metadata(path) {
-        Ok(meta) => Ok(Some(FileStamp { len: meta.len(), modified: meta.modified().ok() })),
+        Ok(meta) => {
+            #[cfg(unix)]
+            let ino = {
+                use std::os::unix::fs::MetadataExt;
+                Some(meta.ino())
+            };
+            #[cfg(not(unix))]
+            let ino = None;
+            Ok(Some(FileStamp { len: meta.len(), modified: meta.modified().ok(), ino }))
+        }
         Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("{}를 확인할 수 없습니다: {e}", path.display())),
     }
@@ -326,5 +336,23 @@ mod tests {
             panic!("expected ready index");
         };
         assert_eq!(empty_raw_index.stocks["005930"].end_minute_exclusive, DEFAULT_END_MINUTE_EXCLUSIVE);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_stamp_detects_same_length_replacement_with_different_inode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("complete.json");
+        let replacement = tmp.path().join("complete.json.next");
+        std::fs::write(&target, b"alpha").unwrap();
+        let stamp_a = read_path_stamp(&target).unwrap().unwrap();
+        std::fs::write(&replacement, b"bravo").unwrap();
+        std::fs::rename(&replacement, &target).unwrap();
+        let stamp_b = read_path_stamp(&target).unwrap().unwrap();
+        assert_eq!(stamp_a.len, stamp_b.len);
+        assert!(stamp_a.ino.is_some());
+        assert_ne!(stamp_a.ino, stamp_b.ino);
+        assert_ne!(stamp_a, stamp_b);
+        assert_ne!(stamp_a.token(), stamp_b.token());
     }
 }

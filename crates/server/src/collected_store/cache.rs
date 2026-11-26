@@ -61,7 +61,7 @@ mod tests {
     use super::*;
 
     fn stamp(len: u64) -> FileStamp {
-        FileStamp { len, modified: None }
+        FileStamp { len, modified: None, ino: None }
     }
 
     #[test]

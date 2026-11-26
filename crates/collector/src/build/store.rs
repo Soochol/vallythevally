@@ -5,7 +5,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use hoga_format::{DecodeError, EncodeError, Span};
-use tempfile::NamedTempFile;
+
+pub use crate::fs_util::write_atomically;
 
 const BROTLI_QUALITY: u32 = 11;
 const BROTLI_WINDOW_BITS: u32 = 22;
@@ -61,16 +62,6 @@ pub fn latest_revisions(folder: &Path) -> io::Result<BTreeMap<u16, u32>> {
         }
     }
     Ok(latest)
-}
-
-pub fn write_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let folder = path.parent().expect("쓰는 경로에는 폴더가 있다");
-    fs::create_dir_all(folder)?;
-    let mut temporary = NamedTempFile::new_in(folder)?;
-    temporary.write_all(bytes)?;
-    temporary.flush()?;
-    temporary.persist(path).map_err(|failure| failure.error)?;
-    Ok(())
 }
 
 #[derive(Debug)]

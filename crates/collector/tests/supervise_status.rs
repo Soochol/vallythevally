@@ -952,3 +952,187 @@ async fn connections_that_never_send_a_request_are_closed_and_give_their_slots_b
     assert_eq!(fresh.ask(r#"{"v":1,"type":"status"}"#).await["type"], "status");
     world.finish().await;
 }
+
+#[test]
+fn collector_wire_replies_decode_losslessly_into_server_wire_types() {
+    use collector::shared::TrMinute;
+    use collector::supervise::{
+        Alert, AlertKind, CoverageDay, CoverageState, DaemonStatus, DayBytes, DiskUsage, ErrorCode, Filesystem, KeyStatus, KeyUsage,
+        ObservationDay, ObservationVerdict, ReplyBody, RestProgress, Today,
+    };
+    use collector::universe::{Diff, Named, Renamed};
+    use server::collector::wire::{
+        CollectorDayState, CollectorKeyRole, CollectorKeyState, CollectorKeyUsage, CollectorPhase, CollectorTrUsage, CollectorVerdict,
+        Line as ServerLine, Reply as ServerReply,
+    };
+
+    let status_reply = Reply::new(ReplyBody::Status {
+        sent_at: "2026-11-18T09:05:00+09:00".to_owned(),
+        status: DaemonStatus {
+            date: DATE,
+            phase: DayPhase::Collecting,
+            today: Today {
+                planned_stocks: 10,
+                receiving_stocks: 8,
+                register_failed_batches: 1,
+                disconnected_stocks: 1,
+                handed_off_stocks: 2,
+                excluded_stocks: 3,
+            },
+            keys: vec![
+                KeyStatus {
+                    name: KeyName::parse("collect-01").unwrap(),
+                    app_key_hash_prefix: "1111aaaa".to_owned(),
+                    role: KeyRole::Collecting,
+                    state: KeyState::Receiving,
+                    stocks: 8,
+                    messages_per_second: Some(42.5),
+                    register_failures: 1,
+                    restarts: 0,
+                    rest: RestProgress { planned_jobs: 0, finished_jobs: 0 },
+                    usage: None,
+                },
+                KeyStatus {
+                    name: KeyName::parse("spare-01").unwrap(),
+                    app_key_hash_prefix: "2222bbbb".to_owned(),
+                    role: KeyRole::Spare,
+                    state: KeyState::Waiting,
+                    stocks: 0,
+                    messages_per_second: None,
+                    register_failures: 0,
+                    restarts: 0,
+                    rest: RestProgress { planned_jobs: 0, finished_jobs: 0 },
+                    usage: None,
+                },
+                KeyStatus {
+                    name: KeyName::parse("rest-01").unwrap(),
+                    app_key_hash_prefix: "3333cccc".to_owned(),
+                    role: KeyRole::Rest,
+                    state: KeyState::Receiving,
+                    stocks: 0,
+                    messages_per_second: None,
+                    register_failures: 0,
+                    restarts: 1,
+                    rest: RestProgress { planned_jobs: 4, finished_jobs: 3 },
+                    usage: Some(KeyUsage {
+                        minute_start: 1_794_873_900,
+                        key_max_per_second: 5,
+                        trs: vec![TrMinute {
+                            tr: "ka10001".to_owned(),
+                            sent: 12,
+                            rate_limited: 1,
+                            resent: 1,
+                            max_wait_ms: 450,
+                            max_per_second: 4,
+                        }],
+                    }),
+                },
+            ],
+            universe_changes: Some(Diff {
+                added: vec![Named { code: "005930".to_owned(), name: "삼성전자".to_owned() }],
+                removed: vec![Named { code: "000660".to_owned(), name: "SK하이닉스".to_owned() }],
+                renamed: vec![Renamed { code: "035420".to_owned(), from: "옛이름".to_owned(), to: "네이버".to_owned() }],
+                halt_started: vec![Named { code: "005380".to_owned(), name: "현대차".to_owned() }],
+                halt_lifted: vec![Named { code: "000270".to_owned(), name: "기아".to_owned() }],
+            }),
+            observation_day: Some(ObservationDay {
+                verdict: ObservationVerdict::Observed,
+                reasons: vec!["정상 개장".to_owned()],
+            }),
+            alerts: vec![Alert {
+                at: "2026-11-18T09:04:00+09:00".to_owned(),
+                kind: AlertKind::SharedJobMoved,
+                message: "공용 작업을 rest-01로 옮겼습니다".to_owned(),
+            }],
+        },
+    });
+    let ServerLine::Reply(ServerReply::Status(decoded_status)) = ServerLine::parse(status_reply.to_line().as_bytes()) else {
+        panic!("status 응답 해석 실패");
+    };
+    assert_eq!(decoded_status.sent_at, "2026-11-18T09:05:00+09:00");
+    assert_eq!(decoded_status.status.phase, CollectorPhase::Collecting);
+    assert_eq!(decoded_status.status.keys.len(), 3);
+    assert_eq!(decoded_status.status.keys[0].role, CollectorKeyRole::Collecting);
+    assert_eq!(decoded_status.status.keys[0].usage, None);
+    assert_eq!(decoded_status.status.keys[1].role, CollectorKeyRole::Spare);
+    assert_eq!(decoded_status.status.keys[1].state, CollectorKeyState::Waiting);
+    assert_eq!(decoded_status.status.keys[2].role, CollectorKeyRole::Rest);
+    assert_eq!(
+        decoded_status.status.keys[2].usage,
+        Some(CollectorKeyUsage {
+            minute_start: 1_794_873_900,
+            key_max_per_second: 5,
+            trs: vec![CollectorTrUsage {
+                tr: "ka10001".to_owned(),
+                sent: 12,
+                rate_limited: 1,
+                resent: 1,
+                max_wait_ms: 450,
+                max_per_second: 4,
+            }],
+        })
+    );
+    let changes = decoded_status.status.universe_changes.as_ref().unwrap();
+    assert_eq!((changes.added.len(), changes.removed.len(), changes.renamed.len(), changes.halt_started.len(), changes.halt_lifted.len()), (1, 1, 1, 1, 1));
+    assert_eq!(decoded_status.status.observation_day.as_ref().unwrap().verdict, CollectorVerdict::Observed);
+    assert_eq!(decoded_status.status.alerts[0].kind, "shared_job_moved");
+
+    let heartbeat = Reply::new(ReplyBody::Heartbeat {
+        sent_at: "2026-11-18T09:05:05+09:00".to_owned(),
+        sequence: 7,
+        phase: DayPhase::Finalizing,
+    });
+    let ServerLine::Reply(ServerReply::Heartbeat(decoded_heartbeat)) = ServerLine::parse(heartbeat.to_line().as_bytes()) else {
+        panic!("heartbeat 응답 해석 실패");
+    };
+    assert_eq!(decoded_heartbeat.sent_at.as_deref(), Some("2026-11-18T09:05:05+09:00"));
+    assert_eq!(decoded_heartbeat.sequence, 7);
+    assert_eq!(decoded_heartbeat.phase, CollectorPhase::Finalizing);
+
+    let coverage = Reply::new(ReplyBody::Coverage {
+        sent_at: "2026-11-18T09:05:10+09:00".to_owned(),
+        days: vec![
+            CoverageDay { date: 20261117, state: CoverageState::Complete, verified: Some(true), planned_stocks: Some(2600), received_stocks: Some(2599) },
+            CoverageDay { date: 20261116, state: CoverageState::Incomplete, verified: None, planned_stocks: None, received_stocks: None },
+            CoverageDay { date: 20261115, state: CoverageState::InProgress, verified: None, planned_stocks: None, received_stocks: None },
+            CoverageDay { date: 20261114, state: CoverageState::VerifyFailed, verified: Some(false), planned_stocks: None, received_stocks: None },
+            CoverageDay { date: 20261113, state: CoverageState::Unreadable, verified: None, planned_stocks: None, received_stocks: None },
+        ],
+    });
+    let ServerLine::Reply(ServerReply::Coverage(decoded_coverage)) = ServerLine::parse(coverage.to_line().as_bytes()) else {
+        panic!("coverage 응답 해석 실패");
+    };
+    assert_eq!(
+        decoded_coverage.days.iter().map(|day| day.state).collect::<Vec<_>>(),
+        vec![
+            CollectorDayState::Complete,
+            CollectorDayState::Incomplete,
+            CollectorDayState::InProgress,
+            CollectorDayState::VerifyFailed,
+            CollectorDayState::Unreadable,
+        ]
+    );
+    assert_eq!(decoded_coverage.days[0].planned_stocks, Some(2600));
+
+    let disk = Reply::new(ReplyBody::Disk {
+        sent_at: "2026-11-18T09:05:15+09:00".to_owned(),
+        disk: DiskUsage {
+            filesystem: Some(Filesystem { free_bytes: 100, total_bytes: 200 }),
+            raw: vec![DayBytes { date: 20261117, bytes: 10 }],
+            store: vec![DayBytes { date: 20261117, bytes: 20 }],
+        },
+    });
+    let ServerLine::Reply(ServerReply::Disk(decoded_disk)) = ServerLine::parse(disk.to_line().as_bytes()) else {
+        panic!("disk 응답 해석 실패");
+    };
+    assert_eq!(decoded_disk.disk.filesystem.as_ref().unwrap().free_bytes, 100);
+    assert_eq!(decoded_disk.disk.store[0].bytes, 20);
+
+    let error_reply = Reply::error(ErrorCode::ReadOnly, "읽기 전용입니다");
+    let ServerLine::Reply(ServerReply::Error(decoded_error)) = ServerLine::parse(error_reply.to_line().as_bytes()) else {
+        panic!("error 응답 해석 실패");
+    };
+    assert_eq!(decoded_error.code, "read_only");
+    assert_eq!(decoded_error.message, "읽기 전용입니다");
+    assert_eq!(decoded_error.supported_version, Some(1));
+}
