@@ -70,13 +70,19 @@ function toCachedPastDay(reply: BrokerDay): CachedPastDay {
   };
 }
 
-function useTodayBrokerDay(code: SymbolCode, date: string, enabled: boolean, active: boolean): BrokerDayResult {
+function useTodayBrokerDay(
+  code: SymbolCode,
+  date: string,
+  enabled: boolean,
+  active: boolean,
+  allowFallback: boolean,
+): BrokerDayResult {
   const feed = useMemo(() => createTodayBrokerFeed(code, BROWSER_FEED_DEPS), [code]);
   const snapshot = useSyncExternalStore(feed.subscribe, feed.snapshot);
 
   useEffect(() => {
-    feed.configure({ date, enabled, active });
-  }, [feed, date, enabled, active]);
+    feed.configure({ date, enabled, active, allowFallback });
+  }, [feed, date, enabled, active, allowFallback]);
 
   useEffect(() => () => feed.dispose(), [feed]);
 
@@ -142,8 +148,14 @@ function usePastBrokerDay(code: SymbolCode, date: string | null): BrokerDayResul
   return { ...LOADING_BROKER_SNAPSHOT, fetching: true, retry };
 }
 
-export function useBrokerDay(code: SymbolCode, date: string, isToday: boolean, active: boolean): BrokerDayResult {
-  const todayResult = useTodayBrokerDay(code, date, isToday, active);
+export function useBrokerDay(
+  code: SymbolCode,
+  date: string,
+  isToday: boolean,
+  active: boolean,
+  allowFallback = false,
+): BrokerDayResult {
+  const todayResult = useTodayBrokerDay(code, date, isToday, active, allowFallback);
   const pastResult = usePastBrokerDay(code, isToday ? null : date);
   return isToday ? todayResult : pastResult;
 }

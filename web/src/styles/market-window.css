@@ -131,8 +131,9 @@ button.mw-card-row:focus-visible { outline:var(--size-1) solid var(--accent); ou
 .pg-spark polyline { stroke:var(--text-3); stroke-width:1.5; }
 .pg-head[data-direction=up] .pg-spark polyline { stroke:var(--up); }
 .pg-head[data-direction=down] .pg-spark polyline { stroke:var(--down); }
-.pg-totals { color:var(--text-2); font-size:var(--fs-xs); }
+.pg-totals { display:flex; align-items:center; gap:var(--s3); color:var(--text-2); font-size:var(--fs-xs); }
 .pg-totals b { font-weight:600; color:var(--text-2); }
+.pg-date { margin-left:auto; padding:0 var(--size-5); border-radius:var(--r-s); background:var(--accent-soft); color:var(--accent); font-size:var(--fs-xs); font-weight:600; white-space:nowrap; }
 .pg-change { display:flex; align-items:center; justify-content:flex-end; height:100%; }
 .pg-change em { padding-left:var(--size-4); font-style:normal; }
 .pg-table { display:flex; flex:1; flex-direction:column; min-height:0; font-size:var(--fs-b); }

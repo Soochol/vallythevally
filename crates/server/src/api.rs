@@ -1459,6 +1459,9 @@ pub struct ProgramTradeTimeline {
     pub points: Vec<ProgramTradePoint>,
     /// 읽지 못해 뺀 행 수.
     pub skipped_rows: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub date: Option<String>,
 }
 
 /// 저장 순서 번호. 브라우저가 저장할 때마다 늘려 보낸다(`max(지금 ms, 마지막 + 1)`).

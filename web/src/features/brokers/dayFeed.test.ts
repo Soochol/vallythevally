@@ -4,7 +4,7 @@ import type { FeedBrokers } from "../../api/generated/FeedBrokers";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { FeedEvent } from "../../api/socket";
-import { createTodayBrokerFeed, TODAY_POLL_MS, type TodayBrokerFeedDeps } from "./dayFeed";
+import { createTodayBrokerFeed, FALLBACK_RECHECK_MS, TODAY_POLL_MS, type TodayBrokerFeedDeps } from "./dayFeed";
 
 const CODE = "005930" as SymbolCode;
 const DATE = "20261125";
@@ -34,14 +34,14 @@ function createHarness() {
   const timers = new Map<number, { fn: () => void; ms: number }>();
   const frames = new Map<number, () => void>();
   const visibilityListeners = new Set<() => void>();
-  const fetchCalls: { code: SymbolCode; date: string; after?: string; signal?: AbortSignal }[] = [];
+  const fetchCalls: { code: SymbolCode; date: string; after?: string; signal?: AbortSignal; fallback?: "latest" }[] = [];
   const pendingFetches: { resolve: (reply: BrokerDay) => void; reject: (err: unknown) => void; signal?: AbortSignal }[] = [];
   const socketListeners = new Set<(event: FeedEvent) => void>();
   let liveSubCount = 0;
 
   const deps: TodayBrokerFeedDeps = {
-    fetchDay(code, date, after, signal) {
-      fetchCalls.push({ code, date, after, signal });
+    fetchDay(code, date, after, signal, fallback) {
+      fetchCalls.push({ code, date, after, signal, fallback });
       return new Promise<BrokerDay>((resolve, reject) => {
         pendingFetches.push({ resolve, reject, signal });
       });
@@ -212,6 +212,59 @@ describe("createTodayBrokerFeed", () => {
     h.flushFrames();
     expect(feed.snapshot().state.grid.times).toEqual([1000, 1060]);
     expect(feed.snapshot().state.grid.gapBefore).toEqual([false, true]);
+
+    feed.dispose();
+  });
+
+  it("직전 마감일 폴백을 표시하다가 실시간 스냅샷이 오면 라이브로 자동 전환한다", async () => {
+    const h = createHarness();
+    const feed = createTodayBrokerFeed(CODE, h.deps);
+    feed.configure({ date: DATE, enabled: true, active: true, allowFallback: true });
+    expect(h.fetchCalls[0]!.fallback).toBe("latest");
+
+    await h.resolveFetch(replyOf({ date: "20261124", source: "store", live: false, snapshots: [snapshot(500, 80)] }));
+    expect(feed.snapshot().mode).toBe("fallback");
+    expect(feed.snapshot().date).toBe("20261124");
+    expect(feed.snapshot().state.grid.times).toEqual([500]);
+    expect(h.liveSubCount()).toBe(1);
+    expect([...h.timers.values()][0]!.ms).toBe(FALLBACK_RECHECK_MS);
+
+    h.emitSocket({ type: "sub_error", sub: "s1", code: "kiwoom_unavailable" });
+    expect(feed.snapshot().mode).toBe("fallback");
+    expect(feed.snapshot().failed).toBe(false);
+
+    h.emitSocket({ type: "feed_brokers", sub: "s1", brokers: snapshot(1000, 120) });
+    expect(h.timers.size).toBe(0);
+    h.flushFrames();
+    expect(feed.snapshot().mode).toBe("live");
+    expect(feed.snapshot().date).toBeNull();
+    expect(feed.snapshot().state.grid.times).toEqual([1000]);
+
+    feed.dispose();
+  });
+
+  it("직전 마감일 폴백 중 재확인에서 당일 흐름이 생기면 수집 모드로 자동 전환하고 라이브를 닫는다", async () => {
+    const h = createHarness();
+    const feed = createTodayBrokerFeed(CODE, h.deps);
+    feed.configure({ date: DATE, enabled: true, active: true, allowFallback: true });
+
+    await h.resolveFetch(replyOf({ date: "20261124", source: "store", live: false, snapshots: [snapshot(500, 80)] }));
+    expect(feed.snapshot().mode).toBe("fallback");
+    expect(h.socketListeners.size).toBe(1);
+
+    h.setVisible(false);
+    expect(h.timers.size).toBe(0);
+
+    h.setVisible(true);
+    expect(h.fetchCalls).toHaveLength(2);
+    expect(h.fetchCalls[1]!.fallback).toBeUndefined();
+
+    await h.resolveFetch(replyOf({ date: DATE, source: "flow", cursor: "f:1:1", snapshots: [snapshot(1000, 200)], reset: true }));
+    expect(feed.snapshot().mode).toBe("collected");
+    expect(feed.snapshot().date).toBe(DATE);
+    expect(feed.snapshot().state.grid.times).toEqual([1000]);
+    expect(h.socketListeners.size).toBe(0);
+    expect([...h.timers.values()][0]!.ms).toBe(TODAY_POLL_MS);
 
     feed.dispose();
   });

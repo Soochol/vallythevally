@@ -48,6 +48,9 @@ pub trait MarketSource: Send + Sync + 'static {
     fn order_book(&self, code: StockCode, venue: Venue, priority: Priority) -> BoxFuture<'_, Result<OrderBookSnapshot, SourceError>>;
     fn trades_page(&self, code: StockCode, venue: Venue, cursor: Option<Cursor>, priority: Priority) -> BoxFuture<'_, Result<TapePage<api::TradePrint>, SourceError>>;
     fn program_trades_page(&self, code: StockCode, today: KstDate, cursor: Option<Cursor>, priority: Priority) -> BoxFuture<'_, Result<TapePage<api::ProgramTradePoint>, SourceError>>;
+    fn supports_past_program_trades(&self) -> bool {
+        false
+    }
 }
 
 impl dyn MarketSource {

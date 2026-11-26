@@ -111,6 +111,10 @@ impl MarketSource for ActiveSource {
         let source = self.current();
         Box::pin(async move { source.program_trades_page(code, today, cursor, priority).await })
     }
+
+    fn supports_past_program_trades(&self) -> bool {
+        self.current().supports_past_program_trades()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
