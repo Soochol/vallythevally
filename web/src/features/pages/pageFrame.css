@@ -12,7 +12,7 @@
 .page-frame-spacer { flex: 1; }
 .page-topbar .page-frame-spacer { flex: 0 0 var(--size-4); }
 .page-frame-back { display: none; place-items: center; width: var(--size-30); height: var(--size-30); border-radius: var(--r-m); color: var(--text-2); font-size: var(--fs-l); }
-@media (width < 48rem) { .page-frame-back { display: inline-grid; } .page-link-label { display: none; } }
+@media (width < 48rem) { .page-frame { gap: var(--size-10); padding: 0 var(--size-4) var(--size-16); } .page-frame-bar { padding: var(--size-6) 0; } .page-frame-back { display: inline-grid; } .page-link-label { display: none; } }
 .page-frame-body { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .page-link-button { display: inline-flex; align-items: center; gap: var(--size-8); height: var(--size-30); padding: 0 var(--size-8); border-radius: var(--r-m); color: var(--text-2); font-size: var(--fs-s); }
 .page-link-button:hover, .page-link-button[aria-expanded="true"] { background: var(--hover); color: var(--text); }

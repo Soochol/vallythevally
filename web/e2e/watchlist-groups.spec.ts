@@ -493,8 +493,8 @@ test("그룹 머리 이름은 11px --text-2로 보이고 종목 이름(--text-na
       rawPrice: root.getPropertyValue("--text-price").trim(),
     };
   });
-  expect(colors.rawName.toLowerCase()).toBe("#d8dfd4");
-  expect(colors.rawPrice.toLowerCase()).toBe("#e4eef7");
+  expect(colors.rawName.toLowerCase()).toBe("#dddad2");
+  expect(colors.rawPrice.toLowerCase()).toBe("#f5f3ee");
   const head = headBox(page, "첫째");
   const label = groupHead(page, "첫째").locator("span.truncate");
   await expect(label).toHaveCSS("color", colors.text2);

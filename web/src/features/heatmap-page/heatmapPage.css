@@ -208,6 +208,8 @@
 }
 
 @media (width < 48rem) {
+  .hm-body { gap: var(--size-10); }
+  .hm-group { gap: var(--size-6); padding-top: var(--size-10); }
   .hm-list-search { width: 100%; }
   .hm-list-row { grid-template-columns: var(--size-14) minmax(var(--size-72), 1fr) var(--size-60) var(--size-54) var(--size-18); column-gap: var(--size-4); }
   .hm-list-traded { display: none; }

@@ -60,7 +60,7 @@ test("조건 문장은 번호 배지와 알약 낱말로 보이고 지우기 확
   await expect(lines).toHaveCount(2);
   expect(await lines.evaluateAll((items) => items.map((item) => getComputedStyle(item, "::before").content))).toEqual(['counter(sentence-line)', 'counter(sentence-line)']);
   const number = panel(page).getByRole("button", { name: "조건 1 최근 기간", exact: true });
-  await expect(number).toHaveCSS("color", "rgb(199, 243, 107)");
+  await expect(number).toHaveCSS("color", "rgb(243, 241, 236)");
   expect(await number.evaluate((node) => getComputedStyle(node).borderBottomStyle)).toBe("none");
 
   await screenAction(sentenceEditor(page), "지우기");

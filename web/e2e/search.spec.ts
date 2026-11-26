@@ -174,15 +174,16 @@ test("시장 표시는 값이 없는 줄도 있는 줄과 같은 왼쪽 끝에 �
   await expect(withoutValue.getByLabel("등락률")).toHaveText("—");
   const left = async (row: Locator) => (await row.locator('[data-cell="market"]').boundingBox())!.x;
   expect(await left(withoutValue)).toBe(await left(withValue));
-  const colors = await dialog.evaluate((root) => {
+  const markStyle = await dialog.evaluate((root) => {
     const probe = document.createElement("span");
-    probe.style.color = "var(--accent)";
+    probe.style.color = "var(--text)";
     root.append(probe);
-    const accent = getComputedStyle(probe).color;
+    const text = getComputedStyle(probe).color;
     probe.remove();
-    return { accent, marked: getComputedStyle(root.querySelector("mark")!).color };
+    const style = getComputedStyle(root.querySelector("mark")!);
+    return { text, color: style.color, background: style.backgroundColor, weight: style.fontWeight };
   });
-  expect(colors.marked).not.toBe(colors.accent);
+  expect(markStyle).toEqual({ text: markStyle.text, color: markStyle.text, background: "rgba(0, 0, 0, 0)", weight: "700" });
 });
 
 test("코스닥 필터로 결과가 없으면 전체에서 찾기가 보이고 누르면 결과가 나온다", async ({ page }) => {

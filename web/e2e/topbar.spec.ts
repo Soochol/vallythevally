@@ -99,11 +99,17 @@ test("검색창 자리표시 글자의 대비가 4.5:1 이상이다", async ({ p
   await open(page, 1440);
   const ratio = await topbar(page).evaluate((bar) => {
     const probe = document.createElement("canvas").getContext("2d")!;
-    const rgb = (css: string) => { probe.fillStyle = "#000"; probe.fillStyle = css; probe.fillRect(0, 0, 1, 1); return [...probe.getImageData(0, 0, 1, 1).data].slice(0, 3); };
+    const rgb = (css: string) => { probe.clearRect(0, 0, 1, 1); probe.fillStyle = "#000"; probe.fillStyle = css; probe.fillRect(0, 0, 1, 1); return [...probe.getImageData(0, 0, 1, 1).data].slice(0, 3); };
     const luminance = ([r, g, b]: number[]) => { const [lr, lg, lb] = [r, g, b].map((v) => { const c = v! / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }); return 0.2126 * lr! + 0.7152 * lg! + 0.0722 * lb!; };
+    const transparent = (css: string) => css === "transparent" || /rgba\(.*,\s*0\)$/.test(css);
     const hint = bar.querySelector(".shell-search-hint")!;
+    let backCss = "";
+    for (let node: Element | null = bar.querySelector(".shell-search"); node !== null; node = node.parentElement) {
+      const bg = getComputedStyle(node).backgroundColor;
+      if (!transparent(bg)) { backCss = bg; break; }
+    }
     const text = luminance(rgb(getComputedStyle(hint).color));
-    const back = luminance(rgb(getComputedStyle(bar.querySelector(".shell-search")!).backgroundColor));
+    const back = luminance(rgb(backCss));
     return (Math.max(text, back) + 0.05) / (Math.min(text, back) + 0.05);
   });
   expect(ratio).toBeGreaterThanOrEqual(4.5);

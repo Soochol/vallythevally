@@ -52,12 +52,11 @@ test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 �
     const selected = group.locator("[aria-pressed=true]");
     const groupBox = (await group.boundingBox())!;
     const itemBox = (await selected.boundingBox())!;
-    const topGap = itemBox.y - groupBox.y;
-    const bottomGap = groupBox.y + groupBox.height - (itemBox.y + itemBox.height);
-    const leftGap = itemBox.x - groupBox.x;
-    expect(topGap).toBeGreaterThanOrEqual(2);
-    expect(Math.abs(topGap - bottomGap)).toBeLessThanOrEqual(1);
-    expect(leftGap).toBeGreaterThanOrEqual(2);
+    expect(itemBox.x).toBeGreaterThanOrEqual(groupBox.x - 1);
+    expect(itemBox.x + itemBox.width).toBeLessThanOrEqual(groupBox.x + groupBox.width + 1);
+    expect(Math.abs(itemBox.y - groupBox.y)).toBeLessThanOrEqual(1);
+    await expect(selected).toHaveCSS("border-bottom-width", "2px");
+    await expect(selected).toHaveCSS("border-bottom-color", "rgb(243, 241, 236)");
   }
   await expect(settingsPopover(page).getByRole("region", { name: "지표 창", exact: true })).toBeInViewport();
 });
