@@ -337,7 +337,9 @@ export class DrawingSurface implements ChartExtension {
         if (!this.host.view()) break;
         const prefs = useUiStore.getState().prefs.drawing;
         if (prefs.hideAll) useUiStore.getState().setDrawingPrefs({ hideAll: false });
-        const body = this.edits.place(effect.tool, effect.points, prefs.lastStyle[effect.tool.tool] ?? effect.tool.defaultStyle());
+        const baseStyle = prefs.lastStyle[effect.tool.tool] ?? effect.tool.defaultStyle();
+        const style = effect.tool.initStyle ? effect.tool.initStyle(effect.points, baseStyle, this.context().ctx) : baseStyle;
+        const body = this.edits.place(effect.tool, effect.points, style);
         if (!body) break;
         if (!prefs.keepDrawing && session.pinnedTool !== body.tool) session.setTool(this.cellId, null);
         session.select(this.cellId, [body.id]);
@@ -393,7 +395,11 @@ export class DrawingSurface implements ChartExtension {
   }
   clone() {
     const ctx = this.context().ctx;
-    this.commitClones(this.selected().map((d) => ({ ...d, points: d.points.map((p) => ({ ...p, t: ctx.shiftBars(p.t, 5) ?? p.t })) })));
+    this.commitClones(this.selected().map((d) => {
+      const tool = toolOf(d.tool);
+      if (tool?.moveBody) return { ...d, ...tool.moveBody({ ...d, selected: false }, { x: 24, y: 24 }, ctx) };
+      return { ...d, points: d.points.map((p) => ({ ...p, t: ctx.shiftBars(p.t, 5) ?? p.t })) };
+    }));
   }
   private commitClones(drawings: readonly DrawingBody[]) {
     if (!this.host.view()) return;

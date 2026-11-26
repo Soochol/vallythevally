@@ -1,4 +1,5 @@
 import type { Tool } from "../../toolSpec";
+import { barspattern } from "../barspattern";
 import { elliott, elliottabc } from "../elliott";
 import { headshoulders } from "../headshoulders";
 import { xabcd } from "../xabcd";
@@ -8,4 +9,5 @@ export const PATTERN_TOOLS: readonly Tool[] = [
   elliottabc,
   xabcd,
   headshoulders,
+  barspattern,
 ];

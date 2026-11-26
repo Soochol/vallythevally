@@ -45,7 +45,9 @@ function stroke(c: CanvasRenderingContext2D, s: Stroke | undefined) {
   if (!s) return;
   c.save();
   if (s.opacity !== undefined) c.globalAlpha *= s.opacity;
-  c.strokeStyle = drawingColor(s.color); c.lineWidth = s.width; c.setLineDash(dash[s.dash]); c.stroke();
+  c.strokeStyle = drawingColor(s.color); c.lineWidth = s.pixelWidth ?? s.width;
+  if (s.cap) { c.lineCap = s.cap; c.lineJoin = s.cap === "round" ? "round" : "miter"; }
+  c.setLineDash(dash[s.dash]); c.stroke();
   c.restore();
 }
 function fill(c: CanvasRenderingContext2D, f: Fill | undefined) {

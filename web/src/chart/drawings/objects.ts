@@ -3,7 +3,7 @@ import { toolOf } from "./tools";
 import type { DrawingBody } from "./types";
 
 export function reusableStyle(style: unknown): unknown {
-  const { objectName: _name, ...rest } = readRecord(style);
+  const { objectName: _name, anchorX: _ax, anchorY: _ay, ...rest } = readRecord(style);
   return rest;
 }
 

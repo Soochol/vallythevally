@@ -14,7 +14,7 @@
 .draw-tool[data-tone=warn][aria-pressed=true] { border-radius:0; color:var(--warning); background:var(--warning-soft); box-shadow:inset var(--size-2) 0 0 var(--warning); }
 .draw-tool-danger:hover { color:var(--danger); background:var(--danger-soft); }
 .draw-tool[data-pinned-run]::after { content:""; position:absolute; top:var(--size-3); right:var(--size-3); width:var(--size-4); height:var(--size-4); border-radius:var(--r-pill); background:var(--accent); }
-.draw-util-badge { position:absolute; right:var(--size-1); bottom:var(--size-1); min-width:var(--size-12); height:var(--size-12); padding:0 var(--size-2); border-radius:var(--r-s); font-size:9px; font-weight:700; line-height:var(--size-12); text-align:center; pointer-events:none; background:var(--accent); color:var(--accent-ink); }
+.draw-util-badge { position:absolute; right:var(--size-1); bottom:var(--size-1); min-width:var(--size-14); height:var(--size-14); padding:0 var(--size-2); border-radius:var(--r-s); font-size:var(--fs-xs); font-weight:700; line-height:var(--size-14); text-align:center; pointer-events:none; background:var(--accent); color:var(--accent-ink); }
 .draw-util-badge[data-strength=strong] { background:var(--warning); color:var(--on-data); }
 .draw-group { display:flex; position:relative; align-items:center; width:calc(var(--size-32) + var(--size-6)); justify-content:center; }
 .draw-group-toggle { position:absolute; right:0; top:var(--size-2); bottom:var(--size-2); display:flex; align-items:center; }

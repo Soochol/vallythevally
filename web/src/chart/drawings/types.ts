@@ -67,6 +67,14 @@ export const TOOL_POINTS: Record<DrawingTool, PointCount> = {
   elliottabc: exact(4),
   xabcd: exact(5),
   headshoulders: exact(7),
+  highlighter: { kind: "range", min: 2, max: 1000 },
+  anchoredtext: exact(1),
+  curve: exact(3),
+  disjointchannel: exact(3),
+  pricenote: exact(2),
+  arrowup: exact(1),
+  arrowdown: exact(1),
+  barspattern: exact(3),
 };
 
 export const isDrawingTool = (x: string): x is DrawingTool => Object.hasOwn(TOOL_POINTS, x);
@@ -85,6 +93,8 @@ export interface Stroke {
   width: Width;
   dash: Dash;
   opacity?: number;
+  cap?: "butt" | "round";
+  pixelWidth?: number;
 }
 
 export interface Fill {

@@ -134,7 +134,9 @@ function drag(s: Extract<Interaction, { kind: "dragging" }>, at: ScreenPoint, mo
       target = handle.constrain.rule === "angle45" ? constrainAngle45(handle.constrain.pivot, target) : constrainSquare(handle.constrain.pivot, target);
       point = c.ctx.fromScreen(target);
     }
-    return point === null ? s : { ...s, preview: [{ ...original, points: handle.move(original.points, point, c.ctx) }] };
+    if (point === null) return s;
+    const style = handle.moveStyle ? handle.moveStyle(original.style, target, c.ctx) : original.style;
+    return { ...s, preview: [{ ...original, points: handle.move(original.points, point, c.ctx), style }] };
   }
   let delta = { x: at.x - s.start.x, y: at.y - s.start.y };
   let lock = s.lock;
@@ -147,6 +149,10 @@ function drag(s: Extract<Interaction, { kind: "dragging" }>, at: ScreenPoint, mo
   if (holds(s.action, mods).has("axisLock")) ({ delta } = constrainAxis(lock, delta));
   const preview = s.originals.map((d) => {
     const tool = toolOf(d.tool);
+    if (tool?.moveBody) {
+      const movedBody = tool.moveBody({ ...d, selected: true }, delta, c.ctx);
+      return { ...d, points: movedBody.points, style: movedBody.style };
+    }
     const moved = d.points.map((p, index) => {
       const uses = tool?.pointRoles?.[index]?.uses ?? "both";
       if (uses === "price") {

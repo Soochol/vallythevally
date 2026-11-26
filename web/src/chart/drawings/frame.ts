@@ -45,7 +45,8 @@ export function renderItem(drawing: DrawingBody, selected: boolean, ctx: ToolCon
   if (!tool) return null;
   const input = { ...drawing, selected };
   const handleSpecs = selected ? tool.handles(input, ctx) : [];
-  return { drawing, id: drawing.id, z: drawing.z, shapes: tool.shapes(input, ctx), handles: handleSpecs.map((h) => h.at), anchors: tool.placement.kind === "freehand" ? [] : drawing.points.flatMap((point) => ctx.toScreen(point) ?? []), handleSpecs, labels: tool.axisLabels(input, ctx) };
+  const anchors = tool.anchors ? tool.anchors(input, ctx) : tool.placement.kind === "freehand" ? [] : drawing.points.flatMap((point) => ctx.toScreen(point) ?? []);
+  return { drawing, id: drawing.id, z: drawing.z, shapes: tool.shapes(input, ctx), handles: handleSpecs.map((h) => h.at), anchors, handleSpecs, labels: tool.axisLabels(input, ctx) };
 }
 export function fineDemand(f: Frame, drawings: readonly DrawingBody[], ctx: ToolContext): FineSpan[] {
   return drawings.flatMap((drawing) => {
