@@ -1592,5 +1592,131 @@ class CommittedModeTest(unittest.TestCase):
         self.assertEqual(server_dir, collector_dir)
 
 
+class DevUnitTemplateTest(unittest.TestCase):
+    def parse_unit_env(self, unit_name):
+        values = {}
+        for line in (DEPLOY / "systemd" / unit_name).read_text().splitlines():
+            if line.startswith("Environment="):
+                key, value = line.removeprefix("Environment=").split("=", 1)
+                values[key] = value
+        return values
+
+    def test_vally_dev_service_is_isolated_mock_and_reads_collector_data(self):
+        unit_text = (DEPLOY / "systemd/vally-dev.service").read_text()
+        env = self.parse_unit_env("vally-dev.service")
+        collector_env = self.parse_unit_env("vally-collector.service")
+        server_env = self.parse_unit_env("vally-server.service")
+
+        self.assertIn("WorkingDirectory=%h/apps/vallythevally-dev", unit_text)
+        self.assertIn("ExecStart=%h/apps/vallythevally-dev/target/release/vally-server", unit_text)
+        self.assertEqual(env.get("VALLY_KIWOOM_ENV"), "mock")
+        self.assertEqual(env.get("VALLY_BIND"), "127.0.0.1:8082")
+        self.assertEqual(env.get("VALLY_SCREENER_UPDATE_ON_START"), "off")
+        self.assertEqual(env.get("VALLY_LOCK_PATH"), "%t/vallythevally/dev/server.lock")
+        self.assertEqual(env.get("VALLY_TOKEN_PATH"), "%h/.local/state/vallythevally/dev/token.json")
+        self.assertEqual(env.get("VALLY_KIWOOM_KEY_PATH"), "%h/.local/state/vallythevally/dev/kiwoom-key.json")
+        self.assertEqual(env.get("VALLY_DB_PATH"), "%h/vally-data/dev/vally.db")
+        self.assertEqual(env.get("VALLY_SCREENER_DB_PATH"), "%h/vally-data/dev/screener.duckdb")
+        self.assertEqual(env.get("VALLY_FINANCIAL_DB_PATH"), server_env.get("VALLY_FINANCIAL_DB_PATH"))
+        self.assertEqual(env.get("VALLY_HOGA_DATA_DIR"), collector_env.get("VALLY_DATA"))
+        self.assertEqual(env.get("VALLY_SHARED_DATA_DIR"), "%h/vally-data/hoga/shared")
+        self.assertEqual(env.get("VALLY_STATIC_DIR"), "%h/apps/vallythevally-dev/web/dist")
+        for forbidden in ("VALLY_ENV_FILE", "VALLY_COLLECTOR_SOCKET", "VALLY_COLLECTOR_TELEGRAM", "VALLY_TAILNET_HOSTS"):
+            self.assertNotIn(forbidden, env)
+        self.assertNotIn(".ts.net", unit_text)
+
+
+class DevPreviewScriptTest(unittest.TestCase):
+    SCRIPT = DEPLOY.parent / "scripts/dev-preview.sh"
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.stubs = Path(self.temp.name) / "stubs"
+        self.calls = Path(self.temp.name) / "calls"
+        self.ssh_stdin = Path(self.temp.name) / "ssh-stdin"
+        self.stubs.mkdir()
+        write_stub(self.stubs, "rsync", f'echo "rsync $*" >> "{self.calls}"\n')
+        write_stub(
+            self.stubs,
+            "ssh",
+            f'echo "ssh $*" >> "{self.calls}"\nif [ ! -t 0 ]; then cat >> "{self.ssh_stdin}"; echo "---END-SSH---" >> "{self.ssh_stdin}"; fi\n',
+        )
+
+    def run_preview(self, *arguments, **env):
+        full = {key: value for key, value in os.environ.items() if not key.startswith("VALLY_")}
+        full["HOME"] = self.temp.name
+        full["PATH"] = f"{self.stubs}:{full['PATH']}"
+        full.update(env)
+        return subprocess.run([str(self.SCRIPT), *arguments], cwd=DEPLOY.parent, env=full, capture_output=True, text=True, timeout=60)
+
+    def recorded(self):
+        return self.calls.read_text().splitlines() if self.calls.exists() else []
+
+    def stdin_text(self):
+        return self.ssh_stdin.read_text() if self.ssh_stdin.exists() else ""
+
+    def test_script_is_executable_0755(self):
+        listing = subprocess.run(["git", "ls-files", "-s", "scripts/dev-preview.sh"], cwd=DEPLOY.parent, check=True, capture_output=True, text=True).stdout.strip()
+        self.assertTrue(listing.startswith("100755 "), listing)
+        self.assertTrue(self.SCRIPT.stat().st_mode & stat.S_IXUSR)
+
+    def test_missing_host_fails_with_exit_2(self):
+        result = self.run_preview()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.recorded(), [])
+
+    def test_prod_service_and_port_guards_exit_2_without_calling_ssh_or_rsync(self):
+        cases = [
+            {"VALLY_PREVIEW_SERVICE": "vally-server.service"},
+            {"VALLY_PREVIEW_HTTPS_PORT": "443"},
+            {"VALLY_PREVIEW_PORT": "8080"},
+        ]
+        for extra_env in cases:
+            with self.subTest(env=extra_env):
+                result = self.run_preview("--host", "dev@preview-box", **extra_env)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(self.recorded(), [])
+
+    def test_default_deploy_rsyncs_without_secrets_or_dbs_then_builds_and_restarts(self):
+        result = self.run_preview("--host", "dev@preview-box")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.recorded()
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[0].startswith("rsync -az --delete "))
+        for excluded in ("--exclude=.git", "--exclude=target", "--exclude=node_modules", "--exclude=.env", "--exclude=.env.*", "--exclude=*.db", "--exclude=*.db-*"):
+            self.assertIn(excluded, calls[0])
+        self.assertIn("dev@preview-box:apps/vallythevally-dev/", calls[0])
+        self.assertTrue(calls[1].startswith("ssh -o BatchMode=yes dev@preview-box bash -s -- "))
+        script = self.stdin_text()
+        self.assertIn("cargo build --locked --release -p server", script)
+        self.assertIn("pnpm install --frozen-lockfile && pnpm build", script)
+        self.assertIn("systemctl --user restart", script)
+        self.assertIn("/api/screener/status", script)
+        self.assertIn("/api/system/kiwoom", script)
+        self.assertIn('"mock"', script)
+
+    def test_stop_only_stops_vally_dev_service(self):
+        result = self.run_preview("--host", "dev@preview-box", "--stop")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.recorded()
+        self.assertEqual(calls, ["ssh -o BatchMode=yes dev@preview-box systemctl --user stop vally-dev.service"])
+        self.assertNotIn("vally-server.service", calls[0])
+
+    def test_setup_configures_8443_without_touching_443_or_prod_service(self):
+        result = self.run_preview("--host", "dev@preview-box", "--setup", "--tailnet-host", "server.example.ts.net")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.recorded()
+        self.assertEqual(len(calls), 1)
+        self.assertIn("vally-dev.service 8082 8443 server.example.ts.net", calls[0])
+        script = self.stdin_text()
+        self.assertIn("Environment=VALLY_TAILNET_HOSTS=", script)
+        self.assertIn("tailscale serve --bg --https=\"$https_port\" \"http://127.0.0.1:${port}\"", script)
+        self.assertIn("systemctl --user daemon-reload", script)
+        self.assertNotIn("443", calls[0].replace("8443", ""))
+        self.assertNotIn("vally-server.service", calls[0])
+        self.assertNotIn("vally-server.service", script)
+
+
 if __name__ == "__main__":
     unittest.main()

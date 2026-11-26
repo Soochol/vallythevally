@@ -8,13 +8,16 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import tomllib
+import urllib.error
 import urllib.request
 
 import evidence
@@ -23,6 +26,16 @@ import evidence
 BINARIES = ("vally-server", "dart-smoke")
 BUILD_ENV_PREFIXES = ("CARGO_", "RUST", "CC", "CXX", "AR", "CFLAGS", "CPPFLAGS", "LDFLAGS", "SDKROOT", "MACOSX_")
 LOCAL_BUILD_ENV = {"CARGO_TARGET_DIR", "CARGO_BUILD_JOBS", "CCACHE_DIR", "CCACHE_BASEDIR"}
+DEFAULT_DEV_PORT = 8082
+DEFAULT_VITE_PORT = 5173
+SAMPLE_HOGA_SUBPATHS = (
+    "store",
+    "shared/quote-minutes",
+    "shared/quote-minutes-live",
+    "shared/minute",
+    "shared/trade-minute",
+    "shared/symbol-flow",
+)
 
 
 def output(args, root):
@@ -339,6 +352,224 @@ def cached_build(root, cache, key, current_key, build, binaries=BINARIES):
         evidence.artifact("server", destination, "direct", key, files=binaries)
 
 
+def validate_port(port, name="port"):
+    if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
+        raise ValueError(f"{name}는 1~65535 정수여야 합니다: {port}")
+    return port
+
+
+def validate_remote_token(value, name):
+    if not isinstance(value, str) or not value or value.startswith("-") or any(character.isspace() for character in value):
+        raise ValueError(f"{name} 값이 올바르지 않습니다: {value!r}")
+    return value
+
+
+def dev_server_environment(
+    root,
+    base_env,
+    *,
+    port=DEFAULT_DEV_PORT,
+    data_dir=None,
+    state_dir=None,
+    runtime_dir=None,
+    hoga_dir=None,
+    shared_dir=None,
+    financial_db=None,
+    tailnet_hosts=None,
+    static_dir=None,
+):
+    validate_port(port, "port")
+    root_path = Path(root).expanduser().resolve()
+    home_path = Path(base_env["HOME"]).expanduser() if base_env.get("HOME") else Path.home()
+    resolved_data = Path(data_dir).expanduser().resolve() if data_dir is not None else (home_path / "vally-data" / "dev-local").resolve()
+    if state_dir is not None:
+        resolved_state = Path(state_dir).expanduser().resolve()
+    elif base_env.get("XDG_STATE_HOME"):
+        resolved_state = Path(base_env["XDG_STATE_HOME"]).expanduser().resolve()
+    else:
+        resolved_state = (home_path / ".local" / "state").resolve()
+    if runtime_dir is not None:
+        resolved_runtime = Path(runtime_dir).expanduser().resolve()
+    elif base_env.get("XDG_RUNTIME_DIR"):
+        resolved_runtime = Path(base_env["XDG_RUNTIME_DIR"]).expanduser().resolve()
+    else:
+        resolved_runtime = Path(f"/tmp/vallythevally-{os.getuid()}")
+    resolved_static = Path(static_dir).expanduser().resolve() if static_dir is not None else (root_path / "web" / "dist").resolve()
+
+    environment = {
+        key: value
+        for key, value in base_env.items()
+        if not key.startswith("VALLY_") and key != "OPENDART_API_KEY"
+    }
+    environment.update(
+        {
+            "VALLY_KIWOOM_ENV": "mock",
+            "VALLY_BIND": f"127.0.0.1:{port}",
+            "VALLY_SCREENER_UPDATE_ON_START": "off",
+            "VALLY_DB_PATH": str(resolved_data / "vally.db"),
+            "VALLY_SCREENER_DB_PATH": str(resolved_data / "screener.duckdb"),
+            "VALLY_LOCK_PATH": str(resolved_runtime / "vallythevally" / "dev-local" / "server.lock"),
+            "VALLY_TOKEN_PATH": str(resolved_state / "vallythevally" / "dev-local" / "token.json"),
+            "VALLY_KIWOOM_KEY_PATH": str(resolved_state / "vallythevally" / "dev-local" / "kiwoom-key.json"),
+            "VALLY_STATIC_DIR": str(resolved_static),
+        }
+    )
+
+    duckdb_library = root_path / "target" / "dev" / "bin" / "libduckdb.so"
+    if duckdb_library.is_file():
+        library_dir = str(duckdb_library.parent)
+        existing_ld = environment.get("LD_LIBRARY_PATH", "")
+        environment["LD_LIBRARY_PATH"] = f"{library_dir}:{existing_ld}" if existing_ld else library_dir
+
+    effective_hoga = Path(hoga_dir).expanduser().resolve() if hoga_dir is not None else (resolved_data / "hoga" if (resolved_data / "hoga").is_dir() else None)
+    if effective_hoga is not None:
+        environment["VALLY_HOGA_DATA_DIR"] = str(effective_hoga)
+
+    effective_shared = (
+        Path(shared_dir).expanduser().resolve()
+        if shared_dir is not None
+        else (effective_hoga / "shared" if effective_hoga is not None and (effective_hoga / "shared").is_dir() else None)
+    )
+    if effective_shared is not None:
+        environment["VALLY_SHARED_DATA_DIR"] = str(effective_shared)
+
+    effective_financial = Path(financial_db).expanduser().resolve() if financial_db is not None else (resolved_data / "financials.db" if (resolved_data / "financials.db").is_file() else None)
+    if effective_financial is not None:
+        environment["VALLY_FINANCIAL_DB_PATH"] = str(effective_financial)
+
+    if tailnet_hosts is not None and tailnet_hosts.strip():
+        environment["VALLY_TAILNET_HOSTS"] = tailnet_hosts.strip()
+
+    return environment
+
+
+def select_recent_dates(raw_names, days):
+    if isinstance(days, bool) or not isinstance(days, int) or not (1 <= days <= 5):
+        raise ValueError(f"days는 1~5 정수여야 합니다: {days}")
+    valid = sorted({name.strip() for name in raw_names if re.fullmatch(r"\d{8}", name.strip())})
+    return valid[-days:]
+
+
+def fetch_remote_hoga_dates(host, remote_data_dir="vally-data"):
+    validate_remote_token(host, "host")
+    clean_remote = validate_remote_token(remote_data_dir.strip("/"), "remote_data_dir")
+    remote_cmd = f'ls -1 "$HOME"/{shlex.quote(clean_remote)}/hoga/store'
+    raw = subprocess.check_output(["ssh", "-o", "BatchMode=yes", host, remote_cmd], text=True)
+    return raw.splitlines()
+
+
+def sync_sample_plan(host, data_dir, *, days=1, remote_data_dir="vally-data", dates=None):
+    validate_remote_token(host, "host")
+    if isinstance(days, bool) or not isinstance(days, int) or not (1 <= days <= 5):
+        raise ValueError(f"days는 1~5 정수여야 합니다: {days}")
+    clean_remote = validate_remote_token(remote_data_dir.strip("/"), "remote_data_dir")
+    resolved_data = Path(data_dir).expanduser().resolve()
+    resolved_dates = select_recent_dates(dates if dates is not None else fetch_remote_hoga_dates(host, clean_remote), days)
+    commands = [
+        ["rsync", "-a", f"{host}:{clean_remote}/server/screener.duckdb", str(resolved_data / "screener.duckdb")],
+    ]
+    for date in resolved_dates:
+        for subpath in SAMPLE_HOGA_SUBPATHS:
+            commands.append(
+                [
+                    "rsync",
+                    "-a",
+                    "--ignore-missing-args",
+                    f"{host}:{clean_remote}/hoga/{subpath}/{date}/",
+                    f"{resolved_data / 'hoga' / subpath / date}/",
+                ]
+            )
+    return commands
+
+
+def wait_for_server_ready(url, process, timeout=30.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise ValueError(f"vally-server가 준비 전에 종료했습니다 (exit={process.returncode})")
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                if response.status == 200:
+                    return
+        except (urllib.error.URLError, OSError):
+            pass
+        time.sleep(0.2)
+    raise TimeoutError(f"vally-server 준비 대기 시간 초과 ({timeout:.0f}초): {url}")
+
+
+def run_serve(root, args):
+    validate_port(args.port, "--port")
+    if not args.backend_only:
+        validate_port(args.vite_port, "--vite-port")
+    if not args.no_build:
+        execute(root, argparse.Namespace(action="build", bin="vally-server", bundled=args.bundled))
+    binary = root / "target" / "dev" / "bin" / "vally-server"
+    if not binary.is_file():
+        raise FileNotFoundError(f"실행 파일이 없습니다: {binary}")
+    server_env = dev_server_environment(
+        root,
+        os.environ,
+        port=args.port,
+        data_dir=args.data_dir,
+        hoga_dir=args.hoga_dir,
+        shared_dir=args.shared_dir,
+        financial_db=args.financial_db,
+        tailnet_hosts=args.tailnet_host,
+    )
+    for key in ("VALLY_DB_PATH", "VALLY_LOCK_PATH", "VALLY_TOKEN_PATH", "VALLY_KIWOOM_KEY_PATH"):
+        Path(server_env[key]).parent.mkdir(parents=True, exist_ok=True)
+    children = []
+    try:
+        with evidence.interrupts():
+            server = subprocess.Popen([str(binary)], cwd=root, env=server_env, start_new_session=True)
+            children.append(server)
+            wait_for_server_ready(f"http://127.0.0.1:{args.port}/api/screener/status", server, timeout=30.0)
+            print(f"Backend: http://127.0.0.1:{args.port}", flush=True)
+            if not args.backend_only:
+                print(f"Frontend (HMR): http://127.0.0.1:{args.vite_port}", flush=True)
+                vite_env = {
+                    **os.environ,
+                    "VITE_FAKE_API": "0",
+                    "VITE_API_TARGET": f"http://127.0.0.1:{args.port}",
+                }
+                vite = subprocess.Popen(
+                    ["pnpm", "--dir", str(root / "web"), "dev", "--port", str(args.vite_port)],
+                    cwd=root,
+                    env=vite_env,
+                    start_new_session=True,
+                )
+                children.append(vite)
+            while True:
+                for child in children:
+                    code = child.poll()
+                    if code is not None:
+                        if code != 0:
+                            raise subprocess.CalledProcessError(code, child.args)
+                        return
+                time.sleep(0.2)
+    except (KeyboardInterrupt, evidence.Interrupted):
+        return
+    finally:
+        for child in reversed(children):
+            evidence.stop_process(child)
+
+
+def run_sync_sample(args):
+    host = args.host or os.environ.get("VALLY_PREVIEW_HOST", "")
+    if not host:
+        raise ValueError("--host 또는 VALLY_PREVIEW_HOST 환경 변수를 지정하세요")
+    data_dir = Path(args.data_dir).expanduser().resolve() if args.data_dir else (Path.home() / "vally-data" / "dev-local").resolve()
+    commands = sync_sample_plan(host, data_dir, days=args.days, remote_data_dir=args.remote_data_dir)
+    if args.dry_run:
+        for command in commands:
+            print(shlex.join(command), flush=True)
+        return
+    for command in commands:
+        Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+        say(shlex.join(command))
+        subprocess.run(command, check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="worktree 간 DuckDB·개발 서버 빌드 재사용")
     parser.add_argument("--bundled", action="store_true", help="DuckDB 소스 빌드 사용 (ccache 연결)")
@@ -349,10 +580,30 @@ def main():
         command.add_argument("--bin", choices=BINARIES, default="vally-server", help="준비할 실행 파일 (기본 vally-server)")
     cargo = subparsers.add_parser("cargo", help="개발용 DuckDB와 공통 잠금으로 Cargo 검사·시험")
     cargo.add_argument("arguments", nargs=argparse.REMAINDER)
+    serve = subparsers.add_parser("serve", help="모의 투자구분 개발 서버와 Vite HMR 실행")
+    serve.add_argument("--port", type=int, default=DEFAULT_DEV_PORT, help=f"백엔드 루프백 포트 (기본 {DEFAULT_DEV_PORT})")
+    serve.add_argument("--vite-port", type=int, default=DEFAULT_VITE_PORT, help=f"Vite HMR 포트 (기본 {DEFAULT_VITE_PORT})")
+    serve.add_argument("--data-dir", type=Path, default=None, help="로컬 개발 데이터 폴더 (기본 ~/vally-data/dev-local)")
+    serve.add_argument("--hoga-dir", type=Path, default=None, help="수집 호가 폴더")
+    serve.add_argument("--shared-dir", type=Path, default=None, help="공용 자료 폴더")
+    serve.add_argument("--financial-db", type=Path, default=None, help="재무자료 SQLite 파일 경로")
+    serve.add_argument("--tailnet-host", type=str, default=None, help="VALLY_TAILNET_HOSTS 값")
+    serve.add_argument("--backend-only", action="store_true", help="Vite HMR 없이 정적 web/dist만 서빙")
+    serve.add_argument("--no-build", action="store_true", help="dev.py build를 건너뛰고 기존 실행 파일 사용")
+    sync_sample = subparsers.add_parser("sync-sample", help="서버 PC에서 screener.duckdb와 최근 N일 호가·공용 자료 표본 내려받기")
+    sync_sample.add_argument("--host", type=str, default=None, help="서버 PC SSH 주소 (생략 시 VALLY_PREVIEW_HOST)")
+    sync_sample.add_argument("--days", type=int, default=1, help="최근 관측일 수 (1~5, 기본 1)")
+    sync_sample.add_argument("--data-dir", type=Path, default=None, help="저장할 로컬 데이터 폴더 (기본 ~/vally-data/dev-local)")
+    sync_sample.add_argument("--remote-data-dir", type=str, default="vally-data", help="서버 PC 홈 기준 데이터 폴더 (기본 vally-data)")
+    sync_sample.add_argument("--dry-run", action="store_true", help="실행하지 않고 계획된 rsync 명령만 출력")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     if args.action == "status":
         execute(root, args)
+    elif args.action == "serve":
+        run_serve(root, args)
+    elif args.action == "sync-sample":
+        run_sync_sample(args)
     else:
         with evidence.Run(root, f"dev-{args.action}", sys.argv, os.environ.get("VALLY_EVIDENCE_DIR")):
             execute(root, args)
@@ -386,6 +637,6 @@ def execute(root, args):
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, ValueError, KeyError, tarfile.TarError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, KeyError, TimeoutError, tarfile.TarError, subprocess.CalledProcessError) as error:
         print(f"dev-build: 실패: {evidence.clean(str(error))}", file=sys.stderr)
         sys.exit(1)
