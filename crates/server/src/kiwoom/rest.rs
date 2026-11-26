@@ -46,6 +46,11 @@ const OTHER_SEND_BUDGET: u8 = 6;
 const GATE_WAIT: Duration = Duration::from_secs(30);
 const GATE_LONG_WAIT: Duration = Duration::from_secs(5 * 60);
 const GATE_MISSES_BEFORE_LONG_WAIT: u8 = 3;
+const PATH_GATE_WAITS: &[Duration] = &[
+    Duration::from_secs(30),
+    Duration::from_secs(5 * 60),
+    Duration::from_secs(30 * 60),
+];
 const AUTH_GATE_WAIT: Duration = Duration::from_secs(MIN_ISSUE_INTERVAL_SECS as u64);
 
 pub use crate::market_source::Priority;
@@ -195,7 +200,7 @@ impl fmt::Display for KiwoomError {
             ),
             KiwoomError::Gated { until, cause: GateCause::Failure(failure) } => write!(f, "{failure}. {until}에 확인 요청 하나를 보냅니다"),
             KiwoomError::Stopped(failure) => match failure.category() {
-                Category::AuthBlocked | Category::Unsupported | Category::Unknown | Category::Protocol => failure.fmt(f),
+                Category::AuthBlocked | Category::Unsupported | Category::Protocol => failure.fmt(f),
                 _ => write!(f, "{failure}. 운영자가 확인하고 서버를 다시 켤 때까지 보내지 않습니다"),
             },
             KiwoomError::NotConnected => f.write_str("키움에 연결하지 않았습니다. 시스템 설정에서 연결하세요"),
@@ -471,6 +476,7 @@ struct Queue {
     totals: HashMap<Endpoint, TrTotals>,
     next_id: u64,
     stopped_paths: HashMap<Endpoint, Failure>,
+    path_gates: HashMap<Endpoint, Gate>,
     failed_once: HashSet<Endpoint>,
     gate: Gate,
 }
@@ -478,6 +484,10 @@ struct Queue {
 impl Queue {
     fn has_market_work(&self) -> bool {
         self.lanes.iter().any(|l| !l.is_empty())
+    }
+
+    fn has_dispatchable_market_work(&self) -> bool {
+        self.lanes.iter().flatten().any(|id| !self.path_gate_probing(self.jobs[id].key.api_id))
     }
 
     fn window(&mut self, endpoint: Endpoint, default_limit: u32) -> &mut SendWindow {
@@ -525,9 +535,7 @@ impl Queue {
         }
     }
 
-    fn stop_path(&mut self, failure: &Failure) {
-        let api_id = failure.api_id();
-        self.stopped_paths.insert(api_id, failure.clone());
+    fn fail_endpoint_queued(&mut self, api_id: Endpoint, err: &KiwoomError) {
         let jobs = &self.jobs;
         let mut ids = Vec::new();
         for lane in &mut self.lanes {
@@ -540,12 +548,40 @@ impl Queue {
             });
         }
         for id in ids {
-            self.finish(id, Err(KiwoomError::Stopped(failure.clone())));
+            self.finish(id, Err(err.clone()));
         }
+    }
+
+    fn stop_path(&mut self, failure: &Failure) {
+        let api_id = failure.api_id();
+        self.path_gates.remove(&api_id);
+        self.stopped_paths.insert(api_id, failure.clone());
+        self.fail_endpoint_queued(api_id, &KiwoomError::Stopped(failure.clone()));
     }
 
     fn stopped(&self, api_id: Endpoint) -> Option<KiwoomError> {
         self.stopped_paths.get(&api_id).cloned().map(KiwoomError::Stopped)
+    }
+
+    fn path_gate_closed(&self, api_id: Endpoint, now: Instant) -> Option<KiwoomError> {
+        match self.path_gates.get(&api_id) {
+            Some(Gate::Closed { opens, until, cause, .. }) if now < *opens => {
+                Some(KiwoomError::Gated { until: *until, cause: GateCause::Failure(cause.clone()) })
+            }
+            _ => None,
+        }
+    }
+
+    fn path_gate_probing(&self, api_id: Endpoint) -> bool {
+        matches!(self.path_gates.get(&api_id), Some(Gate::Probing { .. }))
+    }
+
+    fn clear_stopped_paths(&mut self, reset_issue_repeat: bool) {
+        if reset_issue_repeat || self.stopped_paths.contains_key(&Endpoint::ISSUE) {
+            self.failed_once.remove(&Endpoint::ISSUE);
+        }
+        self.stopped_paths.clear();
+        self.path_gates.clear();
     }
 }
 
@@ -671,6 +707,16 @@ impl KiwoomRest {
 
     pub fn stopped(&self, api_id: impl Into<Endpoint>) -> Option<KiwoomError> {
         self.0.lock().stopped(api_id.into())
+    }
+
+    pub fn clear_stopped_paths(&self) {
+        self.0.lock().clear_stopped_paths(false);
+        self.0.wake.notify_one();
+    }
+
+    pub fn reset_stopped_paths_for_new_key(&self) {
+        self.0.lock().clear_stopped_paths(true);
+        self.0.wake.notify_one();
     }
 
     pub async fn until_stopped(&self, api_id: impl Into<Endpoint>) -> KiwoomError {
@@ -800,6 +846,10 @@ impl Inner {
             let _ = tx.send(Err(err));
             return rx;
         }
+        if let Some(err) = q.path_gate_closed(key.api_id, Instant::now()) {
+            let _ = tx.send(Err(err));
+            return rx;
+        }
         if let Some(&id) = q.by_key.get(&key).filter(|_| once.is_none()) {
             let job = q.jobs.get_mut(&id).expect("by_key와 jobs는 함께 바뀐다");
             job.waiters.push(tx);
@@ -896,6 +946,22 @@ impl Inner {
                 Gate::Open | Gate::Closed { .. } => {}
             }
         }
+        if has_market {
+            let closed_paths: Vec<(Endpoint, KiwoomError)> = q
+                .path_gates
+                .iter()
+                .filter_map(|(&api_id, gate)| match gate {
+                    Gate::Closed { opens, until, cause, .. } if now < *opens => {
+                        Some((api_id, KiwoomError::Gated { until: *until, cause: GateCause::Failure(cause.clone()) }))
+                    }
+                    _ => None,
+                })
+                .collect();
+            for (api_id, err) in closed_paths {
+                q.fail_endpoint_queued(api_id, &err);
+            }
+            has_market = q.has_dispatchable_market_work();
+        }
         let wants_issue = !q.issue_waiters.is_empty() || (has_market && self.auth.needs_issue(now_kst));
         if !wants_issue && !has_market {
             return Step::Idle;
@@ -920,6 +986,9 @@ impl Inner {
             .copied()
             .filter_map(|id| {
                 let (endpoint, priority) = q.jobs[&id].slot();
+                if q.path_gate_probing(endpoint) {
+                    return None;
+                }
                 self.endpoint_ready_at(&q, endpoint, priority, now).map(|_| (id, self.tr_ready_at(&q, endpoint, priority, now).is_some()))
             })
             .collect();
@@ -928,11 +997,19 @@ impl Inner {
             if by_tr { &mut job.window_blocked_since } else { &mut job.total_blocked_since }.get_or_insert(now);
         }
         let ready_job = q.lanes.iter().enumerate().find_map(|(lane, ids)| {
-            ids.iter().position(|id| self.job_ready_at(&q, &q.jobs[id], now).is_none()).map(|position| (lane, position))
+            ids.iter()
+                .position(|id| !q.path_gate_probing(q.jobs[id].key.api_id) && self.job_ready_at(&q, &q.jobs[id], now).is_none())
+                .map(|position| (lane, position))
         });
         let Some((lane, position)) = ready_job else {
-            let soonest = q.lanes.iter().flatten().filter_map(|id| self.job_ready_at(&q, &q.jobs[id], now)).min();
-            return soonest.map_or(Step::Again, Step::Wait);
+            let soonest = q
+                .lanes
+                .iter()
+                .flatten()
+                .filter(|id| !q.path_gate_probing(q.jobs[id].key.api_id))
+                .filter_map(|id| self.job_ready_at(&q, &q.jobs[id], now))
+                .min();
+            return soonest.map_or(Step::Idle, Step::Wait);
         };
         q.last_send = Some(now);
         let id = q.lanes[lane].remove(position).expect("찾은 자리는 대기열에 있다");
@@ -945,6 +1022,10 @@ impl Inner {
             q.finish(id, Err(err));
             return Step::Again;
         }
+        if let Some(err) = q.path_gate_closed(api_id, now) {
+            q.finish(id, Err(err));
+            return Step::Again;
+        }
         if q.jobs.get(&id).and_then(|job| job.admit.as_ref()).is_some_and(|admit| !admit()) {
             q.finish(id, Err(KiwoomError::NotConnected));
             return Step::Again;
@@ -952,6 +1033,13 @@ impl Inner {
         if let Gate::Closed { cause, misses, .. } = std::mem::take(&mut q.gate) {
             tracing::info!(api_id = api_id.as_str(), "관문을 확인하는 요청 하나를 보냅니다");
             q.gate = Gate::Probing { probe: id, cause, misses };
+        }
+        if matches!(q.path_gates.get(&api_id), Some(Gate::Closed { .. })) {
+            let Some(Gate::Closed { cause, misses, .. }) = q.path_gates.remove(&api_id) else {
+                unreachable!("방금 Closed임을 확인했다")
+            };
+            tracing::info!(api_id = api_id.as_str(), "경로 관문을 확인하는 요청 하나를 보냅니다");
+            q.path_gates.insert(api_id, Gate::Probing { probe: id, cause, misses });
         }
         let job = q.jobs.get_mut(&id).expect("대기열의 id는 jobs에 있다");
         let waited = job.window_blocked_since.take().map(|since| now.duration_since(since));
@@ -1119,6 +1207,7 @@ impl Inner {
         match failure.policy().stop {
             Stop::Nothing => KiwoomError::Failed(failure),
             Stop::Gate | Stop::AuthGate => self.close_gate(q, failure, 0),
+            Stop::PathGate => self.close_path_gate(q, failure, 0),
             Stop::IssueInterval => self.wait_issue_interval(failure),
             Stop::PathOnRepeat if q.failed_once.insert(api_id) => {
                 tracing::warn!(api_id = api_id.as_str(), "{failure}. 다음 발급도 같은 범주로 실패하면 발급을 멈춥니다");
@@ -1148,6 +1237,20 @@ impl Inner {
         tracing::warn!(api_id = cause.api_id().as_str(), category = ?cause.category(), misses, %until, "조회 관문을 닫습니다. 그 시각에 확인 요청 하나만 보냅니다");
         q.gate = Gate::Closed { opens: Instant::now() + wait, until, cause: cause.clone(), misses };
         KiwoomError::Gated { until, cause: GateCause::Failure(cause) }
+    }
+
+    fn close_path_gate(&self, q: &mut Queue, cause: Failure, misses: u8) -> KiwoomError {
+        let api_id = cause.api_id();
+        if q.path_gate_probing(api_id) {
+            return KiwoomError::Failed(cause);
+        }
+        let wait = PATH_GATE_WAITS[usize::from(misses).min(PATH_GATE_WAITS.len() - 1)];
+        let until = self.clock.now().plus_secs(wait.as_secs() as i64);
+        tracing::error!(api_id = api_id.as_str(), category = ?cause.category(), misses, %until, "{cause}. 이 경로의 관문을 닫고 그 시각에 확인 요청 하나만 보냅니다");
+        let err = KiwoomError::Gated { until, cause: GateCause::Failure(cause.clone()) };
+        q.path_gates.insert(api_id, Gate::Closed { opens: Instant::now() + wait, until, cause, misses });
+        q.fail_endpoint_queued(api_id, &err);
+        err
     }
 
     fn wait_issue_interval(&self, failure: Failure) -> KiwoomError {
@@ -1193,7 +1296,8 @@ impl Inner {
         if !q.jobs.contains_key(&id) {
             return;
         }
-        let probe = matches!(q.gate, Gate::Probing { probe, .. } if probe == id);
+        let shared_probe = matches!(q.gate, Gate::Probing { probe, .. } if probe == id);
+        let path_probe = matches!(q.path_gates.get(&api_id), Some(Gate::Probing { probe, .. }) if *probe == id);
         if let Err(failure) = &outcome
             && failure.category() == Category::RateLimit
         {
@@ -1202,13 +1306,27 @@ impl Inner {
         }
         match outcome {
             Ok(page) => {
-                if probe {
+                if shared_probe {
                     tracing::info!(api_id = api_id.as_str(), "확인 요청이 성공해 관문을 엽니다");
                     q.gate = Gate::Open;
                 }
+                if path_probe {
+                    tracing::info!(api_id = api_id.as_str(), "확인 요청이 성공해 경로 관문을 엽니다");
+                    q.path_gates.remove(&api_id);
+                }
                 q.finish(id, Ok(page));
             }
-            Err(failure) if probe => self.probe_failed(&mut q, id, generation, failure),
+            Err(failure) if shared_probe && path_probe => {
+                if failure.policy().stop == Stop::PathGate {
+                    q.gate = Gate::Open;
+                    self.path_probe_failed(&mut q, id, generation, failure);
+                } else {
+                    q.path_gates.remove(&api_id);
+                    self.probe_failed(&mut q, id, generation, failure);
+                }
+            }
+            Err(failure) if shared_probe => self.probe_failed(&mut q, id, generation, failure),
+            Err(failure) if path_probe => self.path_probe_failed(&mut q, id, generation, failure),
             Err(failure) => self.market_failed(&mut q, id, generation, failure),
         }
         drop(q);
@@ -1217,6 +1335,20 @@ impl Inner {
 
     fn resends_order_write(&self, job: &Job, failure: &Failure) -> bool {
         job.once.is_some() && failure.category() == Category::RateLimit && failure.http_status() == Some(429) && job.rate_limited < self.order_resends
+    }
+
+    fn path_probe_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
+        let api_id = failure.api_id();
+        let Some(Gate::Probing { misses, .. }) = q.path_gates.remove(&api_id) else {
+            unreachable!("send_market이 경로 확인 요청임을 확인했다")
+        };
+        let is_order_write = q.jobs.get(&id).is_some_and(|job| job.once.is_some());
+        if !is_order_write && failure.policy().stop == Stop::PathGate {
+            let err = self.close_path_gate(q, failure, misses.saturating_add(1));
+            q.finish(id, Err(err));
+            return;
+        }
+        self.market_failed(q, id, generation, failure);
     }
 
     fn probe_failed(self: &Arc<Self>, q: &mut Queue, id: u64, generation: TokenGen, failure: Failure) {
@@ -1256,7 +1388,7 @@ impl Inner {
                 let _ = self.auth.invalidate(generation);
             }
             let err = match failure.policy().stop {
-                Stop::Path | Stop::PathOnRepeat | Stop::Gate => {
+                Stop::Path | Stop::PathOnRepeat | Stop::Gate | Stop::PathGate => {
                     tracing::warn!(api_id, "주문 쓰기가 실패했습니다. 다시 보내지 않고 경로나 관문도 닫지 않습니다: {failure}");
                     KiwoomError::Failed(failure)
                 }
@@ -1873,30 +2005,128 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn unknown_and_protocol_failures_stop_their_path_until_restart() {
+    async fn protocol_and_unsupported_failures_stop_their_path_until_cleared() {
         for (name, reply) in [
-            ("상세 없는 비0", json!({"return_code": 1, "return_msg": "알 수 없음"})),
-            ("표에 없는 상세", json!({"return_code": 3, "return_msg": "실패[8100:처음 보는 코드]"})),
+            ("미지원 API", json!({"return_code": 2, "return_msg": "[8104:모의투자 미지원]"})),
             ("return_code 없음", json!({"list": []})),
             ("빈 봉투", json!({})),
             ("목록 필드 없음", json!({"return_code": 0})),
         ] {
             let tokens = token_counter();
+            let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let fail_clone = fail.clone();
             let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
                 tokens(s).unwrap_or_else(|| match s.api_id.market().unwrap() {
-                    ApiId::Ka10099 => ok(reply.clone(), None),
+                    ApiId::Ka10099 if fail_clone.load(Ordering::SeqCst) => ok(reply.clone(), None),
+                    ApiId::Ka10099 => list_ok(),
                     _ => ok(json!({"return_code": 0, "stk_dt_pole_chart_qry": []}), None),
                 })
             }));
             let rest = rest(&fake);
-            let first = category(call_k(&rest, 0, Priority::Background).await.err());
-            assert!(matches!(first, Some(Category::Unknown | Category::Protocol)), "{name}: {first:?}");
-            assert_eq!(category(call_k(&rest, 1, Priority::Screen).await.err()), first, "{name}");
+            let first = call_k(&rest, 0, Priority::Background).await.unwrap_err();
+            assert!(matches!(first.failure().map(Failure::category), Some(Category::Unsupported | Category::Protocol)), "{name}: {first:?}");
+            assert!(first.manual_action_required(), "{name}: {first:?}");
+            assert_eq!(category(call_k(&rest, 1, Priority::Screen).await.err()), first.failure().map(Failure::category), "{name}");
             assert_eq!(fake.market_sent().len(), 1, "{name}: 다시 보내지 않고, 다른 요청도 같은 경로로 보내지 않는다");
             assert!(rest.stopped(ApiId::Ka10099).is_some() && rest.halted().is_none(), "{name}: 그 경로만 멈춘다");
             let daily = crate::kiwoom::api::DailyChart::new(domain::StockCode::parse("005930").unwrap(), domain::Venue::Krx, KstDate::new(2026, 11, 9).unwrap());
             rest.call(&daily, None, Priority::Screen, MergeScope::default()).await.unwrap();
+            fail.store(false, Ordering::SeqCst);
+            rest.clear_stopped_paths();
+            assert!(rest.stopped(ApiId::Ka10099).is_none(), "{name}: 멈춤을 비우면 풀린다");
+            call_k(&rest, 2, Priority::Screen).await.unwrap();
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unknown_market_failures_close_a_per_path_gate_and_recover_on_probe() {
+        for (name, reply) in [
+            ("상세 없는 비0", json!({"return_code": 1, "return_msg": "알 수 없음"})),
+            ("표에 없는 상세", json!({"return_code": 3, "return_msg": "실패[8100:처음 보는 코드]"})),
+        ] {
+            let tokens = token_counter();
+            let remaining_failures = Arc::new(AtomicUsize::new(4));
+            let remaining_clone = remaining_failures.clone();
+            let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+                tokens(s).unwrap_or_else(|| match s.api_id.market().unwrap() {
+                    ApiId::Ka10099 if remaining_clone.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok() => ok(reply.clone(), None),
+                    ApiId::Ka10099 => list_ok(),
+                    _ => ok(json!({"return_code": 0, "stk_dt_pole_chart_qry": []}), None),
+                })
+            }));
+            let rest = rest(&fake);
+            let first = call_k(&rest, 0, Priority::Background).await.unwrap_err();
+            assert_eq!(category(Some(first.clone())), Some(Category::Unknown), "{name}");
+            assert_eq!(gated_for(&rest, &first), Some(30), "{name}: 첫 실패는 30초 경로 관문을 닫는다");
+            assert!(!first.manual_action_required(), "{name}: 전역 멈춤 배너를 띄우지 않는다");
+            assert!(first.to_string().contains("확인 요청 하나를 보냅니다") && !first.to_string().contains("다시 켤"), "{name}: {first}");
+            assert!(rest.stopped(ApiId::Ka10099).is_none() && rest.halted().is_none(), "{name}");
+            assert!(rest.gate_until().is_none(), "{name}: 공유 관문은 닫지 않는다");
+
+            let held_while_closed = call_k(&rest, 1, Priority::Screen).await.unwrap_err();
+            assert_eq!(held_while_closed.retry_at(), first.retry_at(), "{name}: 닫힌 동안 같은 경로는 보내지 않는다");
+            assert_eq!(fake.market_sent().len(), 1, "{name}");
+
+            let daily = crate::kiwoom::api::DailyChart::new(domain::StockCode::parse("005930").unwrap(), domain::Venue::Krx, KstDate::new(2026, 11, 9).unwrap());
+            rest.call(&daily, None, Priority::Screen, MergeScope::default()).await.unwrap();
+
+            let mut waits = Vec::new();
+            for (step, sleep_secs) in [(2usize, 30u64), (3, 300), (4, 1800)] {
+                tokio::time::sleep(Duration::from_secs(sleep_secs)).await;
+                let (probe, waiter) = tokio::join!(call_k(&rest, step, Priority::Screen), call_k(&rest, 100 + step, Priority::Screen));
+                let err = probe.unwrap_err();
+                assert_eq!(category(Some(err.clone())), Some(Category::Unknown), "{name} step={step}");
+                waits.push(gated_for(&rest, &err).unwrap());
+                assert!(matches!(waiter, Err(KiwoomError::Gated { .. })), "{name}: 확인 요청이 나가는 동안 다른 요청은 보내지 않는다");
+            }
+            assert_eq!(waits, [300, 1800, 1800], "{name}: 30초 -> 5분 -> 30분 상한");
+            assert_eq!(sent_of(&fake, ApiId::Ka10099).len(), 4, "{name}: 첫 실패 1회와 확인 요청 3회만 나간다");
+
+            tokio::time::sleep(Duration::from_secs(1800)).await;
+            call_k(&rest, 5, Priority::Screen).await.unwrap();
+            call_k(&rest, 6, Priority::Screen).await.unwrap();
+            assert_eq!(sent_of(&fake, ApiId::Ka10099).len(), 6, "{name}: 확인 요청이 성공하면 경로 관문이 열린다");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn observed_1631_retries_with_backoff_and_never_stops_the_path() {
+        let tokens = token_counter();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let fake = Arc::new(FakeTransport::new(Duration::ZERO, move |s| {
+            tokens(s).unwrap_or_else(|| {
+                if calls_clone.fetch_add(1, Ordering::SeqCst) == 0 {
+                    ok(json!({"return_code": 7, "return_msg": "일시 오류[1631]"}), None)
+                } else {
+                    list_ok()
+                }
+            })
+        }));
+        let rest = rest(&fake);
+        call_k(&rest, 0, Priority::Screen).await.unwrap();
+        assert_eq!(fake.market_sent().len(), 2, "1631은 일시 장애로 백오프 재시도해 복구한다");
+        assert!(rest.stopped(ApiId::Ka10099).is_none() && rest.halted().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_order_write_unknown_failure_never_retries_or_closes_a_path_gate() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let fake = fake_with(Duration::ZERO, move |_| {
+            if calls_clone.fetch_add(1, Ordering::SeqCst) == 0 {
+                ok(json!({"return_code": 7, "return_msg": "알 수 없는 오류[9997]"}), None)
+            } else {
+                list_ok()
+            }
+        });
+        let rest = real_rest(&fake).await;
+        let err = write_call(&rest, BUY_WRITE, "w0", None).await.unwrap_err();
+        assert!(matches!(err, KiwoomError::Failed(ref f) if f.category() == Category::Unknown), "{err:?}");
+        assert!(!err.manual_action_required());
+        assert_eq!(fake.market_sent().len(), 1, "주문 쓰기는 다시 보내지 않는다");
+        write_call(&rest, BUY_WRITE, "w1", None).await.unwrap();
+        assert_eq!(fake.market_sent().len(), 2, "다음 주문 쓰기를 경로 관문으로 막지 않는다");
     }
 
     #[tokio::test(start_paused = true)]

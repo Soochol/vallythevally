@@ -196,7 +196,12 @@ impl Link {
     }
 
     fn open_access(&self, epoch: u64, access: Access) -> Result<(), Stale> {
-        self.0.engine.publish(epoch, || self.0.rest.set_access(access))
+        self.0.engine.publish(epoch, || {
+            if access == Access::Connecting {
+                self.0.rest.clear_stopped_paths();
+            }
+            self.0.rest.set_access(access);
+        })
     }
 
     pub async fn connect(&self, acknowledged: bool) -> LinkState {
@@ -422,6 +427,7 @@ impl Link {
         let auth = self.0.rest.auth();
         self.abandon_connect(|| {
             self.0.rest.set_access(Access::Closed);
+            self.0.rest.reset_stopped_paths_for_new_key();
             auth.replace_credentials(app_key, app_secret);
             auth.release_key_rejection();
             self.set(self.resting_state());
@@ -432,6 +438,7 @@ impl Link {
     pub fn rebind(&self, identity: Option<(Secret<String>, Secret<String>, Option<super::token_file::TokenFile>)>) -> LinkState {
         self.abandon_connect(|| {
             self.0.rest.set_access(Access::Closed);
+            self.0.rest.reset_stopped_paths_for_new_key();
             self.0.rest.auth().rebind(identity);
             self.set(self.resting_state());
         });
@@ -441,6 +448,7 @@ impl Link {
     pub fn rebind_replacing(&self, identity: Option<(Secret<String>, Secret<String>, Option<super::token_file::TokenFile>)>) -> LinkState {
         self.abandon_connect(|| {
             self.0.rest.set_access(Access::Closed);
+            self.0.rest.reset_stopped_paths_for_new_key();
             self.0.rest.auth().rebind_replacing(identity);
             self.set(self.resting_state());
         });
@@ -454,6 +462,7 @@ impl Link {
     pub fn clear_key(&self) -> LinkState {
         self.abandon_connect(|| {
             self.0.rest.set_access(Access::Closed);
+            self.0.rest.reset_stopped_paths_for_new_key();
             self.0.rest.auth().clear_credentials();
             self.set(self.resting_state());
         });

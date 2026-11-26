@@ -59,8 +59,22 @@ async fn the_symbol_list_is_not_fetched_again_after(reply: Value) {
 }
 
 #[tokio::test]
-async fn an_unknown_failure_stops_the_symbol_list_path() {
-    the_symbol_list_is_not_fetched_again_after(json!({"return_code": 1, "return_msg": "알 수 없음"})).await;
+async fn an_unsupported_failure_stops_the_symbol_list_path() {
+    the_symbol_list_is_not_fetched_again_after(json!({"return_code": 2, "return_msg": "[8104:모의투자 미지원]"})).await;
+}
+
+#[tokio::test]
+async fn an_unknown_failure_on_symbol_list_waits_for_the_path_gate() {
+    let fake = ScriptedTransport::new();
+    fake.respond_with("ka10099", 200, json!({"return_code": 1, "return_msg": "알 수 없음"}));
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::spawn(&fake, &tmp.path().join("run/server.lock"), &static_dir(tmp.path()));
+    server.addr().await;
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    let logs = server.stop().await;
+    let list_requests = fake.api_ids().iter().filter(|id| *id == "ka10099").count();
+    assert_eq!(list_requests, 1, "알 수 없는 실패는 즉시 재시도하지 않고 30초 경로 관문을 기다린다\n{logs}");
+    assert!(logs.contains("그 시각에 다시 받습니다"), "{logs}");
 }
 
 #[tokio::test]
@@ -157,7 +171,12 @@ async fn the_browser_learns_whether_and_when_it_may_ask_again() {
 
     let (status, e) = browser_error("ka10095", 200, json!({"return_code": 1, "return_msg": "알 수 없음"}), "/api/quotes?symbols=005930").await;
     assert_eq!(status, 503, "{e}");
-    assert_eq!((&e["reason"], &e["retryAt"], &e["manualActionRequired"]), (&json!("unknown_failure"), &Value::Null, &json!(true)), "{e}");
+    assert_eq!(e["reason"], json!("unknown_failure"), "{e}");
+    assert!(e["retryAt"].is_i64() && e["manualActionRequired"] == json!(false), "알 수 없는 조회 실패는 경로 관문이 열리는 시각을 준다: {e}");
+
+    let (status, e) = browser_error("ka10095", 200, json!({"return_code": 2, "return_msg": "[8104:모의투자 미지원]"}), "/api/quotes?symbols=005930").await;
+    assert_eq!(status, 500, "{e}");
+    assert_eq!((&e["reason"], &e["retryAt"], &e["manualActionRequired"]), (&json!("unsupported"), &Value::Null, &json!(true)), "{e}");
     assert!(!e["message"].as_str().unwrap().contains("잠시 뒤 다시 시도하세요"), "멈춘 경로를 잠시 뒤에 풀린다고 말하지 않는다: {e}");
 }
 

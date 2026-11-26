@@ -280,13 +280,18 @@ async fn dropping_one_waiter_does_not_cancel_shared_collection_and_different_tar
 
 #[tokio::test(start_paused = true)]
 async fn gate_global_stop_and_path_stop_keep_existing_kiwoom_error_contract() {
-    for (message, stopped, gated) in [("[8003:인증 불확실]", false, true), ("[8050:인증 차단]", true, false), ("[9998:알 수 없음]", true, false)] {
+    for (message, stopped, gated) in [
+        ("[8003:인증 불확실]", false, true),
+        ("[8050:인증 차단]", true, false),
+        ("[8104:모의투자 미지원]", true, false),
+        ("[9998:알 수 없음]", false, true),
+    ] {
         let (fake, collector, _) = noon().await;
         fake.script("ka10095", vec![failure(message)]);
         let error = collector.collect(vec![code(1)], CollectionBasis::default()).await.unwrap_err();
         let CollectionError::Kiwoom(error) = error else { panic!("키움 오류") };
-        assert_eq!(matches!(error, KiwoomError::Stopped(_)), stopped);
-        assert_eq!(matches!(error, KiwoomError::Gated { .. }), gated);
+        assert_eq!(matches!(error, KiwoomError::Stopped(_)), stopped, "{message}");
+        assert_eq!(matches!(error, KiwoomError::Gated { .. }), gated, "{message}");
         assert!(collector.completed().is_none());
         assert!(collector.collect(vec![code(1)], CollectionBasis::default()).await.is_err());
         assert_eq!(calls(&fake), 1);

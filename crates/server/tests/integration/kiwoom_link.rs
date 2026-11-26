@@ -1216,3 +1216,27 @@ async fn an_acknowledged_connect_that_reuses_a_saved_token_and_is_cut_off_keeps_
     assert_eq!(failure(server.link_state()).problem, Problem::AuthBlocked8050);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn reconnecting_or_replacing_a_key_clears_a_stopped_path_without_restart() {
+    let fake = ScriptedTransport::new();
+    fake.respond_with("ka10099", 200, json!({"return_code": 2, "return_msg": "[8104:모의투자 미지원]"}));
+    let env = env();
+    let server = spawn(&fake, &env, &[START, ("VALLY_CLOCK_START", AT_TEN)]);
+    server.addr().await;
+    server.wait_for_state(is_failed).await;
+    assert_eq!(failure(server.link_state()).problem, Problem::PathStopped);
+
+    fake.reset();
+    assert_eq!(server.connect(false).await, LinkState::Connected, "다시 연결하면 멈춘 경로가 풀린다");
+    assert_eq!(fake.issued(), 1, "유효 토큰을 재사용해 발급을 반복하지 않는다");
+
+    fake.respond_with("ka10099", 200, json!({}));
+    server.link().disconnect_by_user();
+    assert_eq!(failure(server.connect(false).await).problem, Problem::PathStopped);
+    fake.reset();
+    server.link().replace_key(Secret::new("FAKE-new-key".into()), Secret::new("FAKE-new-secret".into()));
+    server.clock().jump(601);
+    assert_eq!(server.connect(false).await, LinkState::Connected, "키 교체 뒤 연결하면 멈춘 경로가 풀린다");
+    server.stop().await;
+}

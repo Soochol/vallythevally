@@ -107,6 +107,7 @@ pub const CODE_TABLE: &[(CodeKey, Rule)] = &[
     (Rest(8103), Known(AuthBlocked, Official)),
     (Rest(8104), Known(Unsupported, Official)),
     (Rest(8200), Known(Unsupported, Official)),
+    (Rest(1631), Known(Transient, Observed)),
     (Rest(1634), Known(BatchLimit, Observed)),
     (Rest(2000), Known(BusinessRejected, Reported)),
     (WsControl(1), Known(ControlRejected, Official)),
@@ -178,6 +179,7 @@ pub enum Retry {
 pub enum Stop {
     Nothing,
     Gate,
+    PathGate,
     AuthGate,
     IssueInterval,
     PathOnRepeat,
@@ -205,7 +207,8 @@ pub const fn policy(phase: Phase, category: Category) -> Policy {
         (Phase::Market, TokenInvalid) => p(RefreshTokenOnce, Nothing),
         (Phase::Market, AuthIndeterminate) => p(Never, AuthGate),
         (Phase::Market, InvalidRequest | SymbolMismatch | BatchLimit | BusinessRejected) => p(Never, Nothing),
-        (Phase::Market, Unsupported | Unknown | Protocol) => p(Never, Path),
+        (Phase::Market, Unknown) => p(Never, PathGate),
+        (Phase::Market, Unsupported | Protocol) => p(Never, Path),
         (Phase::Market, RealtimeCapacity | ControlRejected | SubscriptionMismatch) => p(Never, Path),
         (Phase::Issue, RateLimit | Transient) => p(Never, IssueInterval),
         (Phase::Issue, TokenInvalid | AuthIndeterminate) => p(Never, PathOnRepeat),
@@ -428,7 +431,7 @@ impl fmt::Display for Failure {
             },
             SymbolMismatch => write!(f, "키움에 종목이나 시장 정보가 없습니다({ev})"),
             Unsupported => write!(f, "키움이 이 계좌에서 지원하지 않는 API입니다({ev}). 이 조회를 멈췄습니다"),
-            Unknown => write!(f, "키움이 알 수 없는 실패를 돌려줬습니다({ev}){note}. 운영자가 확인하고 서버를 다시 켤 때까지 이 경로로 보내지 않습니다"),
+            Unknown => write!(f, "키움이 알 수 없는 실패를 돌려줬습니다({ev}){note}"),
             Protocol => write!(f, "키움 응답 형식이 예상과 다릅니다({ev}){note}. 운영자가 확인하고 서버를 다시 켤 때까지 이 경로로 보내지 않습니다"),
             RealtimeCapacity | ControlRejected | SubscriptionMismatch => write!(f, "키움 실시간 제어가 거절됐습니다({ev}){note}"),
         }
@@ -664,6 +667,7 @@ mod tests {
         (8103, AuthBlocked),
         (8104, Unsupported),
         (8200, Unsupported),
+        (1631, Transient),
         (1634, BatchLimit),
         (2000, BusinessRejected),
     ];
@@ -695,7 +699,7 @@ mod tests {
         }
         let rest_rows = CODE_TABLE.iter().filter(|(k, _)| matches!(k, Rest(_))).count();
         let official = CODE_TABLE.iter().filter(|(k, r)| matches!(k, Rest(_)) && matches!(r, Known(_, Official))).count();
-        assert_eq!((rest_rows, official), (EXPECTED_REST.len(), 37), "공식 37개와 실측 1634·2000");
+        assert_eq!((rest_rows, official), (EXPECTED_REST.len(), 37), "공식 37개와 실측 1631·1634·2000");
         for &(code, want) in EXPECTED_REST {
             assert_eq!(classify(Rest(code)), want, "[{code}]");
         }
@@ -891,7 +895,8 @@ mod tests {
             }
             assert_eq!(policy(phase, AuthBlocked).stop, Stop::Everything);
         }
-        assert_eq!(policy(Phase::Market, Unknown).stop, Stop::Path);
+        assert_eq!(policy(Phase::Market, Unknown).stop, Stop::PathGate);
+        assert_eq!(policy(Phase::Market, Unsupported).stop, Stop::Path);
         assert_eq!(policy(Phase::Market, Protocol).stop, Stop::Path);
         assert_eq!(policy(Phase::Market, SymbolMismatch).stop, Stop::Nothing, "다른 종목은 계속 받는다");
         assert_eq!(policy(Phase::Market, RateLimit).stop, Stop::Gate);
@@ -902,6 +907,17 @@ mod tests {
         assert_eq!(policy(Phase::Issue, Transient).stop, Stop::IssueInterval);
         assert_eq!(policy(Phase::Market, TokenInvalid).retry, Retry::RefreshTokenOnce);
         assert_eq!(policy(Phase::Issue, Transient).retry, Retry::Never, "발급은 일반 재시도를 쓰지 않는다");
+    }
+
+    #[test]
+    fn observed_1631_is_transient_on_market_and_issue_interval_on_issue() {
+        let body = r#"{"return_code": 7, "return_msg": "일시 오류[1631]"}"#;
+        let market = judge(ApiId::Ka10032, 200, body).unwrap_err();
+        assert_eq!((market.category(), market.detail(), market.return_code()), (Transient, Some(Rest(1631)), Some(7)));
+        assert_eq!(market.policy(), Policy { retry: Retry::Backoff, stop: Stop::Gate });
+        let issue = judge(ApiId::Au10001, 200, body).unwrap_err();
+        assert_eq!(issue.category(), Transient);
+        assert_eq!(issue.policy(), Policy { retry: Retry::Never, stop: Stop::IssueInterval });
     }
 
     #[test]
