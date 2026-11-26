@@ -86,8 +86,8 @@ impl TailnetHosts {
         let mut names: Vec<String> = Vec::new();
         for entry in value.split(',') {
             let name = entry.trim().to_ascii_lowercase();
-            if !is_magic_dns_name(&name) {
-                return Err(ConfigError(format!("VALLY_TAILNET_HOSTS는 server.<tailnet>.ts.net 같은 MagicDNS 전체 이름을 쉼표로 구분해 적습니다. 포트, 스킴, 경로, 와일드카드, IP, 빈 항목은 안 됩니다: {entry:?}")));
+            if !is_tailnet_authority(&name) {
+                return Err(ConfigError(format!("VALLY_TAILNET_HOSTS는 server.<tailnet>.ts.net 또는 443이 아닌 포트가 붙은 server.<tailnet>.ts.net:<포트> 형식의 MagicDNS 전체 이름을 쉼표로 구분해 적습니다. 443 포트, 스킴, 경로, 와일드카드, IP, 빈 항목은 안 됩니다: {entry:?}")));
             }
             if !names.contains(&name) {
                 names.push(name);
@@ -99,6 +99,17 @@ impl TailnetHosts {
     pub fn contains(&self, host: &str) -> bool {
         self.0.iter().any(|name| name.eq_ignore_ascii_case(host))
     }
+}
+
+fn is_tailnet_authority(entry: &str) -> bool {
+    match entry.split_once(':') {
+        Some((name, port)) => is_magic_dns_name(name) && is_explicit_tailnet_port(port),
+        None => is_magic_dns_name(entry),
+    }
+}
+
+fn is_explicit_tailnet_port(port: &str) -> bool {
+    !port.is_empty() && !port.starts_with('0') && port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok_and(|number| number != 443)
 }
 
 fn is_magic_dns_name(name: &str) -> bool {
@@ -1012,6 +1023,37 @@ mod tests {
         }
         let started = Config::from_vars(vars(&[("VALLY_KIWOOM_APP_KEY", KEY), ("VALLY_KIWOOM_APP_SECRET", SECRET)]), vars(&[&REAL[..], &[("VALLY_TAILNET_HOSTS", "*.example-tailnet.ts.net")]].concat()), lock, token, key, account);
         assert!(started.is_err_and(|e| e.0.contains("VALLY_TAILNET_HOSTS")));
+    }
+
+    #[test]
+    fn tailnet_hosts_accept_explicit_non_443_ports_and_reject_invalid_ports() {
+        let parsed = TailnetHosts::parse(" Server.Example-Tailnet.ts.net:8443 , server.example-tailnet.ts.net:8443 , server.example-tailnet.ts.net ").unwrap();
+        assert_eq!(parsed, TailnetHosts(vec!["server.example-tailnet.ts.net:8443".into(), "server.example-tailnet.ts.net".into()]));
+        assert!(parsed.contains("SERVER.EXAMPLE-TAILNET.TS.NET:8443") && parsed.contains("server.example-tailnet.ts.net"));
+        assert!(!parsed.contains("server.example-tailnet.ts.net:443") && !parsed.contains("server.example-tailnet.ts.net:9443"));
+        for ok in ["a.b.ts.net:1", "server.example-tailnet.ts.net:8443", "a1.b-2.c.ts.net:65535"] {
+            assert!(TailnetHosts::parse(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "server.example-tailnet.ts.net:443",
+            "server.example-tailnet.ts.net:0",
+            "server.example-tailnet.ts.net:08443",
+            "server.example-tailnet.ts.net:65536",
+            "server.example-tailnet.ts.net:abc",
+            "server.example-tailnet.ts.net:8443:8443",
+            "server.example-tailnet.ts.net:",
+            "server.example-tailnet.ts.net:+8443",
+            "server.example-tailnet.ts.net: 8443",
+            "server.example-tailnet.ts.net :8443",
+            "server.example-tailnet.ts.net:8443/path",
+            "https://server.example-tailnet.ts.net:8443",
+            "server.example.com:8443",
+            "100.64.0.1:8443",
+            "server.example-tailnet.ts.net.:8443",
+            ":8443",
+        ] {
+            assert!(TailnetHosts::parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

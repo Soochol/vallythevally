@@ -848,3 +848,47 @@ async fn loopback_host_and_origin_keep_working_when_a_tailnet_name_is_configured
     let (status, body) = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).send().await.unwrap()).await;
     assert!(!refused_by_the_guard(status, &body), "{status} {body}");
 }
+
+#[tokio::test]
+async fn a_configured_tailnet_name_with_a_non_default_port_requires_that_exact_port_in_host_and_origin() {
+    let (env, fake) = (Env::new(), ScriptedTransport::new());
+    let server = env.spawn(&fake, &[("VALLY_TAILNET_HOSTS", "Server.Example-Tailnet.ts.net:8443")]);
+    let client = Client::of(&server).await;
+    let host_with_port = format!("{TAILNET_NAME}:8443");
+
+    for host in [TAILNET_NAME.to_owned(), format!("{TAILNET_NAME}:443"), format!("{TAILNET_NAME}:9443")] {
+        let write = answer(client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", &host).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(write.0, &write.1), "{host}: {} {}", write.0, write.1);
+        let read = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).header("host", &host).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(read.0, &read.1), "{host}: {} {}", read.0, read.1);
+    }
+    let wrong_origins = [
+        format!("http://{host_with_port}"),
+        format!("https://{TAILNET_NAME}"),
+        format!("https://{TAILNET_NAME}:443"),
+        format!("https://{TAILNET_NAME}:9443"),
+        "https://other.example-tailnet.ts.net:8443".to_owned(),
+        format!("http://127.0.0.1:{}", client.port),
+    ];
+    for origin in &wrong_origins {
+        let (status, body) = answer(client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", &host_with_port).header("origin", origin).send().await.unwrap()).await;
+        assert!(refused_by_the_guard(status, &body), "{origin}: {status} {body}");
+    }
+    let two_origins = client.put_request(OTHER_APP_KEY, OTHER_APP_SECRET).header("host", &host_with_port).header("origin", format!("https://{host_with_port}")).header("origin", format!("https://{host_with_port}"));
+    let (status, body) = answer(two_origins.send().await.unwrap()).await;
+    assert!(refused_by_the_guard(status, &body), "Origin이 둘이면 거절한다: {status} {body}");
+    assert!(!env.list_path().exists(), "거절된 쓰기는 키 파일을 만들지 않는다");
+
+    for origin in [None, Some(format!("https://{host_with_port}")), Some(format!("HTTPS://{}", host_with_port.to_uppercase()))] {
+        let mut request = client.put_request(APP_KEY, APP_SECRET).header("host", &host_with_port);
+        if let Some(origin) = &origin {
+            request = request.header("origin", origin);
+        }
+        let (status, body) = answer(request.send().await.unwrap()).await;
+        assert_eq!(status, 200, "{origin:?}: {body}");
+    }
+    let upper_host = client.put_request(APP_KEY, APP_SECRET).header("host", host_with_port.to_uppercase()).header("origin", format!("https://{host_with_port}"));
+    assert_eq!(upper_host.send().await.unwrap().status().as_u16(), 200, "포트를 포함한 Host도 대소문자를 가리지 않는다");
+    let (status, body) = answer(client.http.get(format!("{}/api/trading/account-number", client.base)).header("host", &host_with_port).send().await.unwrap()).await;
+    assert!(!refused_by_the_guard(status, &body), "계좌번호 조회가 Host로 거절됐다: {status} {body}");
+}
