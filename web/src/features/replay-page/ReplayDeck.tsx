@@ -419,7 +419,17 @@ export function ReplayDeck({
             title="재생/일시정지 (Space)"
             onClick={onTogglePlay}
           >
-            {playing ? "멈춤" : "재생"}
+            {playing ? (
+              <svg className="rp-play-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <rect x="2" y="1.5" width="3" height="9" rx="0.8" fill="currentColor" />
+                <rect x="7" y="1.5" width="3" height="9" rx="0.8" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg className="rp-play-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2.5 1.5L10.5 6L2.5 10.5V1.5Z" fill="currentColor" />
+              </svg>
+            )}
+            <span>{playing ? "멈춤" : "재생"}</span>
           </button>
           <button type="button" className="rp-tbtn" title="다음 틱 (.)" onClick={() => onStepTick(1)}>+1틱</button>
           <button type="button" className="rp-tbtn" title="+1초 (→)" onClick={() => onStepSec(1)}>+1s</button>

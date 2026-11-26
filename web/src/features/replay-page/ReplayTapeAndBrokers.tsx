@@ -18,10 +18,12 @@ import {
   formatSignedQty,
   formatWonCompact,
 } from "./replayModel";
+import { ReplayBrokerTable } from "./ReplayBrokerTable";
 import type { ReplayPaperEngine } from "./replayPaperEngine";
 
 type RightBottomPane = "brokers" | "journal";
 type JournalTab = "fills" | "open" | "stats";
+type ReplayBrokerView = BrokerView | "table";
 
 interface Props {
   readonly engine: ReplayEngine;
@@ -73,7 +75,7 @@ export function ReplayTapeAndBrokers({
   const [bottomPane, setBottomPane] = useState<RightBottomPane>("brokers");
   const [journalTab, setJournalTab] = useState<JournalTab>("fills");
   const [paperTick, setPaperTick] = useState(0);
-  const [brokerView, setBrokerView] = useState<BrokerView>("board");
+  const [brokerView, setBrokerView] = useState<ReplayBrokerView>("board");
   const [brokerCards, setBrokerCards] = useState<BrokerCards>("bars");
   const [selectedBroker, setSelectedBroker] = useState<string | null>(null);
   const [hoverBrokerCursor, setHoverBrokerCursor] = useState<UnixSeconds | null>(null);
@@ -318,6 +320,14 @@ export function ReplayTapeAndBrokers({
             <div className="rp-seg" role="group" aria-label="거래원 보기">
               <button type="button" aria-pressed={brokerView === "board"} onClick={() => setBrokerView("board")}>입체</button>
               <button type="button" aria-pressed={brokerView === "list"} onClick={() => setBrokerView("list")}>거래원</button>
+              <button
+                type="button"
+                data-testid="replay-broker-view-table"
+                aria-pressed={brokerView === "table"}
+                onClick={() => setBrokerView("table")}
+              >
+                기본
+              </button>
             </div>
             {brokerView === "board" && (
               <div className="rp-seg" role="group" aria-label="카드 모양">
@@ -371,6 +381,10 @@ export function ReplayTapeAndBrokers({
               cursor={effectiveCursor}
               onCursor={setHoverBrokerCursor}
             />
+          )}
+
+          {showContent && brokerView === "table" && (
+            <ReplayBrokerTable snapshots={grid.snapshots} cursor={effectiveCursor} />
           )}
         </div>
       ) : (

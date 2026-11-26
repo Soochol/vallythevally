@@ -389,3 +389,66 @@ test("가상 매매 시뮬레이션 주문·미체결·체결·되감기 복원�
   await expect(page.getByTestId("replay-sim-qty")).toHaveText("0주");
   await expect(page.getByTestId("replay-sim-fill-row")).toHaveCount(0);
 });
+
+test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 시각, 분봉 주기 전환과 재생 버튼 대비가 동작한다", async ({ page, scenario }) => {
+  seedTickReplay(scenario);
+  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
+
+  await expect(page.getByTestId("replay-page")).toBeVisible();
+  await expect(page.getByTestId("replay-sim-equity")).toHaveText("30,000,000원 (0.00%)");
+  await expect(page.getByTestId("replay-ladder-clock")).toHaveText("09:00:00");
+  await expect(page.getByTestId("replay-ladder").getByText("매도 총잔량")).toHaveCount(0);
+  await expect(page.getByTestId("replay-ladder").getByText("매수 총잔량")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "+1틱", exact: true }).click();
+  await expect(page.getByTestId("replay-ladder-clock")).toHaveText("09:00:10");
+
+  await page.getByRole("group", { name: "프리셋 기준" }).getByRole("button", { name: "매수", exact: true }).click();
+  await page.getByRole("group", { name: "주문 수량 프리셋" }).getByRole("button", { name: "전량", exact: true }).click();
+
+  const higherAskBuyCell = page.locator('[data-testid="replay-sim-buy-cell"][data-price="71300"]');
+  await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 420");
+  await expect(higherAskBuyCell.locator(".od-preview")).not.toHaveAttribute("data-over", "");
+  await higherAskBuyCell.click();
+  await expect(page.getByTestId("replay-sim-qty")).toHaveText("420주");
+  await expect(page.getByTestId("replay-sim-status")).toHaveAttribute("data-tone", "ok");
+
+  const brokers = page.getByTestId("replay-brokers");
+  await brokers.getByTestId("replay-broker-view-table").click();
+  await expect(brokers.getByTestId("replay-broker-table")).toBeVisible();
+  await expect(brokers.getByTestId("replay-broker-table-row")).toHaveCount(5);
+  await expect(brokers.getByTestId("replay-broker-table-stamp")).toContainText("첫 스냅샷");
+
+  await page.getByRole("button", { name: "+1m", exact: true }).click();
+  await expect(brokers.getByTestId("replay-broker-sell-name").first()).toContainText("NH투자");
+  await expect(brokers.getByTestId("replay-broker-sell-qty").first()).toHaveText("1,200");
+  await expect(brokers.getByTestId("replay-broker-buy-name").first()).toContainText("모건스탠리");
+  await expect(brokers.getByTestId("replay-broker-buy-qty").first()).toHaveText("2,400");
+  await expect(brokers.getByTestId("replay-broker-table-foreign")).toContainText("+2,400");
+
+  await page.getByRole("button", { name: "+1m", exact: true }).click();
+  await expect(brokers.getByTestId("replay-broker-sell-qty").first()).toHaveText("1,800");
+  await expect(brokers.getByTestId("replay-broker-buy-qty").first()).toHaveText("3,500");
+  await expect(brokers.getByTestId("replay-broker-table-foreign")).toContainText("+3,500");
+
+  await page.getByTestId("replay-chart-timeframe").getByRole("button", { name: "5분", exact: true }).click();
+  await expect(page.getByTestId("replay-main-chart")).toHaveAttribute("data-timeframe", "5");
+
+  const mainChart = page.getByTestId("replay-main-chart");
+  const box = (await mainChart.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.5);
+  await page.mouse.wheel(0, -120);
+  await page.mouse.dblclick(box.x + box.width * 0.4, box.y + box.height * 0.5);
+
+  await page.evaluate(() => document.documentElement.setAttribute("data-style", "bento"));
+  const playBg = await page.getByTestId("replay-play").evaluate((el) => getComputedStyle(el).backgroundColor);
+  const raisedBg = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--raised)";
+    document.body.appendChild(probe);
+    const val = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return val;
+  });
+  expect(playBg).not.toBe(raisedBg);
+});

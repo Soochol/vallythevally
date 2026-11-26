@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
-import { EMPTY_BROKER_STATE, MAX_LIVE_BROKER_COLUMNS, cumulativeAt, halfHourTicks, lineSegments, reduceBrokerEvents, reduceBrokers, sortedRows, startedAt, type BrokerEvent, type BrokerState } from "./model";
+import { EMPTY_BROKER_STATE, MAX_LIVE_BROKER_COLUMNS, cumulativeAt, halfHourTicks, lineSegments, reduceBrokerEvents, reduceBrokers, snapshotAtOrBefore, sortedRows, startedAt, type BrokerEvent, type BrokerState } from "./model";
 
 const member = (code: string, qty: number) => ({ code, name: `사${code}`, qty, qtyChange: 0 });
 const snapshot = (t: number, buys: [string, number][], sells: [string, number][]): BrokerEvent => ({
@@ -118,7 +118,20 @@ describe("실시간 거래원 묶음과 압축", () => {
     );
     const state = reduceBrokerEvents(EMPTY_BROKER_STATE, events);
     expect(state.grid.times.length).toBeLessThanOrEqual(MAX_LIVE_BROKER_COLUMNS);
+    expect(state.grid.snapshots.length).toBe(state.grid.times.length);
     expect(row(state, "a").cells.at(-1)?.cumulative).toBe((MAX_LIVE_BROKER_COLUMNS + 60) * 10);
     expect(row(state, "b").cells.at(-1)?.cumulative).toBe(-(MAX_LIVE_BROKER_COLUMNS + 60) * 3);
+  });
+
+  it("기준 시각 이하의 최신 원본 스냅샷을 반환한다", () => {
+    const state = run([
+      snapshot(100, [["a", 10]], [["b", 5]]),
+      snapshot(200, [["a", 30]], [["b", 15]]),
+    ]);
+    expect(snapshotAtOrBefore(state.grid.snapshots, 99)).toBeNull();
+    expect(snapshotAtOrBefore(state.grid.snapshots, 100)?.t).toBe(100);
+    expect(snapshotAtOrBefore(state.grid.snapshots, 150)?.t).toBe(100);
+    expect(snapshotAtOrBefore(state.grid.snapshots, 250)?.t).toBe(200);
+    expect(snapshotAtOrBefore(state.grid.snapshots, null)?.t).toBe(200);
   });
 });

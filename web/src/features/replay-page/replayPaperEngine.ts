@@ -90,6 +90,38 @@ export const PAPER_AMOUNT_PRESETS_MAN = [100, 300, 500, 1_000] as const;
 export const PAPER_FEE_RATE = 0.00015;
 export const PAPER_SELL_TAX_RATE = 0.0015;
 
+export function affordableMaxBuyQuantity(
+  price: number,
+  availableCash: number,
+  feeEnabled: boolean,
+): number {
+  if (!(price > 0) || !(availableCash > 0)) return 0;
+  const unitCost = feeEnabled ? price * (1 + PAPER_FEE_RATE) : price;
+  let qty = Math.floor(availableCash / unitCost);
+  if (feeEnabled) {
+    while (qty > 0 && qty * price + Math.round(qty * price * PAPER_FEE_RATE) > availableCash) {
+      qty -= 1;
+    }
+    while ((qty + 1) * price + Math.round((qty + 1) * price * PAPER_FEE_RATE) <= availableCash) {
+      qty += 1;
+    }
+  }
+  return Math.max(0, qty);
+}
+
+export function resolvePaperBuyQuantity(
+  price: number,
+  availableCash: number,
+  feeEnabled: boolean,
+  ratioPercent: number | null,
+  fallbackQty: number,
+): number {
+  if (ratioPercent === null) return fallbackQty;
+  const maxQty = affordableMaxBuyQuantity(price, availableCash, feeEnabled);
+  if (maxQty <= 0) return 0;
+  return ratioPercent >= 100 ? maxQty : Math.floor((maxQty * ratioPercent) / 100);
+}
+
 const MAX_SNAPSHOTS = 500;
 const FILL_FLASH_DURATION_MS = 520;
 const MINUS = "\u2212";

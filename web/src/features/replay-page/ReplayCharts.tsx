@@ -1,12 +1,22 @@
 import { type PointerEvent, useEffect, useRef, useState } from "react";
 import { formatPrice } from "../../lib/format";
 import { type CanvasPalette } from "./canvasTheme";
+import {
+  type AggregatedReplayBar,
+  aggregateReplayBars,
+  type ChartViewport,
+  clampViewport,
+  focusViewport,
+  panViewport,
+  REPLAY_CHART_TIMEFRAMES,
+  type ReplayChartTimeframe,
+  zoomViewport,
+} from "./replayChartModel";
 import type { ReplayEngine, ReplayEngineFrame } from "./replayEngine";
 import {
   formatReplayHM,
   formatSignedQty,
   formatWonCompact,
-  type ReplayMinutePoint,
   type ReplaySession,
 } from "./replayModel";
 import type { ReplayPaperEngine } from "./replayPaperEngine";
@@ -23,8 +33,23 @@ interface Props {
   readonly onScrub: (sec: number) => void;
 }
 
+interface HoverPoint {
+  readonly x: number;
+  readonly y: number;
+  readonly pane: "main" | "sub";
+}
+
+interface DragPanState {
+  readonly startX: number;
+  readonly startView: ChartViewport;
+  readonly plotW: number;
+  readonly totalBars: number;
+  dragged: boolean;
+}
+
 const PAD_L = 8;
 const PAD_R = 58;
+const DRAG_THRESHOLD_PX = 5;
 
 function prepareCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
   const rect = canvas.getBoundingClientRect();
@@ -43,15 +68,6 @@ function prepareCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext
   return { ctx, w, h };
 }
 
-function visibleBounds(session: ReplaySession, cursorSec: number, range: ChartRangeMode) {
-  const total = session.minutes.length;
-  if (range === "all" || total <= 61) return { startIdx: 0, endIdx: Math.max(0, total - 1) };
-  const firstMin = session.minutes[0]?.minute ?? 0;
-  const curOffset = Math.floor(cursorSec / 60) - firstMin;
-  const startIdx = Math.max(0, Math.min(total - 61, curOffset - 30));
-  return { startIdx, endIdx: Math.min(total - 1, startIdx + 60) };
-}
-
 function formatCompactCount(value: number): string {
   const abs = Math.abs(value);
   if (abs >= 10_000) return `${(value / 10_000).toFixed(1)}만`;
@@ -62,44 +78,37 @@ function setText(el: HTMLElement | null, text: string): void {
   if (el && el.textContent !== text) el.textContent = text;
 }
 
-function resolvedBarForMinute(bar: ReplayMinutePoint, frame: ReplayEngineFrame, isCurrent: boolean): ReplayMinutePoint {
-  if (!isCurrent || frame.resolution !== "tick") return bar;
-  if (frame.formingBar && frame.formingBar.minute === bar.minute) {
-    return {
-      ...bar,
-      open: frame.formingBar.open,
-      high: frame.formingBar.high,
-      low: frame.formingBar.low,
-      close: frame.formingBar.close,
-      volume: frame.formingBar.volume,
-      vwap: frame.vwap ?? bar.vwap,
-    };
-  }
-  if (frame.price !== null) {
-    return {
-      ...bar,
-      open: frame.price,
-      high: frame.price,
-      low: frame.price,
-      close: frame.price,
-      volume: 0,
-      vwap: frame.vwap ?? bar.vwap,
-    };
-  }
-  return { ...bar, open: null, high: null, low: null, close: null, volume: 0 };
+function defaultViewportFor(
+  totalBars: number,
+  curBarIdx: number,
+  range: ChartRangeMode,
+  timeframe: ReplayChartTimeframe,
+): ChartViewport {
+  if (totalBars <= 0) return { start: 0, end: 0 };
+  if (range === "all") return { start: 0, end: totalBars };
+  const spanBars = Math.max(8, Math.round(60 / timeframe));
+  return focusViewport(totalBars, curBarIdx + 0.5, spanBars);
 }
 
 export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, palette, onScrub }: Props) {
+  const [timeframe, setTimeframe] = useState<ReplayChartTimeframe>(1);
   const [range, setRange] = useState<ChartRangeMode>("all");
-  const [resizeTick, setResizeTick] = useState(0);
+  const [panning, setPanning] = useState(false);
+  const [renderTick, setRenderTick] = useState(0);
+
   const rootRef = useRef<HTMLDivElement>(null);
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
   const totalsCanvasRef = useRef<HTMLCanvasElement>(null);
   const obiCanvasRef = useRef<HTMLCanvasElement>(null);
   const strengthCanvasRef = useRef<HTMLCanvasElement>(null);
   const programCanvasRef = useRef<HTMLCanvasElement>(null);
-  const draggingRef = useRef(false);
-  const latestCursorSecRef = useRef(session.sessionStartSec);
+
+  const viewportRef = useRef<ChartViewport | null>(null);
+  const activeViewportRef = useRef<ChartViewport>({ start: 0, end: 1 });
+  const barsRef = useRef<readonly AggregatedReplayBar[]>([]);
+  const hoverRef = useRef<HoverPoint | null>(null);
+  const dragRef = useRef<DragPanState | null>(null);
+  const paintNowRef = useRef<(() => void) | null>(null);
 
   const hmLabelRef = useRef<HTMLSpanElement>(null);
   const legendOpenRef = useRef<HTMLElement>(null);
@@ -114,11 +123,35 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
   const programValRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
+    viewportRef.current = null;
+  }, [session, timeframe]);
+
+  useEffect(() => {
     const node = rootRef.current;
     if (!node) return;
-    const observer = new ResizeObserver(() => setResizeTick((t) => t + 1));
+    const observer = new ResizeObserver(() => setRenderTick((t) => t + 1));
     observer.observe(node);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node) return;
+    const onWheel = (event: WheelEvent) => {
+      const total = barsRef.current.length;
+      if (total <= 1) return;
+      event.preventDefault();
+      const rect = node.getBoundingClientRect();
+      const plotW = Math.max(10, rect.width - PAD_L - PAD_R);
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - PAD_L) / plotW));
+      const factor = event.deltaY < 0 ? 0.84 : 1.19;
+      const base = viewportRef.current ?? activeViewportRef.current;
+      const next = zoomViewport(base, total, ratio, factor);
+      viewportRef.current = next.end - next.start >= total - 0.01 ? null : next;
+      paintNowRef.current?.();
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
   }, []);
 
   useEffect(() => {
@@ -126,49 +159,95 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
 
     const paint = (frame: ReplayEngineFrame) => {
       const cursorSec = frame.cursorMs / 1000;
-      latestCursorSecRef.current = cursorSec;
-      const curMinFloat = cursorSec / 60 - firstMin;
-      const curIdx = Math.max(0, Math.min(session.minutes.length - 1, Math.floor(curMinFloat)));
-      const rawCurBar = session.minutes[curIdx];
-      const curBar = rawCurBar ? resolvedBarForMinute(rawCurBar, frame, true) : undefined;
+      const curMin = Math.floor(cursorSec / 60);
+      const bars = aggregateReplayBars(session.minutes, timeframe, frame, curMin);
+      barsRef.current = bars;
 
-      setText(hmLabelRef.current, formatReplayHM(cursorSec));
-      if (curBar) {
-        setText(legendOpenRef.current, curBar.open !== null ? formatPrice(curBar.open, false) : "-");
-        setText(legendHighRef.current, curBar.high !== null ? formatPrice(curBar.high, false) : "-");
-        setText(legendLowRef.current, curBar.low !== null ? formatPrice(curBar.low, false) : "-");
-        if (legendCloseRef.current) {
-          legendCloseRef.current.className = curBar.close !== null && curBar.open !== null && curBar.close >= curBar.open ? "rp-up" : "rp-down";
-          setText(legendCloseRef.current, curBar.close !== null ? formatPrice(curBar.close, false) : "-");
-        }
-        setText(legendVwapRef.current, curBar.vwap !== null ? formatPrice(Math.round(curBar.vwap), false) : "-");
+      const totalBars = bars.length;
+      let curBarIdx = 0;
+      for (let i = 0; i < totalBars; i++) {
+        if (bars[i]!.startMinute <= curMin) curBarIdx = i;
+        else break;
       }
 
-      const totalAsk = frame.inGap ? null : (frame.ladder.totalAsk > 0 || frame.resolution === "tick" ? frame.ladder.totalAsk : (curBar?.totalAsk ?? null));
-      const totalBid = frame.inGap ? null : (frame.ladder.totalBid > 0 || frame.resolution === "tick" ? frame.ladder.totalBid : (curBar?.totalBid ?? null));
-      const obiVal = totalAsk !== null && totalBid !== null && totalAsk + totalBid > 0
-        ? ((totalBid - totalAsk) / (totalBid + totalAsk)) * 100
-        : (curBar?.obi ?? null);
-      const strengthVal = frame.strength ?? curBar?.strength ?? null;
-      const programQty = frame.programNetQty ?? curBar?.programNetQty ?? null;
-      const programAmt = frame.programNetAmtMillion ?? curBar?.programNetAmtMillion ?? null;
+      const rawView = viewportRef.current !== null
+        ? clampViewport(viewportRef.current, totalBars)
+        : defaultViewportFor(totalBars, curBarIdx, range, timeframe);
+      activeViewportRef.current = rawView;
 
-      setText(totalsAskRef.current, totalAsk !== null ? formatPrice(totalAsk, false) : "-");
-      setText(totalsBidRef.current, totalBid !== null ? formatPrice(totalBid, false) : "-");
+      const viewSpan = Math.max(1, rawView.end - rawView.start);
+      const startIdx = Math.max(0, Math.floor(rawView.start));
+      const endIdx = Math.min(totalBars - 1, Math.ceil(rawView.end) - 1);
+
+      const mainCanvas = mainCanvasRef.current;
+      const mainRectW = mainCanvas ? Math.max(1, Math.round(mainCanvas.getBoundingClientRect().width)) : 300;
+      const sharedPlotW = Math.max(10, mainRectW - PAD_L - PAD_R);
+
+      const hover = hoverRef.current;
+      let hoverBarIdx: number | null = null;
+      if (hover !== null && totalBars > 0) {
+        const hRatio = (hover.x - PAD_L) / sharedPlotW;
+        if (hRatio >= 0 && hRatio <= 1) {
+          const idx = Math.floor(rawView.start + hRatio * viewSpan);
+          if (idx >= 0 && idx < totalBars) {
+            hoverBarIdx = idx;
+          }
+        }
+      }
+
+      const displayIdx = hoverBarIdx !== null && !(blindMode && hoverBarIdx > curBarIdx)
+        ? hoverBarIdx
+        : curBarIdx;
+      const displayBar = bars[displayIdx];
+      const isShowingCur = displayIdx === curBarIdx;
+
+      setText(
+        hmLabelRef.current,
+        displayBar ? formatReplayHM(displayBar.sec) : formatReplayHM(cursorSec),
+      );
+      if (displayBar) {
+        setText(legendOpenRef.current, displayBar.open !== null ? formatPrice(displayBar.open, false) : "-");
+        setText(legendHighRef.current, displayBar.high !== null ? formatPrice(displayBar.high, false) : "-");
+        setText(legendLowRef.current, displayBar.low !== null ? formatPrice(displayBar.low, false) : "-");
+        if (legendCloseRef.current) {
+          legendCloseRef.current.className = displayBar.close !== null && displayBar.open !== null && displayBar.close >= displayBar.open ? "rp-up" : "rp-down";
+          setText(legendCloseRef.current, displayBar.close !== null ? formatPrice(displayBar.close, false) : "-");
+        }
+        setText(legendVwapRef.current, displayBar.vwap !== null ? formatPrice(Math.round(displayBar.vwap), false) : "-");
+      }
+
+      const curTotalAsk = frame.inGap ? null : (frame.ladder.totalAsk > 0 || frame.resolution === "tick" ? frame.ladder.totalAsk : (displayBar?.totalAsk ?? null));
+      const curTotalBid = frame.inGap ? null : (frame.ladder.totalBid > 0 || frame.resolution === "tick" ? frame.ladder.totalBid : (displayBar?.totalBid ?? null));
+      const curObiVal = curTotalAsk !== null && curTotalBid !== null && curTotalAsk + curTotalBid > 0
+        ? ((curTotalBid - curTotalAsk) / (curTotalBid + curTotalAsk)) * 100
+        : (displayBar?.obi ?? null);
+      const curStrengthVal = frame.strength ?? displayBar?.strength ?? null;
+      const curProgramQty = frame.programNetQty ?? displayBar?.programNetQty ?? null;
+      const curProgramAmt = frame.programNetAmtMillion ?? displayBar?.programNetAmtMillion ?? null;
+
+      const shownAsk = isShowingCur ? curTotalAsk : (displayBar?.totalAsk ?? null);
+      const shownBid = isShowingCur ? curTotalBid : (displayBar?.totalBid ?? null);
+      const shownObi = isShowingCur ? curObiVal : (displayBar?.obi ?? null);
+      const shownStrength = isShowingCur ? curStrengthVal : (displayBar?.strength ?? null);
+      const shownProgQty = isShowingCur ? curProgramQty : (displayBar?.programNetQty ?? null);
+      const shownProgAmt = isShowingCur ? curProgramAmt : (displayBar?.programNetAmtMillion ?? null);
+
+      setText(totalsAskRef.current, shownAsk !== null ? formatPrice(shownAsk, false) : "-");
+      setText(totalsBidRef.current, shownBid !== null ? formatPrice(shownBid, false) : "-");
       if (obiValRef.current) {
-        obiValRef.current.className = obiVal !== null ? (obiVal >= 0 ? "rp-up" : "rp-down") : "rp-muted";
-        setText(obiValRef.current, obiVal !== null ? `${obiVal >= 0 ? "+" : ""}${obiVal.toFixed(1)}%` : "-");
+        obiValRef.current.className = shownObi !== null ? (shownObi >= 0 ? "rp-up" : "rp-down") : "rp-muted";
+        setText(obiValRef.current, shownObi !== null ? `${shownObi >= 0 ? "+" : ""}${shownObi.toFixed(1)}%` : "-");
       }
       if (strengthValRef.current) {
-        strengthValRef.current.className = strengthVal !== null ? (strengthVal >= 100 ? "rp-up" : "rp-down") : "rp-muted";
-        setText(strengthValRef.current, strengthVal !== null ? `${strengthVal.toFixed(1)}%` : "-");
+        strengthValRef.current.className = shownStrength !== null ? (shownStrength >= 100 ? "rp-up" : "rp-down") : "rp-muted";
+        setText(strengthValRef.current, shownStrength !== null ? `${shownStrength.toFixed(1)}%` : "-");
       }
       if (programValRef.current) {
-        if (programQty !== null) {
-          programValRef.current.className = programQty >= 0 ? "rp-up" : "rp-down";
+        if (shownProgQty !== null) {
+          programValRef.current.className = shownProgQty >= 0 ? "rp-up" : "rp-down";
           setText(
             programValRef.current,
-            `${formatSignedQty(programQty)}주${programAmt !== null ? ` (${formatWonCompact(programAmt * 1_000_000)})` : ""}`,
+            `${formatSignedQty(shownProgQty)}주${shownProgAmt !== null ? ` (${formatWonCompact(shownProgAmt * 1_000_000)})` : ""}`,
           );
         } else {
           programValRef.current.className = "rp-muted";
@@ -176,14 +255,10 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
         }
       }
 
-      const { startIdx, endIdx } = visibleBounds(session, cursorSec, range);
-      const visible = session.minutes.slice(startIdx, endIdx + 1);
-      const count = Math.max(1, endIdx - startIdx + 1);
-      const splitIdx = visible.findIndex((_, i) => startIdx + i > curIdx);
-      const pastEnd = splitIdx === -1 ? visible.length - 1 : Math.max(-1, splitIdx - 1);
+      const barCoordOfMinuteFloat = (minFloat: number) => (minFloat - firstMin) / timeframe;
+      const curBarFloat = barCoordOfMinuteFloat(cursorSec / 60);
 
-      const mainCanvas = mainCanvasRef.current;
-      if (mainCanvas && visible.length > 0) {
+      if (mainCanvas && totalBars > 0) {
         const prep = prepareCanvas(mainCanvas);
         if (prep) {
           const { ctx, w, h } = prep;
@@ -198,10 +273,9 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           let minP = session.previousClose ?? Infinity;
           let maxP = session.previousClose ?? -Infinity;
           let maxV = 1;
-          for (let i = 0; i < visible.length; i++) {
-            const absIdx = startIdx + i;
-            if (blindMode && absIdx > curIdx) continue;
-            const b = resolvedBarForMinute(visible[i]!, frame, absIdx === curIdx);
+          for (let i = startIdx; i <= endIdx; i++) {
+            if (blindMode && i > curBarIdx) continue;
+            const b = bars[i]!;
             if (b.low !== null && b.low < minP) minP = b.low;
             if (b.high !== null && b.high > maxP) maxP = b.high;
             if (b.volume > maxV) maxV = b.volume;
@@ -219,8 +293,9 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           minP -= padVal;
           maxP += padVal;
 
-          const xOf = (idx: number) => PAD_L + ((idx - startIdx + 0.5) / count) * plotW;
+          const xOf = (barFloat: number) => PAD_L + ((barFloat - rawView.start) / viewSpan) * plotW;
           const yOf = (price: number) => padT + (1 - (price - minP) / Math.max(1, maxP - minP)) * priceH;
+          const pOfY = (y: number) => minP + (1 - (y - padT) / Math.max(1, priceH)) * (maxP - minP);
 
           ctx.strokeStyle = palette.line;
           ctx.fillStyle = palette.text3;
@@ -237,21 +312,21 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           }
 
           for (const sw of session.singlePriceWindows) {
-            const sIdx = sw.startSec / 60 - firstMin;
-            const eIdx = sw.endSec / 60 - firstMin;
-            if (eIdx < startIdx || sIdx > endIdx) continue;
-            const x0 = xOf(Math.max(startIdx, sIdx));
-            const x1 = Math.max(x0 + 4, xOf(Math.min(endIdx, eIdx)));
+            const sCoord = barCoordOfMinuteFloat(sw.startSec / 60);
+            const eCoord = barCoordOfMinuteFloat(sw.endSec / 60);
+            if (eCoord < rawView.start || sCoord > rawView.end) continue;
+            const x0 = xOf(Math.max(rawView.start, sCoord));
+            const x1 = Math.max(x0 + 4, xOf(Math.min(rawView.end, eCoord)));
             ctx.fillStyle = palette.warningSoft;
             ctx.fillRect(x0, padT, x1 - x0, plotH);
           }
 
           for (const gw of session.gapWindows) {
-            const sIdx = gw.startSec / 60 - firstMin;
-            const eIdx = gw.endSec / 60 - firstMin;
-            if (eIdx < startIdx || sIdx > endIdx) continue;
-            const x0 = xOf(Math.max(startIdx, sIdx));
-            const x1 = Math.max(x0 + 4, xOf(Math.min(endIdx, eIdx)));
+            const sCoord = barCoordOfMinuteFloat(gw.startSec / 60);
+            const eCoord = barCoordOfMinuteFloat(gw.endSec / 60);
+            if (eCoord < rawView.start || sCoord > rawView.end) continue;
+            const x0 = xOf(Math.max(rawView.start, sCoord));
+            const x1 = Math.max(x0 + 4, xOf(Math.min(rawView.end, eCoord)));
             ctx.fillStyle = palette.dangerSoft;
             ctx.fillRect(x0, padT, x1 - x0, plotH);
           }
@@ -270,14 +345,13 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             }
           }
 
-          const barW = Math.max(1.5, (plotW / count) * 0.66);
-          for (let i = 0; i < visible.length; i++) {
-            const absIdx = startIdx + i;
-            const isFuture = absIdx > curIdx;
+          const barW = Math.max(1.5, Math.min(28, (plotW / viewSpan) * 0.66));
+          for (let i = startIdx; i <= endIdx; i++) {
+            const b = bars[i]!;
+            const isFuture = i > curBarIdx;
             if (blindMode && isFuture) continue;
-            const b = resolvedBarForMinute(visible[i]!, frame, absIdx === curIdx);
             if (b.open === null || b.high === null || b.low === null || b.close === null) continue;
-            const x = xOf(absIdx);
+            const x = xOf(i + 0.5);
             const isUp = b.close >= b.open;
             const col = isUp ? palette.up : palette.down;
             ctx.globalAlpha = isFuture ? 0.25 : 0.95;
@@ -304,12 +378,11 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           ctx.strokeStyle = palette.ind1;
           ctx.lineWidth = 1.4;
           let started = false;
-          for (let i = 0; i < visible.length; i++) {
-            const absIdx = startIdx + i;
-            if (blindMode && absIdx > curIdx) break;
-            const b = resolvedBarForMinute(visible[i]!, frame, absIdx === curIdx);
+          for (let i = startIdx; i <= endIdx; i++) {
+            if (blindMode && i > curBarIdx) break;
+            const b = bars[i]!;
             if (b.vwap === null) continue;
-            const x = xOf(absIdx);
+            const x = xOf(i + 0.5);
             const y = yOf(b.vwap);
             if (!started) {
               ctx.moveTo(x, y);
@@ -321,9 +394,9 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           ctx.stroke();
 
           for (const bm of bookmarks) {
-            const bIdx = bm / 60 - firstMin;
-            if (bIdx < startIdx || bIdx > endIdx) continue;
-            const bx = xOf(bIdx);
+            const bCoord = barCoordOfMinuteFloat(bm / 60);
+            if (bCoord < rawView.start || bCoord > rawView.end) continue;
+            const bx = xOf(bCoord);
             ctx.save();
             ctx.strokeStyle = palette.accent;
             ctx.globalAlpha = 0.55;
@@ -358,9 +431,9 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
 
           if (paper) {
             for (const fill of paper.getFills()) {
-              const fIdx = fill.ms / 60_000 - firstMin;
-              if (fIdx < startIdx || fIdx > endIdx) continue;
-              const fx = xOf(fIdx);
+              const fCoord = barCoordOfMinuteFloat(fill.ms / 60_000);
+              if (fCoord < rawView.start || fCoord > rawView.end) continue;
+              const fx = xOf(fCoord);
               const fy = Math.max(padT + 8, Math.min(padT + priceH - 8, yOf(fill.price)));
               ctx.fillStyle = fill.side === "buy" ? palette.up : palette.down;
               ctx.beginPath();
@@ -378,18 +451,19 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             }
           }
 
-          const playX = xOf(curMinFloat);
+          const playX = xOf(curBarFloat);
           if (blindMode && playX < PAD_L + plotW) {
             ctx.save();
             ctx.fillStyle = palette.surface;
             ctx.globalAlpha = 0.82;
-            ctx.fillRect(playX, padT, PAD_L + plotW - playX, plotH);
+            const blindLeft = Math.max(PAD_L, playX);
+            ctx.fillRect(blindLeft, padT, PAD_L + plotW - blindLeft, plotH);
             ctx.globalAlpha = 1;
-            if (PAD_L + plotW - playX > 110) {
+            if (PAD_L + plotW - blindLeft > 110) {
               ctx.fillStyle = palette.text3;
               ctx.font = `600 11px ${palette.fontSans}`;
               ctx.textAlign = "center";
-              ctx.fillText("블라인드 복기 (H 해제)", playX + (PAD_L + plotW - playX) / 2, padT + priceH / 2);
+              ctx.fillText("블라인드 복기 (H 해제)", blindLeft + (PAD_L + plotW - blindLeft) / 2, padT + priceH / 2);
             }
             ctx.restore();
           }
@@ -416,27 +490,66 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           ctx.fillStyle = palette.text3;
           ctx.font = `11px ${palette.fontMono}`;
           ctx.textAlign = "center";
-          const step = range === "all" ? 60 : 15;
-          for (let i = 0; i < visible.length; i++) {
-            const m = visible[i]!.minute;
-            if (m % step !== 0) continue;
-            const lx = xOf(startIdx + i);
+          const labelEvery = Math.max(1, Math.ceil(viewSpan / 6));
+          for (let i = startIdx; i <= endIdx; i += labelEvery) {
+            const lx = xOf(i + 0.5);
             if (lx < PAD_L + 22 || lx > PAD_L + plotW - 22) continue;
-            ctx.fillText(formatReplayHM(m * 60), lx, h - 4);
+            ctx.fillText(formatReplayHM(bars[i]!.sec), lx, h - 4);
+          }
+
+          if (hover !== null && hoverBarIdx !== null) {
+            const hx = Math.round(xOf(hoverBarIdx + 0.5)) + 0.5;
+            if (hx >= PAD_L && hx <= PAD_L + plotW) {
+              ctx.save();
+              ctx.strokeStyle = palette.lineStrong;
+              ctx.setLineDash([3, 3]);
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(hx, padT);
+              ctx.lineTo(hx, padT + plotH);
+              ctx.stroke();
+              if (hover.pane === "main" && hover.y >= padT && hover.y <= padT + priceH) {
+                const hy = Math.round(hover.y) + 0.5;
+                ctx.beginPath();
+                ctx.moveTo(PAD_L, hy);
+                ctx.lineTo(PAD_L + plotW, hy);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                const hPrice = pOfY(hover.y);
+                const step = Math.max(1, session.tickStepOf(Math.max(1, hPrice)));
+                const snapped = Math.round(hPrice / step) * step;
+                ctx.fillStyle = palette.text;
+                ctx.fillRect(PAD_L + plotW + 2, hy - 8, 54, 16);
+                ctx.fillStyle = palette.bg;
+                ctx.font = `600 11px ${palette.fontMono}`;
+                ctx.textAlign = "left";
+                ctx.fillText(formatPrice(snapped, false), PAD_L + plotW + 4, hy + 4);
+              }
+              ctx.setLineDash([]);
+              const tagW = 42;
+              const tagX = Math.max(PAD_L, Math.min(PAD_L + plotW - tagW, hx - tagW / 2));
+              ctx.fillStyle = palette.text;
+              ctx.fillRect(tagX, h - 15, tagW, 14);
+              ctx.fillStyle = palette.bg;
+              ctx.font = `600 11px ${palette.fontMono}`;
+              ctx.textAlign = "center";
+              ctx.fillText(formatReplayHM(bars[hoverBarIdx]!.sec), tagX + tagW / 2, h - 4);
+              ctx.restore();
+            }
           }
         }
       }
 
       const drawSingleSub = (
         canvas: HTMLCanvasElement | null,
-        getter: (i: number) => number | null,
+        getter: (b: AggregatedReplayBar) => number | null,
         liveOverride: number | null,
         zeroVal: number,
         posColor: string,
         negColor: string,
         fmtAxis: (v: number) => string,
       ) => {
-        if (!canvas || visible.length === 0) return;
+        if (!canvas || totalBars === 0) return;
         const prep = prepareCanvas(canvas);
         if (!prep) return;
         const { ctx, w, h } = prep;
@@ -446,13 +559,13 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
         const plotW = Math.max(10, w - PAD_L - PAD_R);
         const plotH = Math.max(10, h - padT - padB);
 
-        const valueAt = (i: number) => (startIdx + i === curIdx && liveOverride !== null ? liveOverride : getter(i));
+        const valueAt = (idx: number) => (idx === curBarIdx && liveOverride !== null ? liveOverride : getter(bars[idx]!));
 
         let minV = zeroVal;
         let maxV = zeroVal;
         let hasAny = false;
-        for (let i = 0; i < visible.length; i++) {
-          if (blindMode && startIdx + i > curIdx) continue;
+        for (let i = startIdx; i <= endIdx; i++) {
+          if (blindMode && i > curBarIdx) continue;
           const v = valueAt(i);
           if (v === null) continue;
           hasAny = true;
@@ -463,7 +576,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
         minV -= span * 0.14;
         maxV += span * 0.14;
 
-        const xOf = (idx: number) => PAD_L + ((idx - startIdx + 0.5) / count) * plotW;
+        const xOf = (barFloat: number) => PAD_L + ((barFloat - rawView.start) / viewSpan) * plotW;
         const yOf = (v: number) => padT + (1 - (v - minV) / Math.max(0.001, maxV - minV)) * plotH;
         const zeroY = yOf(zeroVal);
 
@@ -502,41 +615,32 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           ctx.lineWidth = 1.4;
           ctx.beginPath();
           let started = false;
-          let firstX = 0;
-          let lastX = 0;
           for (let i = fromI; i <= toI; i++) {
             const v = valueAt(i);
             if (v === null) {
               started = false;
               continue;
             }
-            const x = xOf(startIdx + i);
+            const x = xOf(i + 0.5);
             const y = yOf(v);
             if (!started) {
               ctx.moveTo(x, y);
-              firstX = x;
               started = true;
             } else {
               ctx.lineTo(x, y);
             }
-            lastX = x;
           }
           ctx.stroke();
-          if (started && lastX > firstX) {
-            ctx.lineTo(lastX, zeroY);
-            ctx.lineTo(firstX, zeroY);
-            ctx.closePath();
-            ctx.fillStyle = strokeCol;
-            ctx.globalAlpha = alpha * 0.12;
-            ctx.fill();
-          }
           ctx.restore();
         };
 
-        if (pastEnd >= 0) drawSeg(0, pastEnd, 1);
-        if (!blindMode && splitIdx !== -1) drawSeg(Math.max(0, pastEnd), visible.length - 1, 0.25);
+        const pastEnd = Math.min(endIdx, curBarIdx);
+        if (pastEnd >= startIdx) drawSeg(startIdx, pastEnd, 1);
+        if (!blindMode && endIdx > curBarIdx) {
+          drawSeg(Math.max(startIdx, curBarIdx), endIdx, 0.25);
+        }
 
-        const px = xOf(curMinFloat);
+        const px = xOf(curBarFloat);
         if (px >= PAD_L && px <= PAD_L + plotW) {
           if (blindMode) {
             ctx.save();
@@ -552,10 +656,25 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           ctx.lineTo(px, h);
           ctx.stroke();
         }
+
+        if (hoverBarIdx !== null) {
+          const hx = Math.round(xOf(hoverBarIdx + 0.5)) + 0.5;
+          if (hx >= PAD_L && hx <= PAD_L + plotW) {
+            ctx.save();
+            ctx.strokeStyle = palette.lineStrong;
+            ctx.setLineDash([3, 3]);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(hx, 0);
+            ctx.lineTo(hx, h);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
       };
 
       const totalsCanvas = totalsCanvasRef.current;
-      if (totalsCanvas && visible.length > 0) {
+      if (totalsCanvas && totalBars > 0) {
         const prep = prepareCanvas(totalsCanvas);
         if (prep) {
           const { ctx, w, h } = prep;
@@ -565,32 +684,33 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           const plotW = Math.max(10, w - PAD_L - PAD_R);
           const plotH = Math.max(10, h - padT - padB);
 
-          const askAt = (i: number) => (startIdx + i === curIdx && totalAsk !== null ? totalAsk : visible[i]!.totalAsk);
-          const bidAt = (i: number) => (startIdx + i === curIdx && totalBid !== null ? totalBid : visible[i]!.totalBid);
+          const askAt = (idx: number) => (idx === curBarIdx && curTotalAsk !== null ? curTotalAsk : bars[idx]!.totalAsk);
+          const bidAt = (idx: number) => (idx === curBarIdx && curTotalBid !== null ? curTotalBid : bars[idx]!.totalBid);
 
           let minV = Infinity;
-          let maxV = 1;
-          for (let i = 0; i < visible.length; i++) {
-            if (blindMode && startIdx + i > curIdx) continue;
-            const b = visible[i]!;
-            if (b.inGap) continue;
+          let maxV = -Infinity;
+          for (let i = startIdx; i <= endIdx; i++) {
+            if (blindMode && i > curBarIdx) continue;
             const a = askAt(i);
-            const bd = bidAt(i);
+            const b = bidAt(i);
             if (a !== null) {
-              minV = Math.min(minV, a);
-              maxV = Math.max(maxV, a);
+              if (a < minV) minV = a;
+              if (a > maxV) maxV = a;
             }
-            if (bd !== null) {
-              minV = Math.min(minV, bd);
-              maxV = Math.max(maxV, bd);
+            if (b !== null) {
+              if (b < minV) minV = b;
+              if (b > maxV) maxV = b;
             }
           }
-          if (!Number.isFinite(minV)) minV = 0;
-          const span = Math.max(1, maxV - minV);
+          if (!Number.isFinite(minV) || !Number.isFinite(maxV)) {
+            minV = 0;
+            maxV = 1000;
+          }
+          const span = Math.max(10, maxV - minV);
           minV = Math.max(0, minV - span * 0.12);
           maxV += span * 0.12;
 
-          const xOf = (idx: number) => PAD_L + ((idx - startIdx + 0.5) / count) * plotW;
+          const xOf = (barFloat: number) => PAD_L + ((barFloat - rawView.start) / viewSpan) * plotW;
           const yOf = (v: number) => padT + (1 - (v - minV) / Math.max(1, maxV - minV)) * plotH;
 
           ctx.fillStyle = palette.text3;
@@ -599,7 +719,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           ctx.fillText(formatCompactCount(maxV), PAD_L + plotW + 4, padT + 7);
           ctx.fillText(formatCompactCount(minV), PAD_L + plotW + 4, padT + plotH);
 
-          const drawLine = (fromI: number, toI: number, get: (i: number) => number | null, color: string, alpha: number) => {
+          const drawLine = (fromI: number, toI: number, get: (idx: number) => number | null, color: string, alpha: number) => {
             if (toI < fromI) return;
             ctx.save();
             ctx.globalAlpha = alpha;
@@ -613,7 +733,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
                 started = false;
                 continue;
               }
-              const x = xOf(startIdx + i);
+              const x = xOf(i + 0.5);
               const y = yOf(v);
               if (!started) {
                 ctx.moveTo(x, y);
@@ -626,16 +746,17 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             ctx.restore();
           };
 
-          if (pastEnd >= 0) {
-            drawLine(0, pastEnd, askAt, palette.down, 1);
-            drawLine(0, pastEnd, bidAt, palette.up, 1);
+          const pastEnd = Math.min(endIdx, curBarIdx);
+          if (pastEnd >= startIdx) {
+            drawLine(startIdx, pastEnd, askAt, palette.down, 1);
+            drawLine(startIdx, pastEnd, bidAt, palette.up, 1);
           }
-          if (!blindMode && splitIdx !== -1) {
-            drawLine(Math.max(0, pastEnd), visible.length - 1, askAt, palette.down, 0.25);
-            drawLine(Math.max(0, pastEnd), visible.length - 1, bidAt, palette.up, 0.25);
+          if (!blindMode && endIdx > curBarIdx) {
+            drawLine(Math.max(startIdx, curBarIdx), endIdx, askAt, palette.down, 0.25);
+            drawLine(Math.max(startIdx, curBarIdx), endIdx, bidAt, palette.up, 0.25);
           }
 
-          const px = xOf(curMinFloat);
+          const px = xOf(curBarFloat);
           if (px >= PAD_L && px <= PAD_L + plotW) {
             if (blindMode) {
               ctx.save();
@@ -651,22 +772,37 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             ctx.lineTo(px, h);
             ctx.stroke();
           }
+
+          if (hoverBarIdx !== null) {
+            const hx = Math.round(xOf(hoverBarIdx + 0.5)) + 0.5;
+            if (hx >= PAD_L && hx <= PAD_L + plotW) {
+              ctx.save();
+              ctx.strokeStyle = palette.lineStrong;
+              ctx.setLineDash([3, 3]);
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.moveTo(hx, 0);
+              ctx.lineTo(hx, h);
+              ctx.stroke();
+              ctx.restore();
+            }
+          }
         }
       }
 
       drawSingleSub(
         obiCanvasRef.current,
-        (i) => visible[i]!.obi,
-        obiVal,
+        (b) => b.obi,
+        curObiVal,
         0,
         palette.up,
         palette.down,
-        (v) => `${v >= 0 ? "+" : ""}${Math.round(v)}`,
+        (v) => `${v >= 0 ? "+" : ""}${Math.round(v)}%`,
       );
       drawSingleSub(
         strengthCanvasRef.current,
-        (i) => visible[i]!.strength,
-        strengthVal,
+        (b) => b.strength,
+        curStrengthVal,
         100,
         palette.up,
         palette.down,
@@ -674,8 +810,8 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
       );
       drawSingleSub(
         programCanvasRef.current,
-        (i) => visible[i]!.programNetQty,
-        programQty,
+        (b) => b.programNetQty,
+        curProgramQty,
         0,
         palette.up,
         palette.down,
@@ -683,57 +819,138 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
       );
     };
 
+    paintNowRef.current = () => paint(engine.getFrame());
     const unsubFrame = engine.subscribeFrame(paint);
     const unsubPaper = paper ? paper.subscribe(() => paint(engine.getFrame())) : undefined;
     return () => {
+      paintNowRef.current = null;
       unsubFrame();
       unsubPaper?.();
     };
-  }, [session, engine, paper, blindMode, bookmarks, palette, range, resizeTick]);
+  }, [session, engine, paper, blindMode, bookmarks, palette, range, timeframe, renderTick]);
 
-  const scrubFromPointer = (event: PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - PAD_L) / Math.max(10, rect.width - PAD_L - PAD_R)));
+  const scrubAtClientX = (targetEl: HTMLElement, clientX: number) => {
+    const rect = targetEl.getBoundingClientRect();
+    const plotW = Math.max(10, rect.width - PAD_L - PAD_R);
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left - PAD_L) / plotW));
+    const view = activeViewportRef.current;
+    const barFloat = view.start + ratio * Math.max(1, view.end - view.start);
     const firstMin = session.minutes[0]?.minute ?? 540;
-    const { startIdx, endIdx } = visibleBounds(session, latestCursorSecRef.current, range);
-    const minute = firstMin + startIdx + ratio * (endIdx - startIdx + 1);
+    const minute = firstMin + barFloat * timeframe;
     onScrub(minute * 60);
   };
 
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    draggingRef.current = true;
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const plotW = Math.max(10, rect.width - PAD_L - PAD_R);
+    dragRef.current = {
+      startX: event.clientX,
+      startView: activeViewportRef.current,
+      plotW,
+      totalBars: barsRef.current.length,
+      dragged: false,
+    };
     event.currentTarget.setPointerCapture(event.pointerId);
-    scrubFromPointer(event);
   };
 
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (draggingRef.current) scrubFromPointer(event);
+  const handlePointerMove = (pane: "main" | "sub", event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    hoverRef.current = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+      pane,
+    };
+    const drag = dragRef.current;
+    if (drag) {
+      const dx = event.clientX - drag.startX;
+      if (!drag.dragged && Math.abs(dx) >= DRAG_THRESHOLD_PX) {
+        drag.dragged = true;
+        setPanning(true);
+      }
+      if (drag.dragged) {
+        const span = Math.max(1, drag.startView.end - drag.startView.start);
+        const deltaBars = -(dx / drag.plotW) * span;
+        viewportRef.current = panViewport(drag.startView, drag.totalBars, deltaBars);
+      }
+    }
+    paintNowRef.current?.();
   };
 
-  const onPointerUp = () => {
-    draggingRef.current = false;
+  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    setPanning(false);
+    if (drag && !drag.dragged) {
+      scrubAtClientX(event.currentTarget, event.clientX);
+    }
+  };
+
+  const handlePointerLeave = () => {
+    if (!dragRef.current) {
+      hoverRef.current = null;
+      paintNowRef.current?.();
+    }
+  };
+
+  const handleResetZoom = () => {
+    viewportRef.current = null;
+    setRange("all");
+    paintNowRef.current?.();
   };
 
   return (
-    <section className="rp-col" aria-label="1분봉 차트와 4대 보조지표">
+    <section className="rp-col" aria-label="분봉 차트와 4대 보조지표">
       <div className="rp-pane-head">
         <div className="rp-pane-title">
-          <span>1분봉 · VWAP · 4대 보조지표</span>
+          <span>{`${timeframe}분봉 · VWAP`}</span>
           <span ref={hmLabelRef} className="rp-muted rp-mono">09:00</span>
         </div>
-        <div className="rp-seg" role="group" aria-label="차트 범위">
-          <button type="button" aria-pressed={range === "all"} onClick={() => setRange("all")}>장 전체</button>
-          <button type="button" aria-pressed={range === "focus"} onClick={() => setRange("focus")}>현재 ±30분</button>
+        <div className="rp-pane-controls">
+          <div className="rp-seg rp-mono" role="group" aria-label="분봉 주기" data-testid="replay-chart-timeframe">
+            {REPLAY_CHART_TIMEFRAMES.map((tf) => (
+              <button
+                key={tf}
+                type="button"
+                aria-pressed={timeframe === tf}
+                onClick={() => setTimeframe(tf)}
+              >
+                {`${tf}분`}
+              </button>
+            ))}
+          </div>
+          <div className="rp-seg" role="group" aria-label="차트 범위">
+            <button
+              type="button"
+              aria-pressed={range === "all" && viewportRef.current === null}
+              onClick={handleResetZoom}
+            >
+              장 전체
+            </button>
+            <button
+              type="button"
+              aria-pressed={range === "focus"}
+              onClick={() => {
+                viewportRef.current = null;
+                setRange("focus");
+              }}
+            >
+              ±30분
+            </button>
+          </div>
         </div>
       </div>
 
-      <div ref={rootRef} className="rp-left-stack">
+      <div ref={rootRef} className="rp-left-stack" data-panning={panning ? "true" : undefined}>
         <div
           className="rp-chart-wrap"
           data-testid="replay-main-chart"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
+          data-timeframe={String(timeframe)}
+          onPointerDown={handlePointerDown}
+          onPointerMove={(e) => handlePointerMove("main", e)}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerLeave}
+          onDoubleClick={handleResetZoom}
         >
           <canvas ref={mainCanvasRef} className="rp-canvas" />
           <div className="rp-chart-legend rp-mono">
@@ -746,7 +963,15 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
         </div>
 
         <div className="rp-sub-panes" data-testid="replay-sub-indicators">
-          <div className="rp-sub-pane" data-indicator="totals" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+          <div
+            className="rp-sub-pane"
+            data-indicator="totals"
+            onPointerDown={handlePointerDown}
+            onPointerMove={(e) => handlePointerMove("sub", e)}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
+            onDoubleClick={handleResetZoom}
+          >
             <div className="rp-sub-overlay rp-mono">
               <span className="rp-sub-name">총잔량</span>
               <span className="rp-sub-vals">
@@ -757,7 +982,15 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             <canvas ref={totalsCanvasRef} className="rp-canvas" />
           </div>
 
-          <div className="rp-sub-pane" data-indicator="obi" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+          <div
+            className="rp-sub-pane"
+            data-indicator="obi"
+            onPointerDown={handlePointerDown}
+            onPointerMove={(e) => handlePointerMove("sub", e)}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
+            onDoubleClick={handleResetZoom}
+          >
             <div className="rp-sub-overlay rp-mono">
               <span className="rp-sub-name">호가 잔량비</span>
               <span className="rp-sub-vals">
@@ -767,7 +1000,15 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             <canvas ref={obiCanvasRef} className="rp-canvas" />
           </div>
 
-          <div className="rp-sub-pane" data-indicator="strength" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+          <div
+            className="rp-sub-pane"
+            data-indicator="strength"
+            onPointerDown={handlePointerDown}
+            onPointerMove={(e) => handlePointerMove("sub", e)}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
+            onDoubleClick={handleResetZoom}
+          >
             <div className="rp-sub-overlay rp-mono">
               <span className="rp-sub-name">체결강도</span>
               <span className="rp-sub-vals">
@@ -777,7 +1018,15 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             <canvas ref={strengthCanvasRef} className="rp-canvas" />
           </div>
 
-          <div className="rp-sub-pane" data-indicator="program" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+          <div
+            className="rp-sub-pane"
+            data-indicator="program"
+            onPointerDown={handlePointerDown}
+            onPointerMove={(e) => handlePointerMove("sub", e)}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
+            onDoubleClick={handleResetZoom}
+          >
             <div className="rp-sub-overlay rp-mono">
               <span className="rp-sub-name">프로그램 누적</span>
               <span className="rp-sub-vals">

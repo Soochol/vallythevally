@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ReplayPaperEngine } from "./replayPaperEngine";
+import {
+  affordableMaxBuyQuantity,
+  PAPER_FEE_RATE,
+  ReplayPaperEngine,
+  resolvePaperBuyQuantity,
+} from "./replayPaperEngine";
 
 describe("ReplayPaperEngine", () => {
   it("executes marketable buy/sell immediately at best quote and computes realized P&L", () => {
@@ -99,5 +104,35 @@ describe("ReplayPaperEngine", () => {
 
     paper.undoRewind();
     expect(paper.getHolding().quantity).toBe(10);
+  });
+
+  it("computes per-price affordable buy quantity for full/ratio presets with and without fee", () => {
+    const paper = new ReplayPaperEngine({ initialCash: 30_000_000, nowPerf: () => 1000 });
+    const qtyAt71100 = resolvePaperBuyQuantity(71_100, paper.getAvailableCash(), false, 100, 422);
+    expect(qtyAt71100).toBe(421);
+    expect(
+      paper.placeOrder("buy", 71_100, qtyAt71100, {
+        cursorMs: 32_400_000,
+        bestAsk: 71_100,
+        bestBid: 71_000,
+        lastPrice: 71_000,
+      }),
+    ).toBe(true);
+
+    const paperWithFee = new ReplayPaperEngine({ initialCash: 10_000_000, nowPerf: () => 1000 });
+    paperWithFee.setFeeEnabled(true);
+    const feeMax = affordableMaxBuyQuantity(71_100, paperWithFee.getAvailableCash(), true);
+    expect(feeMax * 71_100 + Math.round(feeMax * 71_100 * PAPER_FEE_RATE)).toBeLessThanOrEqual(10_000_000);
+    expect(
+      paperWithFee.placeOrder("buy", 71_100, feeMax, {
+        cursorMs: 32_400_000,
+        bestAsk: 71_100,
+        bestBid: 71_000,
+        lastPrice: 71_000,
+      }),
+    ).toBe(true);
+
+    expect(resolvePaperBuyQuantity(71_500, 10_000_000, false, 50, 999)).toBe(Math.floor((Math.floor(10_000_000 / 71_500) * 50) / 100));
+    expect(resolvePaperBuyQuantity(71_500, 10_000_000, false, null, 25)).toBe(25);
   });
 });
