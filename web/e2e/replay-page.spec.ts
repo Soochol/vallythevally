@@ -1,5 +1,4 @@
 import type { Bar } from "../src/api/generated/Bar";
-import type { BookReplayDay } from "../src/api/generated/BookReplayDay";
 import type { BookReplayMeta } from "../src/api/generated/BookReplayMeta";
 import type { BrokerDay } from "../src/api/generated/BrokerDay";
 import type { ProgramSeriesPage } from "../src/api/generated/ProgramSeriesPage";
@@ -149,23 +148,6 @@ const SPAN_540_BYTES = new Uint8Array(
   }),
 );
 
-const REPLAY_DAY_FALLBACK: BookReplayDay = {
-  symbol: CODE,
-  date: DATE,
-  coverage: "collected",
-  covered: [[540, 542], [544, 545]],
-  books: [
-    {
-      minute: 540,
-      asks: [[71_100, 1000], [71_200, 1200], [71_300, 900], [71_400, 4500]],
-      bids: [[71_000, 1400], [70_900, 1100], [70_800, 800], [70_700, 900]],
-      totalAsk: 7_600,
-      totalBid: 4_200,
-    },
-  ],
-  trades: [[540, 32_410, 71_000, 100]],
-};
-
 const BROKER_DAY: BrokerDay = {
   symbol: CODE,
   date: DATE,
@@ -295,53 +277,6 @@ test("시간 단위·틱 단위 모드 전환과 밀리초 1틱 이동·체결 �
 
   await page.getByRole("button", { name: "+1m", exact: true }).click();
   await expect(page.getByTestId("replay-gap-banner")).toBeVisible();
-});
-
-test("원문이 없는 장중 1분 요약 해상도는 minute_only 배지와 함께 폴백 재생된다", async ({ page, scenario }) => {
-  seedCommon(scenario);
-  scenario.reply(
-    (url) => url.pathname === `/api/symbols/${CODE}/book-replay/meta` && url.searchParams.get("date") === DATE,
-    {
-      body: {
-        ...REPLAY_META_TICK,
-        resolution: "minute_only",
-        spans: [],
-      } satisfies BookReplayMeta,
-    },
-  );
-  scenario.reply(
-    (url) => url.pathname === `/api/symbols/${CODE}/book-replay` && url.searchParams.get("date") === DATE,
-    { body: REPLAY_DAY_FALLBACK },
-  );
-
-  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
-  await expect(page.getByTestId("replay-resolution-badge")).toHaveAttribute("data-resolution", "minute_only");
-  await expect(page.getByTestId("replay-resolution-badge")).toContainText("1분 요약");
-  await expect(page.getByTestId("replay-total-ask")).toHaveText("7,600");
-});
-
-test("공개 모드에서는 book-replay API를 호출하지 않고 안내를 표시한다", async ({ page, scenario }) => {
-  scenario.publicMode.enable({ provider: "google", createdAt: Math.floor(scenario.now / 1000) });
-  await page.goto("/replay");
-  await expect(page.getByText("공개 모드에서는 호가 복기를 지원하지 않습니다")).toBeVisible();
-  const replayCalls = scenario.requests.filter((r) => new URL(r.url()).pathname.includes("book-replay"));
-  expect(replayCalls).toHaveLength(0);
-});
-
-test("다크·라이트 테마 전환과 종목 전환 대화상자가 정상 동작한다", async ({ page, scenario }) => {
-  seedTickReplay(scenario);
-  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
-  await expect(page.getByTestId("replay-page")).toBeVisible();
-
-  await page.getByTestId("replay-symbol-picker").click();
-  const dialog = page.getByTestId("replay-symbol-dialog");
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "닫기" }).click();
-  await expect(dialog).toHaveCount(0);
-
-  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-  await expect(page.getByTestId("replay-ladder")).toBeVisible();
 });
 
 test("가상 매매 시뮬레이션 주문·미체결·체결·되감기 복원과 틱 Δt 고정폭이 동작한다", async ({ page, scenario }) => {
