@@ -19,6 +19,11 @@
 .etf-fund:hover { background: var(--hover); }
 .etf-fund[aria-pressed="true"] { background: var(--accent-soft); }
 .etf-fund-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-s); }
+.etf-fund-right { display: inline-flex; align-items: center; gap: var(--size-6); align-self: center; }
+.etf-fund-flow { font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.etf-fund-flow[data-direction="up"] { color: var(--up); }
+.etf-fund-flow[data-direction="down"] { color: var(--down); }
+.etf-fund-flow[data-direction="flat"] { color: var(--text-3); }
 .etf-fund-code { align-self: center; color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .etf-fund-meta { display: flex; grid-column: 1 / -1; align-items: center; gap: var(--size-8); color: var(--text-3); font-size: var(--fs-xs); }
 .etf-fund[aria-pressed="true"] .etf-fund-code, .etf-fund[aria-pressed="true"] .etf-fund-meta { color: var(--text-2); }
@@ -341,9 +346,97 @@
 .etf-acc-contrib-bar i[data-direction="sell"] { background: var(--down); }
 .etf-similar-issuer { color: var(--text-3); font-size: var(--fs-xs); }
 
+.etf-flow-sort { height: var(--ctl-s); padding: 0 var(--size-8); border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-xs); }
+.etf-flow-kpi[data-direction="up"] { color: var(--up); }
+.etf-flow-kpi[data-direction="down"] { color: var(--down); }
+.etf-flow-kpi-link { color: var(--text); text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.etf-flow-kpi-link:hover { color: var(--accent); }
+.etf-flow-split-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--size-12); }
+.etf-flow-rank-box { display: flex; flex-direction: column; gap: var(--size-8); padding: var(--size-12); border: var(--size-1) solid var(--line); border-radius: var(--r-m); background: var(--surface); }
+.etf-flow-rank-head { display: flex; align-items: center; justify-content: space-between; gap: var(--size-8); font-size: var(--fs-s); font-weight: 700; font-variant-numeric: tabular-nums; }
+.etf-flow-rank-head[data-direction="up"] { color: var(--up); }
+.etf-flow-rank-head[data-direction="down"] { color: var(--down); }
+.etf-flow-bars { display: flex; flex-direction: column; gap: var(--size-6); }
+.etf-flow-bar-row { display: grid; grid-template-columns: var(--size-20) minmax(0, var(--size-168)) minmax(0, 1fr) var(--size-72); align-items: center; gap: var(--size-8); width: 100%; padding: var(--size-6) var(--size-8); border: var(--size-1) solid transparent; border-radius: var(--r-m); background: var(--bg); text-align: left; transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.etf-flow-bar-row:hover { background: var(--raised); border-color: var(--line-strong); }
+.etf-flow-bar-rank { color: var(--text-3); font-size: var(--fs-xs); text-align: center; font-variant-numeric: tabular-nums; }
+.etf-flow-bar-info { display: flex; flex-direction: column; gap: var(--size-2); min-width: 0; }
+.etf-flow-bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-s); font-weight: 600; }
+.etf-flow-bar-meta { display: flex; gap: var(--size-6); color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.etf-flow-bar-track { display: block; height: var(--size-10); border-radius: var(--r-s); background: var(--surface); overflow: hidden; }
+.etf-flow-bar-track i { display: block; height: 100%; border-radius: var(--r-s); }
+.etf-flow-bar-track i[data-direction="up"] { background: var(--up); }
+.etf-flow-bar-track i[data-direction="down"] { background: var(--down); }
+.etf-flow-bar-val { text-align: right; font-size: var(--fs-s); font-weight: 700; font-variant-numeric: tabular-nums; }
+.etf-flow-bar-val[data-direction="up"] { color: var(--up); }
+.etf-flow-bar-val[data-direction="down"] { color: var(--down); }
+.etf-flow-spark { display: block; }
+.etf-flow-spark-zero { stroke: var(--line-strong); stroke-width: 1; }
+.etf-flow-spark-bar[data-tone="up"] { fill: var(--up); }
+.etf-flow-spark-bar[data-tone="down"] { fill: var(--down); }
+.etf-flow-spark-bar[data-tone="flat"] { fill: var(--text-3); }
+
+.etf-overlay-dot { width: var(--size-6); height: var(--size-6); border-radius: var(--r-pill); background: var(--accent); }
+.etf-overlay-dot[data-tone="accent"] { background: var(--accent); }
+.etf-overlay-dot[data-tone="series1"] { background: var(--series-1); }
+.etf-overlay-dot[data-tone="ind1"] { background: var(--ind-1); }
+.etf-overlay-dot[data-tone="series2"] { background: var(--series-2); }
+.etf-shares-stage { position: relative; width: 100%; border: var(--size-1) solid var(--line); border-radius: var(--r-m); background: var(--surface); overflow: hidden; }
+.etf-shares-svg { display: block; width: 100%; height: auto; }
+.etf-shares-section-label { fill: var(--text-3); font-size: var(--fs-xs); font-weight: 600; }
+.etf-shares-axis { fill: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.etf-shares-axis[data-tone="up"] { fill: var(--up); }
+.etf-shares-axis[data-tone="down"] { fill: var(--down); }
+.etf-shares-axis-right { fill: var(--series-1); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.etf-shares-axis-right[data-overlay="aum"] { fill: var(--ind-1); }
+.etf-shares-axis-right[data-overlay="nav"] { fill: var(--series-2); }
+.etf-shares-line-cum { stroke: var(--series-1); stroke-width: 1.8; }
+.etf-shares-line-aum { stroke: var(--ind-1); stroke-width: 1.8; stroke-dasharray: 4 3; }
+.etf-shares-line-nav { stroke: var(--series-2); stroke-width: 1.8; stroke-dasharray: 2 2; }
+.etf-shares-zero { stroke: var(--line-strong); stroke-width: 1; }
+.etf-shares-flow-bar[data-tone="up"] { fill: var(--up); opacity: 0.88; }
+.etf-shares-flow-bar[data-tone="down"] { fill: var(--down); opacity: 0.88; }
+.etf-shares-split-line { stroke: var(--warning); stroke-width: 1; stroke-dasharray: 3 3; }
+.etf-shares-split-label { fill: var(--warning); font-size: var(--fs-xs); font-weight: 700; }
+.etf-shares-crosshair { pointer-events: none; }
+.etf-shares-hover-cum { fill: var(--series-1); stroke: var(--bg); stroke-width: 2; }
+.etf-shares-hit { fill: transparent; cursor: crosshair; }
+.etf-shares-tooltip { position: absolute; top: var(--size-10); z-index: 10; width: var(--size-240); padding: var(--size-10) var(--size-12); border-radius: var(--r-l); background: var(--glass-solid); box-shadow: 0 0 0 var(--size-1) color-mix(in srgb, var(--accent) 45%, var(--line-strong)), var(--shadow-s); font-size: var(--fs-xs); pointer-events: none; }
+.etf-shares-tooltip[data-side="left"] { left: var(--size-12); }
+.etf-shares-tooltip[data-side="right"] { right: var(--size-12); }
+.etf-shares-tt-grid { display: grid; grid-template-columns: auto 1fr; gap: var(--size-4) var(--size-10); margin: 0; font-variant-numeric: tabular-nums; }
+.etf-shares-tt-grid dt { color: var(--text-3); }
+.etf-shares-tt-grid dd { margin: 0; text-align: right; color: var(--text); font-weight: 600; }
+.etf-shares-tt-grid dd[data-direction="up"] { color: var(--up); }
+.etf-shares-tt-grid dd[data-direction="down"] { color: var(--down); }
+
+.etf-shares-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--size-10); padding: var(--size-10) var(--size-12); border: var(--size-1) solid var(--line-strong); border-radius: var(--r-m); background: var(--raised); font-size: var(--fs-s); }
+.etf-shares-banner[data-tone="info"] { border-color: color-mix(in srgb, var(--series-1) 40%, var(--line)); background: color-mix(in srgb, var(--series-1) 10%, var(--surface)); }
+.etf-shares-banner[data-tone="danger"] { border-color: color-mix(in srgb, var(--danger) 42%, var(--line)); background: var(--danger-soft); }
+.etf-shares-banner-copy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-8); color: var(--text-2); font-size: var(--fs-xs); }
+.etf-shares-banner-copy strong { color: var(--text); font-size: var(--fs-s); }
+.etf-shares-progress { display: flex; align-items: center; gap: var(--size-8); min-width: var(--size-220); }
+.etf-shares-progress-track { flex: 1; height: var(--size-6); border-radius: var(--r-pill); background: var(--bg); overflow: hidden; }
+.etf-shares-progress-track i { display: block; height: 100%; border-radius: var(--r-pill); background: var(--accent); }
+.etf-shares-progress-label { color: var(--accent); font-size: var(--fs-xs); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.etf-shares-setup { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--size-16); padding: var(--size-16); border: var(--size-1) solid color-mix(in srgb, var(--warning) 34%, var(--line)); border-radius: var(--r-l); background: var(--bg); }
+.etf-shares-setup-copy h3 { margin: var(--size-6) 0 var(--size-8); color: var(--text); font-size: var(--fs-l); font-weight: 700; }
+.etf-shares-setup-copy p { margin: 0 0 var(--size-12); color: var(--text-2); font-size: var(--fs-s); }
+.etf-shares-steps { display: flex; flex-direction: column; gap: var(--size-8); margin: 0; padding: 0; list-style: none; }
+.etf-shares-steps li { display: flex; gap: var(--size-10); padding: var(--size-10) var(--size-12); border: var(--size-1) solid var(--line); border-radius: var(--r-m); background: var(--surface); }
+.etf-shares-step-num { display: grid; place-items: center; flex: none; width: var(--size-20); height: var(--size-20); border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); font-size: var(--fs-xs); font-weight: 700; }
+.etf-shares-steps strong { display: block; margin-bottom: var(--size-2); color: var(--text); font-size: var(--fs-s); }
+.etf-shares-steps span { color: var(--text-2); font-size: var(--fs-xs); }
+.etf-shares-setup-aside { display: flex; flex-direction: column; gap: var(--size-10); }
+.etf-shares-code { margin: 0; padding: var(--size-12); border: var(--size-1) solid var(--line); border-radius: var(--r-m); background: var(--surface); color: var(--text-name); font-family: var(--font-mono); font-size: var(--fs-xs); overflow-x: auto; }
+.etf-shares-setup-actions { display: flex; flex-wrap: wrap; gap: var(--size-8); }
+.etf-shares-graceful { display: flex; flex-direction: column; gap: var(--size-4); padding: var(--size-12); border: var(--size-1) solid color-mix(in srgb, var(--success) 32%, var(--line)); border-radius: var(--r-m); background: var(--success-soft); color: var(--text-2); font-size: var(--fs-xs); }
+.etf-shares-graceful strong { color: var(--success); font-size: var(--fs-s); }
+
 @media (max-width: 1120px) {
   .etf-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .etf-alpha-grid { grid-template-columns: minmax(0, 1fr); }
+  .etf-alpha-grid, .etf-flow-split-grid, .etf-shares-setup { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 900px) {

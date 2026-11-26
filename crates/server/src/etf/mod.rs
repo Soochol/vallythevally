@@ -4,6 +4,7 @@ mod catalog;
 mod collect;
 mod history;
 mod ma;
+mod shares;
 
 use std::sync::Arc;
 
@@ -22,6 +23,11 @@ use crate::http::{ApiFailure, AppState};
 use ma::MaCache;
 pub use collect::{EtfBook, start as start_collection};
 pub use catalog::{Catalog, Fund, Holding, Loaded, MAX_WEIGHT_SUM_BPS, Rejection};
+pub use shares::{
+    EtfFlowDirection, EtfFlowRankRow, EtfFlowRanking, EtfFlowScope, EtfFlowSort, EtfFlowSummary,
+    EtfSharesBook, EtfSharesLatest, EtfSharesPoint, EtfSharesSeries, EtfSharesState, EtfSharesStatus,
+    start as start_shares_collection,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -91,6 +97,10 @@ pub struct EtfFundSummary {
     pub effective_holdings: f64,
     pub status: EtfDataStatus,
     pub recent_activity: Option<EtfRecentActivity>,
+    #[ts(type = "number | null")]
+    pub latest_aum_won: Option<u64>,
+    #[ts(type = "number | null")]
+    pub net_flow_5d_won: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -279,14 +289,17 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/etf/funds/{code}/similar", get(similar))
         .route("/api/etf/funds/{code}/history", get(history))
         .route("/api/etf/funds/{code}/changes", get(changes))
+        .route("/api/etf/funds/{code}/shares", get(fund_shares))
         .route("/api/etf/stocks/{code}", get(stock))
         .route("/api/etf/accumulation", get(accumulation))
+        .route("/api/etf/flows", get(flows))
         .layer(Extension(Arc::new(MaCache::default())))
         .layer(Extension(Arc::new(accumulation::AccumulationCache::default())))
         .layer(Extension(Arc::new(activity::RecentActivityCache::default())))
 }
 
-fn summary(fund: &Fund, recent_activity: Option<EtfRecentActivity>) -> EtfFundSummary {
+fn summary(st: &AppState, fund: &Fund, recent_activity: Option<EtfRecentActivity>) -> EtfFundSummary {
+    let hint = st.etf.shares().fund_hint(fund.code);
     EtfFundSummary {
         code: fund.code.as_str().into(),
         name: fund.name.clone(),
@@ -298,6 +311,8 @@ fn summary(fund: &Fund, recent_activity: Option<EtfRecentActivity>) -> EtfFundSu
         effective_holdings: fund.effective_holdings,
         status: fund.status.clone(),
         recent_activity,
+        latest_aum_won: hint.map(|h| h.latest_aum_won),
+        net_flow_5d_won: hint.and_then(|h| h.net_flow_5d_won),
     }
 }
 
@@ -316,7 +331,7 @@ async fn funds(
 ) -> Json<EtfFundList> {
     let catalog = st.etf.catalog();
     let activity = activity_cache.get(&st).await;
-    Json(EtfFundList { funds: catalog.funds().iter().map(|f| summary(f, activity.get(&f.code).copied())).collect() })
+    Json(EtfFundList { funds: catalog.funds().iter().map(|f| summary(&st, f, activity.get(&f.code).copied())).collect() })
 }
 
 async fn fund(
@@ -334,7 +349,7 @@ async fn fund(
         .iter()
         .map(|h| EtfHolding { code: h.code.as_str().into(), name: stock_name(&st, &catalog, h.code).unwrap_or_default(), weight_bps: h.weight_bps, ma: ma.states(h.code) })
         .collect();
-    Ok(Json(EtfFundDetail { fund: summary(fund, activity.get(&fund.code).copied()), holdings, ma_as_of: ma.as_of.map(KstDate) }))
+    Ok(Json(EtfFundDetail { fund: summary(&st, fund, activity.get(&fund.code).copied()), holdings, ma_as_of: ma.as_of.map(KstDate) }))
 }
 
 async fn similar(
@@ -349,7 +364,7 @@ async fn similar(
         .similar(code, 6)
         .into_iter()
         .map(|(fund, overlap_bps, common_count)| EtfSimilarFund {
-            fund: summary(fund, activity.get(&fund.code).copied()),
+            fund: summary(&st, fund, activity.get(&fund.code).copied()),
             overlap_bps,
             common_count,
         })
@@ -376,7 +391,7 @@ async fn stock(
     let holders = catalog
         .holders(stock)
         .into_iter()
-        .map(|(fund, weight_bps)| EtfStockHolder { fund: summary(fund, activity.get(&fund.code).copied()), weight_bps })
+        .map(|(fund, weight_bps)| EtfStockHolder { fund: summary(&st, fund, activity.get(&fund.code).copied()), weight_bps })
         .collect();
     Ok(Json(EtfStockHolders { code: stock.as_str().into(), name: stock_name(&st, &catalog, stock), ma: ma.states(stock), ma_as_of: ma.as_of.map(KstDate), holders }))
 }
@@ -425,4 +440,32 @@ async fn accumulation(
     let style = accumulation::parse_style(&query)?;
     let direction = accumulation::parse_direction(&query)?;
     Ok(Json(acc_cache.get(&st, &ma_cache, window, style, direction).await))
+}
+
+async fn flows(
+    State(st): State<Arc<AppState>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<EtfFlowRanking>, ApiFailure> {
+    let window = shares::parse_window(&query)?;
+    let direction = shares::parse_direction(&query)?;
+    let scope = shares::parse_scope(&query)?;
+    let sort = shares::parse_sort(&query)?;
+    let limit = shares::parse_limit(&query)?;
+    let catalog = st.etf.catalog();
+    Ok(Json(st.etf.shares().flows(&catalog, window, direction, scope, sort, limit)))
+}
+
+async fn fund_shares(
+    State(st): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<EtfSharesSeries>, ApiFailure> {
+    let stock = code_in(&code)?;
+    let days = shares::parse_days(&query)?;
+    let catalog = st.etf.catalog();
+    st.etf
+        .shares()
+        .series(&catalog, stock, days)
+        .map(Json)
+        .ok_or_else(|| ApiFailure::new(api::ApiErrorCode::NotFound, format!("상장좌수 자료가 없는 ETF입니다: {code}")))
 }

@@ -3,4 +3,4 @@ import type { EtfDataStatus } from "./EtfDataStatus";
 import type { EtfRecentActivity } from "./EtfRecentActivity";
 import type { EtfStyle } from "./EtfStyle";
 
-export type EtfFundSummary = { code: string, name: string, issuer: string, style: EtfStyle, benchmark: string, holdingsCount: number, top5WeightBps: number, effectiveHoldings: number, status: EtfDataStatus, recentActivity: EtfRecentActivity | null, };
+export type EtfFundSummary = { code: string, name: string, issuer: string, style: EtfStyle, benchmark: string, holdingsCount: number, top5WeightBps: number, effectiveHoldings: number, status: EtfDataStatus, recentActivity: EtfRecentActivity | null, latestAumWon: number | null, netFlow5dWon: number | null, };

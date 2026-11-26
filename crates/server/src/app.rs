@@ -435,6 +435,13 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     }
     crate::market_overview::start(state.clone(), config.market_samples_dir.clone());
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
+    crate::etf::start_shares_collection(
+        state.clone(),
+        config.etf_shares_dir.clone(),
+        config.krx_base_url.clone(),
+        config.krx_api_key.clone(),
+        config.etf_shares_backfill_days,
+    );
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());
 
     state.market_overview.set_financial_db_path(Some(config.financial_db_path.clone()));

@@ -10,6 +10,8 @@ import {
   type FundFilter,
   type FundSort,
   filterFunds,
+  flowDirectionOf,
+  formatFlowWon,
   formatPercent,
   issuersOf,
   sortFunds,
@@ -159,7 +161,18 @@ export function EtfList({
                   onClick={() => onSelect(fund.code)}
                 >
                   <span className="etf-fund-name">{fund.name}</span>
-                  <span className="etf-fund-code">{fund.code}</span>
+                  <span className="etf-fund-right">
+                    {fund.netFlow5dWon !== null && (
+                      <span
+                        className="etf-fund-flow"
+                        data-direction={flowDirectionOf(fund.netFlow5dWon)}
+                        aria-label={`5일 순유입 ${formatFlowWon(fund.netFlow5dWon, true)}`}
+                      >
+                        {formatFlowWon(fund.netFlow5dWon, true)}
+                      </span>
+                    )}
+                    <span className="etf-fund-code">{fund.code}</span>
+                  </span>
                   <span className="etf-fund-meta">
                     <Badge tone={fund.style === "active" ? "accent" : "neutral"}>
                       {fund.style === "active" ? "액티브" : "패시브"}
