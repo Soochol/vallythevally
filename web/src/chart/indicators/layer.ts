@@ -144,6 +144,7 @@ export const indicatorErrorText = (kind: EngineErrorKind) => ERROR_TEXT[kind];
 export class IndicatorLayer {
   private readonly port: IndicatorPort;
   private readonly shown = new Map<string, Shown>();
+  private readonly panelAnchors = new Map<string, OverlaySeries>();
   private readonly queue = new DrawQueue<Line>();
   private previewId: string | null = null;
   private configs: IndicatorConfig[] = [];
@@ -173,6 +174,10 @@ export class IndicatorLayer {
 
   setMicroTarget(target: MicroTarget | null, sync = true): void {
     this.micro.setTarget(target, sync);
+  }
+
+  setMicroLive(enabled: boolean): void {
+    this.micro.setLiveEnabled(enabled);
   }
 
   applyLiveTrade(symbol: SymbolCode, tick: FeedTrade): boolean {
@@ -370,6 +375,10 @@ export class IndicatorLayer {
     prevPaneById: ReadonlyMap<string, number>,
     survivingIds: ReadonlySet<string>,
   ): boolean {
+    if (this.panelAnchors.size > 0) return false;
+    for (const panel of this.panels) {
+      if (!this.configs.some((config) => config.panel === panel.id && specLines(config.spec).length > 0)) return false;
+    }
     const survivingPanes = new Set<number>();
     let maxSurvivingPane = 0;
     for (const config of this.configs) {
@@ -419,7 +428,10 @@ export class IndicatorLayer {
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
-    if (!keepQuotes) this.quotes.markDepthLegendsDirty();
+    if (!keepQuotes) {
+      this.quotes.markDepthLegendsDirty();
+      this.micro.invalidateCoverage();
+    }
     this.load(h, keepQuotes);
   }
 
@@ -685,6 +697,7 @@ export class IndicatorLayer {
     this.quotes.dispose();
     this.micro.dispose();
     this.port.close();
+    this.clearPanelAnchors();
     for (const id of [...this.shown.keys()]) this.removeShown(id);
   }
 
@@ -792,8 +805,14 @@ export class IndicatorLayer {
   }
 
   /** 빈 pane은 라이브러리가 지우므로 앞 pane부터 붙인다. */
+  private clearPanelAnchors(): void {
+    for (const anchor of this.panelAnchors.values()) this.host.chart.removeSeries(anchor);
+    this.panelAnchors.clear();
+  }
+
   private rebuildSeries(): void {
     this.drain();
+    this.clearPanelAnchors();
     const old = new Map<string, Line[]>();
     for (const [id, s] of this.shown) {
       const lines = s.lines;
@@ -801,10 +820,31 @@ export class IndicatorLayer {
       s.lines = [];
       for (const line of lines) this.removeLine(line);
     }
-    const ordered = [...this.configs].sort((a, b) => this.paneOf(a) - this.paneOf(b));
-    for (const config of ordered) {
+    for (const config of this.configs) {
+      if (this.paneOf(config) !== 0) continue;
       const s = this.shown.get(config.id);
       if (s) s.lines = this.addLines(config, old.get(config.id) ?? []);
+    }
+    for (let i = 0; i < this.panels.length; i++) {
+      const panel = this.panels[i]!;
+      const pane = i + 1;
+      let addedOnPane = 0;
+      for (const config of this.configs) {
+        if (config.panel !== panel.id) continue;
+        const s = this.shown.get(config.id);
+        if (!s) continue;
+        s.lines = this.addLines(config, old.get(config.id) ?? []);
+        addedOnPane += s.lines.length;
+      }
+      if (addedOnPane === 0) {
+        const anchor = addOverlayLine(
+          this.host.chart,
+          { visible: false, priceLineVisible: false, lastValueVisible: false, title: "" },
+          pane,
+          false,
+        );
+        this.panelAnchors.set(panel.id, anchor);
+      }
     }
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);

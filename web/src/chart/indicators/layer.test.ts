@@ -1020,3 +1020,89 @@ test("하단 패널 지표가 있는 상태에서 가격 지표의 스펙이 바
   f.layer.setConfigs([ma10, VOLUME, RSI], panels);
   expect(f.active.map((s) => s.pane)).toEqual([0, 1, 2]);
 });
+
+test("계층별 CVD의 모든 계층이 꺼져도 빈 패널의 pane 자리를 유지해 아래 패널이 위로 밀리지 않는다", () => {
+  const emptyCvd: IndicatorConfig = {
+    id: "cvd",
+    spec: { kind: "tickCvd", showWhale: false, showLarge: false, showMid: false, showRetail: false },
+    panel: "p-cvd",
+    visible: true,
+    style: { colors: ["ind-1"], width: 1 },
+  };
+  const program: IndicatorConfig = {
+    id: "prog",
+    spec: { kind: "programFlow", showShare: false },
+    panel: "p-prog",
+    visible: true,
+    style: { colors: ["ind-2"], width: 1 },
+  };
+  const panels: Panel[] = [
+    { id: "p-cvd", stretch: 0.25 },
+    { id: "p-prog", stretch: 0.25 },
+  ];
+  const f = fixture("1m", [emptyCvd, program], panels);
+  expect(f.active.map((s) => s.pane)).toEqual([1, 2]);
+  expect(optionOf(f.active[0]!, "visible")).toBe(false);
+  expect(optionOf(f.active[1]!, "visible")).toBe(true);
+
+  const restoredCvd: IndicatorConfig = {
+    ...emptyCvd,
+    spec: { kind: "tickCvd", showWhale: true, showLarge: false, showMid: false, showRetail: false },
+  };
+  f.layer.setConfigs([restoredCvd, program], panels);
+  expect(f.active.map((s) => s.pane)).toEqual([1, 2]);
+  expect(optionOf(f.active[0]!, "visible")).toBe(true);
+});
+
+test("reset 호출 시 미세 수급 범위를 무효화해 재조회하고, 일반 실시간 advance에서는 재조회하지 않는다", async () => {
+  let cvdFetches = 0;
+  const cvd: IndicatorConfig = {
+    id: "cvd",
+    spec: { kind: "tickCvd", showWhale: true, showLarge: false, showMid: false, showRetail: false },
+    panel: "p-cvd",
+    visible: true,
+    style: { colors: ["ind-1"], width: 1 },
+  };
+  const panels: Panel[] = [{ id: "p-cvd", stretch: 0.25 }];
+  const add = (_definition: unknown, options: object, pane = 0) => {
+    const s = new FakeSeries();
+    s.pane = pane;
+    s.applyOptions(options);
+    return s;
+  };
+  const chart = { addSeries: add, addCustomSeries: add, removeSeries: () => {}, panes: () => [] };
+  const layer = new IndicatorLayer(
+    { chart: chart as unknown as IChartApi, tokens: () => TOKENS, isIndex: () => false, period: () => "1m", requestFrame: () => {}, axisFormatted: () => {}, axisCoordinates: () => [], axisFailed: () => {}, guard: (draw) => draw() },
+    () => ({ chart: 1, post: () => {}, close: () => {} }),
+    undefined,
+    {
+      fetchTickCvd: async () => {
+        cvdFetches++;
+        return {
+          symbol: "005930",
+          period: "1m",
+          state: "ready",
+          points: [{ t: at(0), whaleNetMillionWon: cvdFetches * 100, largeNetMillionWon: 0, midNetMillionWon: 0, retailNetMillionWon: 0 }],
+        };
+      },
+    },
+  );
+  layer.setMicroTarget({ symbol: "005930", period: "1m" }, false);
+  layer.setConfigs([cvd], panels);
+  layer.reset(history([bar(0), bar(1)]));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(cvdFetches).toBe(1);
+
+  const live = bar(2);
+  layer.advance(history([bar(0), bar(1)], live), live, "live");
+  await Promise.resolve();
+  expect(cvdFetches).toBe(1);
+
+  layer.reset(history([bar(0), bar(1), bar(2)]));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(cvdFetches).toBe(2);
+  expect(layer.rows(at(0))[0]?.values[0]?.text).toBe("초대형 +2.00억");
+  layer.dispose();
+});

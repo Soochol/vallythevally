@@ -13,6 +13,7 @@ import { fetchProgramSeries, fetchTickCvd, type MicroRange } from "../../api/mic
 import { MINUS } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import { kstDateOf } from "../barJump";
+import { type DateRange, mergeRanges, missingFromRanges, rangesContain } from "../quotes/coverage";
 import type { IndicatorConfig } from "../settings";
 import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { isIntraday } from "../time";
@@ -42,11 +43,51 @@ const INTRADAY_MINUTES: Readonly<Partial<Record<Period, number>>> = {
   "60m": 60,
 };
 
+const KST_OFFSET_SEC = 9 * 3600;
+const DAY_SEC = 86_400;
+const SESSION_CLOSE_SEC = 20 * 3600;
+const CLOSE_GRACE_SEC = 10;
+
+function kstDayStartSec(date: string): UnixSeconds {
+  return Date.parse(`${date}T00:00:00+09:00`) / 1000;
+}
+
+function kstDayEndSec(date: string): UnixSeconds {
+  return kstDayStartSec(date) + DAY_SEC - 1;
+}
+
+function dateInRange(day: string, range: DateRange): boolean {
+  return day >= range.from && day <= range.to;
+}
+
+function expandNeed(prev: DateRange | null, next: DateRange): DateRange {
+  if (!prev) return next;
+  return {
+    from: prev.from < next.from ? prev.from : next.from,
+    to: prev.to > next.to ? prev.to : next.to,
+  };
+}
+
+function tradedWonOfPoint(pt: ProgramSeriesPoint): number | null {
+  if (pt.dayTradedMillionWon !== undefined && pt.dayTradedMillionWon !== null && Number.isFinite(pt.dayTradedMillionWon) && pt.dayTradedMillionWon > 0) {
+    return pt.dayTradedMillionWon * 1_000_000;
+  }
+  if (pt.programSharePct !== null && Number.isFinite(pt.programSharePct) && pt.programSharePct > 0 && pt.programSharePct < 100) {
+    const grossMillion = pt.buyAmountMillionWon + pt.sellAmountMillionWon;
+    if (grossMillion > 0) return (grossMillion / (pt.programSharePct / 100)) * 1_000_000;
+  }
+  return null;
+}
+
 export function bucketStartSec(unixSec: UnixSeconds, period: Period): UnixSeconds | null {
   const minutes = INTRADAY_MINUTES[period];
   if (minutes === undefined) return null;
+  const kstTod = (((unixSec + KST_OFFSET_SEC) % DAY_SEC) + DAY_SEC) % DAY_SEC;
+  const effectiveSec = kstTod >= SESSION_CLOSE_SEC && kstTod < SESSION_CLOSE_SEC + CLOSE_GRACE_SEC
+    ? unixSec - (kstTod - SESSION_CLOSE_SEC) - 1
+    : unixSec;
   const periodSec = minutes * 60;
-  return Math.floor(unixSec / periodSec) * periodSec;
+  return Math.floor(effectiveSec / periodSec) * periodSec;
 }
 
 function addTierDelta(point: TickCvdPoint, tier: TickTier, deltaMillionWon: number): TickCvdPoint {
@@ -207,31 +248,35 @@ export interface MicroFamilyHost {
   onProgramChanged(from: UnixSeconds | null): void;
 }
 
-interface SeriesStore<P extends { t: UnixSeconds }> {
+interface SeriesStore<P extends { t: UnixSeconds }, L> {
   key: string | null;
   gen: number;
   state: MicroFeedState;
   points: Map<UnixSeconds, P>;
-  coveredFrom: UnixSeconds | null;
+  have: DateRange[];
+  need: DateRange | null;
   liveLatestT: UnixSeconds | null;
+  pendingLive: L[];
   fetching: boolean;
   abort: AbortController | null;
 }
 
-function emptyStore<P extends { t: UnixSeconds }>(): SeriesStore<P> {
+function emptyStore<P extends { t: UnixSeconds }, L>(): SeriesStore<P, L> {
   return {
     key: null,
     gen: 0,
     state: "loading",
     points: new Map(),
-    coveredFrom: null,
+    have: [],
+    need: null,
     liveLatestT: null,
+    pendingLive: [],
     fetching: false,
     abort: null,
   };
 }
 
-function resetStore<P extends { t: UnixSeconds }>(store: SeriesStore<P>, key: string | null, state: MicroFeedState): void {
+function resetStore<P extends { t: UnixSeconds }, L>(store: SeriesStore<P, L>, key: string | null, state: MicroFeedState): void {
   store.gen++;
   store.abort?.abort();
   store.abort = null;
@@ -239,8 +284,10 @@ function resetStore<P extends { t: UnixSeconds }>(store: SeriesStore<P>, key: st
   store.key = key;
   store.state = state;
   store.points.clear();
-  store.coveredFrom = null;
+  store.have = [];
+  store.need = null;
   store.liveLatestT = null;
+  store.pendingLive = [];
 }
 
 function targetKey(target: MicroTarget): string {
@@ -250,12 +297,15 @@ function targetKey(target: MicroTarget): string {
 export class MicroIndicatorController {
   private readonly fetchCvd: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<TickCvdPage>;
   private readonly fetchProgram: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<ProgramSeriesPage>;
-  private readonly cvd = emptyStore<TickCvdPoint>();
-  private readonly program = emptyStore<ProgramSeriesPoint>();
+  private readonly cvd = emptyStore<TickCvdPoint, FeedTrade>();
+  private readonly program = emptyStore<ProgramSeriesPoint, FeedProgramRow>();
+  private readonly httpDayTradedWon = new Map<string, { t: UnixSeconds; won: number }>();
   private readonly liveDayTradedWon = new Map<string, number>();
   private target: MicroTarget | null = null;
   private cvdActive = false;
   private programActive = false;
+  private programShareActive = false;
+  private liveEnabled = true;
   private disposed = false;
 
   constructor(private readonly host: MicroFamilyHost, deps: MicroFamilyDeps = {}) {
@@ -267,8 +317,30 @@ export class MicroIndicatorController {
     const prevKey = this.target ? targetKey(this.target) : null;
     const nextKey = target ? targetKey(target) : null;
     this.target = target;
-    if (prevKey !== nextKey) this.liveDayTradedWon.clear();
+    if (prevKey !== nextKey) {
+      this.httpDayTradedWon.clear();
+      this.liveDayTradedWon.clear();
+    }
     if (sync) this.syncFeeds();
+  }
+
+  setLiveEnabled(enabled: boolean): void {
+    if (this.liveEnabled === enabled) return;
+    this.liveEnabled = enabled;
+    if (!enabled) {
+      this.cvd.liveLatestT = null;
+      this.cvd.pendingLive = [];
+      this.program.liveLatestT = null;
+      this.program.pendingLive = [];
+      this.liveDayTradedWon.clear();
+    }
+  }
+
+  invalidateCoverage(): void {
+    this.httpDayTradedWon.clear();
+    this.liveDayTradedWon.clear();
+    if (this.cvdActive && this.cvd.key !== null) resetStore(this.cvd, this.cvd.key, "loading");
+    if (this.programActive && this.program.key !== null) resetStore(this.program, this.program.key, "loading");
   }
 
   syncFeeds(): void {
@@ -277,6 +349,8 @@ export class MicroIndicatorController {
     const eligible = target !== null && !isIndexCode(target.symbol) && isIntraday(target.period);
     const hasCvd = configs.some((c) => isTickCvd(c.spec) && c.visible);
     const hasProgram = configs.some((c) => isProgramFlow(c.spec) && c.visible);
+    const hasProgramShare = configs.some((c) => isProgramFlow(c.spec) && c.visible && c.spec.showShare);
+    const prevShareActive = this.programShareActive;
 
     this.cvdActive = eligible && hasCvd;
     if (!hasCvd) {
@@ -295,18 +369,26 @@ export class MicroIndicatorController {
     }
 
     this.programActive = eligible && hasProgram;
+    this.programShareActive = eligible && hasProgramShare;
     if (!hasProgram) {
       if (this.program.key !== null || this.program.points.size > 0) resetStore(this.program, null, "loading");
+      this.httpDayTradedWon.clear();
     } else if (!eligible) {
       if (this.program.state !== "unsupported" || this.program.key !== null) {
         resetStore(this.program, null, "unsupported");
+        this.httpDayTradedWon.clear();
         this.host.onProgramChanged(null);
       }
     } else {
       const key = targetKey(target);
       if (this.program.key !== key) {
         resetStore(this.program, key, "loading");
+        this.httpDayTradedWon.clear();
         this.host.onProgramChanged(null);
+      } else if (!prevShareActive && this.programShareActive && !this.cvdActive && this.program.have.length > 0) {
+        resetStore(this.program, key, "loading");
+        this.httpDayTradedWon.clear();
+        this.liveDayTradedWon.clear();
       }
     }
 
@@ -318,18 +400,25 @@ export class MicroIndicatorController {
     const first = bars[0];
     const last = bars[bars.length - 1];
     if (!first || !last) return;
-    if (this.cvdActive) this.coverCvd(this.target, first.t, last.t);
-    if (this.programActive) this.coverProgram(this.target, first.t, last.t);
+    const fromDate = kstDateOf(first.t);
+    const toDate = kstDateOf(last.t);
+    const need: DateRange = fromDate <= toDate ? { from: fromDate, to: toDate } : { from: toDate, to: fromDate };
+    if (this.cvdActive) this.coverCvd(this.target, need);
+    if (this.programActive) this.coverProgram(this.target, need);
   }
 
   applyLiveTrade(symbol: SymbolCode, tick: FeedTrade): boolean {
-    if (this.disposed || !this.target || this.target.symbol !== symbol) return false;
+    if (this.disposed || !this.liveEnabled || !this.target || this.target.symbol !== symbol) return false;
     if (!isIntraday(this.target.period) || isIndexCode(symbol)) return false;
-    if (tick.qty !== 0 && tick.price > 0) {
-      const day = kstDateOf(tick.t);
+    const bucketT = bucketStartSec(tick.t, this.target.period);
+    if (bucketT !== null && tick.qty !== 0 && tick.price > 0) {
+      const day = kstDateOf(bucketT);
       this.liveDayTradedWon.set(day, (this.liveDayTradedWon.get(day) ?? 0) + Math.abs(tick.price * tick.qty));
     }
     if (!this.cvdActive) return false;
+    if (bucketT !== null && tick.qty !== 0 && tick.price > 0 && !rangesContain(this.cvd.have, kstDateOf(bucketT))) {
+      this.cvd.pendingLive.push(tick);
+    }
     const updated = applyLiveTradeToPoints(this.cvd.points, tick, this.target.period);
     if (!updated) return false;
     if (this.cvd.state !== "ready") this.cvd.state = "ready";
@@ -339,9 +428,13 @@ export class MicroIndicatorController {
   }
 
   applyLiveProgram(symbol: SymbolCode, row: FeedProgramRow): boolean {
-    if (this.disposed || !this.target || !this.programActive || this.target.symbol !== symbol) return false;
+    if (this.disposed || !this.liveEnabled || !this.target || !this.programActive || this.target.symbol !== symbol) return false;
     if (!isIntraday(this.target.period) || isIndexCode(symbol)) return false;
-    const dayTraded = this.liveDayTradedWon.get(kstDateOf(row.t));
+    const bucketT = bucketStartSec(row.t, this.target.period);
+    if (bucketT === null) return false;
+    const day = kstDateOf(bucketT);
+    if (!rangesContain(this.program.have, day)) this.program.pendingLive.push(row);
+    const dayTraded = this.dayTradedWonFor(day);
     const updated = applyLiveProgramToPoints(this.program.points, row, this.target.period, dayTraded);
     if (!updated) return false;
     if (this.program.state !== "ready") this.program.state = "ready";
@@ -428,10 +521,17 @@ export class MicroIndicatorController {
     this.disposed = true;
     resetStore(this.cvd, null, "loading");
     resetStore(this.program, null, "loading");
+    this.httpDayTradedWon.clear();
     this.liveDayTradedWon.clear();
   }
 
-  private resolvePoint<P extends { t: UnixSeconds }>(store: SeriesStore<P>, time: UnixSeconds | null): P | undefined {
+  private dayTradedWonFor(day: string): number | undefined {
+    if (this.program.fetching && !rangesContain(this.program.have, day)) return undefined;
+    const total = (this.httpDayTradedWon.get(day)?.won ?? 0) + (this.liveDayTradedWon.get(day) ?? 0);
+    return total > 0 ? total : undefined;
+  }
+
+  private resolvePoint<P extends { t: UnixSeconds }, L>(store: SeriesStore<P, L>, time: UnixSeconds | null): P | undefined {
     if (time === null) return undefined;
     const lastBarT = this.host.bars().at(-1)?.t ?? null;
     if (lastBarT !== null && time === lastBarT && store.liveLatestT !== null && store.liveLatestT > time) {
@@ -441,28 +541,49 @@ export class MicroIndicatorController {
     return store.points.get(time);
   }
 
-  private coverCvd(target: MicroTarget, from: UnixSeconds, to: UnixSeconds): void {
+  private coverCvd(target: MicroTarget, need: DateRange): void {
+    this.cvd.need = expandNeed(this.cvd.need, need);
+    this.pumpCvd(target);
+  }
+
+  private pumpCvd(target: MicroTarget): void {
     const store = this.cvd;
-    if (store.fetching) return;
-    if (store.coveredFrom !== null && from >= store.coveredFrom) return;
-    const fetchTo = store.coveredFrom !== null ? store.coveredFrom : to;
+    if (this.disposed || !this.cvdActive || store.fetching || !store.need) return;
+    const chunks = missingFromRanges(store.need, store.have);
+    if (chunks.length === 0) return;
+    const chunk = chunks[0]!;
     const gen = store.gen;
     const ac = new AbortController();
     store.fetching = true;
     store.abort = ac;
-    this.fetchCvd(target.symbol, target.period, { from, to: fetchTo }, ac.signal).then(
+    this.fetchCvd(target.symbol, target.period, { from: kstDayStartSec(chunk.from), to: kstDayEndSec(chunk.to) }, ac.signal).then(
       (page) => {
         if (this.disposed || gen !== store.gen) return;
         store.fetching = false;
         store.abort = null;
-        const hadExisting = store.coveredFrom !== null;
-        store.coveredFrom = store.coveredFrom === null ? from : Math.min(store.coveredFrom, from);
-        for (const pt of page.points) {
-          if (!hadExisting || !store.points.has(pt.t)) store.points.set(pt.t, pt);
+        store.have = mergeRanges(store.have, chunk);
+        const toReplay: FeedTrade[] = [];
+        const remaining: FeedTrade[] = [];
+        for (const tick of store.pendingLive) {
+          const bucketT = bucketStartSec(tick.t, target.period);
+          if (bucketT !== null && dateInRange(kstDateOf(bucketT), chunk)) toReplay.push(tick);
+          else remaining.push(tick);
+        }
+        store.pendingLive = remaining;
+        for (const t of [...store.points.keys()]) {
+          if (dateInRange(kstDateOf(t), chunk)) store.points.delete(t);
+        }
+        for (const pt of page.points) store.points.set(pt.t, pt);
+        for (const tick of toReplay) {
+          const updated = applyLiveTradeToPoints(store.points, tick, target.period);
+          if (updated && (store.liveLatestT === null || updated.t > store.liveLatestT)) store.liveLatestT = updated.t;
         }
         if (store.points.size > 0) store.state = "ready";
         else store.state = page.state;
         this.host.onTickCvdChanged(null);
+        if (store.points.size > 0 || (page.state !== "disabled" && page.state !== "not_collected")) {
+          this.pumpCvd(target);
+        }
       },
       () => {
         if (this.disposed || gen !== store.gen) return;
@@ -476,28 +597,59 @@ export class MicroIndicatorController {
     );
   }
 
-  private coverProgram(target: MicroTarget, from: UnixSeconds, to: UnixSeconds): void {
+  private coverProgram(target: MicroTarget, need: DateRange): void {
+    this.program.need = expandNeed(this.program.need, need);
+    this.pumpProgram(target);
+  }
+
+  private pumpProgram(target: MicroTarget): void {
     const store = this.program;
-    if (store.fetching) return;
-    if (store.coveredFrom !== null && from >= store.coveredFrom) return;
-    const fetchTo = store.coveredFrom !== null ? store.coveredFrom : to;
+    if (this.disposed || !this.programActive || store.fetching || !store.need) return;
+    const chunks = missingFromRanges(store.need, store.have);
+    if (chunks.length === 0) return;
+    const chunk = chunks[0]!;
     const gen = store.gen;
     const ac = new AbortController();
     store.fetching = true;
     store.abort = ac;
-    this.fetchProgram(target.symbol, target.period, { from, to: fetchTo }, ac.signal).then(
+    this.fetchProgram(target.symbol, target.period, { from: kstDayStartSec(chunk.from), to: kstDayEndSec(chunk.to) }, ac.signal).then(
       (page) => {
         if (this.disposed || gen !== store.gen) return;
         store.fetching = false;
         store.abort = null;
-        const hadExisting = store.coveredFrom !== null;
-        store.coveredFrom = store.coveredFrom === null ? from : Math.min(store.coveredFrom, from);
+        store.have = mergeRanges(store.have, chunk);
+        const toReplay: FeedProgramRow[] = [];
+        const remaining: FeedProgramRow[] = [];
+        for (const row of store.pendingLive) {
+          const bucketT = bucketStartSec(row.t, target.period);
+          if (bucketT !== null && dateInRange(kstDateOf(bucketT), chunk)) toReplay.push(row);
+          else remaining.push(row);
+        }
+        store.pendingLive = remaining;
+        for (const t of [...store.points.keys()]) {
+          if (dateInRange(kstDateOf(t), chunk)) store.points.delete(t);
+        }
         for (const pt of page.points) {
-          if (!hadExisting || !store.points.has(pt.t)) store.points.set(pt.t, pt);
+          store.points.set(pt.t, pt);
+          const won = tradedWonOfPoint(pt);
+          if (won !== null) {
+            const day = kstDateOf(pt.t);
+            const prev = this.httpDayTradedWon.get(day);
+            if (!prev || pt.t >= prev.t) this.httpDayTradedWon.set(day, { t: pt.t, won });
+          }
+        }
+        for (const row of toReplay) {
+          const bucketT = bucketStartSec(row.t, target.period);
+          const dayTraded = bucketT !== null ? this.dayTradedWonFor(kstDateOf(bucketT)) : undefined;
+          const updated = applyLiveProgramToPoints(store.points, row, target.period, dayTraded);
+          if (updated && (store.liveLatestT === null || updated.t > store.liveLatestT)) store.liveLatestT = updated.t;
         }
         if (store.points.size > 0) store.state = "ready";
         else store.state = page.state;
         this.host.onProgramChanged(null);
+        if (store.points.size > 0 || (page.state !== "disabled" && page.state !== "not_collected")) {
+          this.pumpProgram(target);
+        }
       },
       () => {
         if (this.disposed || gen !== store.gen) return;

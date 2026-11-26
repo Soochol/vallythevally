@@ -110,6 +110,7 @@ fn program_flow_row(recv_ms: i64, hhmmss: &str, sell_amt: u64, buy_amt: u64, net
 
 struct Harness {
     app: Router,
+    clock: Clock,
     data: PathBuf,
     _tmp: tempfile::TempDir,
 }
@@ -127,7 +128,7 @@ impl Harness {
         let symbols = Arc::new(SymbolDirectory::default());
         let state = application(ApplicationInputs {
             rest,
-            clock,
+            clock: clock.clone(),
             symbols,
             db,
             screener_store: store,
@@ -139,7 +140,7 @@ impl Harness {
         if enabled {
             state.collector_paths.configure(CollectorPaths::hoga_only(data.clone()));
         }
-        Harness { app: router(state), data, _tmp: tmp }
+        Harness { app: router(state), clock, data, _tmp: tmp }
     }
 
     fn shared(&self) -> PathBuf {
@@ -315,10 +316,12 @@ async fn program_series_buckets_and_computes_program_share_pct() {
     assert!((points[0]["buyAmountMillionWon"].as_f64().unwrap() - 75.0).abs() < 1e-6);
     assert!((points[0]["sellAmountMillionWon"].as_f64().unwrap() - 25.0).abs() < 1e-6);
     assert!((points[0]["programSharePct"].as_f64().unwrap() - 50.0).abs() < 1e-6);
+    assert!((points[0]["dayTradedMillionWon"].as_f64().unwrap() - 200.0).abs() < 1e-6);
 
     assert_eq!(points[1]["t"], at_sec(23, 9, 5, 0));
     assert!((points[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 200.0).abs() < 1e-6);
     assert!((points[1]["programSharePct"].as_f64().unwrap() - 100.0).abs() < 1e-6);
+    assert!((points[1]["dayTradedMillionWon"].as_f64().unwrap() - 300.0).abs() < 1e-6);
 
     h.write_links(TODAY, "collect-01", &[(at_sec(24, 9, 0, 0), "connected")]);
     h.write_flow::<ProgramFlow>(
@@ -333,6 +336,91 @@ async fn program_series_buckets_and_computes_program_share_pct() {
     assert_eq!(pts2.len(), 1);
     assert!((pts2[0]["netBuyAmountMillionWon"].as_f64().unwrap() - 30.0).abs() < 1e-6);
     assert!(pts2[0]["programSharePct"].is_null());
+    assert!(pts2[0].get("dayTradedMillionWon").is_none());
+}
+
+#[tokio::test]
+async fn close_grace_ticks_and_program_rows_fold_across_parquet_and_flow() {
+    let h = Harness::start(true).await;
+    write_complete(&h.data, CLOSED);
+    write_parquet(
+        &h.data,
+        CLOSED,
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql(at_sec(23, 19, 59, 40) * 1000, "195940", 100_000, 1_000),
+            tick_sql(at_sec(23, 20, 0, 3) * 1000, "200003", 100_000, 1_500),
+        ],
+    );
+    write_parquet(
+        &h.data,
+        CLOSED,
+        "0w",
+        "005930_AL",
+        &[
+            program_sql(at_sec(23, 19, 59, 45) * 1000, "195945", 20, 50, 300, 30),
+            program_sql(at_sec(23, 20, 0, 4) * 1000, "200004", 30, 95, 650, 65),
+        ],
+    );
+    h.write_links(TODAY, "collect-01", &[(at_sec(24, 9, 0, 0), "connected")]);
+    h.write_flow::<TradeTicks>(
+        TODAY,
+        "collect-01",
+        &[tick_flow_row(at_sec(24, 19, 59, 50) * 1000, "195950", 100_000, 1_000)],
+    );
+    h.write_flow::<ProgramFlow>(
+        TODAY,
+        "collect-01",
+        &[program_flow_row(at_sec(24, 19, 59, 50) * 1000, "195950", 10, 30, 200, 20)],
+    );
+
+    let from = at_sec(23, 19, 0, 0);
+    let to = at_sec(24, 20, 5, 0);
+    let (s_init, _) = h.get(&format!("/api/symbols/005930/tick-cvd?period=1m&from={from}&to={to}")).await;
+    assert_eq!(s_init, 200);
+    let (sp_init, _) = h.get(&format!("/api/symbols/005930/program-series?period=1m&from={from}&to={to}")).await;
+    assert_eq!(sp_init, 200);
+
+    h.write_flow::<TradeTicks>(
+        TODAY,
+        "collect-01",
+        &[tick_flow_row(at_sec(24, 20, 0, 5) * 1000, "200005", 100_000, 2_000)],
+    );
+    h.write_flow::<ProgramFlow>(
+        TODAY,
+        "collect-01",
+        &[program_flow_row(at_sec(24, 20, 0, 5) * 1000, "200005", 40, 110, 700, 70)],
+    );
+    h.clock.jump(5);
+
+    for (period, d1_t, d2_t) in [
+        ("1m", at_sec(23, 19, 59, 0), at_sec(24, 19, 59, 0)),
+        ("5m", at_sec(23, 19, 55, 0), at_sec(24, 19, 55, 0)),
+        ("60m", at_sec(23, 19, 0, 0), at_sec(24, 19, 0, 0)),
+    ] {
+        let (sc, cvd) = h.get(&format!("/api/symbols/005930/tick-cvd?period={period}&from={from}&to={to}")).await;
+        assert_eq!(sc, 200, "{period}: {cvd}");
+        let cvd_pts = cvd["points"].as_array().unwrap();
+        assert_eq!(cvd_pts.len(), 2, "{period}: {cvd}");
+        assert_eq!(cvd_pts[0]["t"], d1_t);
+        assert!((cvd_pts[0]["whaleNetMillionWon"].as_f64().unwrap() - 250.0).abs() < 1e-6);
+        assert_eq!(cvd_pts[1]["t"], d2_t);
+        assert!((cvd_pts[1]["whaleNetMillionWon"].as_f64().unwrap() - 300.0).abs() < 1e-6);
+
+        let (sp, prog) = h.get(&format!("/api/symbols/005930/program-series?period={period}&from={from}&to={to}")).await;
+        assert_eq!(sp, 200, "{period}: {prog}");
+        let prog_pts = prog["points"].as_array().unwrap();
+        assert_eq!(prog_pts.len(), 2, "{period}: {prog}");
+        assert_eq!(prog_pts[0]["t"], d1_t);
+        assert!((prog_pts[0]["netBuyAmountMillionWon"].as_f64().unwrap() - 65.0).abs() < 1e-6);
+        assert!((prog_pts[0]["dayTradedMillionWon"].as_f64().unwrap() - 250.0).abs() < 1e-6);
+        assert!((prog_pts[0]["programSharePct"].as_f64().unwrap() - 50.0).abs() < 1e-6);
+        assert_eq!(prog_pts[1]["t"], d2_t);
+        assert!((prog_pts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 70.0).abs() < 1e-6);
+        assert!((prog_pts[1]["dayTradedMillionWon"].as_f64().unwrap() - 300.0).abs() < 1e-6);
+        assert!((prog_pts[1]["programSharePct"].as_f64().unwrap() - 50.0).abs() < 1e-6);
+    }
 }
 
 #[test]
