@@ -249,7 +249,7 @@ async fn four_day_compare_detects_spoof_genuine_gap_flat_and_0b_outcomes() {
     assert_eq!(status, 200, "{default_body}");
     let default_cmp: PreMarketCompare = serde_json::from_value(default_body).unwrap();
     let default_dates: Vec<&str> = default_cmp.series.iter().map(|s| s.date.as_str()).collect();
-    assert_eq!(default_dates, vec!["20261121", "20261122", "20261123"]);
+    assert_eq!(default_dates, vec!["20261120", "20261121", "20261122", "20261123"]);
 }
 
 #[tokio::test]
@@ -377,7 +377,11 @@ async fn rejects_bad_dates_too_many_days_and_index_symbols() {
     assert_eq!(h.get("/api/symbols/IDX:001/premarket/compare").await.0, 400);
     assert_eq!(h.get("/api/symbols/005930/premarket/compare?days=bad").await.0, 400);
     assert_eq!(
-        h.get("/api/symbols/005930/premarket/compare?days=20261119,20261120,20261121,20261122,20261123").await.0,
+        h.get("/api/symbols/005930/premarket/compare?days=20261114,20261115,20261116,20261117,20261118,20261119,20261120,20261121,20261122,20261123").await.0,
+        200
+    );
+    assert_eq!(
+        h.get("/api/symbols/005930/premarket/compare?days=20261113,20261114,20261115,20261116,20261117,20261118,20261119,20261120,20261121,20261122,20261123").await.0,
         400
     );
     assert_eq!(h.get("/api/premarket/snapshot?date=2026-11-23").await.0, 400);

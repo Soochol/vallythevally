@@ -32,9 +32,9 @@ const MAX_STORE_DAY_FOLDERS: usize = 60;
 const OUTCOME_0900_SEC: u32 = 9 * 3600;
 const OUTCOME_0905_SEC: u32 = 9 * 3600 + 5 * 60;
 const OUTCOME_0910_SEC: u32 = 9 * 3600 + 10 * 60;
-const MAX_COMPARE_DAYS: usize = 4;
-const DEFAULT_COMPARE_DAYS: usize = 3;
-const COMPARE_CACHE_CAPACITY: usize = 64;
+const MAX_COMPARE_DAYS: usize = 10;
+const DEFAULT_COMPARE_DAYS: usize = 10;
+const COMPARE_CACHE_CAPACITY: usize = 256;
 const SNAPSHOT_CACHE_CAPACITY: usize = 16;
 const DENSE_THRESHOLD_SECONDS: usize = 480;
 const FLOW_SNAPSHOT_TTL_SECS: i64 = 1;
@@ -1380,7 +1380,17 @@ mod tests {
     fn validates_days_query_bounds_and_format() {
         assert!(parse_days_query(None).unwrap().is_none());
         assert_eq!(parse_days_query(Some("20261120,20261123")).unwrap().unwrap().len(), 2);
-        assert!(parse_days_query(Some("20261119,20261120,20261121,20261122,20261123")).is_err());
+        assert_eq!(
+            parse_days_query(Some("20261114,20261115,20261116,20261117,20261118,20261119,20261120,20261121,20261122,20261123"))
+                .unwrap()
+                .unwrap()
+                .len(),
+            10
+        );
+        assert!(
+            parse_days_query(Some("20261113,20261114,20261115,20261116,20261117,20261118,20261119,20261120,20261121,20261122,20261123"))
+                .is_err()
+        );
         assert!(parse_days_query(Some("2026-11-23")).is_err());
     }
 }
