@@ -123,11 +123,12 @@ export const QuantityRow = memo(function QuantityRow({ input, mode, amountPreset
   return (
     <div className="od-qty" data-testid="order-quantity-row" data-preset-mode={mode}>
       <input ref={field} className="od-qty-input" aria-label="수량" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} />
-      <div className="mw-seg od-preset-mode" role="group" aria-label="프리셋 기준">
+      <div className="ui-seg od-preset-mode" data-size="sm" role="group" aria-label="프리셋 기준">
         {PRESET_MODES.map((option) => (
           <button
             key={option.value}
             type="button"
+            className="ui-seg-item"
             data-mode={option.value}
             aria-pressed={mode === option.value}
             onClick={() => {

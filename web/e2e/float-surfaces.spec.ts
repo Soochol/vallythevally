@@ -19,7 +19,7 @@ test("지표·비교 창은 배경 가림막 없이, 종목 검색 창은 가림
   await page.keyboard.type("이평 20");
   await expect(cell(page).getByText("이동평균 단순 20", { exact: false }).first()).toBeVisible();
   expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(0, 0, 0, 0)", blur: "none" });
-  expect(await styleOf(dialog)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none", radius: "10px" });
+  expect(await styleOf(dialog)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none", radius: "8px" });
   await page.screenshot({ path: info.outputPath("1440-indicator-preview.png") });
   await page.keyboard.press("Escape");
 
@@ -42,7 +42,7 @@ test("메뉴와 팝오버는 같은 유리 표면을 쓴다", async ({ page }, i
   await minuteButton.click();
   const minutes = page.locator(".minute-menu");
   await expect(minutes).toBeVisible();
-  expect(await styleOf(minutes)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "10px" });
+  expect(await styleOf(minutes)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "8px" });
   await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
   await page.keyboard.press("Escape");
 });

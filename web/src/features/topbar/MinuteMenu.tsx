@@ -20,7 +20,7 @@ export function MinuteMenu({ value, onChange }: { value: Period; onChange(value:
   const offered = marketFeatureOn(useMarketSource(), "minuteBars");
   const choose = (period: Period) => { if (!offered) return; onChange(period); setOpen(false); };
   return <>
-    <button ref={trigger} type="button" className={offered ? "seg-btn inline-flex items-center gap-1" : "seg-btn inline-flex items-center gap-1 opacity-40"} aria-disabled={offered ? undefined : true} title={offered ? undefined : NO_MINUTE_BARS_NOTE} aria-label="분봉" data-value={minute ? value : ""} aria-haspopup="menu" aria-expanded={open} aria-pressed={minute} onClick={() => minute || !offered ? setOpen(!open) : onChange(lastMinute)}>{PERIOD_LABEL[minute ? value : lastMinute]}<ChevronIcon /></button>
+    <button ref={trigger} type="button" className={offered ? "ui-seg-item gap-1" : "ui-seg-item gap-1 opacity-40"} aria-disabled={offered ? undefined : true} title={offered ? undefined : NO_MINUTE_BARS_NOTE} aria-label="분봉" data-value={minute ? value : ""} aria-haspopup="menu" aria-expanded={open} aria-pressed={minute} onClick={() => minute || !offered ? setOpen(!open) : onChange(lastMinute)}>{PERIOD_LABEL[minute ? value : lastMinute]}<ChevronIcon /></button>
     {open && <Popover anchor={trigger} onClose={() => setOpen(false)} role="menu" aria-label="분봉" className="minute-menu" onKeyDown={(e) => {
       if (["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
         e.preventDefault(); e.stopPropagation();

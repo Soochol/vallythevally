@@ -61,7 +61,6 @@
   --radius-s: var(--r-s);
   --radius-m: var(--r-m);
   --radius-l: var(--r-l);
-  --radius-xl: var(--r-xl);
 
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
@@ -95,14 +94,6 @@
   .tb-btn[aria-pressed="true"] { color: var(--accent); }
   .tb-btn:disabled, .tb-btn[aria-disabled="true"] { color: var(--text-3); cursor: not-allowed; }
   .tb-btn:disabled:hover, .tb-btn[aria-disabled="true"]:hover { background: none; }
-  .seg-btn {
-    height: 34px; min-width: 32px; padding: 0 10px; border-radius: var(--r-s); color: var(--text-2); font-size: var(--fs-s); white-space: nowrap;
-  }
-  .seg-btn:hover { background: var(--hover); color: var(--text); }
-  .seg-btn[aria-pressed="true"]:hover { background: var(--raised); color: var(--text); }
-  .seg-btn[aria-pressed="true"] { background: var(--raised); color: var(--text); font-weight: 600; }
-  .seg-btn[aria-disabled="true"] { color: var(--text-3); opacity: 0.6; cursor: not-allowed; }
-  .seg-btn[aria-disabled="true"]:hover { background: none; }
   .icon-btn {
     width: 32px; height: 32px; display: grid; place-items: center; border-radius: var(--r-s); color: var(--text-2);
   }

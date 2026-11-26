@@ -298,7 +298,7 @@ const stripFit = (page: Page) =>
     const strength = one("[data-testid=trade-strength]");
     const cumulative = one("[data-testid=trade-cumulative]");
     const badge = one("[data-testid=trade-integrated-only]");
-    const buttons = [...window.querySelectorAll<HTMLElement>(".mw-seg button")];
+    const buttons = [...window.querySelectorAll<HTMLElement>(".ui-seg button")];
     const names = [...window.querySelectorAll<HTMLElement>(".tr-strips .tr-name")];
     return {
       stripsHeight: strips.height,

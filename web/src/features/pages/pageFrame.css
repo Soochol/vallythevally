@@ -17,8 +17,8 @@
 .page-link-button { display: inline-flex; align-items: center; gap: var(--size-8); height: var(--size-30); padding: 0 var(--size-8); border-radius: var(--r-m); color: var(--text-2); font-size: var(--fs-s); }
 .page-link-button:hover, .page-link-button[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 .page-link-chip { --swatch: var(--size-20); }
-.page-preparing { display: grid; flex: 1; place-content: center; gap: var(--size-4); min-height: 240px; text-align: center; color: var(--text-2); border-radius: var(--r-l); background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.page-preparing { display: grid; flex: 1; place-content: center; gap: var(--size-4); min-height: 240px; text-align: center; color: var(--text-2); border: var(--size-1) solid var(--line); border-radius: var(--r-l); background: var(--surface); }
 .page-preparing strong { color: var(--text); font-size: var(--fs-l); }
 .page-preparing-recent { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--size-8); margin-top: var(--size-12); }
-.page-preparing-symbol { padding: var(--size-5) var(--size-12); border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-s); }
-.page-preparing-symbol:hover { box-shadow: 0 0 0 1px var(--accent); }
+.page-preparing-symbol { padding: var(--size-5) var(--size-12); border: var(--size-1) solid transparent; border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-s); }
+.page-preparing-symbol:hover { border-color: var(--accent); }
