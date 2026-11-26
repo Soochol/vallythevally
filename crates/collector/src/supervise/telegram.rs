@@ -274,7 +274,6 @@ pub fn classify_alert(date: u32, alert: &Alert) -> AlertEvent {
 struct Tracker {
     notes_date: u32,
     notes: Vec<String>,
-    disk_level: DiskLevel,
     crash_checked: bool,
 }
 
@@ -330,7 +329,6 @@ impl AlertTelegram {
         }
         let marker = self.state_folder.join(CRASH_MARKER_FILE);
         let Ok(raw) = std::fs::read_to_string(&marker) else { return };
-        let _ = std::fs::remove_file(&marker);
         let crashed_at = raw.trim().parse::<i64>().ok();
         let downtime = crashed_at.map(|unix| self.clock.now().unix().saturating_sub(unix).max(0) as u64);
         let summary = match downtime {
@@ -340,7 +338,59 @@ impl AlertTelegram {
         let event = AlertEvent::active(AlertSource::Systemd, AlertCode::DaemonCrashed, "vally-collector", "감독 데몬 자동 재기동 정상화", summary)
             .with_severity(Severity::P3Info);
         let key = format!("crash_recovered:{}", crashed_at.unwrap_or(0));
-        self.pipeline.emit_digest(&key, event, MarketContext::new(ctx.date, ctx.phase, MarketObservation::Observed));
+        self.pipeline.emit_digest_with_callback(
+            &key,
+            event,
+            MarketContext::new(ctx.date, ctx.phase, MarketObservation::Observed),
+            Box::new(move || {
+                let _ = std::fs::remove_file(&marker);
+            }),
+        );
+    }
+
+    pub(super) fn resolve_finalize(&self, ctx: MarketContext, date: u32) {
+        let fp = Fingerprint::new(AlertSource::Supervise, AlertCode::FinalizeFailed, format!("finalize:{date}"));
+        if self.pipeline.has_active(&fp) {
+            let resolved = AlertEvent::resolved(
+                AlertSource::Supervise,
+                AlertCode::FinalizeFailed,
+                format!("finalize:{date}"),
+                format!("{date} 마감 정리 복구 완료"),
+                format!("{date}일 원문 정리 및 대조가 완료됐습니다"),
+            );
+            self.pipeline.emit(resolved, ctx);
+        }
+    }
+
+    pub(super) fn retire_previous_day_incidents(&self, current_date: u32, data_dir: &Path) {
+        let coverage = read_coverage(data_dir);
+        let completed_dates: std::collections::BTreeSet<u32> = coverage
+            .days
+            .into_iter()
+            .filter(|day| day.state == CoverageState::Complete)
+            .map(|day| day.date)
+            .collect();
+        for fp in self.pipeline.active_fingerprints() {
+            if fp.source != AlertSource::Supervise {
+                continue;
+            }
+            match fp.code {
+                AlertCode::DiskWarning | AlertCode::DiskCritical | AlertCode::KeyAuthHalted => {}
+                AlertCode::FinalizeFailed => {
+                    if let Some(day_str) = fp.target.strip_prefix("finalize:")
+                        && let Ok(day_num) = day_str.parse::<u32>()
+                        && completed_dates.contains(&day_num)
+                    {
+                        self.pipeline.retire_silently(&fp);
+                    }
+                }
+                _ => {
+                    if !fp.target.ends_with(&current_date.to_string()) {
+                        self.pipeline.retire_silently(&fp);
+                    }
+                }
+            }
+        }
     }
 
     pub(super) fn alert(&self, ctx: MarketContext, alert: &Alert) {
@@ -392,6 +442,16 @@ impl AlertTelegram {
         }
     }
 
+    fn current_disk_level(&self) -> DiskLevel {
+        if self.pipeline.has_firing(&Fingerprint::new(AlertSource::Supervise, AlertCode::DiskCritical, "disk:data")) {
+            DiskLevel::Critical
+        } else if self.pipeline.has_firing(&Fingerprint::new(AlertSource::Supervise, AlertCode::DiskWarning, "disk:data")) {
+            DiskLevel::Warning
+        } else {
+            DiskLevel::Normal
+        }
+    }
+
     pub(super) fn check_disk(&self, data_dir: &Path, ctx: MarketContext) {
         let disk = (self.disk_probe)(data_dir);
         self.check_disk_usage(&disk, ctx);
@@ -399,19 +459,20 @@ impl AlertTelegram {
 
     pub fn check_disk_usage(&self, disk: &DiskUsage, ctx: MarketContext) {
         let Some(fs) = &disk.filesystem else { return };
-        let previous = self.tracker().disk_level;
+        let previous = self.current_disk_level();
         let next = evaluate_disk_level(fs, previous);
-        self.tracker().disk_level = next;
 
         let pct = used_percent(fs);
         let raw_bytes: u64 = disk.raw.iter().map(|d| d.bytes).sum();
         let store_bytes: u64 = disk.store.iter().map(|d| d.bytes).sum();
+        let warn_fp = Fingerprint::new(AlertSource::Supervise, AlertCode::DiskWarning, "disk:data");
+        let crit_fp = Fingerprint::new(AlertSource::Supervise, AlertCode::DiskCritical, "disk:data");
 
         match next {
             DiskLevel::Critical => {
-                if self.pipeline.has_active(&Fingerprint::new(AlertSource::Supervise, AlertCode::DiskWarning, "disk:data")) {
-                    let clear_warn = AlertEvent::resolved(AlertSource::Supervise, AlertCode::DiskWarning, "disk:data", "디스크 경고에서 임계로 승격", "P1 임계 경보로 전환됐습니다");
-                    self.pipeline.emit(clear_warn, ctx);
+                let was_warning_firing = self.pipeline.has_firing(&warn_fp);
+                if self.pipeline.has_active(&warn_fp) {
+                    self.pipeline.retire_silently(&warn_fp);
                 }
                 let event = AlertEvent::active(
                     AlertSource::Supervise,
@@ -424,10 +485,14 @@ impl AlertTelegram {
                 .with_metric("저장소(store)", format_gib(store_bytes))
                 .with_impact("오늘 원문 쓰기 또는 마감 finalize 임시 공간 부족 위험")
                 .with_action("df -h ~/vally-data/hoga && grep '\"action\":\"kept\"' ~/vally-data/hoga/store/prune.log.jsonl | tail");
-                self.pipeline.emit(event, ctx);
+                if was_warning_firing {
+                    self.pipeline.emit_immediate(event, ctx);
+                } else {
+                    self.pipeline.emit(event, ctx);
+                }
             }
             DiskLevel::Warning => {
-                if self.pipeline.has_active(&Fingerprint::new(AlertSource::Supervise, AlertCode::DiskCritical, "disk:data")) {
+                if self.pipeline.has_active(&crit_fp) {
                     let clear_crit = AlertEvent::resolved(
                         AlertSource::Supervise,
                         AlertCode::DiskCritical,
@@ -477,7 +542,7 @@ impl AlertTelegram {
                 Vec::new()
             }
         };
-        let deferred = self.pipeline.take_deferred_p2();
+        let deferred = self.pipeline.peek_deferred_p2();
         let disk = (self.disk_probe)(data_dir);
 
         let collecting_total = status.keys.iter().filter(|k| k.role == KeyRole::Collecting).count();
@@ -511,7 +576,7 @@ impl AlertTelegram {
             event = event.with_metric("야간 지연 P2", format!("{}건", deferred.len()));
         }
 
-        self.pipeline.emit_digest("morning_brief", event, ctx);
+        self.pipeline.emit_digest_clearing_deferred("morning_brief", event, ctx);
     }
 
     pub(super) fn close_day(&self, ctx: MarketContext, status: &DaemonStatus, data_dir: &Path) {
@@ -641,5 +706,87 @@ mod tests {
         assert_eq!(messages.len(), 1);
         assert!(messages[0].html.contains("감독 데몬 자동 재기동 정상화") && messages[0].html.contains("34초") && messages[0].silent);
         assert!(!folder.path().join(CRASH_MARKER_FILE).exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn crash_marker_stays_when_delivery_fails_and_retries_after_restart() {
+        let folder = tempfile::tempdir().unwrap();
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 26).unwrap(), 10, 21, 34));
+        std::fs::write(folder.path().join(CRASH_MARKER_FILE), (clock.now().unix() - 34).to_string()).unwrap();
+
+        let sink = Arc::new(MemorySink::new());
+        sink.set_fail(true);
+        let first = AlertTelegram::spawn_with_sink(sink.clone(), folder.path(), clock.clone());
+        first.resolve_pending_crash(live_ctx());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(sink.messages().is_empty());
+        assert!(folder.path().join(CRASH_MARKER_FILE).exists());
+
+        sink.set_fail(false);
+        let second = AlertTelegram::spawn_with_sink(sink.clone(), folder.path(), clock);
+        second.resolve_pending_crash(live_ctx());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(sink.messages().len(), 1);
+        assert!(!folder.path().join(CRASH_MARKER_FILE).exists());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn disk_warning_to_critical_escalates_immediately_without_false_recovery_and_band_survives_restart() {
+        let folder = tempfile::tempdir().unwrap();
+        let sink = Arc::new(MemorySink::new());
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 26).unwrap(), 9, 0, 0));
+        let disk_of = |free_gib: u64| DiskUsage {
+            filesystem: Some(Filesystem { free_bytes: free_gib * GIB, total_bytes: 500 * GIB }),
+            raw: Vec::new(),
+            store: Vec::new(),
+        };
+
+        let first = AlertTelegram::spawn_with_sink(sink.clone(), folder.path(), clock.clone());
+        first.check_disk_usage(&disk_of(110), live_ctx());
+        clock.jump(120);
+        first.tick(live_ctx());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(sink.messages().len(), 1);
+        assert!(sink.messages()[0].html.contains("P2 경고"));
+
+        let restarted = AlertTelegram::spawn_with_sink(sink.clone(), folder.path(), clock.clone());
+        restarted.check_disk_usage(&disk_of(130), live_ctx());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(sink.messages().len(), 1, "130GB는 140GB 복구 밴드 미만이라 재시작 뒤에도 경고가 유지된다");
+
+        restarted.check_disk_usage(&disk_of(45), live_ctx());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent = sink.messages();
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        assert!(sent[1].html.contains("P1 장애") && sent[1].html.contains("임계"));
+        assert!(!sent[1].html.contains("복구 완료"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn finalize_failed_resolves_on_success_and_does_not_remind_across_days() {
+        let folder = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let sink = Arc::new(MemorySink::new());
+        let clock = Clock::fake(kst(KstDate::new(2026, 11, 26).unwrap(), 20, 10, 0));
+        let notifier = AlertTelegram::spawn_with_sink(sink.clone(), folder.path(), clock.clone());
+
+        let day1 = MarketContext::new(20261126, MarketPhase::Finalizing, MarketObservation::Observed);
+        notifier.alert(day1, &alert(AlertKind::StageFailed, "정리: finalize가 종료 코드 1로 끝났습니다"));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(sink.messages().len(), 1);
+
+        clock.jump(86400);
+        let day2 = MarketContext::new(20261127, MarketPhase::Finalizing, MarketObservation::Observed);
+        notifier.tick(day2);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(sink.messages().len(), 1);
+
+        notifier.resolve_finalize(day2, 20261126);
+        notifier.close_day(day2, &DaemonStatus::default(), data.path());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent = sink.messages();
+        assert_eq!(sent.len(), 3, "{sent:?}");
+        assert!(sent[1].html.contains("복구 완료") && sent[1].html.contains("20261126 마감 정리 복구 완료"));
+        assert!(sent[2].html.contains("미해결 P1 0건"));
     }
 }

@@ -106,8 +106,94 @@ fn wait_from(header: Option<&str>, body: &[u8]) -> Duration {
     }
 }
 
+fn closing_tags_len(open_tags: &[String]) -> usize {
+    open_tags.iter().map(|tag| tag.chars().count() + 3).sum()
+}
+
+fn tag_name(tag: &str) -> Option<(bool, String)> {
+    let inner = tag.strip_prefix('<')?.strip_suffix('>')?.trim();
+    if inner.is_empty() || inner.ends_with('/') {
+        return None;
+    }
+    let (closing, rest) = match inner.strip_prefix('/') {
+        Some(rest) => (true, rest.trim()),
+        None => (false, inner),
+    };
+    let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    (!name.is_empty()).then_some((closing, name))
+}
+
+fn truncate_html(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
+        return text.to_owned();
+    }
+    let mut output = String::new();
+    let mut output_chars = 0usize;
+    let mut open_tags: Vec<String> = Vec::new();
+    let mut rest = text;
+
+    while !rest.is_empty() {
+        if rest.starts_with('<')
+            && let Some(end) = rest.find('>')
+        {
+            let token = &rest[..=end];
+            let token_chars = token.chars().count();
+            let mut next_tags = open_tags.clone();
+            if let Some((closing, name)) = tag_name(token) {
+                if closing {
+                    if let Some(pos) = next_tags.iter().rposition(|open| open.eq_ignore_ascii_case(&name)) {
+                        next_tags.truncate(pos);
+                    }
+                } else {
+                    next_tags.push(name);
+                }
+            }
+            if output_chars + token_chars + closing_tags_len(&next_tags) > limit {
+                break;
+            }
+            output.push_str(token);
+            output_chars += token_chars;
+            open_tags = next_tags;
+            rest = &rest[end + 1..];
+            continue;
+        }
+        if rest.starts_with('&')
+            && let Some(end) = rest.find(';')
+            && end <= 10
+            && rest[1..end].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'#')
+        {
+            let token = &rest[..=end];
+            let token_chars = token.chars().count();
+            if output_chars + token_chars + closing_tags_len(&open_tags) > limit {
+                break;
+            }
+            output.push_str(token);
+            output_chars += token_chars;
+            rest = &rest[end + 1..];
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else { break };
+        if output_chars + 1 + closing_tags_len(&open_tags) > limit {
+            break;
+        }
+        output.push(ch);
+        output_chars += 1;
+        rest = &rest[ch.len_utf8()..];
+    }
+
+    for tag in open_tags.into_iter().rev() {
+        output.push_str("</");
+        output.push_str(&tag);
+        output.push('>');
+    }
+    output
+}
+
 fn payload_with(chat_id: &str, text: &str, parse_mode: Option<&str>, disable_notification: bool) -> String {
-    let text: String = text.chars().take(TEXT_LIMIT).collect();
+    let text: String = match parse_mode {
+        Some("HTML") => truncate_html(text, TEXT_LIMIT),
+        _ => text.chars().take(TEXT_LIMIT).collect(),
+    };
     let mut object = serde_json::Map::new();
     object.insert("chat_id".to_owned(), serde_json::Value::String(chat_id.to_owned()));
     object.insert("text".to_owned(), serde_json::Value::String(text));
@@ -261,6 +347,14 @@ mod tests {
         let html: serde_json::Value = serde_json::from_str(&payload_with("-100123", "<b>알림</b>", Some("HTML"), true)).unwrap();
         assert_eq!(html["parse_mode"], "HTML");
         assert_eq!(html["disable_notification"], true);
+
+        let long_html = format!("<b>제목</b>\n{} <code>#inc-12345678</code> &amp; 끝", "가".repeat(TEXT_LIMIT - 20));
+        let parsed: serde_json::Value = serde_json::from_str(&payload_with("-100123", &long_html, Some("HTML"), false)).unwrap();
+        let text = parsed["text"].as_str().unwrap();
+        assert!(text.chars().count() <= TEXT_LIMIT);
+        assert_eq!(text.matches("<b>").count(), text.matches("</b>").count(), "{text}");
+        assert_eq!(text.matches("<code>").count(), text.matches("</code>").count(), "{text}");
+        assert!(!text.ends_with('<') && !text.ends_with("&am"));
     }
 
     const SETTINGS: &str = "bot_token=123456:SECRET-TOKEN\nchat_id=-100777\n";

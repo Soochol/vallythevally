@@ -1818,3 +1818,31 @@ async fn an_alert_that_never_reached_telegram_is_sent_again_after_a_restart() {
     assert_eq!(count_containing(&texts, "코스피 지수 일봉 대조 실패"), 1, "{texts:?}");
     assert_eq!(count_containing(&texts, "장전 수집 준비 점검"), 1, "{texts:?}");
 }
+
+#[tokio::test(start_paused = true)]
+async fn disk_critical_during_collecting_fires_before_after_close() {
+    let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
+    let folder = tempfile::tempdir().unwrap();
+    let low_disk = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = low_disk.clone();
+    let telegram = AlertTelegram::spawn_with_clock(
+        Telegram::load_at(&FakeTelegram::settings_file(folder.path()), &format!("http://127.0.0.1:{}", hook.port)).unwrap().unwrap(),
+        folder.path(),
+        Clock::fake(at(11, 0, 0)),
+    )
+    .with_disk_probe(move |_| {
+        let free_gib = if flag.load(std::sync::atomic::Ordering::SeqCst) { 40 } else { 300 };
+        collector::supervise::DiskUsage {
+            filesystem: Some(collector::supervise::Filesystem { free_bytes: free_gib * 1024 * 1024 * 1024, total_bytes: 500 * 1024 * 1024 * 1024 }),
+            raw: Vec::new(),
+            store: Vec::new(),
+        }
+    });
+    let harness = Harness::start(Config { start: at(11, 0, 0), telegram: Some(telegram), ..Config::default() });
+    harness.until(at(11, 2, 0)).await;
+    low_disk.store(true, std::sync::atomic::Ordering::SeqCst);
+    harness.until(at(11, 10, 0)).await;
+    let texts = hook.texts();
+    assert!(texts.iter().any(|text| text.contains("P1 장애") && text.contains("데이터 디스크 임계")), "{texts:?}");
+    harness.finish().await;
+}
