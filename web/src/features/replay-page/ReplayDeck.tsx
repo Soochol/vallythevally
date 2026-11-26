@@ -15,6 +15,7 @@ import {
   formatReplayClock,
   type ReplaySession,
 } from "./replayModel";
+import type { ReplayPaperEngine } from "./replayPaperEngine";
 
 export type TimelineZoom = "day" | "10m";
 
@@ -26,6 +27,7 @@ export interface LoopRange {
 interface Props {
   readonly session: ReplaySession;
   readonly engine: ReplayEngine;
+  readonly paper?: ReplayPaperEngine;
   readonly playing: boolean;
   readonly buffering: boolean;
   readonly mode: PlaybackMode;
@@ -68,15 +70,16 @@ function setText(el: HTMLElement | null, text: string): void {
   if (el && el.textContent !== text) el.textContent = text;
 }
 
-function formatDeltaBadge(ms: number): string {
-  if (ms <= 0) return "Δt 0ms";
-  if (ms >= 1000) return `Δt +${(ms / 1000).toFixed(2)}s`;
-  return `Δt +${Math.round(ms)}ms`;
+function formatDeltaValue(ms: number): string {
+  if (ms <= 0) return "0ms";
+  if (ms >= 1000) return `+${(ms / 1000).toFixed(2)}s`;
+  return `+${Math.round(ms).toLocaleString("ko-KR")}ms`;
 }
 
 export function ReplayDeck({
   session,
   engine,
+  paper,
   playing,
   buffering,
   mode,
@@ -98,6 +101,7 @@ export function ReplayDeck({
   const clockRef = useRef<HTMLSpanElement>(null);
   const sessionPillRef = useRef<HTMLSpanElement>(null);
   const deltaPillRef = useRef<HTMLSpanElement>(null);
+  const deltaValRef = useRef<HTMLSpanElement>(null);
   const skipPillRef = useRef<HTMLSpanElement>(null);
   const draggingRef = useRef(false);
   const lastCursorSecRef = useRef(session.sessionStartSec);
@@ -135,7 +139,7 @@ export function ReplayDeck({
       if (deltaPillRef.current) {
         if (frame.resolution === "tick" && mode.kind === "tick") {
           deltaPillRef.current.hidden = false;
-          setText(deltaPillRef.current, formatDeltaBadge(frame.deltaMs));
+          setText(deltaValRef.current, formatDeltaValue(frame.deltaMs));
         } else {
           deltaPillRef.current.hidden = true;
         }
@@ -271,6 +275,18 @@ export function ReplayDeck({
         ctx.fillRect(bx - 0.75, 8, 1.5, h - 8);
       }
 
+      if (paper) {
+        for (const fill of paper.getFills()) {
+          const fillSec = fill.ms / 1000;
+          if (fillSec < start || fillSec > end) continue;
+          const fx = xOfSec(fillSec);
+          ctx.fillStyle = fill.side === "buy" ? palette.up : palette.down;
+          ctx.beginPath();
+          ctx.arc(fx, fill.side === "buy" ? h - 8 : 8, 3.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
       const px = xOfSec(cursorSec);
       ctx.fillStyle = palette.seriesFill;
       ctx.fillRect(0, 0, Math.max(0, px), h);
@@ -293,8 +309,13 @@ export function ReplayDeck({
       ctx.fill();
     };
 
-    return engine.subscribeFrame(paint);
-  }, [session, engine, mode.kind, bookmarks, loop, zoom, palette, resizeTick, hoverSec]);
+    const unsubFrame = engine.subscribeFrame(paint);
+    const unsubPaper = paper ? paper.subscribe(() => paint(engine.getFrame())) : undefined;
+    return () => {
+      unsubFrame();
+      unsubPaper?.();
+    };
+  }, [session, engine, paper, mode.kind, bookmarks, loop, zoom, palette, resizeTick, hoverSec]);
 
   const { start, end } = timelineBounds(session, lastCursorSecRef.current, zoom);
   const span = Math.max(1, end - start);
@@ -369,7 +390,10 @@ export function ReplayDeck({
         <div className="rp-clock-box">
           <span ref={clockRef} className="rp-clock-val rp-mono" data-testid="replay-clock">09:00:00.000</span>
           <span ref={sessionPillRef} className="rp-session-pill" data-kind="open">정규장</span>
-          <span ref={deltaPillRef} className="rp-dt-pill rp-mono" data-testid="replay-tick-dt" hidden>Δt 0ms</span>
+          <span ref={deltaPillRef} className="rp-dt-pill rp-mono" data-testid="replay-tick-dt" hidden>
+            <span className="rp-dt-lbl">Δt</span>
+            <span ref={deltaValRef} className="rp-dt-val">0ms</span>
+          </span>
           <span ref={skipPillRef} className="rp-skip-pill rp-mono" data-testid="replay-skip-notice" hidden />
           {buffering && <span className="rp-buf-pill" data-testid="replay-buffering">구간 불러오는 중</span>}
         </div>
