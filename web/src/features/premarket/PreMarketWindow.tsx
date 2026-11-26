@@ -1,137 +1,119 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { PreMarketSnapshotRow } from "../../api/generated/PreMarketSnapshotRow";
+import { useMemo, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
-import { usePreMarketCompare, usePreMarketDays, usePreMarketSnapshot } from "../../api/premarket";
+import { usePreMarketCompare, usePreMarketDays } from "../../api/premarket";
 import { useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
 import { isIndexCode } from "../../lib/symbol";
-import { linkedWindowSymbol, useLayoutStore } from "../../stores/layout";
-import { useSelectionStore } from "../../stores/selection";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
-import { defaultSelectedDates, toggleDateSelection, WIDE_BREAKPOINT_PX } from "./logic";
+import { DateListPane } from "./DateListPane";
+import {
+  computeHistoricalBand,
+  formatShortDate,
+  formatSignedPct,
+  formatVolumeValue,
+  formatWon,
+  nearestBandAt,
+  pointVolumeValue,
+  selectRangeDates,
+  signalMeta,
+  togglePinnedDate,
+  valueTone,
+  type BackgroundStyle,
+  type CompareRange,
+  type VolumeUnit,
+} from "./logic";
 import { OverlayChart } from "./OverlayChart";
-import { SnapshotPane } from "./SnapshotPane";
 import "./premarket.css";
 
-type NarrowTab = "compare" | "snapshot";
-
 export function PreMarketWindow({ id }: { id: WindowId }) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(true);
-  const [narrowTab, setNarrowTab] = useState<NarrowTab>("compare");
-  const [snapshotDate, setSnapshotDate] = useState<string | undefined>(undefined);
-  const [knownSnapshotDates, setKnownSnapshotDates] = useState<readonly string[]>([]);
   const linkedSymbol = useLinkedSymbol(id);
-  const [override, setOverride] = useState<{ readonly base: SymbolCode | null; readonly code: SymbolCode } | null>(null);
-  const activeSymbol = override !== null && override.base === linkedSymbol ? override.code : linkedSymbol;
-  const stockSymbol = activeSymbol !== null && !isIndexCode(activeSymbol) ? activeSymbol : null;
+  const stockSymbol = linkedSymbol !== null && !isIndexCode(linkedSymbol) ? linkedSymbol : null;
   const symbolInfo = useSymbolInfo(stockSymbol);
-  const [selectedBySymbol, setSelectedBySymbol] = useState<{ readonly symbol: SymbolCode; readonly days: readonly string[] } | null>(null);
 
-  useEffect(() => {
-    setOverride((prev) => (prev !== null && prev.base !== linkedSymbol ? null : prev));
-  }, [linkedSymbol]);
-
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const update = (width: number) => {
-      if (width > 0) setWide(width >= WIDE_BREAKPOINT_PX);
-    };
-    update(el.getBoundingClientRect().width);
-    const observer = new ResizeObserver((entries) => {
-      const width = entries[0]?.contentRect.width ?? 0;
-      update(width);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
+  const [range, setRange] = useState<CompareRange>(10);
+  const [unit, setUnit] = useState<VolumeUnit>("qty");
+  const [bgStyle, setBgStyle] = useState<BackgroundStyle>("both");
+  const [focusBySymbol, setFocusBySymbol] = useState<{ readonly symbol: SymbolCode; readonly date: string } | null>(null);
+  const [pinnedBySymbol, setPinnedBySymbol] = useState<{ readonly symbol: SymbolCode; readonly dates: readonly string[] } | null>(null);
+  const [spotDate, setSpotDate] = useState<string | null>(null);
 
   const daysQuery = usePreMarketDays(stockSymbol);
   const availableDays = daysQuery.data?.days ?? [];
 
-  const selectedDays = useMemo(() => {
-    if (stockSymbol === null) return [];
-    if (selectedBySymbol !== null && selectedBySymbol.symbol === stockSymbol) {
-      const valid = selectedBySymbol.days.filter((d) => availableDays.includes(d));
-      if (valid.length > 0) return valid;
-    }
-    return defaultSelectedDates(availableDays);
-  }, [stockSymbol, selectedBySymbol, availableDays]);
-
-  const compareQuery = usePreMarketCompare(stockSymbol, selectedDays);
-  const snapshotQuery = usePreMarketSnapshot(snapshotDate);
-
-  useEffect(() => {
-    const incoming = snapshotQuery.data?.availableDates ?? [];
-    if (incoming.length > 0) {
-      setKnownSnapshotDates(incoming);
-    } else if (snapshotQuery.data?.date) {
-      const fallbackDate = snapshotQuery.data.date;
-      setKnownSnapshotDates((prev) => (prev.length > 0 ? prev : [fallbackDate]));
-    }
-  }, [snapshotQuery.data?.availableDates, snapshotQuery.data?.date]);
-
-  const handleToggleDay = (date: string) => {
-    if (stockSymbol === null) return;
-    setSelectedBySymbol({ symbol: stockSymbol, days: toggleDateSelection(selectedDays, date) });
-  };
-
-  const handleSelectStock = (row: PreMarketSnapshotRow) => {
-    const activeCell = useSelectionStore.getState().activeCell;
-    const layoutStore = useLayoutStore.getState();
-    const currentWin = layoutStore.layout.windows.find((w) => w.id === id);
-    if (currentWin && currentWin.kind === "premarket" && currentWin.symbol !== undefined) {
-      layoutStore.pinSymbol(id, row.code);
-    }
-    layoutStore.sendSymbol(id, activeCell, { code: row.code, name: row.name });
-    const nextLinked = linkedWindowSymbol(useLayoutStore.getState().layout, id, activeCell);
-    setOverride(nextLinked === row.code ? null : { base: nextLinked, code: row.code });
-    if (!wide) setNarrowTab("compare");
-  };
-
-  const compareError = daysQuery.error?.message ?? compareQuery.error?.message ?? null;
-  const snapshotError = snapshotQuery.error?.message ?? null;
-
-  const comparePane =
-    stockSymbol === null ? (
-      <div className="pm-pane" data-testid="premarket-compare-pane">
-        <div className="pm-toolbar">
-          <span className="pm-toolbar-title">08:30–09:00 날짜 비교</span>
-        </div>
-        <div className="pm-empty">주식을 선택하면 장전 예상체결 날짜 비교를 볼 수 있습니다</div>
-      </div>
-    ) : (
-      <OverlayChart
-        availableDays={availableDays}
-        selectedDays={selectedDays}
-        onToggleDay={handleToggleDay}
-        series={compareQuery.data?.series ?? []}
-        loading={daysQuery.isLoading || compareQuery.isLoading}
-        error={compareError}
-      />
-    );
-
-  const snapshotPane = (
-    <SnapshotPane
-      snapshot={snapshotQuery.data}
-      fallbackDates={knownSnapshotDates}
-      selectedDate={snapshotDate}
-      onChangeDate={(next) => setSnapshotDate(next || undefined)}
-      activeSymbol={stockSymbol}
-      onSelectStock={handleSelectStock}
-      loading={snapshotQuery.isLoading}
-      error={snapshotError}
-    />
+  const rangeDates = useMemo(
+    () => (stockSymbol === null ? [] : selectRangeDates(availableDays, range)),
+    [stockSymbol, availableDays, range],
   );
+
+  const compareQuery = usePreMarketCompare(stockSymbol, rangeDates);
+  const series = compareQuery.data?.series ?? [];
+
+  const focusDate = useMemo(() => {
+    if (rangeDates.length === 0) return null;
+    if (focusBySymbol !== null && focusBySymbol.symbol === stockSymbol && rangeDates.includes(focusBySymbol.date)) {
+      return focusBySymbol.date;
+    }
+    return rangeDates[rangeDates.length - 1] ?? null;
+  }, [rangeDates, focusBySymbol, stockSymbol]);
+
+  const pinnedDates = useMemo(() => {
+    if (stockSymbol === null || rangeDates.length === 0) return [];
+    if (pinnedBySymbol !== null && pinnedBySymbol.symbol === stockSymbol) {
+      return pinnedBySymbol.dates.filter((d) => d !== focusDate && rangeDates.includes(d));
+    }
+    return [];
+  }, [stockSymbol, rangeDates, pinnedBySymbol, focusDate]);
+
+  const focusSeries = useMemo(
+    () => series.find((s) => s.date === focusDate) ?? series[series.length - 1] ?? null,
+    [series, focusDate],
+  );
+
+  const pastSeries = useMemo(
+    () => (focusSeries ? series.filter((s) => s.date !== focusSeries.date) : []),
+    [series, focusSeries],
+  );
+
+  const historicalBand = useMemo(
+    () => computeHistoricalBand(pastSeries, unit),
+    [pastSeries, unit],
+  );
+
+  const lastFocusPt = focusSeries?.points[focusSeries.points.length - 1] ?? null;
+  const lastBand = lastFocusPt ? nearestBandAt(historicalBand, lastFocusPt.secOfDay) : null;
+  const volRatio =
+    lastFocusPt && lastBand && lastBand.avgVolume > 0
+      ? pointVolumeValue(lastFocusPt, unit) / lastBand.avgVolume
+      : null;
+
+  const handleTogglePin = (date: string) => {
+    if (stockSymbol === null) return;
+    setPinnedBySymbol({
+      symbol: stockSymbol,
+      dates: togglePinnedDate(pinnedDates, date, focusDate),
+    });
+  };
+
+  const handleSelectFocus = (date: string) => {
+    if (stockSymbol === null) return;
+    setFocusBySymbol({ symbol: stockSymbol, date });
+    setPinnedBySymbol({
+      symbol: stockSymbol,
+      dates: pinnedDates.filter((d) => d !== date),
+    });
+    setSpotDate(null);
+  };
+
+  const error = daysQuery.error?.message ?? compareQuery.error?.message ?? null;
+  const loading = daysQuery.isLoading || compareQuery.isLoading;
+  const focusSignal = focusSeries ? signalMeta(focusSeries.classification) : null;
+  const isLiveFlow = focusSeries?.source === "flow";
 
   return (
     <div
-      ref={rootRef}
       className="pm"
       data-testid="premarket-window"
       data-symbol={stockSymbol ?? ""}
-      data-layout={wide ? "wide" : "narrow"}
     >
       <div className="pm-head">
         <div className="pm-sym">
@@ -140,43 +122,146 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
           </span>
           {stockSymbol !== null && <span className="pm-sym-code">{stockSymbol}</span>}
         </div>
+        {focusSeries && lastFocusPt && (
+          <div className="pm-head-metrics" data-testid="premarket-head-metrics">
+            <span className="pm-head-stat">
+              <span className="pm-head-label">{formatShortDate(focusSeries.date)} 예상가</span>
+              <span className="pm-head-val">{formatWon(lastFocusPt.expectedPriceWon)}원</span>
+              <span className="pm-head-val pm-val" data-tone={valueTone(lastFocusPt.expectedReturnPct)}>
+                {formatSignedPct(lastFocusPt.expectedReturnPct)}
+              </span>
+            </span>
+            <span className="pm-head-stat">
+              <span className="pm-head-label">예상물량</span>
+              <span className="pm-head-val pm-val" data-tone="accent">
+                {formatVolumeValue(pointVolumeValue(lastFocusPt, unit), unit)}
+              </span>
+              {volRatio !== null && (
+                <span
+                  className="pm-head-ratio pm-val"
+                  data-tone={volRatio >= 1.5 ? "accent" : volRatio <= 0.75 ? "warn" : "flat"}
+                >
+                  ({pastSeries.length}일 평균 ×{volRatio.toFixed(1)})
+                </span>
+              )}
+            </span>
+            {focusSignal && (
+              <span className="pm-badge" data-tone={isLiveFlow ? "ext" : focusSignal.tone}>
+                {isLiveFlow ? "수신 중" : focusSignal.label}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {!wide && (
-        <div className="pm-tabs" role="tablist" aria-label="장전 동시호가 보기">
-          <button
-            type="button"
-            role="tab"
-            className="pm-tab"
-            aria-selected={narrowTab === "compare"}
-            onClick={() => setNarrowTab("compare")}
-          >
-            날짜 비교
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="pm-tab"
-            aria-selected={narrowTab === "snapshot"}
-            onClick={() => setNarrowTab("snapshot")}
-          >
-            전 종목 스냅샷
-          </button>
+      {stockSymbol !== null && (
+        <div className="pm-toolbar">
+          <div className="pm-ctrl-group" role="group" aria-label="비교 기간">
+            <button
+              type="button"
+              className="pm-seg-btn"
+              data-testid="premarket-range-5"
+              aria-pressed={range === 5}
+              onClick={() => setRange(5)}
+            >
+              5일
+            </button>
+            <button
+              type="button"
+              className="pm-seg-btn"
+              data-testid="premarket-range-10"
+              aria-pressed={range === 10}
+              onClick={() => setRange(10)}
+            >
+              2주(10일)
+            </button>
+          </div>
+
+          <div className="pm-ctrl-group" role="group" aria-label="과거일 표시">
+            <button
+              type="button"
+              className="pm-seg-btn"
+              data-testid="premarket-bg-both"
+              aria-pressed={bgStyle === "both"}
+              onClick={() => setBgStyle("both")}
+            >
+              선+밴드
+            </button>
+            <button
+              type="button"
+              className="pm-seg-btn"
+              data-testid="premarket-bg-band"
+              aria-pressed={bgStyle === "band"}
+              onClick={() => setBgStyle("band")}
+            >
+              밴드만
+            </button>
+            <button
+              type="button"
+              className="pm-seg-btn"
+              data-testid="premarket-bg-lines"
+              aria-pressed={bgStyle === "lines"}
+              onClick={() => setBgStyle("lines")}
+            >
+              선만
+            </button>
+          </div>
+
+          <div className="pm-ctrl-group" role="group" aria-label="물량 단위">
+            <button
+              type="button"
+              className="pm-seg-btn"
+              data-testid="premarket-unit-qty"
+              aria-pressed={unit === "qty"}
+              onClick={() => setUnit("qty")}
+            >
+              체결량(주)
+            </button>
+            <button
+              type="button"
+              className="pm-seg-btn"
+              data-testid="premarket-unit-turnover"
+              aria-pressed={unit === "turnover"}
+              onClick={() => setUnit("turnover")}
+            >
+              체결대금(억)
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="pm-split">
-        {wide ? (
-          <>
-            {comparePane}
-            {snapshotPane}
-          </>
-        ) : narrowTab === "compare" ? (
-          comparePane
-        ) : (
-          snapshotPane
-        )}
-      </div>
+      {stockSymbol === null ? (
+        <div className="pm-empty">주식을 선택하면 장전 예상체결 추이를 볼 수 있습니다</div>
+      ) : error !== null ? (
+        <div className="pm-empty" role="alert">{error}</div>
+      ) : loading && series.length === 0 ? (
+        <div className="pm-empty">장전 예상체결 자료를 불러오는 중입니다</div>
+      ) : rangeDates.length === 0 ? (
+        <div className="pm-empty">수집된 장전 예상체결 자료가 없습니다</div>
+      ) : (
+        <div className="pm-workspace">
+          <DateListPane
+            rangeDates={rangeDates}
+            series={series}
+            focusDate={focusDate}
+            pinnedDates={pinnedDates}
+            spotDate={spotDate}
+            range={range}
+            unit={unit}
+            onSpotDate={setSpotDate}
+            onTogglePin={handleTogglePin}
+            onSelectFocus={handleSelectFocus}
+          />
+          <OverlayChart
+            series={series}
+            focusDate={focusDate}
+            pinnedDates={pinnedDates}
+            spotDate={spotDate}
+            unit={unit}
+            bgStyle={bgStyle}
+          />
+        </div>
+      )}
     </div>
   );
 }
