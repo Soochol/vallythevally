@@ -504,3 +504,44 @@ fn unsigned_call_auction_ticks_do_not_skew_cvd_buckets() {
     assert_eq!(points.len(), 1);
     assert!((points[0].whale_net_million_won - (-100.0)).abs() < 1e-9);
 }
+
+#[tokio::test]
+async fn watch_micro_returns_disabled_or_batch_totals_and_validates_limit() {
+    let disabled = Harness::start(false).await;
+    let (status, body) = disabled.get("/api/watch/micro?symbols=005930,IDX:001").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["state"], "disabled");
+    assert_eq!(body["rows"].as_array().unwrap().len(), 0);
+
+    let harness = Harness::start(true).await;
+    write_complete(&harness.data, CLOSED);
+    write_parquet(
+        &harness.data,
+        CLOSED,
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql(at_sec(23, 9, 0, 5) * 1000, "090005", 100_000, 1_500),
+            tick_sql(at_sec(23, 9, 1, 5) * 1000, "090105", 100_000, -500),
+        ],
+    );
+    write_parquet(
+        &harness.data,
+        CLOSED,
+        "0w",
+        "005930_AL",
+        &[program_sql(at_sec(23, 9, 0, 10) * 1000, "090010", 120, 480, 3_200, 360)],
+    );
+    let (status, body) = harness.get("/api/watch/micro?symbols=005930,IDX:001,000660").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["state"], "ready");
+    let rows = body["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["symbol"], "005930");
+    assert!((rows[0]["programNetMillionWon"].as_f64().unwrap() - 360.0).abs() < 1e-6);
+    assert!((rows[0]["whaleNetMillionWon"].as_f64().unwrap() - 150.0).abs() < 1e-6);
+
+    let too_many = (0..201).map(|i| format!("{i:06}")).collect::<Vec<_>>().join(",");
+    let (status, _) = harness.get(&format!("/api/watch/micro?symbols={too_many}")).await;
+    assert_eq!(status, 400);
+}

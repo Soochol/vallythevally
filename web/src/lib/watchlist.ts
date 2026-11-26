@@ -8,10 +8,33 @@ export const MAX_WATCH_GROUPS = 100;
 export const FIRST_WATCHLIST_ID = "01900000-0000-7000-8000-000000000002";
 export const DEFAULT_WATCHLISTS: readonly Watchlist[] = [{ id: FIRST_WATCHLIST_ID, name: "기본", symbols: [], groups: [] }];
 
-export const WATCH_COLUMNS = ["price", "change", "changeRate", "volume"] as const;
+export const WATCH_COLUMNS = ["price", "change", "changeRate", "tradedValue", "volume", "program", "whale"] as const;
 export type WatchColumn = (typeof WATCH_COLUMNS)[number];
 export const DEFAULT_WATCH_COLUMNS: readonly WatchColumn[] = ["price", "changeRate"];
-export const WATCH_COLUMN_LABEL: Record<WatchColumn, string> = { price: "현재가", change: "등락", changeRate: "등락률", volume: "거래량" };
+export const WATCH_COLUMN_LABEL: Record<WatchColumn, string> = {
+  price: "현재가",
+  change: "등락",
+  changeRate: "등락률",
+  tradedValue: "거래대금",
+  volume: "거래량",
+  program: "프로그램",
+  whale: "고래",
+};
+
+export interface WatchColumnPreset {
+  readonly id: string;
+  readonly label: string;
+  readonly columns: readonly WatchColumn[];
+}
+
+export const WATCH_COLUMN_PRESETS: readonly WatchColumnPreset[] = [
+  { id: "basic", label: "기본", columns: ["price", "changeRate"] },
+  { id: "quote", label: "시세 상세", columns: ["price", "changeRate", "tradedValue", "volume"] },
+  { id: "flow", label: "수급 모니터링", columns: ["price", "changeRate", "program", "whale"] },
+  { id: "all", label: "전체", columns: WATCH_COLUMNS },
+];
+
+export const isMicroWatchColumn = (column: WatchColumn): boolean => column === "program" || column === "whale";
 
 export function addSymbol(list: readonly SymbolCode[], code: SymbolCode): readonly SymbolCode[] {
   return list.includes(code) ? list : [...list, code];

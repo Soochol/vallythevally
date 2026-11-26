@@ -132,6 +132,19 @@ export function fakeApi(screenerScenario: string | undefined): Plugin {
           await sleep(SCREENER_RUN_DELAY_MS);
           return reply(res, screener.run(body));
         }
+        if (path === "/watch/micro" && method === "GET") {
+          const codes = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);
+          if (codes.length > 200) return fail(res, 400, "bad_request", "종목은 한 번에 200개까지입니다");
+          const rows = codes
+            .filter((code) => !code.startsWith("IDX:") && findSymbol(code))
+            .map((code) => {
+              const seed = [...code].reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 7);
+              const program = ((seed % 900) - 350) * 2;
+              const whale = (((seed >> 3) % 600) - 240);
+              return { symbol: code, programNetMillionWon: program, whaleNetMillionWon: whale };
+            });
+          return send(res, 200, { state: "ready", rows });
+        }
         if (path === "/quotes") {
           const codes = (url.searchParams.get("symbols") ?? "").split(",").filter(Boolean);
           if (codes.length > 200) return fail(res, 400, "bad_request", "종목은 한 번에 200개까지입니다");

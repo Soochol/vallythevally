@@ -84,7 +84,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     theme: "dark",
     recentSymbols: pick("recentSymbols", recentSymbols, isStringArray, [], true).slice(0, MAX_RECENT),
     activeWatchlistId: pick("activeWatchlistId", activeWatchlistId, (x): x is string | null => x === null || typeof x === "string", null, true),
-    watchColumns: sortColumns(pick("watchColumns", watchColumns, isColumns, DEFAULT_WATCH_COLUMNS, true)),
+    watchColumns: pick("watchColumns", watchColumns, isColumns, DEFAULT_WATCH_COLUMNS, true),
     drawing: parseDrawingPrefs(drawing),
     indicatorWindow: windowMode,
     layoutMode: pick("layoutMode", layoutMode, (x): x is LayoutMode => x === "dock" || x === "canvas", "dock", true),

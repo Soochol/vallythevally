@@ -14,7 +14,6 @@ test.beforeEach(async ({ page }) => {
 
 const THREE = ["005930", "086520", "005935"];
 const FOUR = [...THREE, "000660"];
-const LINE = "rgba(255, 255, 255, 0.08) 0px 1px 0px 0px inset";
 
 const panel = (page: Page) => page.getByRole("complementary", { name: "관심종목" });
 const row = (page: Page, code: string) => panel(page).locator(`li[data-code="${code}"]`);
@@ -183,11 +182,19 @@ test("방향키로 고른 줄은 초점 테두리 없이 바탕만 있고 Alt �
 test("종목과 종목 사이에만 옅은 1px 선이 있고 줄 높이는 그대로다", async ({ scenario, page }) => {
   seed(scenario, FOUR, [{ id: "g1", name: "첫째", symbols: ["005930", "086520"] }]);
   await open(page);
+  const lineShadow = await page.evaluate(() => {
+    const el = document.createElement("i");
+    el.style.boxShadow = "inset 0 1px 0 var(--line-subtle)";
+    document.body.append(el);
+    const computed = getComputedStyle(el).boxShadow;
+    el.remove();
+    return computed;
+  });
   const lines = await panel(page).locator("li[data-code]").evaluateAll((items, line) => items.map((el) => ({
     code: el.getAttribute("data-code"),
     line: getComputedStyle(el).boxShadow.includes(line),
     height: (el as HTMLElement).offsetHeight,
-  })), LINE);
+  })), lineShadow);
   expect(lines).toEqual([
     { code: "005930", line: false, height: 34 },
     { code: "086520", line: true, height: 34 },

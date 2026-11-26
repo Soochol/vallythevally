@@ -9,7 +9,7 @@ import type { DrawingPrefs } from "../chart/drawings/prefs";
 import { actualKeys, type ActionKeys, type HotkeyOverrides } from "../lib/hotkeys";
 import { type OrderEntries, type OrderEntry, orderEntryKey, withOrderEntry } from "../features/order/orderEntries";
 import type { OrderSettings } from "../features/order/orderSettings";
-import { DEFAULT_UI_PREFS, MAX_RECENT, sortColumns, type IndicatorWindow, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
+import { DEFAULT_UI_PREFS, MAX_RECENT, type IndicatorWindow, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 import { registerWindowReclaim } from "./windowReclaim";
 
 interface UiStore {
@@ -23,6 +23,8 @@ interface UiStore {
   setLastLayoutId(id: string): void;
   setActiveWatchlist(id: string): void;
   toggleWatchColumn(column: WatchColumn): void;
+  setWatchColumns(columns: readonly WatchColumn[]): void;
+  moveWatchColumn(column: WatchColumn, step: -1 | 1): void;
   setDrawingPrefs(patch: Partial<DrawingPrefs>): void;
   setWatchGroupCollapsed(id: string, collapsed: boolean, known: readonly string[]): void;
   setIndicatorWindow(mode: IndicatorWindow | null): void;
@@ -91,8 +93,22 @@ export const useUiStore = create<UiStore>()((set, get) => {
     toggleWatchColumn: (column) =>
       edit((p) => ({
         ...p,
-        watchColumns: p.watchColumns.includes(column) ? p.watchColumns.filter((c) => c !== column) : sortColumns([...p.watchColumns, column]),
+        watchColumns: p.watchColumns.includes(column) ? p.watchColumns.filter((c) => c !== column) : [...p.watchColumns, column],
       })),
+    setWatchColumns: (columns) =>
+      edit((p) => {
+        const unique = [...new Set(columns)];
+        return unique.length === p.watchColumns.length && unique.every((c, i) => c === p.watchColumns[i]) ? p : { ...p, watchColumns: unique };
+      }),
+    moveWatchColumn: (column, step) =>
+      edit((p) => {
+        const from = p.watchColumns.indexOf(column);
+        const to = from + step;
+        if (from < 0 || to < 0 || to >= p.watchColumns.length) return p;
+        const next = [...p.watchColumns];
+        [next[from], next[to]] = [next[to]!, next[from]!];
+        return { ...p, watchColumns: next };
+      }),
   };
 });
 

@@ -27,6 +27,8 @@ import {
   PHASE_LABEL,
   type RunBlock,
   runBlock,
+  SCREENER_QUICK_PRESETS,
+  type ScreenerQuickPreset,
   showsUpdateBand,
   sortRows,
   type StatusFooter,
@@ -36,6 +38,7 @@ import {
   type UpdateRetry,
   updateRetry,
 } from "../../lib/screener";
+import { draftOf } from "../screen-dialog/screenForm";
 import { listNameFrom, MAX_WATCHLISTS } from "../../lib/watchlist";
 import { useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { activeWatchWindow } from "../../stores/activeWindow";
@@ -44,7 +47,7 @@ import { type Rerun, rerunReason, type ScreenRun, shownResult, useScreenerStore 
 import { useSelectionStore } from "../../stores/selection";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useWatchlistStore } from "../../stores/watchlist";
-import { ChevronIcon, EmptyBoxIcon, InfoIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SpinnerIcon, WarningIcon } from "../icons";
+import { ChevronIcon, CloseIcon, EmptyBoxIcon, InfoIcon, MoreIcon, PenIcon, PlayIcon, PlusIcon, SearchIcon, SpinnerIcon, WarningIcon } from "../icons";
 import { OVERLAY_GAP, placeOverlay } from "../overlay/position";
 import { Skeleton } from "../overlay/State";
 import { Badge } from "../ui/Badge";
@@ -52,6 +55,7 @@ import { Menu, type MenuItem } from "../menu/Menu";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { DataAgeNote } from "../data-age/DataAgeNote";
 import { RESULT_KEYS_HINT, ResultTable } from "./ResultTable";
+import { ScreenerColumnPicker } from "./ScreenerColumnPicker";
 import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
 import { nextResult, resultKeyAction } from "./results";
 
@@ -157,6 +161,25 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
   const sort = useScreenerStore((s) => s.sort);
   const result = shownResult(run);
   const rows = useMemo(() => (result ? sortRows(result.rows, sort) : []), [result, sort]);
+  const [filterText, setFilterText] = useState("");
+  const [onlyRising, setOnlyRising] = useState(false);
+  const [onlyBothBuy, setOnlyBothBuy] = useState(false);
+  const screenId = screen?.id ?? null;
+  useEffect(() => {
+    setFilterText("");
+    setOnlyRising(false);
+    setOnlyBothBuy(false);
+  }, [screenId]);
+  const filteredRows = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    if (!q && !onlyRising && !onlyBothBuy) return rows;
+    return rows.filter((row) => {
+      if (q && !row.name.toLowerCase().includes(q) && !row.symbol.toLowerCase().includes(q)) return false;
+      if (onlyRising && (row.changeRate === null || row.changeRate <= 0)) return false;
+      if (onlyBothBuy && !((row.programNetMillionWon ?? 0) > 0 && (row.whaleNetMillionWon ?? 0) > 0)) return false;
+      return true;
+    });
+  }, [rows, filterText, onlyRising, onlyBothBuy]);
   const queryClient = useQueryClient();
   const active = useWatchedSymbol(id);
   const [editing, setEditing] = useState(false);
@@ -172,12 +195,27 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
     screenEditing.create();
     setEditing(true);
   };
+  const createPreset = (preset: ScreenerQuickPreset) => {
+    screenEditing.create();
+    screenEditing.edit(() => draftOf({ id: "", ...preset.screen }));
+    if (desktop) setEditing(true);
+    else openDialog(id);
+  };
   const createScreen = desktop ? createInPanel : () => createInDialog(screenEditing, id);
   useMountedWindow(id);
-  useResultKeys({ rows, active, onSelect: select, onRun: execute }, () => ownsKeys(id));
+  useResultKeys({ rows: filteredRows, active, onSelect: select, onRun: execute }, () => ownsKeys(id));
   useEffect(() => dropPendingOpen, []);
   const band = status !== undefined && showsUpdateBand(status);
   const offline = useFeedBeforeConnect() !== null;
+  const resultFilter: ResultFilterState = {
+    query: filterText,
+    onlyRising,
+    onlyBothBuy,
+    onQuery: setFilterText,
+    onToggleRising: () => setOnlyRising((v) => !v),
+    onToggleBothBuy: () => setOnlyBothBuy((v) => !v),
+    onReset: () => { setFilterText(""); setOnlyRising(false); setOnlyBothBuy(false); },
+  };
   return (
     <aside aria-label="스크리너" data-chart-control className="flex min-h-0 min-w-0 flex-1 flex-col" onPointerDownCapture={() => { lastTouchedWindow = id; }} onFocusCapture={() => { lastTouchedWindow = id; }}>
       {offline && status?.lastDay && <p className="flex-none border-b border-line px-3 py-1.5 text-xs text-text-2">저장된 일봉 {status.lastDay.slice(5).replace("-", "/")}까지 · 오늘 시세는 연결 뒤에 합칩니다</p>}
@@ -185,22 +223,22 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
         <div className="max-h-[50%] flex-none overflow-y-auto">
           {band && <UpdateBand status={status} />}
           {chosen && desktop ? (
-            <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} menu={(screenItems) => <PanelMenu screen={screen} rows={rows} status={status} lead={screenItems} />} editing={editing} onEditingChange={setEditing} onRun={execute} />
+            <SentenceEditor screenEditing={screenEditing} chosen={chosen} entries={view.entries} blocked={!status || block !== null} menu={(screenItems) => <PanelMenu screen={screen} rows={filteredRows} status={status} lead={screenItems} />} editing={editing} onEditingChange={setEditing} onRun={execute} />
           ) : chosen ? (
-            <ScreenHeader windowId={id} screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={rows} onRun={execute} />
+            <ScreenHeader windowId={id} screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={filteredRows} onRun={execute} />
           ) : (
             <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
               <h2 className="text-l font-[700]">스크리너</h2>
               <span className="flex-1" />
-              <PanelMenu screen={null} rows={rows} status={status} />
+              <PanelMenu screen={null} rows={filteredRows} status={status} />
             </header>
           )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {screen ? (
-            <Results screen={screen} run={run} rows={rows} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : () => openDialog(id)} selected={active} onSelect={select} />
+            <Results screen={screen} run={run} rows={rows} filteredRows={filteredRows} filter={resultFilter} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : () => openDialog(id)} selected={active} onSelect={select} />
           ) : (
-            <NoScreen query={screens} onCreate={createScreen} />
+            <NoScreen query={screens} onCreate={createScreen} onPreset={createPreset} />
           )}
         </div>
       </div>
@@ -388,7 +426,7 @@ function StatePanel({ title, children, action, tone, icon, busy }: { title: stri
   );
 }
 
-function NoScreen({ query, onCreate }: { query: UseQueryResult<Screens>; onCreate(): void }) {
+function NoScreen({ query, onCreate, onPreset }: { query: UseQueryResult<Screens>; onCreate(): void; onPreset(preset: ScreenerQuickPreset): void }) {
   if (query.isPending) return <Skeleton label="조건식을 불러오는 중" rows={6} />;
   if (query.isError) {
     return (
@@ -401,9 +439,23 @@ function NoScreen({ query, onCreate }: { query: UseQueryResult<Screens>; onCreat
     <StatePanel
       title="저장한 조건식이 없습니다"
       action={
-        <button type="button" className="btn-primary btn-sm" onClick={onCreate}>
-          <PlusIcon size={14} />새 조건식
-        </button>
+        <div className="flex flex-col items-center gap-2.5">
+          <button type="button" className="btn-primary btn-sm" onClick={onCreate}>
+            <PlusIcon size={14} />새 조건식
+          </button>
+          <div role="group" aria-label="추천 프리셋" className="flex max-w-[260px] flex-wrap justify-center gap-1">
+            {SCREENER_QUICK_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="h-6 rounded-s border border-line bg-raised px-2 text-xs text-text-2 hover:border-accent hover:text-text"
+                onClick={() => onPreset(preset)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
       }
     >
       조건식에 이름과 조건을 정해 저장하면 여기서 골라 실행합니다.
@@ -429,10 +481,22 @@ const NOT_RUN: Record<RunBlock | "ready", { title: string; body: string }> = {
   empty: { title: "저장소가 비어 있습니다", body: "위에서 처음 받기를 누르면 KRX 일봉을 받습니다." },
 };
 
+interface ResultFilterState {
+  query: string;
+  onlyRising: boolean;
+  onlyBothBuy: boolean;
+  onQuery(value: string): void;
+  onToggleRising(): void;
+  onToggleBothBuy(): void;
+  onReset(): void;
+}
+
 interface ResultsProps {
   screen: Screen;
   run: ScreenRun | null;
   rows: readonly ScreenerRow[];
+  filteredRows: readonly ScreenerRow[];
+  filter: ResultFilterState;
   status: ScreenerStatus | undefined;
   block: RunBlock | null;
   onRun(): void;
@@ -441,7 +505,7 @@ interface ResultsProps {
   onSelect(code: SymbolCode): void;
 }
 
-function Results({ screen, run, rows, status, block, onRun, onEdit, selected, onSelect }: ResultsProps) {
+function Results({ screen, run, rows, filteredRows, filter, status, block, onRun, onEdit, selected, onSelect }: ResultsProps) {
   const result = shownResult(run);
   const storeVersion = useScreenerStore((s) => s.storeVersion);
   const rerun = block === null ? rerunReason(run, storeVersion, status) : null;
@@ -460,7 +524,7 @@ function Results({ screen, run, rows, status, block, onRun, onEdit, selected, on
           <RetryButton disabled={block !== null} onClick={onRun} />
         </div>
       )}
-      <ResultList screen={screen} result={result} rows={rows} running={run?.kind === "running"} rerun={rerun} onRun={onRun} onEdit={onEdit} selected={selected} onSelect={onSelect} />
+      <ResultList screen={screen} result={result} rows={rows} filteredRows={filteredRows} filter={filter} running={run?.kind === "running"} rerun={rerun} onRun={onRun} onEdit={onEdit} selected={selected} onSelect={onSelect} />
     </>
   );
   if (failure) return (
@@ -537,16 +601,72 @@ function ResultInfo({ result }: { result: ScreenerResult }) {
   );
 }
 
-function ResultList({ screen, result, rows, running, rerun, onRun, onEdit, selected, onSelect }: ResultListProps) {
+function ResultList({ screen, result, rows, filteredRows, filter, running, rerun, onRun, onEdit, selected, onSelect }: ResultListProps) {
   const sort = useScreenerStore((s) => s.sort);
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
+  const hasFilter = filter.query.trim() !== "" || filter.onlyRising || filter.onlyBothBuy;
+  const hasBothMicro = rows.some((row) => row.programNetMillionWon !== undefined) && rows.some((row) => row.whaleNetMillionWon !== undefined);
   return (
     <section aria-label="결과" aria-busy={running} className={`flex flex-col ${running ? "opacity-50" : ""}`}>
-      <div className="flex h-7 flex-none items-center gap-1.5 pl-3 pr-1.5 text-s">
-        <span className="min-w-0 flex-1 truncate text-text-2"><span className="font-[600] text-text">{count(rows.length)}종목</span> · {dayLabel(result.asOf, result.asOf)} 기준</span>
+      <div className="flex h-7 flex-none items-center gap-1 pl-3 pr-1.5 text-s">
+        <span className="min-w-0 flex-1 truncate text-text-2">
+          <span className="font-[600] text-text">{hasFilter ? `${count(filteredRows.length)} / ${count(rows.length)}` : count(rows.length)}종목</span> · {dayLabel(result.asOf, result.asOf)} 기준
+        </span>
         <DataAgeNote recordedAt={result.collectionCompletedAt} cadence="screener" />
+        {rows.length > 0 && <ScreenerColumnPicker rows={rows} />}
         <ResultInfo result={result} />
       </div>
+      {rows.length > 0 && (
+        <div className="flex h-8 flex-none items-center gap-1 border-t border-line-subtle bg-[color-mix(in_srgb,var(--raised)_28%,var(--surface))] px-2.5">
+          <label className="relative flex min-w-0 flex-1 items-center">
+            <span className="pointer-events-none absolute left-1.5 text-text-3"><SearchIcon size={12} /></span>
+            <input
+              type="search"
+              aria-label="결과 내 검색"
+              placeholder="종목명·코드"
+              value={filter.query}
+              onChange={(e) => filter.onQuery(e.target.value)}
+              className="h-[var(--ctl-xs)] w-full min-w-0 rounded-s border border-line bg-surface pl-6 pr-5 text-xs text-text outline-none placeholder:text-text-3 focus:border-accent"
+            />
+            {filter.query && (
+              <button
+                type="button"
+                aria-label="검색 지우기"
+                className="absolute right-1 grid size-4 place-items-center rounded-s text-text-3 hover:text-text"
+                onClick={() => filter.onQuery("")}
+              >
+                <CloseIcon size={11} />
+              </button>
+            )}
+          </label>
+          <button
+            type="button"
+            aria-pressed={filter.onlyRising}
+            onClick={filter.onToggleRising}
+            className={`h-[var(--ctl-xs)] flex-none rounded-s px-2 text-xs font-[500] ${
+              filter.onlyRising
+                ? "bg-up-soft text-up shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--up)_35%,transparent)]"
+                : "bg-raised text-text-2 hover:bg-overlay hover:text-text"
+            }`}
+          >
+            상승
+          </button>
+          {hasBothMicro && (
+            <button
+              type="button"
+              aria-pressed={filter.onlyBothBuy}
+              onClick={filter.onToggleBothBuy}
+              className={`h-[var(--ctl-xs)] flex-none rounded-s px-2 text-xs font-[500] ${
+                filter.onlyBothBuy
+                  ? "bg-accent-soft text-accent shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--accent)_35%,transparent)]"
+                  : "bg-raised text-text-2 hover:bg-overlay hover:text-text"
+              }`}
+            >
+              양매수
+            </button>
+          )}
+        </div>
+      )}
       {rerun && (
         <p className="mx-3 mb-2 flex flex-none items-center gap-2 rounded-s bg-accent-soft px-2 py-1.5 text-xs text-accent">
           {rerun.kind === "new_day" ? `${dayLabel(rerun.day, result.asOf)} 자료가 들어왔습니다` : "저장소 자료가 바뀌었습니다"}
@@ -566,8 +686,13 @@ function ResultList({ screen, result, rows, running, rerun, onRun, onEdit, selec
             : `대상 ${count(result.universe)}종목 가운데 조건을 모두 만족하는 종목이 없습니다.`}
           {left > 0 && ` 상장 기간이나 이력이 짧아 ${count(left)}종목이 빠졌습니다.`}
         </StatePanel>
+      ) : filteredRows.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
+          <p className="text-s text-text-2">필터 조건에 맞는 종목이 없습니다</p>
+          <button type="button" className="btn btn-sm" onClick={filter.onReset}>필터 초기화</button>
+        </div>
       ) : (
-        <ResultTable screen={screen} asOf={result.asOf} rows={rows} selected={selected} sort={sort} onSort={useScreenerStore.getState().setSort} onSelect={onSelect} />
+        <ResultTable screen={screen} asOf={result.asOf} rows={filteredRows} selected={selected} sort={sort} onSort={useScreenerStore.getState().setSort} onSelect={onSelect} />
       )}
     </section>
   );

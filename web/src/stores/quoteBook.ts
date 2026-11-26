@@ -35,6 +35,18 @@ function union(lists: Iterable<readonly SymbolCode[]>): SymbolCode[] {
 
 const sameOrder = (a: readonly SymbolCode[], b: readonly SymbolCode[]) => a.length === b.length && a.every((c, i) => c === b[i]);
 
+function mergeRealtimeQuote(incoming: Quote, previous: Quote | undefined): Quote {
+  if (!previous) return incoming;
+  const volume = incoming.source === "expected" ? previous.volume : incoming.volume;
+  let tradedMillionWon = incoming.tradedMillionWon;
+  if (tradedMillionWon === undefined && previous.tradedMillionWon !== undefined) {
+    const deltaVolume = incoming.source === "expected" ? 0 : Math.max(0, incoming.volume - previous.volume);
+    tradedMillionWon = Math.round(previous.tradedMillionWon + (deltaVolume * incoming.price) / 1_000_000);
+  }
+  if (volume === incoming.volume && tradedMillionWon === incoming.tradedMillionWon) return incoming;
+  return tradedMillionWon === undefined ? { ...incoming, volume } : { ...incoming, volume, tradedMillionWon };
+}
+
 /**
  * 보이는 관심종목 목록들의 현재가. 값은 실시간 `quotes`로 바뀌고, REST는 종목이 목록에 처음 들어올 때나 거래소가 바뀔 때 부른다.
  * 줄마다 같은 상태면 같은 객체를 돌려준다(`useSyncExternalStore`).
@@ -196,7 +208,7 @@ export class QuoteBook {
         for (const q of e.quotes) {
           if (!this.entries.has(q.symbol)) continue;
           const row = this.get(q.symbol);
-          const quote = q.source === "expected" && row.quote ? { ...q, volume: row.quote.volume } : q;
+          const quote = mergeRealtimeQuote(q, row.quote);
           this.put(q.symbol, { quote, limited: row.limited, stale: !this.live || row.limited });
         }
         return;

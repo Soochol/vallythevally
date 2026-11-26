@@ -140,6 +140,15 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
         return { body: { symbol, period, state: "disabled", points: [] } };
       },
     );
+    scenario.on(
+      (url) => url.pathname === "/api/watch/micro",
+      () => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        return { body: { state: "disabled", rows: [] } };
+      },
+    );
     const throttle = cpuThrottleRate();
     if (throttle !== null) {
       const apply = async (page: Page) => { await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: throttle }); };

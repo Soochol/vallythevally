@@ -52,3 +52,22 @@ export function formatDecimal(x: number): string {
   const rounded = Math.round(x * 100) / 100;
   return (rounded < 0 ? MINUS : "") + two.format(Math.abs(rounded));
 }
+
+const one = new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+export function formatMillionWonCompact(millionWon: number): string {
+  const absVal = Math.abs(millionWon);
+  if (absVal >= 1_000_000) return `${one.format(absVal / 1_000_000)}조`;
+  if (absVal >= 100) {
+    const eok = absVal / 100;
+    return `${eok >= 100 ? int.format(Math.round(eok)) : one.format(eok)}억`;
+  }
+  return `${int.format(Math.round(absVal))}백만`;
+}
+
+export function formatSignedMillionWonCompact(millionWon: number): string {
+  const rounded = Math.round(millionWon);
+  if (rounded === 0) return "0";
+  const prefix = rounded > 0 ? "+" : MINUS;
+  return `${prefix}${formatMillionWonCompact(rounded)}`;
+}

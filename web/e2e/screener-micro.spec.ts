@@ -58,6 +58,24 @@ test("프로그램 순매수와 신고가 조건식을 만들고 실행해 결�
   await expectRows(page, [["120010", "가상교차급증"]]);
   await expect(results(page).getByRole("columnheader", { name: "프로그램" })).toBeVisible();
   await expect(results(page).locator('tr[data-code="120010"]')).toContainText("+1,700백만");
+  const upColor = await page.evaluate(() => {
+    const el = document.createElement("i");
+    el.style.color = "var(--up)";
+    document.body.append(el);
+    const computed = getComputedStyle(el).color;
+    el.remove();
+    return computed;
+  });
+  await expect(results(page).locator('tr[data-code="120010"]').getByText("+1,700백만")).toHaveCSS("color", upColor);
+  await results(page).getByRole("button", { name: "스크리너 열 설정" }).click();
+  const colDialog = page.getByRole("dialog", { name: "스크리너 열 설정" });
+  await colDialog.getByRole("checkbox", { name: "거래대금" }).click();
+  await page.keyboard.press("Escape");
+  await expect(results(page).getByRole("columnheader", { name: "거래대금" })).toBeVisible();
+  await results(page).getByRole("searchbox", { name: "결과 내 검색" }).fill("없는종목");
+  await expect(results(page).getByText("필터 조건에 맞는 종목이 없습니다")).toBeVisible();
+  await results(page).getByRole("button", { name: "필터 초기화" }).click();
+  await expectRows(page, [["120010", "가상교차급증"]]);
   expect(runBodies).toHaveLength(1);
   expect(runBodies[0]?.conditions).toEqual([
     { kind: "program_net_buy", days: 5, minMillionWon: 1000, maxMillionWon: null },
