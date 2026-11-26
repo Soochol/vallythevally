@@ -4,6 +4,7 @@ import type { Shape, ToolContext } from "../toolSpec";
 import type { DrawingOp, DrawingScope, ScreenPoint } from "../types";
 import { demo } from "./demo";
 import { eraser } from "./eraser";
+import { measure } from "./measure";
 
 export interface ModeContext {
   ctx: ToolContext;
@@ -21,6 +22,6 @@ export interface ModeSpec {
   preview(path: readonly ScreenPoint[], ctx: ModeContext): readonly Shape[];
   finish(path: readonly ScreenPoint[], partial: boolean, ctx: ModeContext): { ops: readonly DrawingOp[]; transient?: TransientShapes };
 }
-export const MODES: readonly ModeSpec[] = [eraser, demo];
+export const MODES: readonly ModeSpec[] = [measure, eraser, demo];
 export const modeOf = (id: ModeId) => MODES.find((mode) => mode.id === id);
 export const registeredModes = () => new Set(MODES.map((mode) => mode.id));

@@ -1,6 +1,6 @@
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesPrimitive, ISeriesPrimitiveAxisView, IPanePrimitive, PrimitiveHoveredItem, SeriesAttachedParameter } from "lightweight-charts";
 import { contrastRatio, parseColor } from "../../styles/colorMath";
-import { frameHit, type RenderFrame } from "./frame";
+import { frameHit, type RenderFrame, type SnapIndicator } from "./frame";
 import { extendedSegment, HANDLE_DIAMETER_PX } from "./geometry";
 import { prepareText, textFont, textLayout, type TextMeasure } from "./textLayout";
 import type { Shape } from "./toolSpec";
@@ -43,7 +43,10 @@ function readableOnChart(color: string): string {
 }
 function stroke(c: CanvasRenderingContext2D, s: Stroke | undefined) {
   if (!s) return;
+  c.save();
+  if (s.opacity !== undefined) c.globalAlpha *= s.opacity;
   c.strokeStyle = drawingColor(s.color); c.lineWidth = s.width; c.setLineDash(dash[s.dash]); c.stroke();
+  c.restore();
 }
 function fill(c: CanvasRenderingContext2D, f: Fill | undefined) {
   if (!f?.on) return;
@@ -98,6 +101,43 @@ export function paintShape(c: CanvasRenderingContext2D, s: Shape, pane: { width:
       break;
     }
   }
+  c.restore();
+}
+
+function paintSnapIndicator(c: CanvasRenderingContext2D, snap: SnapIndicator, pane: { width: number; height: number }) {
+  const accent = drawingColor(snap.strength === "strong" ? "$warning" : "$accent");
+  const ink = inkOn(accent);
+  const { x, y } = snap.at;
+  c.save();
+  c.beginPath();
+  c.arc(x, y, 10, 0, Math.PI * 2);
+  c.fillStyle = accent;
+  c.globalAlpha = 0.2;
+  c.fill();
+  c.globalAlpha = 1;
+  c.beginPath();
+  c.arc(x, y, 5, 0, Math.PI * 2);
+  c.fillStyle = drawingColor("$chart-bg");
+  c.fill();
+  c.strokeStyle = accent;
+  c.lineWidth = 2;
+  c.stroke();
+  const label = `${snap.tag} ${snap.priceText}`;
+  c.font = `600 11px ${getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() || "monospace"}`;
+  const padX = 6;
+  const h = 20;
+  const w = c.measureText(label).width + padX * 2;
+  const bx = Math.max(4, Math.min(pane.width - w - 4, x + 12 + w <= pane.width - 4 ? x + 12 : x - 12 - w));
+  const by = Math.max(4, Math.min(pane.height - h - 4, y - h - 8 >= 4 ? y - h - 8 : y + 10));
+  c.fillStyle = accent;
+  c.beginPath();
+  if (typeof c.roundRect === "function") c.roundRect(bx, by, w, h, 5);
+  else c.rect(bx, by, w, h);
+  c.fill();
+  c.fillStyle = ink;
+  c.textAlign = "left";
+  c.textBaseline = "middle";
+  c.fillText(label, bx + padX, by + h / 2 + 0.5);
   c.restore();
 }
 
@@ -162,6 +202,12 @@ export class DrawingLayer implements ISeriesPrimitive {
       const f = this.frame;
       for (const item of f.items) {
         for (const s of item.shapes) paintShape(c, s, f.pane);
+        if (item.hovered) {
+          for (const p of item.anchors ?? []) {
+            c.save(); c.beginPath(); c.arc(p.x, p.y, HANDLE_DIAMETER_PX / 2 + 1, 0, Math.PI * 2);
+            c.strokeStyle = drawingColor("$accent"); c.lineWidth = 2; c.stroke(); c.restore();
+          }
+        }
         for (const p of item.handles) {
           c.save(); c.beginPath(); c.arc(p.x, p.y, HANDLE_DIAMETER_PX / 2, 0, Math.PI * 2);
           c.fillStyle = drawingColor("$chart-bg"); c.fill();
@@ -174,6 +220,7 @@ export class DrawingLayer implements ISeriesPrimitive {
         const { start: a, end: b } = f.box;
         paintShape(c, { kind: "rect", a, b, stroke: { color: "$draw", width: 1, dash: "dashed" }, fill: { on: true, color: "$draw", opacity: 0.08 } }, f.pane);
       }
+      if (f.snapIndicator) paintSnapIndicator(c, f.snapIndicator, f.pane);
     });
   }
 }

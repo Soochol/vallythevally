@@ -10,6 +10,7 @@ export interface PositionStyle {
   profit: Fill;
   stop: Fill;
   label: TextStyle;
+  riskBudget?: number;
 }
 
 export const positionDefaults = (): PositionStyle => ({
@@ -22,7 +23,8 @@ export const positionDefaults = (): PositionStyle => ({
 export function parsePositionStyle(raw: unknown): PositionStyle {
   const d = positionDefaults();
   const o = readRecord(raw);
-  return { ...o, v: 1, profit: readFill(o.profit, d.profit), stop: readFill(o.stop, d.stop), label: readTextStyle(o.label, d.label) };
+  const riskBudget = typeof o.riskBudget === "number" && Number.isFinite(o.riskBudget) && o.riskBudget > 0 ? Math.round(o.riskBudget) : undefined;
+  return { ...o, v: 1, profit: readFill(o.profit, d.profit), stop: readFill(o.stop, d.stop), label: readTextStyle(o.label, d.label), ...(riskBudget === undefined ? {} : { riskBudget }) };
 }
 
 export const TARGET_RATIO = 0.1;
@@ -97,7 +99,19 @@ function positionTool(side: PositionSide): Tool {
     ],
     defaultStyle: positionDefaults,
     parseStyle: parsePositionStyle,
-    bar: { textColor: L("label", "color") },
+    bar: {
+      textColor: L("label", "color"),
+      riskBudget: {
+        get: (s) => s.riskBudget ?? 0,
+        set: (s, v) => {
+          if (v <= 0) {
+            const { riskBudget: _, ...rest } = s;
+            return rest;
+          }
+          return { ...s, riskBudget: Math.round(v) };
+        },
+      },
+    },
     settings: {
       style: [
         { kind: "fill", label: "목표 띠", lens: L("profit") },
@@ -127,7 +141,12 @@ function positionTool(side: PositionSide): Tool {
       level(stop, "손절", style.stop);
       shapes.push({ kind: "segment", a, b: { x: right, y: a.y }, stroke: thinStroke(DRAW) });
       const ratio = target === undefined || stop === undefined ? null : riskReward(entry.price, target.price, stop.price);
-      if (labelled && ratio !== null) shapes.push(positionLabel({ x, y: a.y }, `손익비 ${ratio.toFixed(2)}`, style.label, DRAW, "middle", align));
+      if (labelled && ratio !== null) {
+        const riskPerUnit = stop === undefined ? 0 : Math.abs(entry.price - stop.price);
+        const qty = style.riskBudget && riskPerUnit > 0 ? Math.floor(style.riskBudget / riskPerUnit) : 0;
+        const text = qty > 0 ? `손익비 ${ratio.toFixed(2)} · 추천 ${qty.toLocaleString("ko-KR")}주` : `손익비 ${ratio.toFixed(2)}`;
+        shapes.push(positionLabel({ x, y: a.y }, text, style.label, DRAW, "middle", align));
+      }
       return shapes;
     },
     setPoint(points, index, to, ctx) {

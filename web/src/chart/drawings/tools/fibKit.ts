@@ -191,6 +191,10 @@ export function defineFibTool(spec: FibToolSpec): Tool {
       lineColor: { get: mainColor, set: recolor },
       width: L("line", "width"),
       dash: L("line", "dash"),
+      extend: L("extend"),
+      levels: L("levels"),
+      fibLabels: L("labels"),
+      fibReverse: L("reverse"),
     },
     settings: {
       style: [

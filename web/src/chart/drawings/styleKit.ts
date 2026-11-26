@@ -58,11 +58,13 @@ export const LINE_ENDS: readonly LineEnd[] = ["plain", "arrow"];
 
 export function readStroke(raw: unknown, d: Stroke): Stroke {
   const o = readRecord(raw);
+  const opacity = typeof o.opacity === "number" && Number.isFinite(o.opacity) ? Math.min(1, Math.max(0.1, o.opacity)) : d.opacity;
   return {
     ...o,
     color: readString(o.color, d.color),
     width: readOneOf(o.width, WIDTHS, d.width),
     dash: readOneOf(o.dash, DASHES, d.dash),
+    ...(opacity === undefined ? {} : { opacity }),
   };
 }
 
@@ -112,6 +114,21 @@ export function strokeFields<S>(label: string, stroke: Lens<S, Stroke>): StyleFi
     { kind: "width", label: `${label} 굵기`, lens: compose(stroke, prop<Stroke, "width">("width")) },
     { kind: "dash", label: `${label} 모양`, lens: compose(stroke, prop<Stroke, "dash">("dash")) },
   ];
+}
+
+export function strokeOpacity<S>(stroke: Lens<S, Stroke>): Lens<S, number> {
+  return {
+    get: (s) => stroke.get(s).opacity ?? 1,
+    set: (s, v) => {
+      const clamped = Math.min(1, Math.max(0.1, v));
+      const cur = stroke.get(s);
+      if (clamped >= 0.995) {
+        const { opacity: _, ...rest } = cur;
+        return stroke.set(s, rest);
+      }
+      return stroke.set(s, { ...cur, opacity: Math.round(clamped * 100) / 100 });
+    },
+  };
 }
 
 export const EXTEND_OPTIONS: readonly { value: Extend; label: string }[] = [

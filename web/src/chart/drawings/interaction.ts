@@ -21,6 +21,8 @@ export type Interaction =
   | { kind: "drawing"; tool: Tool; points: Anchors; start: ScreenPoint }
   | ({ kind: "dragging"; action: "move" | "clone" | "handle"; originals: DrawingBody[]; preview: DrawingBody[]; lock: AxisLock } & Press)
   | { kind: "box"; start: ScreenPoint; end: ScreenPoint }
+  | { kind: "measuring"; start: DrawingPoint; end: DrawingPoint; origin: ScreenPoint; anchored: boolean }
+  | { kind: "measured"; start: DrawingPoint; end: DrawingPoint }
   | { kind: "mode"; mode: ModeId; action: DragAction; path: ScreenPoint[] };
 
 export const IDLE: Interaction = { kind: "idle" };
@@ -101,6 +103,7 @@ function click(s: Extract<Interaction, { kind: "pressing" }>, c: Context): Trans
       return result({ kind: "placing", tool, fixed: [point], cursor: point, pressed: point });
     }
     case "eraseOne": return result(IDLE, { kind: "mode", mode: "eraser", action: s.resolution.drag, path: [s.start] });
+    case "measure": return result(IDLE);
     case "keepSelection": return result(IDLE);
   }
 }
@@ -198,10 +201,34 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
     }
     return result(s);
   }
+  if (s.kind === "measuring") {
+    const p = c.point(e.at, "measure", e.mods);
+    if (p === null) return result(s);
+    if (e.kind === "move") return result({ ...s, end: p });
+    if (e.kind === "up" && !s.anchored) {
+      if (distance(s.origin, e.at) >= PRESS_DISTANCE) return result({ kind: "measured", start: s.start, end: p }, { kind: "mode", mode: "measure", path: [], action: "measure" });
+      return result({ ...s, end: p, anchored: true });
+    }
+    if (e.kind === "down" && s.anchored) return result({ kind: "measured", start: s.start, end: p }, { kind: "mode", mode: "measure", path: [], action: "measure" });
+    return result(s);
+  }
+  if (s.kind === "measured") {
+    if (e.kind !== "down") return result(s);
+    if (c.mode === "measure") {
+      const p = c.point(e.at, "measure", e.mods);
+      return p === null ? result(IDLE) : result({ kind: "measuring", start: p, end: p, origin: e.at, anchored: false });
+    }
+    return result(IDLE);
+  }
   if (s.kind === "idle") {
     if (e.kind !== "down") return result(s);
-    const resolution = resolvePress(c.tool ? "draw" : c.mode === "eraser" ? "erase" : "select", e.hit.kind, e.mods, c.registeredModes);
+    const pressMode = c.tool ? "draw" : c.mode === "eraser" ? "erase" : c.mode === "measure" ? "measure" : "select";
+    const resolution = resolvePress(pressMode, e.hit.kind, e.mods, c.registeredModes);
     if (!resolution) return result(s);
+    if (c.mode === "measure") {
+      const p = c.point(e.at, "measure", e.mods);
+      return p === null ? result(s) : result({ kind: "measuring", start: p, end: p, origin: e.at, anchored: false });
+    }
     if (c.tool) {
       const placement = c.tool.placement;
       const p = placement.kind === "freehand" ? c.ctx.fromScreen(e.at) : c.point(e.at, "place", e.mods);
@@ -233,5 +260,5 @@ export function step(s: Interaction, e: Input, c: Context): Transition {
 }
 
 export function captures(s: Interaction): boolean {
-  return s.kind !== "idle" && (s.kind !== "pressing" || s.resolution.capturesPointer);
+  return s.kind !== "idle" && s.kind !== "measured" && (s.kind !== "pressing" || s.resolution.capturesPointer);
 }

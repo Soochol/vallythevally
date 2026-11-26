@@ -71,6 +71,7 @@ export interface ToolContext {
   formatPrice(p: number): string;
   formatTime(t: UnixSeconds): string;
   logScale: boolean;
+  lastPrice?: number | null;
 }
 
 export interface HandleSpec {
@@ -107,10 +108,17 @@ export type StyleFieldKind = StyleField<unknown>["kind"];
 
 export interface BarFields<S> {
   lineColor?: Lens<S, Color>;
+  lineOpacity?: Lens<S, number>;
   fill?: Lens<S, Fill>;
   textColor?: Lens<S, Color>;
   width?: Lens<S, Width>;
   dash?: Lens<S, Dash>;
+  extend?: Lens<S, Extend>;
+  statsAlways?: Lens<S, boolean>;
+  levels?: Lens<S, readonly Level[]>;
+  fibLabels?: Lens<S, { ratio: boolean; price: boolean }>;
+  fibReverse?: Lens<S, boolean>;
+  riskBudget?: Lens<S, number>;
 }
 
 export interface SettingsTabs<S> {
@@ -197,10 +205,17 @@ export function defineTool<S>(spec: ToolSpec<S>): Tool {
     parseStyle: parse,
     bar: {
       lineColor: maybe(bar.lineColor),
+      lineOpacity: maybe(bar.lineOpacity),
       fill: maybe(bar.fill),
       textColor: maybe(bar.textColor),
       width: maybe(bar.width),
       dash: maybe(bar.dash),
+      extend: maybe(bar.extend),
+      statsAlways: maybe(bar.statsAlways),
+      levels: maybe(bar.levels),
+      fibLabels: maybe(bar.fibLabels),
+      fibReverse: maybe(bar.fibReverse),
+      riskBudget: maybe(bar.riskBudget),
     },
     settings: { inputs: fields(settings.inputs), style: fields(settings.style), text: fields(settings.text) },
     shapes: (d, ctx) => spec.shapes(typed(d), ctx),

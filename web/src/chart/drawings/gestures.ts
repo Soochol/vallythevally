@@ -9,12 +9,12 @@ export interface Mods {
 
 export const CLONE_MODIFIER: CloneModifier = "ctrl";
 
-export type PressMode = "select" | "draw" | "erase";
+export type PressMode = "select" | "draw" | "erase" | "measure";
 export type PressTarget = "empty" | "body" | "handle";
-export type ModeId = "demo" | "eraser";
+export type ModeId = "demo" | "eraser" | "measure";
 
-export type ClickAction = "select" | "toggleSelect" | "clearSelection" | "keepSelection" | "place" | "eraseOne";
-export type DragAction = "pan" | "move" | "clone" | "handle" | "box" | "place" | "demo" | "erase" | "erasePartial";
+export type ClickAction = "select" | "toggleSelect" | "clearSelection" | "keepSelection" | "place" | "eraseOne" | "measure";
+export type DragAction = "pan" | "move" | "clone" | "handle" | "box" | "place" | "demo" | "erase" | "erasePartial" | "measure";
 export type HoldEffect = "invertMagnet" | "constrainShape" | "axisLock";
 
 type Target = PressTarget | "any";
@@ -35,6 +35,7 @@ export function gesturesFor(clone: CloneModifier): readonly GestureRow[] {
     { kind: "drag", mode: "select", target: "empty", mod: "alt", action: "demo", label: "시연 커서" },
     { kind: "drag", mode: "select", target: "empty", mod: null, action: "pan", label: "차트 옮기기" },
     { kind: "drag", mode: "draw", target: "any", mod: null, action: "place", label: "그리기" },
+    { kind: "drag", mode: "measure", target: "any", mod: null, action: "measure", label: "빠른 측정" },
     { kind: "drag", mode: "erase", target: "any", mod: "ctrl", action: "erasePartial", label: "붓 획 일부 지우기" },
     { kind: "drag", mode: "erase", target: "any", mod: null, action: "erase", label: "지나간 드로잉 지우기" },
 
@@ -45,20 +46,21 @@ export function gesturesFor(clone: CloneModifier): readonly GestureRow[] {
     { kind: "click", mode: "select", target: "empty", mod: "ctrl", action: "keepSelection", label: "선택 유지" },
     { kind: "click", mode: "select", target: "empty", mod: null, action: "clearSelection", label: "선택 풀기" },
     { kind: "click", mode: "draw", target: "any", mod: null, action: "place", label: "점 찍기" },
+    { kind: "click", mode: "measure", target: "any", mod: null, action: "measure", label: "빠른 측정" },
     { kind: "click", mode: "erase", target: "any", mod: null, action: "eraseOne", label: "지우기" },
 
     { kind: "hold", mod: "shift", during: ["place", "handle"], effect: "constrainShape", label: "45°·정사각형·원" },
     { kind: "hold", mod: "shift", during: ["move", "clone"], effect: "axisLock", label: "수평·수직으로만 옮기기" },
-    { kind: "hold", mod: "ctrl", during: ["place", "handle"], effect: "invertMagnet", label: "자석 잠시 반대로" },
+    { kind: "hold", mod: "ctrl", during: ["place", "handle", "measure"], effect: "invertMagnet", label: "자석 잠시 반대로" },
   ];
 }
 
 export const GESTURES = gesturesFor(CLONE_MODIFIER);
 
-const MODE_OF: Partial<Record<DragAction, ModeId>> = { demo: "demo", erase: "eraser", erasePartial: "eraser" };
+const MODE_OF: Partial<Record<DragAction, ModeId>> = { demo: "demo", erase: "eraser", erasePartial: "eraser", measure: "measure" };
 
 const isAvailable = (row: GestureRow, registered: ReadonlySet<ModeId>) => {
-  const needs = row.kind === "drag" ? MODE_OF[row.action] : undefined;
+  const needs = row.kind === "drag" ? MODE_OF[row.action] : row.kind === "click" && row.action === "measure" ? "measure" : undefined;
   return needs === undefined || registered.has(needs);
 };
 
@@ -96,7 +98,7 @@ export function holds(drag: DragAction, mods: Mods, rows: readonly GestureRow[] 
 
 const MOD_KEY: Record<Modifier, string> = { ctrl: "Ctrl", alt: "Alt", shift: "Shift" };
 const TARGET_TEXT: Record<Target, string> = { empty: "빈 곳 ", body: "드로잉 ", handle: "핸들 ", any: "" };
-const MODE_TEXT: Record<PressMode, string> = { select: "", draw: "그리는 중 ", erase: "지우개로 " };
+const MODE_TEXT: Record<PressMode, string> = { select: "", draw: "그리는 중 ", erase: "지우개로 ", measure: "측정 중 " };
 
 function keysOf(row: GestureRow): string {
   if (row.kind === "hold") return `${MOD_KEY[row.mod]} 누르고 있기`;
@@ -110,7 +112,7 @@ export const HELP_SECTIONS: readonly HelpSection[] = ["그리기", "고르기", 
 function sectionOf(row: GestureRow): HelpSection {
   if (row.kind === "hold") return row.effect === "axisLock" ? "옮기기·복제" : "그리기";
   if (row.mode === "erase") return "지우기";
-  if (row.mode === "draw") return "그리기";
+  if (row.mode === "draw" || row.mode === "measure") return "그리기";
   if (row.kind === "click" || row.action === "box") return "고르기";
   return "옮기기·복제";
 }

@@ -1,4 +1,4 @@
-import { at, defaultFill, defaultStroke, EXTEND_OPTIONS, EXTENDS, readBool, readFill, readOneOf, readRecord, readStroke, select, strokeFields } from "../styleKit";
+import { at, defaultFill, defaultStroke, EXTEND_OPTIONS, EXTENDS, readBool, readFill, readOneOf, readRecord, readStroke, select, strokeFields, strokeOpacity } from "../styleKit";
 import { extendedSegment } from "../geometry";
 import { type AxisLabel, defineTool, type Shape, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, Extend, Fill, ScreenPoint, Stroke } from "../types";
@@ -67,7 +67,7 @@ export const channel = defineTool<ChannelStyle>({
   ],
   defaultStyle: channelDefaults,
   parseStyle: parseChannelStyle,
-  bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash"), fill: L("fill") },
+  bar: { lineColor: L("line", "color"), lineOpacity: strokeOpacity(L("line")), width: L("line", "width"), dash: L("line", "dash"), fill: L("fill"), extend: L("extend") },
   settings: {
     style: [
       ...strokeFields("선", L("line")),

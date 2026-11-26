@@ -44,8 +44,8 @@ test("서버 표의 도구는 모두 등록돼 있다", () => {
   for (const id of Object.keys(TOOL_POINTS) as DrawingTool[]) expect(toolOf(id), id).toBeDefined();
 });
 
-test("모드는 지우개와 시연 커서다", () => {
-  expect(MODES.map((mode) => [mode.id, mode.label])).toEqual([["eraser", "지우개"], ["demo", "시연 커서"]]);
+test("모드는 빠른 측정·지우개·시연 커서다", () => {
+  expect(MODES.map((mode) => [mode.id, mode.label])).toEqual([["measure", "빠른 측정"], ["eraser", "지우개"], ["demo", "시연 커서"]]);
 });
 
 test("등록 표에 같은 도구가 두 번 없다", () => {

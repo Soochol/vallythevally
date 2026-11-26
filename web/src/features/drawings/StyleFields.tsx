@@ -27,11 +27,25 @@ function lineLook(style: unknown): { width: number; dash: Dash } | null {
   const { width, dash } = line;
   return typeof width === "number" && (dash === "solid" || dash === "dashed" || dash === "dotted") ? { width, dash } : null;
 }
+const WidthGlyph = ({ width }: { width: Width }) => (
+  <span className="draw-width-glyph" aria-hidden="true"><i style={{ height: width }} /></span>
+);
+
+const DashGlyph = ({ dash }: { dash: Dash }) => (
+  <svg viewBox="0 0 22 10" width="22" height="10" aria-hidden="true" className="flex-none">
+    <line x1="1" y1="5" x2="21" y2="5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray={dash === "dashed" ? "5 4" : dash === "dotted" ? "1.5 4" : undefined} />
+  </svg>
+);
+
 export function WidthInput({ label, value, onChange }: { label: string; value: Width; onChange(v: Width): void }) {
-  return <Select label={label} className={INPUT} value={value} options={([1, 2, 3, 4, 5] as const).map((n) => ({ value: n, label: `${n}px` }))} onChange={onChange} />;
+  return <Select label={label} className={INPUT} value={value} options={([1, 2, 3, 4, 5] as const).map((n) => ({ value: n, label: `${n}px`, icon: <WidthGlyph width={n} /> }))} onChange={onChange} />;
 }
 export function DashInput({ label, value, onChange }: { label: string; value: Dash; onChange(v: Dash): void }) {
-  return <Select label={label} className={INPUT} value={value} options={[{ value: "solid", label: "실선" }, { value: "dashed", label: "파선" }, { value: "dotted", label: "점선" }]} onChange={onChange} />;
+  return <Select label={label} className={INPUT} value={value} options={([
+    { value: "solid", label: "실선", icon: <DashGlyph dash="solid" /> },
+    { value: "dashed", label: "파선", icon: <DashGlyph dash="dashed" /> },
+    { value: "dotted", label: "점선", icon: <DashGlyph dash="dotted" /> },
+  ] as const)} onChange={onChange} />;
 }
 function NumberInput({ label, min, max, step, value, onChange }: { label?: string; min: number; max: number; step?: number; value: number; onChange(v: number): void }) {
   const [draft, setDraft] = useState<string | null>(null);
