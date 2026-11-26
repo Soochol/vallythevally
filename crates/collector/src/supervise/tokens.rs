@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use domain::KstTime;
 use server::clock::Clock;
 use server::config::Secret;
 use server::instance::{InstanceLock, LockError};
@@ -53,6 +54,10 @@ impl KeyTokens {
 
     pub fn expires_at(&self) -> Option<i64> {
         self.rest.auth().token_expires_at().map(|at| at.unix())
+    }
+
+    pub fn issued_since(&self, cutoff: KstTime) -> bool {
+        self.rest.auth().issued_at().is_some_and(|at| at >= cutoff)
     }
 
     pub fn needs_issue(&self) -> bool {

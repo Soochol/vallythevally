@@ -509,7 +509,14 @@ impl SharedSupervisor {
                 }
                 self.keys[index].jobs = jobs;
             }
-            Event::Halted { reason, action } => tracing::error!(%key, %reason, %action, "공용 자료 자식이 멈췄다고 알렸습니다"),
+            Event::Halted { reason, action } => {
+                tracing::error!(%key, %reason, %action, "공용 자료 자식이 멈췄다고 알렸습니다");
+                if self.keys[index].slot.is_running() {
+                    self.retire(index, Some(reason));
+                } else if !self.keys[index].slot.is_stopped() {
+                    self.stop_key(index, reason);
+                }
+            }
             Event::Registered { .. } | Event::Unregistered { .. } | Event::Live | Event::Down { .. } | Event::MarketOpen { .. } => {}
         }
     }

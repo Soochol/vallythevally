@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use server::collector::wire::{
+    CollectorCoverage, CollectorCoverageDay, CollectorDayBytes, CollectorDayState, CollectorDisk, CollectorDiskUsage, CollectorFilesystem, DaemonError,
+    Heartbeat, Reply as ServerWireBody, StatusReply, WireReply,
+};
 
 use super::status::{DaemonStatus, DayPhase};
 
@@ -43,6 +47,18 @@ pub enum ErrorCode {
     TooManyConnections,
 }
 
+impl ErrorCode {
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            ErrorCode::BadRequest => "bad_request",
+            ErrorCode::UnsupportedVersion => "unsupported_version",
+            ErrorCode::UnknownRequest => "unknown_request",
+            ErrorCode::ReadOnly => "read_only",
+            ErrorCode::TooManyConnections => "too_many_connections",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CoverageState {
@@ -51,6 +67,18 @@ pub enum CoverageState {
     InProgress,
     VerifyFailed,
     Unreadable,
+}
+
+impl CoverageState {
+    pub fn to_wire(self) -> CollectorDayState {
+        match self {
+            CoverageState::Complete => CollectorDayState::Complete,
+            CoverageState::Incomplete => CollectorDayState::Incomplete,
+            CoverageState::InProgress => CollectorDayState::InProgress,
+            CoverageState::VerifyFailed => CollectorDayState::VerifyFailed,
+            CoverageState::Unreadable => CollectorDayState::Unreadable,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,10 +90,28 @@ pub struct CoverageDay {
     pub received_stocks: Option<u64>,
 }
 
+impl CoverageDay {
+    pub fn to_wire(&self) -> CollectorCoverageDay {
+        CollectorCoverageDay {
+            date: self.date,
+            state: self.state.to_wire(),
+            verified: self.verified,
+            planned_stocks: self.planned_stocks.map(|count| u32::try_from(count).unwrap_or(u32::MAX)),
+            received_stocks: self.received_stocks.map(|count| u32::try_from(count).unwrap_or(u32::MAX)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DayBytes {
     pub date: u32,
     pub bytes: u64,
+}
+
+impl DayBytes {
+    pub fn to_wire(&self) -> CollectorDayBytes {
+        CollectorDayBytes { date: self.date, bytes: self.bytes }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,11 +120,27 @@ pub struct Filesystem {
     pub total_bytes: u64,
 }
 
+impl Filesystem {
+    pub fn to_wire(&self) -> CollectorFilesystem {
+        CollectorFilesystem { free_bytes: self.free_bytes, total_bytes: self.total_bytes }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskUsage {
     pub filesystem: Option<Filesystem>,
     pub raw: Vec<DayBytes>,
     pub store: Vec<DayBytes>,
+}
+
+impl DiskUsage {
+    pub fn to_wire(&self) -> CollectorDiskUsage {
+        CollectorDiskUsage {
+            filesystem: self.filesystem.as_ref().map(Filesystem::to_wire),
+            raw: self.raw.iter().map(DayBytes::to_wire).collect(),
+            store: self.store.iter().map(DayBytes::to_wire).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,8 +169,36 @@ impl Reply {
         Reply::new(ReplyBody::Error { code, message: message.into(), supported_version: API_VERSION })
     }
 
+    pub fn to_wire(&self) -> WireReply {
+        let body = match &self.body {
+            ReplyBody::Status { sent_at, status } => ServerWireBody::Status(Box::new(StatusReply {
+                sent_at: sent_at.clone(),
+                status: status.to_wire(),
+            })),
+            ReplyBody::Heartbeat { sent_at, sequence, phase } => ServerWireBody::Heartbeat(Heartbeat {
+                sent_at: Some(sent_at.clone()),
+                sequence: *sequence,
+                phase: phase.to_wire(),
+            }),
+            ReplyBody::Coverage { sent_at, days } => ServerWireBody::Coverage(CollectorCoverage {
+                sent_at: sent_at.clone(),
+                days: days.iter().map(CoverageDay::to_wire).collect(),
+            }),
+            ReplyBody::Disk { sent_at, disk } => ServerWireBody::Disk(CollectorDisk {
+                sent_at: sent_at.clone(),
+                disk: disk.to_wire(),
+            }),
+            ReplyBody::Error { code, message, supported_version } => ServerWireBody::Error(DaemonError {
+                code: code.wire_name().to_owned(),
+                message: message.clone(),
+                supported_version: Some(u64::from(*supported_version)),
+            }),
+        };
+        WireReply { v: u64::from(self.v), body }
+    }
+
     pub fn to_line(&self) -> String {
-        let mut line = serde_json::to_string(self).expect("응답은 항상 JSON으로 바뀐다");
+        let mut line = serde_json::to_string(&self.to_wire()).expect("응답은 항상 JSON으로 바뀐다");
         line.push('\n');
         line
     }

@@ -121,6 +121,7 @@ enum StopReason {
     RestartLimit,
     Token(Halted),
     VersionMismatch,
+    ChildHalted(String),
 }
 
 impl fmt::Display for StopReason {
@@ -130,6 +131,7 @@ impl fmt::Display for StopReason {
             StopReason::Token(halted) if halted.is_8050 => write!(formatter, "8050을 받았습니다: {}", halted.text),
             StopReason::Token(halted) => write!(formatter, "토큰을 받을 수 없습니다: {}", halted.text),
             StopReason::VersionMismatch => formatter.write_str("자식의 프로토콜 버전이 데몬과 다릅니다"),
+            StopReason::ChildHalted(reason) => formatter.write_str(reason),
         }
     }
 }
@@ -773,6 +775,12 @@ impl Supervisor {
             Event::Usage { .. } | Event::JobStats { .. } => {}
             Event::Halted { reason, action } => {
                 tracing::error!(%key, %reason, %action, "자식이 멈췄다고 알렸습니다");
+                let stop = StopReason::ChildHalted(reason);
+                if self.keys[index].slot.is_running() {
+                    self.retire(index, Some(stop));
+                } else if !self.keys[index].slot.is_stopped() {
+                    self.stop_key(index, stop);
+                }
             }
         }
     }

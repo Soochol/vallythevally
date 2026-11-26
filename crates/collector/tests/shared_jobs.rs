@@ -412,12 +412,25 @@ struct FakeKiwoom {
     calls: Mutex<Vec<Call>>,
     accepted: Mutex<Vec<(Duration, String)>>,
     issued: Mutex<Vec<String>>,
+    halt_market_keys: Mutex<BTreeSet<String>>,
     counter: AtomicUsize,
 }
 
 impl FakeKiwoom {
     fn new(limit: Limit) -> Arc<FakeKiwoom> {
-        Arc::new(FakeKiwoom { origin: Instant::now(), limit, calls: Mutex::default(), accepted: Mutex::default(), issued: Mutex::default(), counter: AtomicUsize::new(0) })
+        Arc::new(FakeKiwoom {
+            origin: Instant::now(),
+            limit,
+            calls: Mutex::default(),
+            accepted: Mutex::default(),
+            issued: Mutex::default(),
+            halt_market_keys: Mutex::default(),
+            counter: AtomicUsize::new(0),
+        })
+    }
+
+    fn halt_market_for(&self, key: &str) {
+        self.halt_market_keys.lock().unwrap().insert(format!("for-{}", app_key_of(key)));
     }
 
     fn market_calls(&self) -> Vec<(Duration, String, String)> {
@@ -452,25 +465,30 @@ impl Transport for FakeKiwoom {
             "ka10099" => reply(json!({"list": [], "return_code": 0, "return_msg": "정상"})),
             _ => {
                 let now = self.origin.elapsed();
-                self.calls.lock().unwrap().push(Call { at: now, api: api.clone(), token: request.token.as_ref().map(|token| token.expose().clone()).unwrap_or_default() });
-                let mut accepted = self.accepted.lock().unwrap();
-                accepted.retain(|(at, _)| now.saturating_sub(*at) < Duration::from_secs(1));
-                let in_window = match self.limit {
-                    Limit::None => 0,
-                    Limit::KeyTotalOver(_) => accepted.len(),
-                    Limit::PerTrOver(_) => accepted.iter().filter(|(_, accepted_api)| *accepted_api == api).count(),
-                };
-                let cap = match self.limit {
-                    Limit::None => usize::MAX,
-                    Limit::KeyTotalOver(cap) | Limit::PerTrOver(cap) => cap,
-                };
-                if in_window >= cap {
-                    Ok(HttpResponse { status: 429, next_key: None, body: json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:유량=5]"}).to_string() })
+                let token = request.token.as_ref().map(|token| token.expose().clone()).unwrap_or_default();
+                self.calls.lock().unwrap().push(Call { at: now, api: api.clone(), token: token.clone() });
+                if self.halt_market_keys.lock().unwrap().iter().any(|marker| token.ends_with(marker)) {
+                    reply(json!({"return_code": 3, "return_msg": "인증에 실패했습니다[8050:지정단말기 인증에 실패하였습니다]"}))
                 } else {
-                    accepted.push((now, api.clone()));
-                    match api.as_str() {
-                        "ka10008" => reply(json!({"stk_frgnr": [], "return_code": 0, "return_msg": "정상"})),
-                        _ => reply(json!({"stk_cd": "", "stk_nm": "", "mac": "", "flo_stk": "", "per": "", "pbr": "", "roe": "", "eps": "", "bps": "", "for_exh_rt": "", "250hgst": "", "250lwst": "", "upl_pric": "", "lst_pric": "", "return_code": 0, "return_msg": "정상"})),
+                    let mut accepted = self.accepted.lock().unwrap();
+                    accepted.retain(|(at, _)| now.saturating_sub(*at) < Duration::from_secs(1));
+                    let in_window = match self.limit {
+                        Limit::None => 0,
+                        Limit::KeyTotalOver(_) => accepted.len(),
+                        Limit::PerTrOver(_) => accepted.iter().filter(|(_, accepted_api)| *accepted_api == api).count(),
+                    };
+                    let cap = match self.limit {
+                        Limit::None => usize::MAX,
+                        Limit::KeyTotalOver(cap) | Limit::PerTrOver(cap) => cap,
+                    };
+                    if in_window >= cap {
+                        Ok(HttpResponse { status: 429, next_key: None, body: json!({"return_code": 5, "return_msg": "허용된 요청 개수를 초과하였습니다[1700:유량=5]"}).to_string() })
+                    } else {
+                        accepted.push((now, api.clone()));
+                        match api.as_str() {
+                            "ka10008" => reply(json!({"stk_frgnr": [], "return_code": 0, "return_msg": "정상"})),
+                            _ => reply(json!({"stk_cd": "", "stk_nm": "", "mac": "", "flo_stk": "", "per": "", "pbr": "", "roe": "", "eps": "", "bps": "", "for_exh_rt": "", "250hgst": "", "250lwst": "", "upl_pric": "", "lst_pric": "", "return_code": 0, "return_msg": "정상"})),
+                        }
                     }
                 }
             }
@@ -608,7 +626,7 @@ impl Launcher for FakeLauncher {
         }
         let (event_sink, event_source) = std::sync::mpsc::channel();
         let forward = messages_tx.clone();
-        tokio::spawn(async move {
+        let forwarder = tokio::spawn(async move {
             loop {
                 match event_source.try_recv() {
                     Ok(event) => {
@@ -635,6 +653,7 @@ impl Launcher for FakeLauncher {
         };
         tokio::spawn(async move {
             run_shared(parts).await;
+            let _ = forwarder.await;
             if alive.swap(false, Ordering::SeqCst) {
                 let _ = messages_tx.send(ChildMessage::Exited(Some(0)));
             }
@@ -766,6 +785,166 @@ async fn a_job_left_with_no_key_is_reported_not_silently_dropped() {
     let report = shared.report.borrow().clone();
     assert!(report.alerts.iter().any(|alert| alert.kind == AlertKind::SharedJobMoved && alert.message.contains("이어받을 키가 없")), "{:?}", report.alerts);
     shared.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_kiwoom_rest_child_that_halts_on_8050_retires_at_once_and_rebalances_slices() {
+    let shared = Shared::start(probe_assignment(&["rest-01", "rest-02"], 4, None), Limit::None, |_| {});
+    sleep(Duration::from_secs(12)).await;
+    let initial = shared.launcher.received_by("rest-02")[0].assigned();
+    assert_eq!(initial.len(), 1);
+    assert_eq!((initial[0].1[0].slice_index, initial[0].1[0].slice_count), (1, 2));
+
+    shared.kiwoom.halt_market_for("rest-01");
+    sleep(Duration::from_secs(35)).await;
+
+    assert_eq!(shared.launcher.received_by("rest-01").len(), 1);
+    assert!(shared.journal_of("restart").is_empty());
+    let stopped = shared.journal_of("key_stopped");
+    assert_eq!(stopped.len(), 1);
+    assert_eq!(stopped[0]["key"], "rest-01");
+    assert!(stopped[0]["reason"].as_str().unwrap().contains("8050"), "{}", stopped[0]);
+    let moved = shared.journal_of("shared_job_moved");
+    assert_eq!(moved.len(), 1);
+    assert_eq!((moved[0]["job"].as_str(), moved[0]["from"].as_str(), moved[0]["to"].as_str()), (Some("probe"), Some("rest-01"), Some("rest-02")));
+
+    let received = shared.launcher.received_by("rest-02").remove(0);
+    let assigned = received.assigned();
+    assert_eq!(assigned.len(), 2);
+    assert_eq!((assigned[0].1[0].slice_index, assigned[0].1[0].slice_count), (1, 2));
+    assert_eq!((assigned[1].1[0].slice_index, assigned[1].1[0].slice_count), (0, 1));
+    let report = shared.report.borrow().clone();
+    let rest_01 = report.keys.iter().find(|status| status.name.as_str() == "rest-01").unwrap();
+    assert_eq!(rest_01.state, collector::supervise::KeyState::Stopped);
+    assert_eq!(rest_01.restarts, 0);
+    assert!(report.alerts.iter().any(|alert| alert.kind == AlertKind::KeyStopped && alert.message.contains("rest-01")), "{:?}", report.alerts);
+    assert!(report.alerts.iter().any(|alert| alert.kind == AlertKind::SharedJobMoved && alert.message.contains("rest-02")), "{:?}", report.alerts);
+    let before_rebalanced_calls = shared.kiwoom.calls_with_token_of("rest-02").len();
+    sleep(Duration::from_secs(40)).await;
+    let after_rebalanced_calls = shared.kiwoom.calls_with_token_of("rest-02").len();
+    assert!(after_rebalanced_calls >= before_rebalanced_calls + 8, "{before_rebalanced_calls} -> {after_rebalanced_calls}");
+    shared.finish().await;
+}
+
+struct FakeKisTransport;
+
+impl server::kis::transport::Transport for FakeKisTransport {
+    fn send(&self, request: server::kis::transport::HttpRequest) -> BoxFuture<'static, Result<server::kis::transport::HttpResponse, server::kis::transport::TransportError>> {
+        let reply = match request.path {
+            "/oauth2/tokenP" => Ok(server::kis::transport::HttpResponse {
+                status: 200,
+                tr_cont: None,
+                body: json!({"access_token": "FAKE-KIS-TOKEN-1", "access_token_token_expired": "2099-12-31 00:00:00"}).to_string(),
+            }),
+            _ => Ok(server::kis::transport::HttpResponse {
+                status: 200,
+                tr_cont: None,
+                body: json!({"rt_cd": "0", "msg_cd": "MCA00000", "msg1": "정상", "output": []}).to_string(),
+            }),
+        };
+        Box::pin(async move { reply })
+    }
+}
+
+struct HaltingKisChildLauncher {
+    received: Mutex<Vec<(String, Arc<Received>)>>,
+    emitters: Mutex<Vec<(String, mpsc::UnboundedSender<ChildMessage>)>>,
+}
+
+impl HaltingKisChildLauncher {
+    fn new() -> Arc<HaltingKisChildLauncher> {
+        Arc::new(HaltingKisChildLauncher { received: Mutex::default(), emitters: Mutex::default() })
+    }
+
+    fn received_by(&self, key: &str) -> Vec<Arc<Received>> {
+        self.received.lock().unwrap().iter().filter(|(name, _)| name == key).map(|(_, received)| received.clone()).collect()
+    }
+
+    fn emit_halted(&self, key: &str, reason: &str, action: &str) {
+        let emitters = self.emitters.lock().unwrap();
+        let (_, tx) = emitters.iter().find(|(name, _)| name == key).unwrap();
+        let _ = tx.send(ChildMessage::Event(Event::Halted { reason: reason.to_owned(), action: action.to_owned() }));
+    }
+}
+
+impl Launcher for HaltingKisChildLauncher {
+    fn launch(&self, _: &KeyName) -> io::Result<Spawned> {
+        unreachable!()
+    }
+
+    fn launch_shared(&self, key: &KeyName, _: &SharedLaunch) -> io::Result<Spawned> {
+        let received = Arc::new(Received::default());
+        self.received.lock().unwrap().push((key.as_str().to_owned(), received.clone()));
+        let (messages_tx, messages) = mpsc::unbounded_channel();
+        let alive = Arc::new(AtomicBool::new(true));
+        let (stop, _) = watch::channel(false);
+        let (command_tx, _) = mpsc::unbounded_channel();
+        let handle = FakeHandle { received, commands: command_tx, stop, messages: messages_tx.clone(), alive: alive.clone() };
+        self.emitters.lock().unwrap().push((key.as_str().to_owned(), messages_tx.clone()));
+        let _ = messages_tx.send(ChildMessage::Event(Event::Hello { key: key.clone(), pid: 6000 }));
+        tokio::spawn(async move {
+            while alive.load(Ordering::SeqCst) {
+                sleep(Duration::from_secs(5)).await;
+                if alive.load(Ordering::SeqCst) {
+                    let _ = messages_tx.send(ChildMessage::Event(Event::Heartbeat { frames: 0, bytes: 0, state: collector::protocol::SessionState::Live }));
+                }
+            }
+        });
+        Ok(Spawned { pid: Some(6000), process: Box::new(handle), messages })
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_kis_rest_child_that_reports_halted_retires_at_once_and_rebalances_to_surviving_key() {
+    let folder = tempfile::tempdir().unwrap();
+    let keys = vec![rest_key(folder.path(), "rest-kis", Broker::Kis), rest_key(folder.path(), "rest-02", Broker::Kiwoom)];
+    let text = json!({"version": 1, "jobs": {"rankings": {"keys": ["rest-kis", "rest-02"], "period_secs": 30}}}).to_string();
+    let assignment = Assignment::parse(&text, Path::new("/etc/collector-shared.json"), &keys).unwrap();
+    let clock = Clock::fake(at(9, 0, 0));
+    let kiwoom = FakeKiwoom::new(Limit::None);
+    let launcher = HaltingKisChildLauncher::new();
+    let supervisor = SharedSupervisor::start(
+        SharedInputs { keys, assignment, date: DATE, data_dir: folder.path().join("data"), settings: Settings::default() },
+        SharedInjected { launcher: launcher.clone(), transport: kiwoom, kis_transport: Some(Arc::new(FakeKisTransport)), clock },
+    )
+    .unwrap();
+    let report = supervisor.report();
+    let (stop, shutdown) = watch::channel(false);
+    let done = tokio::spawn(supervisor.run(shutdown));
+
+    sleep(Duration::from_secs(12)).await;
+    assert_eq!(launcher.received_by("rest-kis")[0].assigned().len(), 1);
+    assert_eq!(launcher.received_by("rest-02")[0].assigned().len(), 1);
+
+    launcher.emit_halted("rest-kis", "한투 응답 거절: 인증이 거절됨(HTTP 403, 코드 EGW00999)", "한투 키와 인증 상태를 확인한 뒤 다시 시작하세요");
+    sleep(Duration::from_secs(5)).await;
+
+    assert_eq!(launcher.received_by("rest-kis").len(), 1);
+    let journal_text = std::fs::read_to_string(journal_path(&folder.path().join("data"), DATE)).unwrap();
+    let journal: Vec<Value> = journal_text.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert!(journal.iter().all(|record| record["event"] != "restart"));
+    let stopped: Vec<&Value> = journal.iter().filter(|record| record["event"] == "key_stopped").collect();
+    assert_eq!(stopped.len(), 1);
+    assert_eq!(stopped[0]["key"], "rest-kis");
+    assert!(stopped[0]["reason"].as_str().unwrap().contains("EGW00999"));
+    let moved: Vec<&Value> = journal.iter().filter(|record| record["event"] == "shared_job_moved").collect();
+    assert_eq!(moved.len(), 1);
+    assert_eq!((moved[0]["job"].as_str(), moved[0]["from"].as_str(), moved[0]["to"].as_str()), (Some("rankings"), Some("rest-kis"), Some("rest-02")));
+
+    let assigned = launcher.received_by("rest-02")[0].assigned();
+    assert_eq!(assigned.len(), 2);
+    assert_eq!((assigned[0].1[0].slice_index, assigned[0].1[0].slice_count), (1, 2));
+    assert_eq!((assigned[1].1[0].slice_index, assigned[1].1[0].slice_count), (0, 1));
+    assert_eq!(assigned[1].1[0].peers, vec![Broker::Kiwoom]);
+    let snapshot = report.borrow().clone();
+    let rest_kis = snapshot.keys.iter().find(|status| status.name.as_str() == "rest-kis").unwrap();
+    assert_eq!(rest_kis.state, collector::supervise::KeyState::Stopped);
+    assert_eq!(rest_kis.restarts, 0);
+    assert!(snapshot.alerts.iter().any(|alert| alert.kind == AlertKind::KeyStopped && alert.message.contains("rest-kis")));
+    assert!(snapshot.alerts.iter().any(|alert| alert.kind == AlertKind::SharedJobMoved && alert.message.contains("rest-02")));
+
+    stop.send(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(30), done).await.unwrap().unwrap();
 }
 
 fn read_usage(data: &Path) -> (String, Vec<Value>) {

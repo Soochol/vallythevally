@@ -806,58 +806,53 @@ fn write_parquet_atomically(shared_dir: &Path, date: u32, rows: &BTreeMap<String
     let dir = daily_micro_dir(shared_dir);
     fs::create_dir_all(&dir)?;
     let final_path = daily_micro_path(shared_dir, date);
-    let tmp_path = dir.join(format!("{date}.parquet.tmp"));
-    let write_result = (|| -> io::Result<()> {
-        let schema = daily_micro_schema();
-        let count = rows.len();
-        let mut dates = Vec::with_capacity(count);
-        let mut symbols = Vec::with_capacity(count);
-        let mut whale_net = Vec::with_capacity(count);
-        let mut program_net = Vec::with_capacity(count);
-        let mut program_share = Vec::with_capacity(count);
-        let mut foreign_est = Vec::with_capacity(count);
-        let mut spoof_cancel = Vec::with_capacity(count);
-        let mut vi_counts = Vec::with_capacity(count);
-        let mut vwap_gaps = Vec::with_capacity(count);
-        for (symbol, row) in rows {
-            dates.push(row.date);
-            symbols.push(symbol.as_str());
-            whale_net.push(row.whale_net_won);
-            program_net.push(row.program_net_won);
-            program_share.push(row.program_share_bps);
-            foreign_est.push(row.foreign_est_net_qty);
-            spoof_cancel.push(row.spoof_cancel_rate_bps);
-            vi_counts.push(row.vi_count);
-            vwap_gaps.push(row.vwap_close_gap_bps);
-        }
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![
-                Arc::new(Int32Array::from(dates)),
-                Arc::new(StringArray::from(symbols)),
-                Arc::new(Int64Array::from(whale_net)),
-                Arc::new(Int64Array::from(program_net)),
-                Arc::new(Int32Array::from(program_share)),
-                Arc::new(Int64Array::from(foreign_est)),
-                Arc::new(Int32Array::from(spoof_cancel)),
-                Arc::new(Int32Array::from(vi_counts)),
-                Arc::new(Int32Array::from(vwap_gaps)),
-            ],
-        )
-        .map_err(into_io)?;
-        let properties = WriterProperties::builder()
-            .set_compression(Compression::ZSTD(ZstdLevel::try_new(PARQUET_ZSTD_LEVEL).expect("zstd 수준이 맞다")))
-            .build();
-        let file = File::create(&tmp_path)?;
-        let mut writer = ArrowWriter::try_new(file, schema, Some(properties)).map_err(into_io)?;
-        writer.write(&batch).map_err(into_io)?;
-        writer.close().map_err(into_io)?;
-        Ok(())
-    })();
-    if let Err(error) = write_result {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(error);
+    let temporary = tempfile::NamedTempFile::new_in(&dir)?;
+    let schema = daily_micro_schema();
+    let count = rows.len();
+    let mut dates = Vec::with_capacity(count);
+    let mut symbols = Vec::with_capacity(count);
+    let mut whale_net = Vec::with_capacity(count);
+    let mut program_net = Vec::with_capacity(count);
+    let mut program_share = Vec::with_capacity(count);
+    let mut foreign_est = Vec::with_capacity(count);
+    let mut spoof_cancel = Vec::with_capacity(count);
+    let mut vi_counts = Vec::with_capacity(count);
+    let mut vwap_gaps = Vec::with_capacity(count);
+    for (symbol, row) in rows {
+        dates.push(row.date);
+        symbols.push(symbol.as_str());
+        whale_net.push(row.whale_net_won);
+        program_net.push(row.program_net_won);
+        program_share.push(row.program_share_bps);
+        foreign_est.push(row.foreign_est_net_qty);
+        spoof_cancel.push(row.spoof_cancel_rate_bps);
+        vi_counts.push(row.vi_count);
+        vwap_gaps.push(row.vwap_close_gap_bps);
     }
-    fs::rename(&tmp_path, &final_path)?;
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(Int32Array::from(dates)),
+            Arc::new(StringArray::from(symbols)),
+            Arc::new(Int64Array::from(whale_net)),
+            Arc::new(Int64Array::from(program_net)),
+            Arc::new(Int32Array::from(program_share)),
+            Arc::new(Int64Array::from(foreign_est)),
+            Arc::new(Int32Array::from(spoof_cancel)),
+            Arc::new(Int32Array::from(vi_counts)),
+            Arc::new(Int32Array::from(vwap_gaps)),
+        ],
+    )
+    .map_err(into_io)?;
+    let properties = WriterProperties::builder()
+        .set_compression(Compression::ZSTD(ZstdLevel::try_new(PARQUET_ZSTD_LEVEL).expect("zstd 수준이 맞다")))
+        .build();
+    let file = temporary.as_file().try_clone()?;
+    let mut writer = ArrowWriter::try_new(file, schema, Some(properties)).map_err(into_io)?;
+    writer.write(&batch).map_err(into_io)?;
+    writer.close().map_err(into_io)?;
+    temporary.as_file().sync_all()?;
+    temporary.persist(&final_path).map_err(|failure| failure.error)?;
+    crate::fs_util::sync_dir(&dir)?;
     Ok(final_path)
 }

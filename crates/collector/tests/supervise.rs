@@ -727,3 +727,34 @@ async fn a_reissue_due_inside_the_issue_interval_keeps_the_valid_token_until_the
     assert_eq!(world.launcher.children_of("collect-02")[1].tokens().len(), 2, "새 토큰은 발급 간격이 지난 뒤 간다");
     world.finish().await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_collecting_child_that_reports_halted_stops_at_once_and_hands_off_to_the_spare() {
+    let world = World::start(plan_for(2, 3));
+    world.pass(30).await;
+
+    let child = world.launcher.only("collect-02");
+    child.emit(Event::Halted { reason: "실시간 인증이 거절되었습니다".to_owned(), action: "키를 확인하세요".to_owned() });
+    world.pass(5).await;
+
+    assert_eq!(world.launcher.children_of("collect-02").len(), 1);
+    assert_eq!(world.status_of("collect-02").restarts, 0);
+    assert!(world.journal_of("restart").is_empty());
+    assert_eq!(child.signals(), ["terminate"]);
+    let stopped = world.journal_of("key_stopped");
+    assert_eq!(stopped.len(), 1);
+    assert_eq!(stopped[0]["key"], "collect-02");
+    assert_eq!(stopped[0]["reason"], "실시간 인증이 거절되었습니다");
+    let handoffs = world.journal_of("handoff");
+    assert_eq!(handoffs.len(), 1);
+    assert_eq!(handoffs[0]["from"], "collect-02");
+    assert_eq!(handoffs[0]["to"], "spare-01");
+    assert_eq!(handoffs[0]["stocks"], json!(["000004", "000005", "000006"]));
+    assert_eq!(world.state_of("collect-02"), KeyState::HandedOff);
+    assert_eq!(world.status_of("collect-02").stocks, 0);
+    let spare = world.launcher.only("spare-01");
+    let wire: Vec<String> = spare.registers().iter().flat_map(Registration::wire_items).collect();
+    assert_eq!(wire, ["000004_AL", "000005_AL", "000006_AL"]);
+    assert_eq!(world.state_of("spare-01"), KeyState::Receiving);
+    world.finish().await;
+}

@@ -3,13 +3,14 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
+use std::time::Duration;
 
 use rustix::process::{Signal, getppid, set_parent_process_death_signal};
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
 use super::config::{Variables, process_variables};
-use super::link::{ChildLink, Commands, Events, Incoming};
+use super::link::{ChildLink, Commands, Events, Incoming, LoopProgress};
 use super::output::{Output, Throughput};
 use super::registry::Registry;
 use super::session::{Finish, Halt, Session, SessionParts, SystemWallClock, Timings, Tokens, WallClock};
@@ -42,7 +43,8 @@ pub async fn run_session(parts: ChildParts) -> Finish {
     }
     let output = Output::for_key(data_dir, key.clone());
     let (state, observed_state) = watch::channel(SessionState::WaitingForToken);
-    let heartbeat = tokio::spawn(heartbeat(events.clone(), output.throughput(), observed_state));
+    let progress = Arc::new(LoopProgress::new());
+    let heartbeat = tokio::spawn(heartbeat(events.clone(), output.throughput(), observed_state, progress.clone(), HEARTBEAT_EVERY * 2));
     let (tap_feed, tap_worker) = match spawn_live_tap(tap, key, wall_clock.clone()) {
         Some((feed, worker)) => (Some(feed), Some(worker)),
         None => (None, None),
@@ -55,7 +57,7 @@ pub async fn run_session(parts: ChildParts) -> Finish {
         wall_clock,
         timings,
         shutdown,
-        child: Some(ChildLink { commands, events, state }),
+        child: Some(ChildLink { commands, events, state, progress }),
         tap: tap_feed,
     });
     let finish = session.run().await;
@@ -67,13 +69,21 @@ pub async fn run_session(parts: ChildParts) -> Finish {
     finish
 }
 
-async fn heartbeat(events: Events, throughput: Arc<Throughput>, state: watch::Receiver<SessionState>) {
+pub(super) async fn heartbeat(
+    events: Events,
+    throughput: Arc<Throughput>,
+    state: watch::Receiver<SessionState>,
+    progress: Arc<LoopProgress>,
+    stall_limit: Duration,
+) {
     let mut tick = interval_at(Instant::now() + HEARTBEAT_EVERY, HEARTBEAT_EVERY);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
-        let (frames, bytes) = throughput.take();
-        events.heartbeat(frames, bytes, *state.borrow());
+        if progress.elapsed() < stall_limit {
+            let (frames, bytes) = throughput.take();
+            events.heartbeat(frames, bytes, *state.borrow());
+        }
     }
 }
 
