@@ -8,6 +8,7 @@ import { financialRequest } from "../../chart/indicators/shown";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
 import { type CellStatus, ChartController } from "../../chart/ChartController";
 import type { IndicatorCommand } from "../../chart/indicators/legendRows";
+import { nextIndicatorAxis, resolvePanelScales } from "../../chart/indicators/scales";
 import { crosshairGroupKey, crosshairSync } from "../../chart/crosshairSync";
 import { readThemeTokens } from "../../chart/theme";
 import { isIntraday } from "../../chart/time";
@@ -39,8 +40,9 @@ import type { WindowId } from "../../layout/kinds";
 
 function runIndicatorCommand(cellId: WindowId, id: string, command: IndicatorCommand): void {
   const store = useLayoutStore.getState();
-  const config = chartWindows(store.layout).find((c) => c.id === cellId)?.chartSettings.indicators.find((i) => i.id === id);
-  if (!config) return;
+  const cell = chartWindows(store.layout).find((c) => c.id === cellId);
+  const config = cell?.chartSettings.indicators.find((i) => i.id === id);
+  if (!cell || !config) return;
   switch (command) {
     case "edit":
       return;
@@ -53,6 +55,16 @@ function runIndicatorCommand(cellId: WindowId, id: string, command: IndicatorCom
     case "up":
     case "down":
       return store.movePanel(cellId, config.panel, command === "up" ? -1 : 1);
+    case "split": {
+      const panelIndex = config.panel === "price" ? -1 : cell.chartSettings.panels.findIndex((p) => p.id === config.panel);
+      return store.splitIndicatorToNewPanel(cellId, id, panelIndex < 0 ? 0 : panelIndex + 1);
+    }
+    case "axis": {
+      if (config.panel === "price") return;
+      const scales = resolvePanelScales(cell.chartSettings.indicators, config.panel);
+      const currentSlot = scales.get(id)?.slot ?? "right";
+      return store.setIndicatorAxis(cellId, id, nextIndicatorAxis(currentSlot));
+    }
   }
 }
 
@@ -116,6 +128,8 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
         const initial = chartWindows(useLayoutStore.getState().layout).find((c) => c.id === cellIdRef.current)?.chartSettings.indicators.find((i) => i.id === id);
         if (initial) setEditing((current) => current?.initial.id === id ? current : { initial, anchor });
       },
+      onIndicatorMerge: (indicatorId, targetPanelId) => useLayoutStore.getState().mergeIndicatorIntoPanel(cellIdRef.current, indicatorId, targetPanelId),
+      onIndicatorSplit: (indicatorId, insertAt) => useLayoutStore.getState().splitIndicatorToNewPanel(cellIdRef.current, indicatorId, insertAt),
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(cellIdRef.current, stretches),
       onCompareRemove: (code) => useLayoutStore.getState().removeCompare(cellIdRef.current, code),
       onCorner: setCorner,

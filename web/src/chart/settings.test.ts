@@ -7,14 +7,20 @@ import {
   type IndicatorConfig,
   clampVisibleBars,
   DEFAULT_CHART_SETTINGS,
+  MAX_INDICATORS_PER_PANEL,
+  MERGED_PANEL_MIN_STRETCH,
+  mergeIndicatorIntoPanel,
   movePanel,
   parseChartSettings,
   readSpecShape,
   compareRefusal,
   removeCompare,
   removeIndicator,
+  reorderPanel,
+  setIndicatorAxis,
   setIndicatorPlacement,
   setPanelStretches,
+  splitIndicatorToNewPanel,
   togglePanel,
   shownScale,
   updateIndicator,
@@ -164,7 +170,8 @@ test.each([
   ["지표 패널 지표가 가격 패널에", { ...rsi, indicators: [rsi.indicators[0], { ...rsi.indicators[1]!, panel: "price" }] }],
   ["지표 없는 패널", { ...rsi, panels: [...rsi.panels, { id: "p2", stretch: 1 }] }],
   ["없는 패널을 가리킴", { ...rsi, panels: [{ id: "p9", stretch: 1 }] }],
-  ["패널 하나에 지표 둘", { ...rsi, indicators: [...rsi.indicators, { ...rsi.indicators[1]!, id: "c" }], panels: [...rsi.panels, { id: "p2", stretch: 1 }] }],
+  ["잘못된 축 지정", { ...rsi, indicators: [rsi.indicators[0], { ...rsi.indicators[1]!, axis: "center" }] }],
+  ["빈 패널이 남음", { ...rsi, indicators: [...rsi.indicators, { ...rsi.indicators[1]!, id: "c" }], panels: [...rsi.panels, { id: "p2", stretch: 1 }] }],
   ["같은 지표 id 둘", { ...rsi, indicators: [rsi.indicators[0], { ...rsi.indicators[0]!, spec: { kind: "ma", method: "sma", period: 9 } }, rsi.indicators[1]] }],
   ["높이 비율이 문자열", { ...rsi, panels: [{ id: "p1", stretch: "0.3" }] }],
 ])("모양이 틀리면(%s) 기본 설정으로 열고 콘솔에 남긴다", (_, raw) => {
@@ -378,4 +385,66 @@ test("계층별 CVD와 프로그램 수급 설정을 저장했다가 읽고 잘�
   expect(parseChartSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
   expect(readSpecShape({ ...cvd, showWhale: "yes" })).toBeNull();
   expect(readSpecShape({ ...prog, showShare: 1 })).toBeNull();
+});
+
+test("여러 지표를 한 패널에 합치고 분리·순서 변경·축 전환하며 v2로 저장·복원한다", () => {
+  const make = ids();
+  const base: ChartSettings = {
+    ...DEFAULT_CHART_SETTINGS,
+    indicators: [
+      { id: "vol", spec: { kind: "volume", maPeriod: 20 }, panel: "p-vol", visible: true, style: { colors: ["ind-1"], width: 1 } },
+      { id: "rsi", spec: { kind: "rsi", period: 14, signal: null }, panel: "p-rsi", visible: true, style: { colors: ["ind-2"], width: 1 } },
+      { id: "macd", spec: { kind: "macd", fast: 12, slow: 26, signal: 9 }, panel: "p-macd", visible: true, style: { colors: ["ind-3"], width: 1 } },
+    ],
+    panels: [
+      { id: "p-vol", stretch: 0.25 },
+      { id: "p-rsi", stretch: 0.25 },
+      { id: "p-macd", stretch: 0.25 },
+    ],
+  };
+
+  const merged = mergeIndicatorIntoPanel(base, "rsi", "p-vol");
+  expect(merged.panels).toEqual([{ id: "p-vol", stretch: MERGED_PANEL_MIN_STRETCH }, { id: "p-macd", stretch: 0.25 }]);
+  expect(merged.indicators.map((i) => [i.id, i.panel])).toEqual([["vol", "p-vol"], ["rsi", "p-vol"], ["macd", "p-macd"]]);
+  expect(parseChartSettings(JSON.parse(JSON.stringify(merged)))).toEqual(merged);
+
+  const withAxis = setIndicatorAxis(merged, "rsi", "overlay");
+  expect(withAxis.indicators.find((i) => i.id === "rsi")?.axis).toBe("overlay");
+  expect(parseChartSettings(JSON.parse(JSON.stringify(withAxis)))).toEqual(withAxis);
+  expect(setIndicatorAxis(withAxis, "rsi", "auto").indicators.find((i) => i.id === "rsi")).not.toHaveProperty("axis");
+
+  const removedOne = removeIndicator(withAxis, "rsi");
+  expect(removedOne.panels.map((p) => p.id)).toEqual(["p-vol", "p-macd"]);
+  expect(parseChartSettings(removedOne)).toEqual(removedOne);
+
+  const volOverPrice = setIndicatorPlacement(withAxis, "vol", "price");
+  expect(volOverPrice.panels.map((p) => p.id)).toEqual(["p-vol", "p-macd"]);
+  expect(volOverPrice.indicators.find((i) => i.id === "vol")?.panel).toBe("price");
+  expect(parseChartSettings(volOverPrice)).toEqual(volOverPrice);
+
+  const split = splitIndicatorToNewPanel(withAxis, "rsi", 2, make);
+  expect(split.panels.map((p) => p.id)).toEqual(["p-vol", "p-macd", "id-1"]);
+  expect(split.indicators.find((i) => i.id === "rsi")).toMatchObject({ panel: "id-1" });
+  expect(split.indicators.find((i) => i.id === "rsi")).not.toHaveProperty("axis");
+  expect(parseChartSettings(split)).toEqual(split);
+
+  const reordered = splitIndicatorToNewPanel(split, "macd", 0, make);
+  expect(reordered.panels.map((p) => p.id)).toEqual(["p-macd", "p-vol", "id-1"]);
+  expect(reorderPanel(reordered, "p-macd", 3).panels.map((p) => p.id)).toEqual(["p-vol", "id-1", "p-macd"]);
+});
+
+test("패널당 최대 지표 개수를 넘겨 합치지 않는다", () => {
+  const indicators: IndicatorConfig[] = Array.from({ length: MAX_INDICATORS_PER_PANEL + 1 }, (_, i) => ({
+    id: `r${i}`,
+    spec: { kind: "rsi", period: 14 + i, signal: null },
+    panel: i < MAX_INDICATORS_PER_PANEL ? "p-full" : "p-extra",
+    visible: true,
+    style: { colors: ["ind-1"], width: 1 },
+  }));
+  const full: ChartSettings = {
+    ...DEFAULT_CHART_SETTINGS,
+    indicators,
+    panels: [{ id: "p-full", stretch: 0.4 }, { id: "p-extra", stretch: 0.25 }],
+  };
+  expect(mergeIndicatorIntoPanel(full, `r${MAX_INDICATORS_PER_PANEL}`, "p-full")).toBe(full);
 });

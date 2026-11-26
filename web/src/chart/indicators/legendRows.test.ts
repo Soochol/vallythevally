@@ -116,8 +116,9 @@ test("지표 범례 줄은 이름과 단추에만 title을 두고 줄 컨테이�
   const rowsBox = legend.priceBox.children[1] as unknown as FakeElement;
   const priceRow = rowsBox.children[0]!;
   const panelRow = overlay.children[0]!;
+  const nameOf = (row: FakeElement) => row.children.find((child) => "indicatorEdit" in child.dataset);
   expect(priceRow.title).toBe("");
-  expect(priceRow.children[1]!.title).toBe(ma.name);
+  expect(nameOf(priceRow)?.title).toBe(ma.name);
   expect(panelRow.title).toBe("");
-  expect(panelRow.children[1]!.title).toBe(VOLUME_PANE.name);
+  expect(nameOf(panelRow)?.title).toBe(VOLUME_PANE.name);
 });

@@ -30,11 +30,12 @@ import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
 import { FinancialIndicatorStore } from "./financialFamily";
-import { isFinancial, isFinancialBar, isMicro, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, type PlotLineId as LineId, isBarLine, lineColor, specLines, specName } from "./kinds";
+import { isFinancial, isFinancialBar, isMicro, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName } from "./kinds";
 import { type MicroFamilyDeps, MicroIndicatorController, type MicroTarget, programLineValue, tickCvdLineValue } from "./microFamily";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
 import { type QuoteFamilyDeps, QuoteIndicatorController, type QuoteTarget } from "./quoteFamily";
+import { priceScaleIdFor, type ResolvedAxisSlot, type ResolvedScale, resolvePanelScales, scaleDomainOf } from "./scales";
 import { syncOp } from "./sync";
 
 type Status = { kind: "pending" } | { kind: "ready" } | { kind: "hidden" } | { kind: "error"; error: EngineErrorKind; message: string };
@@ -68,6 +69,17 @@ export interface LegendValue {
   color: string;
 }
 
+export interface IndicatorPanelInfo {
+  index: number;
+  count: number;
+  collapsed?: boolean;
+  panelId?: string;
+  slotIndex?: number;
+  memberCount?: number;
+  axisSlot?: ResolvedAxisSlot;
+  axisExplicit?: boolean;
+}
+
 export interface IndicatorRow {
   id: string;
   name: string;
@@ -75,7 +87,8 @@ export interface IndicatorRow {
   values: LegendValue[];
   state: "ok" | "pending" | "hidden" | EngineErrorKind;
   detail?: { status: string; summary: string; rows: readonly FinancialDetailRow[]; reports: readonly FinancialReport[] };
-  panel: { index: number; count: number; collapsed?: boolean } | null;
+  panel: IndicatorPanelInfo | null;
+  draggable?: boolean;
 }
 
 export interface FinancialReport { readonly label: string; readonly rows: readonly FinancialDetailRow[] }
@@ -89,9 +102,9 @@ export interface LayerHost {
   isPercentScale?(): boolean;
   period(): Period;
   requestFrame(): void;
-  axisFormatted(pane: ReturnType<IChartApi["panes"]>[number]): void;
-  axisCoordinates(pane: ReturnType<IChartApi["panes"]>[number]): number[];
-  axisFailed(pane: ReturnType<IChartApi["panes"]>[number], error: unknown): void;
+  axisFormatted(pane: ReturnType<IChartApi["panes"]>[number], side?: "right" | "left"): void;
+  axisCoordinates(pane: ReturnType<IChartApi["panes"]>[number], side?: "right" | "left"): number[];
+  axisFailed(pane: ReturnType<IChartApi["panes"]>[number], error: unknown, side?: "right" | "left"): void;
   /** 시리즈에 그리는 동안 보이는 범위 변경으로 과거 페이지를 받지 않게 한다(주 시리즈의 setData와 같은 가드). */
   guard(draw: () => void): void;
 }
@@ -149,6 +162,7 @@ export class IndicatorLayer {
   private previewId: string | null = null;
   private configs: IndicatorConfig[] = [];
   private panels: Panel[] = [];
+  private panelScales = new Map<string, Map<string, ResolvedScale>>();
   private gen = 0;
   private history: History | null = null;
   private display: Bar[] = [];
@@ -284,18 +298,51 @@ export class IndicatorLayer {
     }
   }
 
+  usesLeftAxis(): boolean {
+    for (const panel of this.panels) {
+      if (panel.collapsed) continue;
+      const scales = this.panelScales.get(panel.id);
+      if (!scales) continue;
+      for (const config of this.configs) {
+        if (config.panel === panel.id && config.visible && scales.get(config.id)?.slot === "left") return true;
+      }
+    }
+    return false;
+  }
+
+  private recomputePanelScales(): void {
+    this.panelScales.clear();
+    for (const panel of this.panels) {
+      this.panelScales.set(panel.id, resolvePanelScales(this.configs, panel.id));
+    }
+  }
+
+  private resolvedScaleOf(config: IndicatorConfig): ResolvedScale {
+    const found = config.panel === "price" ? undefined : this.panelScales.get(config.panel)?.get(config.id);
+    return found ?? { slot: "right", domain: scaleDomainOf(config.spec), explicit: false };
+  }
+
+  private isVolumeMergedWithOther(config: IndicatorConfig, configs: readonly IndicatorConfig[] = this.configs): boolean {
+    return config.panel !== "price" && config.spec.kind === "volume" && configs.some((other) => other.panel === config.panel && other.spec.kind !== "volume");
+  }
+
   private applyConfigs(configs: IndicatorConfig[], panels: Panel[]): void {
     this.timesDirty = true;
     const prevConfigs = this.configs;
     const prevPanels = this.panels;
     const prevPaneById = new Map<string, number>();
-    const prevFirstById = new Map<string, boolean>();
+    const prevLeaderById = new Map<string, boolean>();
+    const prevSlotById = new Map<string, ResolvedAxisSlot>();
+    const prevVolMergedById = new Map<string, boolean>();
     for (const config of prevConfigs) {
       prevPaneById.set(config.id, this.paneOf(config));
-      prevFirstById.set(config.id, this.firstInPanel(config));
+      prevLeaderById.set(config.id, this.isAxisLeader(config));
+      prevSlotById.set(config.id, this.resolvedScaleOf(config).slot);
+      prevVolMergedById.set(config.id, this.isVolumeMergedWithOther(config, prevConfigs));
     }
     this.configs = configs;
     this.panels = panels;
+    this.recomputePanelScales();
     const keep = new Set(configs.map((c) => c.id));
     const dropped = [...this.shown.keys()].filter((id) => !keep.has(id));
     for (const id of dropped) this.removeShown(id);
@@ -303,7 +350,7 @@ export class IndicatorLayer {
 
     const fresh: IndicatorConfig[] = [];
     const survivingIds = new Set<string>();
-    const firstChanged: Shown[] = [];
+    const leaderChanged: Shown[] = [];
     for (const config of configs) {
       const s = this.shown.get(config.id);
       if (!s || s.config.spec !== config.spec) {
@@ -330,11 +377,11 @@ export class IndicatorLayer {
         }
       }
       if (prev.style !== config.style || prev.visible !== config.visible) this.styleLines(s);
-      else if (prevFirstById.get(config.id) !== this.firstInPanel(config)) firstChanged.push(s);
+      else if (prevLeaderById.get(config.id) !== this.isAxisLeader(config)) leaderChanged.push(s);
       if (barOpacityOf(prev.style) !== barOpacityOf(config.style)) this.redrawBars(s);
     }
-    if (this.canPatchSeries(prevConfigs, prevPanels, prevPaneById, survivingIds)) {
-      for (const s of firstChanged) this.styleLines(s);
+    if (this.canPatchSeries(prevConfigs, prevPanels, prevPaneById, prevSlotById, prevVolMergedById, survivingIds)) {
+      for (const s of leaderChanged) this.styleLines(s);
       const added = configs
         .filter((config) => {
           const s = this.shown.get(config.id);
@@ -373,6 +420,8 @@ export class IndicatorLayer {
     prevConfigs: readonly IndicatorConfig[],
     prevPanels: readonly Panel[],
     prevPaneById: ReadonlyMap<string, number>,
+    prevSlotById: ReadonlyMap<string, ResolvedAxisSlot>,
+    prevVolMergedById: ReadonlyMap<string, boolean>,
     survivingIds: ReadonlySet<string>,
   ): boolean {
     if (this.panelAnchors.size > 0) return false;
@@ -387,6 +436,8 @@ export class IndicatorLayer {
       if (!s || s.lines.length === 0) continue;
       const nextPane = this.paneOf(config);
       if (prevPaneById.get(config.id) !== nextPane) return false;
+      if (prevSlotById.get(config.id) !== this.resolvedScaleOf(config).slot) return false;
+      if (prevVolMergedById.get(config.id) !== this.isVolumeMergedWithOther(config)) return false;
       survivingPanes.add(nextPane);
       if (nextPane > maxSurvivingPane) maxSurvivingPane = nextPane;
     }
@@ -577,6 +628,13 @@ export class IndicatorLayer {
   rows(t: UnixSeconds | null): IndicatorRow[] {
     const tokens = this.host.tokens();
     let fiscalMonthShown = false;
+    const panelMembers = new Map<string, IndicatorConfig[]>();
+    for (const config of this.configs) {
+      if (config.panel === "price") continue;
+      const list = panelMembers.get(config.panel);
+      if (list) list.push(config);
+      else panelMembers.set(config.panel, [config]);
+    }
     return this.configs.map((config) => {
       const s = this.shown.get(config.id);
       const status = s?.status ?? { kind: "pending" };
@@ -585,25 +643,40 @@ export class IndicatorLayer {
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((p) => p.id === config.panel);
       const collapsed = this.panels[panelIndex]?.collapsed;
       const time = collapsed ? this.display.at(-1)?.t ?? t : t;
+      const members = panelIndex < 0 ? null : panelMembers.get(config.panel) ?? [config];
+      const scale = panelIndex < 0 ? null : this.resolvedScaleOf(config);
+      const panelInfo: IndicatorPanelInfo | null = panelIndex < 0
+        ? null
+        : {
+            index: panelIndex,
+            count: this.panels.length,
+            collapsed,
+            panelId: config.panel,
+            slotIndex: members!.indexOf(config),
+            memberCount: members!.length,
+            axisSlot: scale!.slot,
+            axisExplicit: scale!.explicit,
+          };
+      const draggable = placementsOf(config.spec.kind).includes("panel");
       if (isFinancial(config.spec)) {
         const showFiscalMonth = !fiscalMonthShown;
         fiscalMonthShown = true;
-        return this.financialStore.row(config, time, this.host.period(), tokens, { index: panelIndex, count: this.panels.length, collapsed }, showFiscalMonth);
+        return {
+          ...this.financialStore.row(config, time, this.host.period(), tokens, panelInfo ?? { index: panelIndex, count: this.panels.length, collapsed }, showFiscalMonth),
+          draggable,
+        };
       }
       if (isQuoteTotals(config.spec)) {
-        const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
-        return this.quotes.totalsRow(config, time, tokens, panel);
+        return { ...this.quotes.totalsRow(config, time, tokens, panelInfo), draggable };
       }
       if (isQuoteDepth(config.spec)) {
-        return this.quotes.depthRow(config, time, tokens);
+        return { ...this.quotes.depthRow(config, time, tokens), draggable };
       }
       if (isTickCvd(config.spec)) {
-        const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
-        return this.micro.tickCvdRow(config, time, tokens, panel);
+        return { ...this.micro.tickCvdRow(config, time, tokens, panelInfo), draggable };
       }
       if (isProgramFlow(config.spec)) {
-        const panel = panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed };
-        return this.micro.programFlowRow(config, time, tokens, panel);
+        return { ...this.micro.programFlowRow(config, time, tokens, panelInfo), draggable };
       }
       const values: LegendValue[] =
         state !== "ok" || time === null || !s
@@ -620,7 +693,8 @@ export class IndicatorLayer {
         color: primary < 0 ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, primary)),
         values,
         state,
-        panel: panelIndex < 0 ? null : { index: panelIndex, count: this.panels.length, collapsed },
+        panel: panelInfo,
+        draggable,
       };
     });
   }
@@ -880,13 +954,19 @@ export class IndicatorLayer {
 
   private addLines(config: IndicatorConfig, kept: readonly Line[]): Line[] {
     const pane = this.paneOf(config);
+    const mergedVolume = this.isVolumeMergedWithOther(config);
     return specLines(config.spec).map((id, i): Line => {
       const plot = this.addPlot(config, id, i, pane);
       const { series } = plot;
       // 새 pane은 차트 단위 rightPriceScale을 물려받는데, 가격 패널의 축 모드(%·로그)를 바꾸면 그 값도 바뀐다.
-      if (pane > 0) series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: id === "volume" ? { top: 0.12, bottom: 0 } : { top: 0.14, bottom: 0.08 } });
+      if (pane > 0) {
+        const scaleMargins = id === "volume"
+          ? (mergedVolume ? { top: 0.45, bottom: 0 } : { top: 0.12, bottom: 0 })
+          : { top: 0.14, bottom: 0.08 };
+        series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins });
+      }
       if (isVolumeOverPrice(config)) series.priceScale().applyOptions({ mode: PriceScaleMode.Normal, scaleMargins: VOLUME_OVER_PRICE_MARGINS });
-      if (isVolumeOverPrice(config) && id === "volume") series.setSeriesOrder(0);
+      if ((isVolumeOverPrice(config) || mergedVolume) && id === "volume") series.setSeriesOrder(0);
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
       return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: barOpacityOf(config.style), points: same?.points ?? [], drawnLastT: null, guides, legendValues: new TrackedValues(), legendDirty: true, legendHasGap: false };
@@ -895,11 +975,14 @@ export class IndicatorLayer {
 
   private addPlot(config: IndicatorConfig, id: LineId, i: number, pane: number): Plot {
     const priceFormat = id === "programShare" ? axisPriceFormat("%", 0.1) : this.priceFormat(config);
+    const resolvedSlot = pane > 0 ? this.resolvedScaleOf(config).slot : "right";
     const scaleOverride = isVolumeOverPrice(config)
       ? { priceScaleId: `volume:${config.id}` }
       : id === "programShare"
         ? { priceScaleId: `programShare:${config.id}` }
-        : {};
+        : pane > 0 && resolvedSlot !== "right"
+          ? { priceScaleId: priceScaleIdFor(config, resolvedSlot) }
+          : {};
     const options = { ...this.lineOptions(config, id, i), priceFormat, ...scaleOverride };
     const bar = isFinancial(config.spec) ? isFinancialBar(config.spec.kind) : isBarLine(id);
     if (!bar) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane, isOverlay(config, id)) };
@@ -911,7 +994,7 @@ export class IndicatorLayer {
   }
 
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
-    const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price" && i === 0 && this.firstInPanel(config), title: "" };
+    const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price" && i === 0 && this.isAxisLeader(config), title: "" };
     if (isQuoteTotals(config.spec)) {
       const color = id === "quoteAsk" ? this.host.tokens().down : this.host.tokens().up;
       return { ...common, color, lineWidth: 2 as const, crosshairMarkerVisible: false };
@@ -922,8 +1005,13 @@ export class IndicatorLayer {
     return isOverlay(config, id) ? { ...line, halo: config.id === this.previewId } : { ...line, crosshairMarkerVisible: false };
   }
 
-  private firstInPanel(config: IndicatorConfig): boolean {
-    return this.configs.find((other) => other.panel === config.panel)?.id === config.id;
+  private isAxisLeader(config: IndicatorConfig): boolean {
+    if (config.panel === "price") return false;
+    const slot = this.resolvedScaleOf(config).slot;
+    if (slot === "overlay") return false;
+    const visibleLeader = this.configs.find((other) => other.panel === config.panel && other.visible && this.resolvedScaleOf(other).slot === slot);
+    if (visibleLeader) return visibleLeader.id === config.id;
+    return this.configs.find((other) => other.panel === config.panel && this.resolvedScaleOf(other).slot === slot)?.id === config.id;
   }
 
   private styleLines(s: Shown): void {
@@ -941,19 +1029,24 @@ export class IndicatorLayer {
   }
 
   private axisGeometry(config: IndicatorConfig): AxisGeometry {
+    const slot = config.panel === "price" ? "right" : this.resolvedScaleOf(config).slot;
+    if (slot === "overlay") {
+      return { toCoordinate: () => null, lastCoordinates: () => [] };
+    }
+    const side = slot;
     return {
       formatted: () => {
         const series = this.shown.get(config.id)?.lines[0]?.series;
-        if (series) this.host.axisFormatted(series.getPane());
+        if (series) this.host.axisFormatted(series.getPane(), side);
       },
       failed: (error) => {
         const series = this.shown.get(config.id)?.lines[0]?.series;
-        if (series) this.host.axisFailed(series.getPane(), error);
+        if (series) this.host.axisFailed(series.getPane(), error, side);
       },
       toCoordinate: (value) => this.shown.get(config.id)?.lines[0]?.series.priceToCoordinate(value) ?? null,
       lastCoordinates: () => {
         const series = this.shown.get(config.id)?.lines[0]?.series;
-        return series ? this.host.axisCoordinates(series.getPane()) : [];
+        return series ? this.host.axisCoordinates(series.getPane(), side) : [];
       },
     };
   }

@@ -8,6 +8,10 @@ export type ChartStyle = "candle" | "bar" | "line" | "area";
 export type PriceScale = "normal" | "log" | "percent";
 export type LineWidth = 1 | 2 | 3 | 4 | 5;
 export type ExtremeBasis = "last" | "extreme";
+export type IndicatorAxis = "auto" | "right" | "left" | "overlay";
+
+export const MAX_INDICATORS_PER_PANEL = 4;
+export const MERGED_PANEL_MIN_STRETCH = 0.34;
 
 export interface IndicatorConfig {
   id: string;
@@ -15,6 +19,7 @@ export interface IndicatorConfig {
   panel: "price" | Panel["id"];
   visible: boolean;
   style: { colors: IndicatorColor[]; width: LineWidth; barOpacity?: number };
+  axis?: IndicatorAxis;
 }
 
 export const DEFAULT_BAR_OPACITY = 0.38;
@@ -103,6 +108,7 @@ const CHART_STYLES = ["candle", "bar", "line", "area"] as const satisfies readon
 const PRICE_SCALES = ["normal", "log", "percent"] as const satisfies readonly PriceScale[];
 const WIDTHS = [1, 2, 3, 4, 5] as const satisfies readonly LineWidth[];
 const EXTREME_BASES = ["last", "extreme"] as const satisfies readonly ExtremeBasis[];
+const INDICATOR_AXES = ["auto", "right", "left", "overlay"] as const satisfies readonly IndicatorAxis[];
 
 const isOneOf = <T extends string | number>(xs: readonly T[], x: unknown): x is T => (xs as readonly unknown[]).includes(x);
 const isEmptyArray = (x: unknown): x is never[] => Array.isArray(x) && x.length === 0;
@@ -174,7 +180,16 @@ function readIndicator(raw: unknown): IndicatorConfig | null {
   if (!Array.isArray(colors) || !colors.every(isIndicatorColor)) return null;
   const barOpacity = style.barOpacity;
   if (barOpacity !== undefined && !isBarOpacity(barOpacity)) return null;
-  return { id: raw.id, spec, panel: raw.panel, visible: raw.visible, style: { colors, width: style.width, ...(barOpacity === undefined ? {} : { barOpacity }) } };
+  const axis = raw.axis;
+  if (axis !== undefined && !isOneOf(INDICATOR_AXES, axis)) return null;
+  return {
+    id: raw.id,
+    spec,
+    panel: raw.panel,
+    visible: raw.visible,
+    style: { colors, width: style.width, ...(barOpacity === undefined ? {} : { barOpacity }) },
+    ...(axis === undefined || axis === "auto" ? {} : { axis }),
+  };
 }
 
 export function readSpecShape(raw: unknown): IndicatorSpec | null {
@@ -249,10 +264,12 @@ const isCompareList = (x: unknown): x is SymbolCode[] =>
 
 function panelsMatch(s: Pick<ChartSettings, "indicators" | "panels">): boolean {
   const panelIds = s.panels.map((p) => p.id);
+  const panelSet = new Set(panelIds);
   const panelOwners = s.indicators.filter((i) => placementOfConfig(i) === "panel").map((i) => i.panel);
+  const ownerSet = new Set(panelOwners);
   const eachOnItsPane = s.indicators.every((i) => placementsOf(i.spec.kind).includes(placementOfConfig(i)));
-  const onePerPanel = panelOwners.length === panelIds.length && allDistinct(panelOwners) && panelOwners.every((id) => panelIds.includes(id));
-  return allDistinct(panelIds) && allDistinct(s.indicators.map((i) => i.id)) && eachOnItsPane && onePerPanel;
+  const atLeastOnePerPanel = panelOwners.every((id) => panelSet.has(id)) && panelIds.every((id) => ownerSet.has(id));
+  return allDistinct(panelIds) && allDistinct(s.indicators.map((i) => i.id)) && eachOnItsPane && atLeastOnePerPanel;
 }
 
 const newId = () => crypto.randomUUID();
@@ -285,18 +302,33 @@ export function updateIndicator(s: ChartSettings, id: string, patch: Partial<Pic
   return indicators.every((i, n) => i === s.indicators[n]) ? s : { ...s, indicators };
 }
 
+function withoutAxis(config: IndicatorConfig): IndicatorConfig {
+  if (config.axis === undefined) return config;
+  const { axis: _removed, ...rest } = config;
+  return rest;
+}
+
+function prunePanels(panels: readonly Panel[], indicators: readonly IndicatorConfig[]): Panel[] {
+  return panels.filter((p) => indicators.some((i) => i.panel === p.id));
+}
+
 export function setIndicatorPlacement(s: ChartSettings, id: string, placement: Placement, panel: Panel = { id: newId(), stretch: DEFAULT_PANEL_STRETCH }, at = 0): ChartSettings {
   const config = s.indicators.find((i) => i.id === id);
   if (!config || placementOfConfig(config) === placement || !placementsOf(config.spec.kind).includes(placement)) return s;
-  const indicators = s.indicators.map((i) => (i === config ? { ...i, panel: placement === "price" ? "price" : panel.id } : i));
-  const panels = placement === "price" ? s.panels.filter((p) => p.id !== config.panel) : [...s.panels.slice(0, at), panel, ...s.panels.slice(at)];
+  const indicators = s.indicators.map((i) => (i === config ? withoutAxis({ ...i, panel: placement === "price" ? "price" : panel.id }) : i));
+  const panels = placement === "price"
+    ? prunePanels(s.panels, indicators)
+    : s.panels.some((p) => p.id === panel.id)
+      ? s.panels
+      : [...s.panels.slice(0, at), panel, ...s.panels.slice(at)];
   return { ...s, indicators, panels };
 }
 
 export function removeIndicator(s: ChartSettings, id: string): ChartSettings {
   const gone = s.indicators.find((i) => i.id === id);
   if (!gone) return s;
-  return { ...s, indicators: s.indicators.filter((i) => i !== gone), panels: s.panels.filter((p) => p.id !== gone.panel) };
+  const indicators = s.indicators.filter((i) => i !== gone);
+  return { ...s, indicators, panels: prunePanels(s.panels, indicators) };
 }
 
 export function movePanel(s: ChartSettings, panelId: string, step: -1 | 1): ChartSettings {
@@ -306,6 +338,75 @@ export function movePanel(s: ChartSettings, panelId: string, step: -1 | 1): Char
   const panels = [...s.panels];
   [panels[from], panels[to]] = [panels[to]!, panels[from]!];
   return { ...s, panels };
+}
+
+export function reorderPanel(s: ChartSettings, panelId: string, insertAt: number): ChartSettings {
+  const from = s.panels.findIndex((p) => p.id === panelId);
+  if (from < 0) return s;
+  const clamped = Math.max(0, Math.min(s.panels.length, insertAt));
+  if (clamped === from || clamped === from + 1) return s;
+  const panels = [...s.panels];
+  const [moved] = panels.splice(from, 1);
+  const to = clamped > from ? clamped - 1 : clamped;
+  panels.splice(to, 0, moved!);
+  return { ...s, panels };
+}
+
+export function mergeIndicatorIntoPanel(s: ChartSettings, indicatorId: string, targetPanelId: "price" | Panel["id"]): ChartSettings {
+  const config = s.indicators.find((i) => i.id === indicatorId);
+  if (!config || config.panel === targetPanelId) return s;
+  if (targetPanelId === "price") return setIndicatorPlacement(s, indicatorId, "price");
+  if (!placementsOf(config.spec.kind).includes("panel")) return s;
+  if (!s.panels.some((p) => p.id === targetPanelId)) return s;
+  const targetMembers = s.indicators.filter((i) => i.panel === targetPanelId);
+  if (targetMembers.length >= MAX_INDICATORS_PER_PANEL) return s;
+  const moved = withoutAxis({ ...config, panel: targetPanelId });
+  const withoutMoved = s.indicators.filter((i) => i !== config);
+  let lastTargetIndex = -1;
+  for (let i = 0; i < withoutMoved.length; i++) {
+    if (withoutMoved[i]!.panel === targetPanelId) lastTargetIndex = i;
+  }
+  const indicators = lastTargetIndex < 0
+    ? [...withoutMoved, moved]
+    : [...withoutMoved.slice(0, lastTargetIndex + 1), moved, ...withoutMoved.slice(lastTargetIndex + 1)];
+  const panels = prunePanels(s.panels, indicators).map((p) => {
+    if (p.id !== targetPanelId) return p;
+    const stretch = p.stretch < MERGED_PANEL_MIN_STRETCH ? MERGED_PANEL_MIN_STRETCH : p.stretch;
+    const next: Panel = { id: p.id, stretch };
+    return next;
+  });
+  return { ...s, indicators, panels };
+}
+
+export function splitIndicatorToNewPanel(
+  s: ChartSettings,
+  indicatorId: string,
+  insertAt: number,
+  makeId: () => string = newId,
+): ChartSettings {
+  const config = s.indicators.find((i) => i.id === indicatorId);
+  if (!config || !placementsOf(config.spec.kind).includes("panel")) return s;
+  if (config.panel !== "price") {
+    const siblings = s.indicators.filter((i) => i.panel === config.panel);
+    if (siblings.length === 1) return reorderPanel(s, config.panel, insertAt);
+  }
+  const panelId = makeId();
+  const clamped = Math.max(0, Math.min(s.panels.length, insertAt));
+  const indicators = s.indicators.map((i) => (i === config ? withoutAxis({ ...i, panel: panelId }) : i));
+  const panels = [...s.panels.slice(0, clamped), { id: panelId, stretch: DEFAULT_PANEL_STRETCH }, ...s.panels.slice(clamped)];
+  return { ...s, indicators, panels };
+}
+
+export function setIndicatorAxis(s: ChartSettings, indicatorId: string, axis: IndicatorAxis): ChartSettings {
+  const config = s.indicators.find((i) => i.id === indicatorId);
+  if (!config || config.panel === "price") return s;
+  const nextAxis = axis === "auto" ? undefined : axis;
+  if (config.axis === nextAxis) return s;
+  const indicators = s.indicators.map((i) => {
+    if (i !== config) return i;
+    return nextAxis === undefined ? withoutAxis(i) : { ...i, axis: nextAxis };
+  });
+  return { ...s, indicators };
 }
 
 export function togglePanel(s: ChartSettings, panelId: string): ChartSettings {
