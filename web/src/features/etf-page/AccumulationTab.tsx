@@ -155,11 +155,26 @@ const rowEtfCount = (row: EtfAccumulationRow, direction: EtfAccumulationDirectio
   direction === "sell" ? row.sellingEtfCount : row.buyingEtfCount;
 
 const RADAR_DEFAULT_W = 720;
-const RADAR_H = 216;
+const RADAR_H = 420;
 const RADAR_LEFT = 48;
-const RADAR_RIGHT_PAD = 32;
-const RADAR_TOP = 24;
-const RADAR_BOTTOM = 182;
+const RADAR_RIGHT_PAD = 36;
+const RADAR_TOP = 28;
+const RADAR_BOTTOM = 382;
+const RADAR_LOG_GAIN = 10;
+
+interface LabelBox {
+  x1: number;
+  x2: number;
+  y1: number;
+  y2: number;
+}
+
+function overlapsAny(box: LabelBox, placed: readonly LabelBox[]): boolean {
+  for (const other of placed) {
+    if (box.x1 < other.x2 && box.x2 > other.x1 && box.y1 < other.y2 && box.y2 > other.y1) return true;
+  }
+  return false;
+}
 
 interface AccumulationTabProps {
   onOpenFund: (code: string) => void;
@@ -232,19 +247,33 @@ function ConvictionRadar({
   const plotH = RADAR_BOTTOM - RADAR_TOP;
   const numericSpan = svgW < 420 ? plotW * 0.72 : plotW * 0.82;
   const nullX = Math.min(svgW - 26, RADAR_LEFT + plotW * 0.93);
+  const maxLog = Math.log1p(maxChange * RADAR_LOG_GAIN);
   const xFor = (mag: number | null) =>
     mag === null
       ? nullX
-      : RADAR_LEFT + (Math.min(maxChange, Math.max(0, mag)) / maxChange) * numericSpan;
+      : RADAR_LEFT + (Math.log1p(Math.min(maxChange, Math.max(0, mag)) * RADAR_LOG_GAIN) / maxLog) * numericSpan;
   const yFor = (count: number) => RADAR_BOTTOM - ((count - 0.5) / maxCount) * plotH;
 
   const zoneX = xFor(0.15);
   const zoneY = RADAR_TOP;
   const zoneH = Math.max(24, yFor(2.6) - RADAR_TOP);
-  const showMidTick = xFor(0.15) - xFor(0) >= 38 && xFor(maxChange) - xFor(0.15) >= 38;
-  const xTicks = showMidTick ? [0, 0.15, maxChange] : [0, maxChange];
-  const yTicks = Array.from({ length: Math.min(5, maxCount) }, (_, idx) =>
-    Math.max(1, Math.round(((idx + 1) * maxCount) / Math.min(5, maxCount))),
+  const candidateTicks = [0, 0.15, 0.5, 1.0, maxChange].filter((tick) => tick <= maxChange + 1e-6);
+  const xTicks: number[] = [];
+  for (const tick of candidateTicks) {
+    const prev = xTicks[xTicks.length - 1];
+    if (prev === undefined || xFor(tick) - xFor(prev) >= 48) {
+      xTicks.push(tick);
+    }
+  }
+  if (xTicks[xTicks.length - 1] !== maxChange) {
+    if (xTicks.length > 1 && xFor(maxChange) - xFor(xTicks[xTicks.length - 1]!) < 44) {
+      xTicks[xTicks.length - 1] = maxChange;
+    } else {
+      xTicks.push(maxChange);
+    }
+  }
+  const yTicks = Array.from({ length: Math.min(6, maxCount) }, (_, idx) =>
+    Math.max(1, Math.round(((idx + 1) * maxCount) / Math.min(6, maxCount))),
   );
   const uniqueYTicks = [...new Set(yTicks)];
 
@@ -271,6 +300,56 @@ function ConvictionRadar({
       onToggle(code);
     }
   };
+
+  const positioned = useMemo(() => {
+    const bucketCounts = new Map<string, number>();
+    const items = rows.map((row) => {
+      const count = rowEtfCount(row, direction);
+      const mag = magnitude(row.medianRealChange);
+      const baseX = xFor(mag);
+      const baseY = yFor(count);
+      const key = `${Math.round(baseX / 14)}:${count}`;
+      const slot = bucketCounts.get(key) ?? 0;
+      bucketCounts.set(key, slot + 1);
+      const ring = Math.floor((slot + 1) / 2);
+      const sign = slot % 2 === 0 ? 1 : -1;
+      const dx = slot === 0 ? 0 : sign * Math.min(18, ring * 6) * (mag === null ? 0.7 : 1);
+      const dy = slot === 0 ? 0 : (((slot % 5) - 2) * 7);
+      const r = Math.min(18, 7 + count * 2.2);
+      const cx = Math.min(svgW - r - 6, Math.max(RADAR_LEFT + r, baseX + dx));
+      const cy = Math.min(RADAR_BOTTOM - r - 2, Math.max(RADAR_TOP + r + 2, baseY + dy));
+      const tone = bubbleTone(row);
+      const highConviction = count >= 3 && (mag === null || mag >= 0.15);
+      return { row, count, mag, cx, cy, r, tone, highConviction };
+    });
+
+    const placed: LabelBox[] = [];
+    const labelVisible = new Set<string>();
+    const order = [...items].sort((a, b) => {
+      const aSel = expanded === a.row.code ? 1 : 0;
+      const bSel = expanded === b.row.code ? 1 : 0;
+      if (aSel !== bSel) return bSel - aSel;
+      if (a.highConviction !== b.highConviction) return a.highConviction ? -1 : 1;
+      if (a.count !== b.count) return b.count - a.count;
+      return (b.mag ?? 99) - (a.mag ?? 99);
+    });
+    for (const item of order) {
+      const labelW = Math.max(36, item.row.name.length * 10 + 8);
+      const labelH = 14;
+      const yTop = item.cy - item.r - 4 - labelH;
+      const box: LabelBox = {
+        x1: item.cx - labelW / 2,
+        x2: item.cx + labelW / 2,
+        y1: yTop,
+        y2: yTop + labelH,
+      };
+      if (expanded === item.row.code || !overlapsAny(box, placed)) {
+        placed.push(box);
+        labelVisible.add(item.row.code);
+      }
+    }
+    return { items, labelVisible };
+  }, [rows, direction, expanded, svgW, maxChange, maxCount, nullX, numericSpan, plotH]);
 
   return (
     <section className="etf-card etf-card-wide" aria-label="컨빅션 버블 레이더">
@@ -330,14 +409,9 @@ function ConvictionRadar({
           <text x={xFor(null)} y={RADAR_BOTTOM + 16} textAnchor="middle" className="etf-curve-axis">
             {copy.radarNullTick}
           </text>
-          {rows.map((row, idx) => {
-            const count = rowEtfCount(row, direction);
-            const cx = xFor(magnitude(row.medianRealChange));
-            const jitter = ((idx % 3) - 1) * 5;
-            const cy = Math.min(RADAR_BOTTOM - 12, Math.max(RADAR_TOP + 12, yFor(count) + jitter));
-            const r = Math.min(18, 7 + count * 2.5);
-            const tone = bubbleTone(row);
+          {positioned.items.map(({ row, count, cx, cy, r, tone }) => {
             const selected = expanded === row.code;
+            const showLabel = positioned.labelVisible.has(row.code);
             return (
               <g
                 key={row.code}
@@ -352,10 +426,16 @@ function ConvictionRadar({
                 onClick={() => onToggle(row.code)}
                 onKeyDown={(event) => handleKey(event, row.code)}
               >
+                <title>
+                  {row.name} · {copy.countAriaVerb} ETF {count}개 · 중앙 실질 증감{" "}
+                  {formatMedianRealChange(row.medianRealChange)}
+                </title>
                 <circle cx={cx} cy={cy} r={r} className="etf-radar-circle" />
-                <text x={cx} y={cy - r - 4} textAnchor="middle" className="etf-radar-label">
-                  {row.name}
-                </text>
+                {showLabel && (
+                  <text x={cx} y={cy - r - 4} textAnchor="middle" className="etf-radar-label">
+                    {row.name}
+                  </text>
+                )}
               </g>
             );
           })}

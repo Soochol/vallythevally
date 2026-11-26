@@ -15,5 +15,5 @@
 .page-topbar-slot { display: contents; }
 .page-topbar .page-find kbd { flex: none; }
 
-.page-stage { position: absolute; inset: 0; margin: var(--island-gap); overflow-x: hidden; overflow-y: auto; border-radius: var(--r-l); }
+.page-stage { position: absolute; inset: 0; z-index: 1; margin: var(--island-gap); overflow-x: hidden; overflow-y: auto; border-radius: var(--r-l); background: var(--bg); }
 @media (width < 48rem) { .page-stage { position: static; grid-area: grid; margin: 0; padding: var(--size-8); } }
