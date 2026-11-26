@@ -3,7 +3,7 @@ import type { OrderSide } from "../../api/generated/OrderSide";
 import { formatPrice } from "../../lib/format";
 import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
-import { type DayPrices, ladderColumns, type LadderMicroCue, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
+import { type DayPrices, ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
 import { type BuyingPower, buyPreview, groupKey, orderQuantityForPrice, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
@@ -36,7 +36,6 @@ interface Props {
   readonly actions: LadderActions;
   readonly averagePrice: number | null;
   readonly dayPrices?: DayPrices | null;
-  readonly microCues?: ReadonlyMap<number, LadderMicroCue>;
   readonly divider: boolean;
   readonly rateShown: boolean;
   readonly explorerOn: boolean;
@@ -158,7 +157,7 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, microCues, divider, rateShown, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
@@ -253,7 +252,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   };
 
   const shown = exploring ? rows.slice(range.start, range.end) : rows;
-  const ladderView = <PriceLadder rows={shown} previousClose={previousClose} rateShown={rateShown} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} dayPrices={dayPrices} microCues={microCues} expectedPrice={expectedPrice} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
+  const ladderView = <PriceLadder rows={shown} previousClose={previousClose} rateShown={rateShown} slots={slots} rowSlots={exploring ? undefined : rowSlots} mark={{ price: averagePrice, label: "평단가" }} dayPrices={dayPrices} expectedPrice={expectedPrice} firstBidIndex={exploring ? Math.max(0, (centerIndex < 0 ? rowCount : centerIndex) - range.start) : undefined} />;
 
   return (
     <div ref={ladder} className="od-ladder" data-testid="order-ladder" data-explorer={exploring ? "" : undefined} data-dragging={dragging ? "" : undefined} data-divider={divider ? "" : undefined}
