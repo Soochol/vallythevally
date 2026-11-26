@@ -474,7 +474,7 @@ async function openNarrowest(page: Page, scenario: Scenario): Promise<void> {
 test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자가 잘리거나 겹치지 않고 금액 프리셋이 한 줄이다", async ({ page, scenario }) => {
   await openNarrowest(page, scenario);
   const quantityRow = page.getByTestId("order-quantity-row");
-  expect((await win(page).boundingBox())!.width).toBeCloseTo(372, 0);
+  expect((await page.locator('[data-canvas-window="order"]').boundingBox())!.width).toBeCloseTo(372, 0);
   expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-gear").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(1);
   expect(await cutTexts(win(page))).toEqual([]);
   for (const row of [quantityRow, page.getByTestId("order-summary"), page.locator(".od-account-bar"), page.getByTestId("order-symbol-head")]) expect(await overlappingChildren(row)).toEqual([]);
@@ -483,7 +483,7 @@ test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자�
 test("등락률을 끈 10호가 창을 최소 폭 232px로 줄여도 잔량·체결·총잔량 글자가 잘리지 않는다", async ({ page, scenario }) => {
   await openNarrowest(page, scenario);
   const book = page.getByTestId("book-window");
-  expect((await book.boundingBox())!.width).toBeCloseTo(232, 0);
+  expect((await page.locator('[data-canvas-window="book"]').boundingBox())!.width).toBeCloseTo(232, 0);
   expect(await cutTexts(book)).toEqual([]);
 });
 

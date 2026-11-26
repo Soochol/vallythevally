@@ -566,8 +566,9 @@ export class ChartController {
         .filter((r) => r.state === "ok")
         .map((r) => ({ name: r.name, color: r.color, values: r.values })),
     };
+    const cssWidth = this.chart.chartElement().querySelector("table")?.clientWidth || this.el.clientWidth;
     return {
-      canvas: composeSnapshot(shot, head, this.tokens, shot.width / Math.max(1, this.el.clientWidth)),
+      canvas: composeSnapshot(shot, head, this.tokens, shot.width / Math.max(1, cssWidth)),
       fileName: snapshotFileName(view.symbol, view.venue, view.period, takenAt),
     };
   }
