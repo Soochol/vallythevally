@@ -9,12 +9,12 @@ import type { EtfMaStates } from "../../api/generated/EtfMaStates";
 import type { EtfRecentActivity } from "../../api/generated/EtfRecentActivity";
 import type { EtfStyle } from "../../api/generated/EtfStyle";
 
-export type GlobalTabId = "accumulation" | "overlap" | "reverse";
-export type FundTabId = "holdings" | "history" | "similar";
+export type GlobalTabId = "accumulation" | "flows" | "overlap" | "reverse";
+export type FundTabId = "holdings" | "history" | "shares" | "similar";
 export type TabId = GlobalTabId | FundTabId;
 
 export function isGlobalTab(tab: TabId): tab is GlobalTabId {
-  return tab === "accumulation" || tab === "overlap" || tab === "reverse";
+  return tab === "accumulation" || tab === "flows" || tab === "overlap" || tab === "reverse";
 }
 
 export type StyleFilter = EtfStyle | "all";
@@ -37,10 +37,13 @@ export function filterFunds(funds: readonly EtfFundSummary[], filter: FundFilter
   );
 }
 
-export type FundSort = "name" | "top5" | "effective" | "activity" | "count";
+export type FundSort = "name" | "flow_in" | "flow_out" | "aum" | "top5" | "effective" | "activity" | "count";
 
 export const SORT_CHOICES: readonly { value: FundSort; label: string }[] = [
   { value: "name", label: "이름순" },
+  { value: "flow_in", label: "5일 유입순" },
+  { value: "flow_out", label: "5일 유출순" },
+  { value: "aum", label: "순자산순" },
   { value: "top5", label: "상위 5 비중순" },
   { value: "effective", label: "실효 종목순" },
   { value: "activity", label: "최근 리밸런싱순" },
@@ -52,7 +55,36 @@ export function activityScore(activity: EtfRecentActivity | null): number {
   return activity.added * 3 + activity.increased * 2 + activity.removed * 2 + activity.decreased;
 }
 
+function compareNullableDesc(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return b - a;
+}
+
+function compareNullableAsc(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
 export function sortFunds(funds: readonly EtfFundSummary[], sort: FundSort): EtfFundSummary[] {
+  if (sort === "flow_in") {
+    return funds.toSorted(
+      (a, b) => compareNullableDesc(a.netFlow5dWon, b.netFlow5dWon) || a.name.localeCompare(b.name, "ko"),
+    );
+  }
+  if (sort === "flow_out") {
+    return funds.toSorted(
+      (a, b) => compareNullableAsc(a.netFlow5dWon, b.netFlow5dWon) || a.name.localeCompare(b.name, "ko"),
+    );
+  }
+  if (sort === "aum") {
+    return funds.toSorted(
+      (a, b) => compareNullableDesc(a.latestAumWon, b.latestAumWon) || a.name.localeCompare(b.name, "ko"),
+    );
+  }
   if (sort === "top5") return funds.toSorted((a, b) => b.top5WeightBps - a.top5WeightBps);
   if (sort === "count") return funds.toSorted((a, b) => b.holdingsCount - a.holdingsCount);
   if (sort === "effective") return funds.toSorted((a, b) => a.effectiveHoldings - b.effectiveHoldings || a.name.localeCompare(b.name, "ko"));
@@ -332,3 +364,46 @@ export const formatAccumulationPeriod = (fromDate: string | null, toDate: string
 
 export const formatBuyingSummary = (buyingEtfCount: number, addedEtfCount: number): string =>
   addedEtfCount > 0 ? `${buyingEtfCount}개 (신규 ${addedEtfCount})` : `${buyingEtfCount}개`;
+
+export function formatFlowWon(won: number | null, signed = true): string {
+  if (won === null) return "-";
+  const eok = won / 1e8;
+  const sign = signed && eok > 0 ? "+" : "";
+  if (Math.abs(eok) >= 10_000) return `${sign}${(eok / 10_000).toFixed(2)}조`;
+  if (Math.abs(eok) >= 100) return `${sign}${Math.round(eok).toLocaleString("ko-KR")}억`;
+  if (Math.abs(eok) >= 0.05) return `${sign}${eok.toFixed(1)}억`;
+  return "0억";
+}
+
+export function formatAumWon(won: number | null): string {
+  if (won === null || won <= 0) return "-";
+  const eok = won / 1e8;
+  if (eok >= 10_000) return `${(eok / 10_000).toFixed(2)}조원`;
+  if (eok >= 1) return `${Math.round(eok).toLocaleString("ko-KR")}억원`;
+  return `${Math.round(won / 1e4).toLocaleString("ko-KR")}만원`;
+}
+
+export function formatSharesCount(shares: number | null, signed = false): string {
+  if (shares === null) return "-";
+  const sign = signed && shares > 0 ? "+" : "";
+  const abs = Math.abs(shares);
+  if (abs >= 1e8) return `${sign}${(shares / 1e8).toFixed(2)}억좌`;
+  if (abs >= 1e4) return `${sign}${Math.round(shares / 1e4).toLocaleString("ko-KR")}만좌`;
+  return `${sign}${shares.toLocaleString("ko-KR")}좌`;
+}
+
+export function formatSignedPercent(pct: number | null): string {
+  if (pct === null || !Number.isFinite(pct)) return "-";
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
+export function formatPremiumBps(bps: number | null): string {
+  if (bps === null) return "-";
+  const pct = bps / 100;
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
+export function flowDirectionOf(value: number | null): "up" | "down" | "flat" {
+  if (value === null || value === 0) return "flat";
+  return value > 0 ? "up" : "down";
+}

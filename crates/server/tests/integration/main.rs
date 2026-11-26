@@ -21,6 +21,7 @@ mod etf_accumulation;
 mod etf_collect;
 mod etf_history;
 mod etf_ma;
+mod etf_shares;
 mod feature_route;
 mod financial_calculations;
 mod financial_source_response;

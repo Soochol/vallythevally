@@ -8,8 +8,11 @@ import {
   commonHoldings,
   filterChangeRows,
   filterFunds,
+  formatAumWon,
+  formatFlowWon,
   formatRealChange,
   formatScale,
+  formatSharesCount,
   fullRangePair,
   holdingsBreadth,
   isGlobalTab,
@@ -32,10 +35,14 @@ const fund = (
   style: EtfFundSummary["style"],
   issuer: string,
   recentActivity: EtfFundSummary["recentActivity"] = null,
+  latestAumWon: number | null = null,
+  netFlow5dWon: number | null = null,
 ): EtfFundSummary => ({
   code, name, issuer, style, benchmark: "", holdingsCount: 1, top5WeightBps: 100, effectiveHoldings: 1,
   status: { source: "snapshot", holdingsAsOf: "2026-10-30", lastAttemptAt: null, refreshFailed: false },
   recentActivity,
+  latestAumWon,
+  netFlow5dWon,
 });
 
 const FUNDS = [
@@ -117,6 +124,22 @@ describe("sortFunds", () => {
   it("원래 배열을 바꾸지 않는다", () => {
     sortFunds(sized, "count");
     expect(sized.map((f) => f.code)).toEqual(["a", "b", "c"]);
+  });
+  it("자금 유입·유출·순자산순 정렬은 결측 값을 뒤로 둔다", () => {
+    const flowFunds = [
+      fund("a", "다", "passive", "x", null, 300_000_000_000, -12_000_000_000),
+      fund("b", "가", "passive", "x", null, null, null),
+      fund("c", "나", "passive", "x", null, 800_000_000_000, 45_000_000_000),
+    ];
+    expect(sortFunds(flowFunds, "flow_in").map((f) => f.code)).toEqual(["c", "a", "b"]);
+    expect(sortFunds(flowFunds, "flow_out").map((f) => f.code)).toEqual(["a", "c", "b"]);
+    expect(sortFunds(flowFunds, "aum").map((f) => f.code)).toEqual(["c", "a", "b"]);
+    expect(formatFlowWon(45_000_000_000)).toBe("+450억");
+    expect(formatFlowWon(-12_300_000_000)).toBe("-123억");
+    expect(formatAumWon(1_250_000_000_000)).toBe("1.25조원");
+    expect(formatSharesCount(19_200_000)).toBe("1,920만좌");
+    expect(isGlobalTab("flows")).toBe(true);
+    expect(isGlobalTab("shares")).toBe(false);
   });
 });
 

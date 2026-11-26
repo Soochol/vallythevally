@@ -31,6 +31,7 @@ pub struct EtfBook {
     state: Mutex<Collected>,
     pdf_dir: OnceLock<PathBuf>,
     revision: AtomicU64,
+    shares: super::shares::EtfSharesBook,
 }
 
 #[derive(Default)]
@@ -42,13 +43,17 @@ struct Collected {
 impl Default for EtfBook {
     fn default() -> Self {
         let base = Arc::new(Catalog::embedded());
-        EtfBook { current: RwLock::new(base.clone()), base, state: Mutex::default(), pdf_dir: OnceLock::new(), revision: AtomicU64::new(0) }
+        EtfBook { current: RwLock::new(base.clone()), base, state: Mutex::default(), pdf_dir: OnceLock::new(), revision: AtomicU64::new(0), shares: super::shares::EtfSharesBook::default() }
     }
 }
 
 impl EtfBook {
     pub fn catalog(&self) -> Arc<Catalog> {
         self.current.read().expect("ETF 목록 잠금").clone()
+    }
+
+    pub fn shares(&self) -> &super::shares::EtfSharesBook {
+        &self.shares
     }
 
     pub fn revision(&self) -> u64 {

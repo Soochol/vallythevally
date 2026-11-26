@@ -11,11 +11,13 @@ import { rovingIndex } from "../ui/roving";
 import { AccumulationTab } from "./AccumulationTab";
 import { CumulativeCurve } from "./CumulativeCurve";
 import { Failure, Loading, Notice } from "./EtfStates";
+import { FlowTab } from "./FlowTab";
 import { HelpTip } from "./HelpTip";
 import { HistoryTab } from "./HistoryTab";
 import { HoldingsTable } from "./HoldingsTable";
 import { type OverlapPair, OverlapTab } from "./OverlapTab";
 import { ReverseTab } from "./ReverseTab";
+import { SharesTab } from "./SharesTab";
 import { SimilarTab } from "./SimilarTab";
 import { Treemap } from "./Treemap";
 import {
@@ -35,6 +37,7 @@ export type { TabId } from "./etfModel";
 
 const GLOBAL_TABS = [
   { id: "accumulation", label: "동시 매집" },
+  { id: "flows", label: "자금 흐름" },
   { id: "overlap", label: "겹침" },
   { id: "reverse", label: "역추적" },
 ] as const;
@@ -42,6 +45,7 @@ const GLOBAL_TABS = [
 const FUND_TABS = [
   { id: "holdings", label: "구성" },
   { id: "history", label: "편입 변경" },
+  { id: "shares", label: "좌수·자금" },
   { id: "similar", label: "유사 ETF" },
 ] as const;
 
@@ -331,6 +335,7 @@ function HoldingsTab({ code, onOpenReverse }: { code: string; onOpenReverse: (st
 
 interface EtfDetailProps {
   fund: EtfFundSummary | null;
+  requestedCode: string | null;
   funds: readonly EtfFundSummary[];
   tab: TabId;
   basket: readonly string[];
@@ -343,12 +348,14 @@ interface EtfDetailProps {
   onToggleBasket: (code: string) => void;
   onStock: (code: string | null) => void;
   onOpenFund: (code: string) => void;
+  onOpenShares: (code: string) => void;
   onOpenReverse: (stockCode: string) => void;
   onComparePair: (codeA: string, codeB: string) => void;
 }
 
 function Panel({
   fund,
+  requestedCode,
   funds,
   tab,
   basket,
@@ -356,9 +363,11 @@ function Panel({
   pair,
   overlapPair,
   onPair,
+  onTab,
   onToggleBasket,
   onStock,
   onOpenFund,
+  onOpenShares,
   onOpenReverse,
   onComparePair,
 }: EtfDetailProps) {
@@ -386,6 +395,23 @@ function Panel({
   }
   if (tab === "accumulation") {
     return <AccumulationTab onOpenFund={onOpenFund} onOpenReverse={onOpenReverse} />;
+  }
+  if (tab === "flows") {
+    return <FlowTab onOpenShares={onOpenShares} onOpenAccumulation={() => onTab("accumulation")} />;
+  }
+  if (tab === "shares") {
+    const targetCode = fund?.code ?? requestedCode;
+    if (targetCode !== null) {
+      return (
+        <SharesTab
+          key={targetCode}
+          code={targetCode}
+          hasCatalogHero={fund !== null}
+          onOpenFlows={() => onTab("flows")}
+          onOpenHistory={() => onTab("history")}
+        />
+      );
+    }
   }
   if (tab === "holdings" && fund) return <HoldingsTab key={fund.code} code={fund.code} onOpenReverse={onOpenReverse} />;
   if (tab === "history" && fund) {

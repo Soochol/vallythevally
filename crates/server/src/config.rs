@@ -167,8 +167,12 @@ const KNOWN_KEYS: &[&str] = &[
     "VALLY_STATIC_DIR",
     "VALLY_LOG",
     "VALLY_NAVER_BASE_URL",
+    "VALLY_KRX_API_KEY",
+    "VALLY_KRX_BASE_URL",
     "VALLY_KIS_MASTER_BASE_URL",
     "VALLY_ETF_PDF_DIR",
+    "VALLY_ETF_SHARES_DIR",
+    "VALLY_ETF_SHARES_BACKFILL_DAYS",
     "VALLY_PUBLIC_IP_URL",
     "VALLY_FINANCIAL_DB_PATH",
     "VALLY_MARKET_SAMPLES_DIR",
@@ -209,8 +213,12 @@ pub struct Config {
     pub screener_snapshot_stale_limit: Duration,
     pub log_filter: String,
     pub naver_base_url: String,
+    pub krx_api_key: Option<Secret<String>>,
+    pub krx_base_url: String,
     pub kis_master_base_url: String,
     pub etf_pdf_dir: PathBuf,
+    pub etf_shares_dir: PathBuf,
+    pub etf_shares_backfill_days: u32,
     pub public_ip_url: String,
     pub financial_db_path: PathBuf,
     pub market_samples_dir: PathBuf,
@@ -251,6 +259,18 @@ fn shared_data_settings(vars: &BTreeMap<String, String>) -> Result<Option<crate:
 }
 
 const DEFAULT_SCREENER_SNAPSHOT_STALE_LIMIT: Duration = Duration::from_secs(120);
+const DEFAULT_ETF_SHARES_BACKFILL_DAYS: u32 = 60;
+const MAX_ETF_SHARES_BACKFILL_DAYS: u32 = 250;
+
+fn etf_shares_backfill_days(vars: &BTreeMap<String, String>) -> Result<u32, ConfigError> {
+    match vars.get("VALLY_ETF_SHARES_BACKFILL_DAYS").filter(|v| !v.is_empty()) {
+        None => Ok(DEFAULT_ETF_SHARES_BACKFILL_DAYS),
+        Some(s) => match s.parse::<u32>() {
+            Ok(days) if (1..=MAX_ETF_SHARES_BACKFILL_DAYS).contains(&days) => Ok(days),
+            _ => Err(ConfigError(format!("VALLY_ETF_SHARES_BACKFILL_DAYS는 1~{MAX_ETF_SHARES_BACKFILL_DAYS} 정수입니다: {s}"))),
+        },
+    }
+}
 
 fn screener_snapshot_stale_limit(vars: &BTreeMap<String, String>) -> Result<Duration, ConfigError> {
     match vars.get("VALLY_SCREENER_SNAPSHOT_STALE_SECS").filter(|v| !v.is_empty()) {
@@ -372,6 +392,9 @@ impl Config {
             return Err(ConfigError("VALLY_CLOCK_START는 루프백 한투 주소(VALLY_KIS_BASE_URL, VALLY_KIS_WS_URL)와만 쓸 수 있습니다".into()));
         }
         let naver_base_url = public_or_loopback("VALLY_NAVER_BASE_URL", url("VALLY_NAVER_BASE_URL"), "https://stock.naver.com")?;
+        let krx_api_key = present("VALLY_KRX_API_KEY").map(Secret::new);
+        let krx_base_url = public_or_loopback("VALLY_KRX_BASE_URL", url("VALLY_KRX_BASE_URL"), "https://data-dbg.krx.co.kr")?;
+        let etf_shares_backfill_days = etf_shares_backfill_days(&vars)?;
         let kis_master_base_url = public_or_loopback("VALLY_KIS_MASTER_BASE_URL", url("VALLY_KIS_MASTER_BASE_URL"), KIS_MASTER_BASE_URL)?;
         let public_ip_url = public_or_loopback("VALLY_PUBLIC_IP_URL", url("VALLY_PUBLIC_IP_URL"), "https://api.ipify.org")?;
         let account_server_url = url("VALLY_ACCOUNT_SERVER_URL").map(|value| AccountServerUrl::parse(&value).map_err(|e| ConfigError(format!("VALLY_ACCOUNT_SERVER_URL: {e}")))).transpose()?;
@@ -399,6 +422,17 @@ impl Config {
         if public.is_some() && shared_data.is_none() {
             return Err(ConfigError("공개 리스너(VALLY_PUBLIC_BIND, VALLY_PUBLIC_ORIGIN)를 켜면 VALLY_SHARED_DATA_DIR도 적어야 합니다. 공개 요청은 공용 자료 폴더에서만 읽고 키움을 부르지 않습니다".into()));
         }
+        let etf_shares_dir = vars
+            .get("VALLY_ETF_SHARES_DIR")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                krx_api_key
+                    .is_none()
+                    .then(|| shared_data.as_ref().map(|shared| shared.dir.join("etf-shares")))
+                    .flatten()
+            })
+            .unwrap_or_else(|| db_path.with_file_name("etf-shares"));
         let config = Config {
             kiwoom_environment,
             kiwoom_credentials,
@@ -442,6 +476,10 @@ impl Config {
             collector_admins,
             collector_telegram: present("VALLY_COLLECTOR_TELEGRAM").map(PathBuf::from),
             naver_base_url,
+            krx_base_url,
+            etf_shares_dir,
+            krx_api_key,
+            etf_shares_backfill_days,
             kis_master_base_url,
             etf_pdf_dir: vars.get("VALLY_ETF_PDF_DIR").map(PathBuf::from).unwrap_or_else(|| db_path.with_file_name("etf-pdf")),
             public_ip_url,
@@ -678,6 +716,41 @@ mod tests {
         for endpoint in ["https://example.com", "https://stock.naver.com.evil.test", "http://stock.naver.com"] {
             let mut process = vars(&REAL);
             process.insert("VALLY_NAVER_BASE_URL".into(), endpoint.into());
+            assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn etf_shares_config_masks_api_key_validates_endpoint_and_bounds_backfill_days() {
+        let file = vars(&[("VALLY_DB_PATH", "isolated/user.db")]);
+        let (config, warnings) = Config::from_vars(file.clone(), vars(&REAL), lock, token, key, account).unwrap();
+        assert!(warnings.is_empty());
+        assert!(config.krx_api_key.is_none());
+        assert_eq!(config.krx_base_url, "https://data-dbg.krx.co.kr");
+        assert_eq!(config.etf_shares_dir, PathBuf::from("isolated/etf-shares"));
+        assert_eq!(config.etf_shares_backfill_days, 60);
+
+        let mut process = vars(&REAL);
+        process.insert("VALLY_KRX_API_KEY".into(), "krx-secret-value-123".into());
+        process.insert("VALLY_KRX_BASE_URL".into(), "http://127.0.0.1:29/".into());
+        process.insert("VALLY_ETF_SHARES_DIR".into(), "elsewhere/shares".into());
+        process.insert("VALLY_ETF_SHARES_BACKFILL_DAYS".into(), "120".into());
+        let (config, warnings) = Config::from_vars(file.clone(), process, lock, token, key, account).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(config.krx_api_key.as_ref().map(|s| s.expose().as_str()), Some("krx-secret-value-123"));
+        assert!(!format!("{config:?}").contains("krx-secret-value-123"));
+        assert_eq!(config.krx_base_url, "http://127.0.0.1:29");
+        assert_eq!(config.etf_shares_dir, PathBuf::from("elsewhere/shares"));
+        assert_eq!(config.etf_shares_backfill_days, 120);
+
+        for bad_days in ["0", "251", "abc"] {
+            let mut process = vars(&REAL);
+            process.insert("VALLY_ETF_SHARES_BACKFILL_DAYS".into(), bad_days.into());
+            assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{bad_days}");
+        }
+        for endpoint in ["https://example.com", "http://data-dbg.krx.co.kr", "https://data-dbg.krx.co.kr.evil.test"] {
+            let mut process = vars(&REAL);
+            process.insert("VALLY_KRX_BASE_URL".into(), endpoint.into());
             assert!(Config::from_vars(file.clone(), process, lock, token, key, account).is_err(), "{endpoint}");
         }
     }

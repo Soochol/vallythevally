@@ -3,9 +3,14 @@ import type { EtfAccumulation } from "./generated/EtfAccumulation";
 import type { EtfAccumulationDirection } from "./generated/EtfAccumulationDirection";
 import type { EtfAccumulationStyle } from "./generated/EtfAccumulationStyle";
 import type { EtfChanges } from "./generated/EtfChanges";
+import type { EtfFlowDirection } from "./generated/EtfFlowDirection";
+import type { EtfFlowRanking } from "./generated/EtfFlowRanking";
+import type { EtfFlowScope } from "./generated/EtfFlowScope";
+import type { EtfFlowSort } from "./generated/EtfFlowSort";
 import type { EtfFundDetail } from "./generated/EtfFundDetail";
 import type { EtfFundList } from "./generated/EtfFundList";
 import type { EtfHistory } from "./generated/EtfHistory";
+import type { EtfSharesSeries } from "./generated/EtfSharesSeries";
 import type { EtfSimilarFunds } from "./generated/EtfSimilarFunds";
 import type { EtfStockHolders } from "./generated/EtfStockHolders";
 import { getJson } from "./http";
@@ -13,6 +18,8 @@ import { getJson } from "./http";
 const STALE_MS = 60_000;
 
 export type EtfAccumulationWindow = 5 | 20;
+export type EtfFlowWindow = 1 | 5 | 20 | 60;
+export type EtfSharesDays = 20 | 60 | 120 | 250;
 
 export const etfFundsQuery = queryOptions({
   queryKey: ["etf", "funds"],
@@ -84,3 +91,39 @@ export const etfSimilarQuery = (code: string) =>
   });
 
 export const useEtfSimilar = (code: string) => useQuery(etfSimilarQuery(code));
+
+export const etfFlowsQuery = (
+  window: EtfFlowWindow,
+  direction: EtfFlowDirection,
+  scope: EtfFlowScope,
+  sort: EtfFlowSort,
+  limit = 100,
+) =>
+  queryOptions({
+    queryKey: ["etf", "flows", window, direction, scope, sort, limit],
+    queryFn: ({ signal }) =>
+      getJson<EtfFlowRanking>(
+        `/api/etf/flows?window=${window}&direction=${direction}&scope=${scope}&sort=${sort}&limit=${limit}`,
+        signal,
+      ),
+    staleTime: STALE_MS,
+  });
+
+export const useEtfFlows = (
+  window: EtfFlowWindow,
+  direction: EtfFlowDirection,
+  scope: EtfFlowScope,
+  sort: EtfFlowSort,
+  limit = 100,
+) => useQuery(etfFlowsQuery(window, direction, scope, sort, limit));
+
+export const etfSharesQuery = (code: string, days: EtfSharesDays = 60) =>
+  queryOptions({
+    queryKey: ["etf", "shares", code, days],
+    queryFn: ({ signal }) =>
+      getJson<EtfSharesSeries>(`/api/etf/funds/${encodeURIComponent(code)}/shares?days=${days}`, signal),
+    staleTime: STALE_MS,
+  });
+
+export const useEtfShares = (code: string | null, days: EtfSharesDays = 60) =>
+  useQuery({ ...etfSharesQuery(code ?? "", days), enabled: code !== null });

@@ -106,7 +106,13 @@ export function EtfPage() {
 
   const handleSelectFund = (next: string) => {
     setOverlapPair(null);
-    go({ code: next, tab: effectiveTab === "history" || effectiveTab === "similar" ? effectiveTab : "holdings" });
+    const nextTab: TabId =
+      effectiveTab === "flows"
+        ? "shares"
+        : effectiveTab === "history" || effectiveTab === "similar" || effectiveTab === "shares"
+          ? effectiveTab
+          : "holdings";
+    go({ code: next, tab: nextTab });
   };
 
   const handleComparePair = (codeA: string, codeB: string) => {
@@ -118,6 +124,10 @@ export function EtfPage() {
   const handleTab = (next: TabId) => {
     if (next !== "overlap") setOverlapPair(null);
     if (!isGlobalTab(next) && selected === null && list !== null && list.length > 0) {
+      if (next === "shares" && code !== null) {
+        go({ code, tab: next });
+        return;
+      }
       go({ code: list[0]!.code, tab: next });
       return;
     }
@@ -125,7 +135,7 @@ export function EtfPage() {
   };
 
   const detailOpen = code !== null || rawTab !== null;
-  const missingCode = code !== null && selected === null && !isGlobalTab(effectiveTab);
+  const missingCode = code !== null && selected === null && !isGlobalTab(effectiveTab) && effectiveTab !== "shares";
   const freshnessFund = effectiveFund ?? list?.[0] ?? null;
 
   return (
@@ -175,6 +185,7 @@ export function EtfPage() {
                 ) : (
                   <EtfDetail
                     fund={effectiveFund}
+                    requestedCode={code}
                     funds={list}
                     tab={effectiveTab}
                     basket={basket}
@@ -189,6 +200,10 @@ export function EtfPage() {
                     onOpenFund={(next) => {
                       setOverlapPair(null);
                       go({ code: next, tab: "holdings" });
+                    }}
+                    onOpenShares={(next) => {
+                      setOverlapPair(null);
+                      go({ code: next, tab: "shares" });
                     }}
                     onOpenReverse={(stockCode) => {
                       setOverlapPair(null);

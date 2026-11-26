@@ -3,12 +3,14 @@ import type { EtfAccumulation } from "../../src/api/generated/EtfAccumulation";
 import type { EtfChangePair } from "../../src/api/generated/EtfChangePair";
 import type { EtfChangeRow } from "../../src/api/generated/EtfChangeRow";
 import type { EtfChanges } from "../../src/api/generated/EtfChanges";
+import type { EtfFlowRanking } from "../../src/api/generated/EtfFlowRanking";
 import type { EtfFundDetail } from "../../src/api/generated/EtfFundDetail";
 import type { EtfFundList } from "../../src/api/generated/EtfFundList";
 import type { EtfFundSummary } from "../../src/api/generated/EtfFundSummary";
 import type { EtfHistory } from "../../src/api/generated/EtfHistory";
 import type { EtfHolding } from "../../src/api/generated/EtfHolding";
 import type { EtfMaStates } from "../../src/api/generated/EtfMaStates";
+import type { EtfSharesSeries } from "../../src/api/generated/EtfSharesSeries";
 import type { EtfSimilarFund } from "../../src/api/generated/EtfSimilarFund";
 import type { EtfSimilarFunds } from "../../src/api/generated/EtfSimilarFunds";
 import type { EtfStockHolders } from "../../src/api/generated/EtfStockHolders";
@@ -52,6 +54,8 @@ const effectiveHoldings = (holdings: readonly EtfHolding[]) => {
 const summary = (
   base: Pick<EtfFundSummary, "code" | "name" | "issuer" | "style" | "benchmark" | "status"> & {
     recentActivity?: EtfFundSummary["recentActivity"];
+    latestAumWon?: number | null;
+    netFlow5dWon?: number | null;
   },
   holdings: readonly EtfHolding[],
 ): EtfFundSummary => ({
@@ -60,6 +64,8 @@ const summary = (
   top5WeightBps: holdings.toSorted((a, b) => b.weightBps - a.weightBps).slice(0, 5).reduce((sum, h) => sum + h.weightBps, 0),
   effectiveHoldings: effectiveHoldings(holdings),
   recentActivity: base.recentActivity ?? null,
+  latestAumWon: base.latestAumWon ?? null,
+  netFlow5dWon: base.netFlow5dWon ?? null,
 });
 
 const SNAPSHOT_STATUS = { source: "snapshot", holdingsAsOf: "2026-10-30", lastAttemptAt: null, refreshFailed: false } as const;
@@ -358,8 +364,213 @@ export const ACCUMULATION_5_ALL_SELL: EtfAccumulation = {
   ],
 };
 
+export const READY_SHARES_STATUS = {
+  state: "ready",
+  configured: true,
+  latestDate: "2026-11-20",
+  firstDate: "2026-10-20",
+  collectedDays: 22,
+  backfillTargetDays: 60,
+  lastAttemptAt: 1_795_170_000,
+  message: null,
+} as const;
+
+export const FLOWS_5D_ALL: EtfFlowRanking = {
+  status: READY_SHARES_STATUS,
+  window: 5,
+  direction: "all",
+  scope: "all",
+  sort: "amount",
+  fromDate: "2026-11-13",
+  toDate: "2026-11-20",
+  summary: {
+    totalEtfCount: 3,
+    totalAumWon: 4_850_000_000_000,
+    totalNetFlowWon: 41_000_000_000,
+    inflowEtfCount: 2,
+    outflowEtfCount: 1,
+    inflowTotalWon: 73_000_000_000,
+    outflowTotalWon: -32_000_000_000,
+    topInflowCode: "091160",
+    topInflowName: "KODEX 반도체",
+    topInflowWon: 52_000_000_000,
+    topOutflowCode: "069500",
+    topOutflowName: "KODEX 200",
+    topOutflowWon: -32_000_000_000,
+  },
+  rows: [
+    {
+      code: "091160",
+      name: "KODEX 반도체",
+      issuer: "삼성자산운용",
+      inCatalog: true,
+      style: "passive",
+      listedShares: 19_200_000,
+      shareChange: 1_200_000,
+      shareChangePct: 6.67,
+      netFlowWon: 52_000_000_000,
+      netFlow1dWon: 12_000_000_000,
+      netFlow5dWon: 52_000_000_000,
+      netFlow20dWon: 128_000_000_000,
+      flowToAumPct: 6.45,
+      aumWon: 860_000_000_000,
+      marketCapWon: 861_000_000_000,
+      nav: 44_790,
+      closePrice: 44_850,
+      premiumBps: 13,
+      streakDays: 4,
+      sparklineFlow: [4e9, 8e9, 10e9, 18e9, 12e9],
+    },
+    {
+      code: "069500",
+      name: "KODEX 200",
+      issuer: null,
+      inCatalog: false,
+      style: null,
+      listedShares: 97_000_000,
+      shareChange: -900_000,
+      shareChangePct: -0.92,
+      netFlowWon: -32_000_000_000,
+      netFlow1dWon: -8_000_000_000,
+      netFlow5dWon: -32_000_000_000,
+      netFlow20dWon: -74_000_000_000,
+      flowToAumPct: -0.91,
+      aumWon: 3_490_000_000_000,
+      marketCapWon: 3_488_000_000_000,
+      nav: 35_980,
+      closePrice: 35_960,
+      premiumBps: -6,
+      streakDays: -3,
+      sparklineFlow: [-5e9, -7e9, -6e9, -6e9, -8e9],
+    },
+    {
+      code: "444200",
+      name: "SOL 코리아메가테크액티브",
+      issuer: "신한자산운용",
+      inCatalog: true,
+      style: "active",
+      listedShares: 25_000_000,
+      shareChange: 1_050_000,
+      shareChangePct: 4.38,
+      netFlowWon: 21_000_000_000,
+      netFlow1dWon: 6_000_000_000,
+      netFlow5dWon: 21_000_000_000,
+      netFlow20dWon: 64_000_000_000,
+      flowToAumPct: 4.39,
+      aumWon: 500_000_000_000,
+      marketCapWon: 500_500_000_000,
+      nav: 20_000,
+      closePrice: 20_020,
+      premiumBps: 10,
+      streakDays: 3,
+      sparklineFlow: [2e9, 3e9, 5e9, 5e9, 6e9],
+    },
+  ],
+};
+
+export const SHARES_SERIES_BY_CODE: Record<string, EtfSharesSeries> = {
+  "091160": {
+    status: READY_SHARES_STATUS,
+    code: "091160",
+    name: "KODEX 반도체",
+    inCatalog: true,
+    latest: {
+      date: "2026-11-20",
+      listedShares: 19_200_000,
+      aumWon: 860_000_000_000,
+      marketCapWon: 861_000_000_000,
+      nav: 44_790,
+      closePrice: 44_850,
+      premiumBps: 13,
+      netFlow1dWon: 12_000_000_000,
+      netFlow5dWon: 52_000_000_000,
+      netFlow20dWon: 128_000_000_000,
+      shareChange5dPct: 6.67,
+      shareChange20dPct: 14.2,
+      streakDays: 4,
+    },
+    points: [
+      { date: "2026-11-17", listedShares: 18_000_000, shareDelta: 0, netFlowWon: 0, cumNetFlowWon: 0, aumWon: 774_000_000_000, marketCapWon: 774_900_000_000, nav: 43_000, closePrice: 43_050, premiumBps: 12, tradingValueWon: 18_000_000_000, splitAdjusted: false },
+      { date: "2026-11-18", listedShares: 18_500_000, shareDelta: 500_000, netFlowWon: 21_750_000_000, cumNetFlowWon: 21_750_000_000, aumWon: 804_750_000_000, marketCapWon: 805_000_000_000, nav: 43_500, closePrice: 43_515, premiumBps: 3, tradingValueWon: 22_000_000_000, splitAdjusted: false },
+      { date: "2026-11-19", listedShares: 18_900_000, shareDelta: 400_000, netFlowWon: 17_680_000_000, cumNetFlowWon: 39_430_000_000, aumWon: 835_380_000_000, marketCapWon: 836_000_000_000, nav: 44_200, closePrice: 44_230, premiumBps: 7, tradingValueWon: 24_000_000_000, splitAdjusted: false },
+      { date: "2026-11-20", listedShares: 19_200_000, shareDelta: 300_000, netFlowWon: 13_437_000_000, cumNetFlowWon: 52_867_000_000, aumWon: 860_000_000_000, marketCapWon: 861_000_000_000, nav: 44_790, closePrice: 44_850, premiumBps: 13, tradingValueWon: 26_000_000_000, splitAdjusted: false },
+    ],
+  },
+  "069500": {
+    status: READY_SHARES_STATUS,
+    code: "069500",
+    name: "KODEX 200",
+    inCatalog: false,
+    latest: {
+      date: "2026-11-20",
+      listedShares: 97_000_000,
+      aumWon: 3_490_000_000_000,
+      marketCapWon: 3_488_000_000_000,
+      nav: 35_980,
+      closePrice: 35_960,
+      premiumBps: -6,
+      netFlow1dWon: -8_000_000_000,
+      netFlow5dWon: -32_000_000_000,
+      netFlow20dWon: -74_000_000_000,
+      shareChange5dPct: -0.92,
+      shareChange20dPct: -2.15,
+      streakDays: -3,
+    },
+    points: [
+      { date: "2026-11-18", listedShares: 98_000_000, shareDelta: 0, netFlowWon: 0, cumNetFlowWon: 0, aumWon: 3_479_000_000_000, marketCapWon: 3_479_000_000_000, nav: 35_500, closePrice: 35_500, premiumBps: 0, tradingValueWon: 120_000_000_000, splitAdjusted: false },
+      { date: "2026-11-19", listedShares: 97_500_000, shareDelta: -500_000, netFlowWon: -17_850_000_000, cumNetFlowWon: -17_850_000_000, aumWon: 3_480_750_000_000, marketCapWon: 3_479_000_000_000, nav: 35_700, closePrice: 35_680, premiumBps: -6, tradingValueWon: 115_000_000_000, splitAdjusted: false },
+      { date: "2026-11-20", listedShares: 97_000_000, shareDelta: -500_000, netFlowWon: -17_990_000_000, cumNetFlowWon: -35_840_000_000, aumWon: 3_490_000_000_000, marketCapWon: 3_488_000_000_000, nav: 35_980, closePrice: 35_960, premiumBps: -6, tradingValueWon: 118_000_000_000, splitAdjusted: false },
+    ],
+  },
+  "444200": {
+    status: READY_SHARES_STATUS,
+    code: "444200",
+    name: "SOL 코리아메가테크액티브",
+    inCatalog: true,
+    latest: {
+      date: "2026-11-20",
+      listedShares: 25_000_000,
+      aumWon: 500_000_000_000,
+      marketCapWon: 500_500_000_000,
+      nav: 20_000,
+      closePrice: 20_020,
+      premiumBps: 10,
+      netFlow1dWon: 6_000_000_000,
+      netFlow5dWon: 21_000_000_000,
+      netFlow20dWon: 64_000_000_000,
+      shareChange5dPct: 4.38,
+      shareChange20dPct: 12.5,
+      streakDays: 3,
+    },
+    points: [
+      { date: "2026-11-18", listedShares: 12_000_000, shareDelta: 0, netFlowWon: 0, cumNetFlowWon: 0, aumWon: 468_000_000_000, marketCapWon: 468_000_000_000, nav: 39_000, closePrice: 39_000, premiumBps: 0, tradingValueWon: 14_000_000_000, splitAdjusted: false },
+      { date: "2026-11-19", listedShares: 24_000_000, shareDelta: 0, netFlowWon: 0, cumNetFlowWon: 0, aumWon: 472_800_000_000, marketCapWon: 473_000_000_000, nav: 19_700, closePrice: 19_710, premiumBps: 5, tradingValueWon: 15_000_000_000, splitAdjusted: true },
+      { date: "2026-11-20", listedShares: 25_000_000, shareDelta: 1_000_000, netFlowWon: 20_000_000_000, cumNetFlowWon: 20_000_000_000, aumWon: 500_000_000_000, marketCapWon: 500_500_000_000, nav: 20_000, closePrice: 20_020, premiumBps: 10, tradingValueWon: 17_000_000_000, splitAdjusted: false },
+    ],
+  },
+};
+
 export function etfBaseline(path: string, method: string, query: URLSearchParams = new URLSearchParams()): FixtureReply | null {
   if (method !== "GET") return null;
+  if (path === "/api/etf/flows") {
+    const window = Number(query.get("window") ?? "5");
+    const direction = (query.get("direction") ?? "all") as EtfFlowRanking["direction"];
+    const scope = (query.get("scope") ?? "all") as EtfFlowRanking["scope"];
+    const sort = (query.get("sort") ?? "amount") as EtfFlowRanking["sort"];
+    let rows = [...FLOWS_5D_ALL.rows];
+    if (scope === "catalog") rows = rows.filter((r) => r.inCatalog);
+    if (scope === "active") rows = rows.filter((r) => r.style === "active");
+    if (scope === "passive") rows = rows.filter((r) => r.style === "passive");
+    if (direction === "inflow") rows = rows.filter((r) => r.netFlowWon > 0);
+    if (direction === "outflow") rows = rows.filter((r) => r.netFlowWon < 0);
+    return { body: { ...FLOWS_5D_ALL, window, direction, scope, sort, rows } };
+  }
+  const shares = /^\/api\/etf\/funds\/([^/]+)\/shares$/.exec(path);
+  if (shares) {
+    const code = decodeURIComponent(shares[1]!);
+    const found = SHARES_SERIES_BY_CODE[code];
+    return found ? { body: found } : notFound(code);
+  }
   if (path === "/api/etf/accumulation") {
     const window = query.get("window") ?? "5";
     const style = query.get("style") ?? "active";
