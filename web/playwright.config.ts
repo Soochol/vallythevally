@@ -20,5 +20,5 @@ export default defineConfig({
     timezoneId: "Asia/Seoul",
     launchOptions: { chromiumSandbox: true },
   },
-  projects: [{ name: "chromium", workers: 6, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
+  projects: [{ name: "chromium", workers: 12, use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } }],
 });

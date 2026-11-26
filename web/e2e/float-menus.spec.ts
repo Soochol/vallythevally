@@ -34,7 +34,7 @@ test("차트 우클릭은 누른 가격과 날짜를 머리에 두고 차트 동
   await expect(chartMenu(page).getByRole("menuitem", { name: "붙여넣기" })).toHaveCount(0);
   await expect(chartMenu(page)).toContainText("드로잉 0개");
   await expect(chartMenu(page).getByRole("menuitem", { name: /일 이상 드로잉 모두 지우기/ })).toBeDisabled();
-  await page.screenshot({ path: info.outputPath("1440-chart-menu.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-chart-menu.png") });
 
   await chartMenu(page).getByRole("menuitem", { name: /이 가격에 수평선/ }).click();
   await expect.poll(async () => (await drawings(page)).map((d) => d.tool)).toEqual(["hline"]);
@@ -73,7 +73,7 @@ test("분봉 버튼은 마지막 분봉으로 바로 바꾸고, 분봉일 때 �
     if (i > 0) expect(box!.y).toBeGreaterThan(boxes[i - 1]!.y + box!.height / 2);
   }
   expect(await menu.evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
-  await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
   await menu.getByRole("menuitemradio", { name: "10분", exact: true }).click();
   await expect(menu).toBeHidden();
   await expect(cell(page)).toHaveAttribute("aria-label", / 10분$/);
@@ -135,7 +135,7 @@ test("지표 설정은 색 격자·굵기 견본·기간 프리셋을 한 장에
   await settings.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "3", exact: true }).click();
   await settings.getByRole("group", { name: "자주 쓰는 기간" }).getByRole("button", { name: "60", exact: true }).click();
   await expect(cell(page).getByRole("button", { name: "이동평균 단순 60 설정", exact: true }).first()).toBeVisible();
-  await page.screenshot({ path: info.outputPath("1440-indicator-settings.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-indicator-settings.png") });
   expect(await page.getByRole("dialog").count()).toBe(1);
 
   await settings.getByRole("button", { name: "지표 숨기기", exact: true }).click();

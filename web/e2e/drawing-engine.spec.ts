@@ -160,13 +160,13 @@ test("drawing engine: settings preview, cancellation, coordinates and text", asy
   await dialog.getByRole("tab", { name: "글자", exact: true }).click();
   await expect(dialog.getByRole("button", { name: "글자 색 선택", exact: true })).toContainText(defaultColor.toUpperCase());
   await dialog.getByRole("textbox", { name: "글자", exact: true }).fill("지지 구간");
-  await page.screenshot({ path: testInfo.outputPath("settings.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("settings.png") });
   await dialog.getByRole("button", { name: "확인", exact: true }).click();
   await pollSaved(async () => (await drawings(scenario))[0]!.text).toBe("지지 구간");
   expect((await drawings(scenario))[0]!.points[0]!.price).toBe(original.points[0]!.price + 10);
   expect((await drawings(scenario))[0]!.style).toMatchObject({ line: { color: "$draw" }, label: { color: "$draw" } });
   await expect.poll(async () => (await mirror(page))[0]!.texts).toContain("지지 구간");
-  await page.screenshot({ path: testInfo.outputPath("desktop.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("desktop.png") });
   await page.getByRole("button", { name: "드로잉 더 보기" }).click();
   await page.getByRole("menuitem", { name: "글자 고치기…" }).click();
   const inline = page.getByRole("textbox", { name: "드로잉 글자" });

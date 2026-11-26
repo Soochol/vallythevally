@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { barsPage, findSymbol, publicInfo, resolveVenue, search, seriesOf } from "./fakeMarket.ts";
+import { barsPage, findSymbol, publicInfo, quoteOf, resolveVenue, search, seriesOf } from "./fakeMarket.ts";
 
 const now = Date.UTC(2026, 10, 9, 3, 0); // 2026-11-09(월) 12:00 KST
 
@@ -154,4 +154,14 @@ test("10분봉 개발 차트는 1분봉 열 개의 OHLCV를 보존한다", () =>
     c: minutes.at(-1)!.c,
     v: minutes.reduce((sum, b) => sum + b.v, 0),
   });
+});
+
+test("시세를 먼저 조회해도 같은 종목의 과거 봉 개수는 바뀌지 않는다", () => {
+  const s = findSymbol("086520")!;
+  const history = (at: number) => barsPage(s, "combined", "D", 9_999, null, at).bars.length;
+  const pageFirstAt = Date.parse("2031-01-02T09:01:00+09:00");
+  const quoteFirstAt = Date.parse("2031-01-02T09:02:00+09:00");
+  const expected = history(pageFirstAt);
+  quoteOf(s, quoteFirstAt);
+  expect(history(quoteFirstAt)).toBe(expected);
 });

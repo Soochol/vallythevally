@@ -18,6 +18,7 @@ const loginDialog = (page: Page) => page.getByRole("dialog", { name: "로그인"
 const serverNote = (page: Page) => page.getByRole("heading", { name: /서버에 가는 것은\s*셋업뿐입니다/ });
 
 async function shot(page: Page, name: string) {
+  if (process.env.VALLY_E2E_SCREENSHOTS !== "1") return;
   await mkdir(SCREENS, { recursive: true });
   await page.screenshot({ path: path.join(SCREENS, name) });
 }

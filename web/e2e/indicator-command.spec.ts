@@ -40,10 +40,12 @@ test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨
   await expect(dialog.getByRole("button", { name: "이동평균 단순 7 보이기", exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "RSI 9 지우기", exact: true })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "볼린저 밴드 12 2 설정", exact: true })).toBeVisible();
-  await mkdir(resolve("../target/ux-screens"), { recursive: true });
-  for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
-    await page.setViewportSize(size);
-    await page.screenshot({ path: resolve(`../target/ux-screens/indicator-command-${size.width}x${size.height}.png`) });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") {
+    await mkdir(resolve("../target/ux-screens"), { recursive: true });
+    for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+      await page.setViewportSize(size);
+      await page.screenshot({ path: resolve(`../target/ux-screens/indicator-command-${size.width}x${size.height}.png`) });
+    }
   }
 });
 

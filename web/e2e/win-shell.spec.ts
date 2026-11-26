@@ -73,11 +73,10 @@ test("기본 레이아웃은 왼쪽 묶음에 차트, 오른쪽 묶음에 관심
   expect(footer.y).toBeGreaterThanOrEqual(area.y + area.height);
   expect(footer.y + footer.height).toBeLessThanOrEqual(900);
   expect(await pageScroll(page)).toEqual([0, 0]);
-  await mkdir(SCREENS, { recursive: true });
-  await page.screenshot({ path: path.join(SCREENS, "win-shell-default-1440x900.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(SCREENS, { recursive: true }); await page.screenshot({ path: path.join(SCREENS, "win-shell-default-1440x900.png") }); }
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect.poll(() => pageScroll(page)).toEqual([0, 0]);
-  await page.screenshot({ path: path.join(SCREENS, "win-shell-default-1024x768.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.join(SCREENS, "win-shell-default-1024x768.png") });
 });
 
 test("탭을 누르면 창 내용이 바뀌고 키보드로도 옮기며 새로고침 뒤에도 고른 탭이 남는다", async ({ page, scenario }) => {
@@ -165,11 +164,10 @@ test("차트 창 두 개는 각자 봉을 그리고, 실시간 봉은 그 종목
   scenario.live.bar("005930", bar(NOV9, 56_700));
   await expect(chartOf(first)).toHaveAttribute("data-last-close", "56700");
   await expect(chartOf(second)).toHaveAttribute("data-last-close", "123400");
-  await mkdir(SCREENS, { recursive: true });
-  await page.screenshot({ path: path.join(SCREENS, "win-shell-two-charts-1440x900.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(SCREENS, { recursive: true }); await page.screenshot({ path: path.join(SCREENS, "win-shell-two-charts-1440x900.png") }); }
   await page.setViewportSize({ width: 1024, height: 768 });
   await expect.poll(() => pageScroll(page)).toEqual([0, 0]);
-  await page.screenshot({ path: path.join(SCREENS, "win-shell-two-charts-1024x768.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.join(SCREENS, "win-shell-two-charts-1024x768.png") });
 });
 
 test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉 수가 둘째 차트를 따르고 드로잉 도구 막대는 칸 밖 한 자리에서 활성 칸에만 적용된다", async ({ page, scenario }) => {
@@ -327,6 +325,5 @@ test("휴대폰 화면은 머리·봉 주기 칩·차트·아래 탭을 그대�
   await expect(page.getByRole("toolbar", { name: "차트 도구 막대" })).toBeHidden();
   await expect(page.getByRole("contentinfo")).toBeHidden();
   expect(await pageScroll(page)).toEqual([0, 0]);
-  await mkdir(SCREENS, { recursive: true });
-  await page.screenshot({ path: path.join(SCREENS, "win-shell-phone-390x844.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(SCREENS, { recursive: true }); await page.screenshot({ path: path.join(SCREENS, "win-shell-phone-390x844.png") }); }
 });

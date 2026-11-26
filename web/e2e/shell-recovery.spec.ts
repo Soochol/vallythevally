@@ -14,7 +14,7 @@ for (const initialFailure of [true, false]) {
     await expect(cell(page).getByRole("button", { name: "다시 시도", exact: true })).toBeVisible();
     await expectDesktopVenue(page, "KRX");
     await expect(cell(page).getByText("삼성전자", { exact: true })).toBeVisible();
-    await page.screenshot({ path: info.outputPath("venue-error.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("venue-error.png") });
     await pickDesktopVenue(page, "통합");
     await expect(cell(page)).toHaveAttribute("aria-label", "칸 1: 삼성전자 통합 일");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -45,5 +45,5 @@ test("긴 ETF 이름은 범례에서 잘리고 탭을 누를 수 있다", async 
   const name = cell(page).getByText(LONG_NAME, { exact: true });
   await expect(name).toHaveAttribute("aria-label", LONG_NAME);
   expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-  await page.screenshot({ path: info.outputPath("long-etf.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("long-etf.png") });
 });

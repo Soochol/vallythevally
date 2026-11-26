@@ -75,6 +75,6 @@ test("색상표와 직접 고른 색·굵기 5를 지표에 적용하고 관리 
   await page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
-  await page.screenshot({ path: info.outputPath("indicator.png"), fullPage: true });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("indicator.png"), fullPage: true });
   expect(errors).toEqual([]);
 });

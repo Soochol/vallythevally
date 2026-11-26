@@ -31,14 +31,14 @@ test("한 줄 셸과 탭은 작은 창에서도 넘치지 않고 휴대폰 경�
       await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
       await expect(cell(page)).toBeVisible();
     }
-    await page.screenshot({ path: path.resolve(`../target/ux-screens/shell-${size.width}x${size.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve(`../target/ux-screens/shell-${size.width}x${size.height}.png`) });
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(tabs(page)).toHaveCount(0);
   await expect(page.getByRole("toolbar", { name: "차트 도구 막대" })).toBeHidden();
   await expect(cell(page)).toBeVisible();
   await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
-  await page.screenshot({ path: path.resolve("../target/ux-screens/shell-390x844.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve("../target/ux-screens/shell-390x844.png") });
 });
 
 test("상태 막대는 연결·저장·서버 시계와 공유 재무 조회의 상태·실패를 표시한다", async ({ page, scenario }) => {

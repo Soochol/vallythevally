@@ -63,7 +63,7 @@ test("주석 도구: 글자·말풍선·가격 라벨·화살표를 놓고 새�
     points.forEach((p, i) => { expect(after[id]![i]!.x).toBeCloseTo(p!.x, 0); expect(after[id]![i]!.y).toBeCloseTo(p!.y, 0); });
   }
   expect((await drawings(scenario)).map((d) => d.points)).toEqual(saved.map((d) => d.points));
-  await page.screenshot({ path: testInfo.outputPath("note-tools.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("note-tools.png") });
   expect(errors).toEqual([]);
 });
 
@@ -101,7 +101,7 @@ test("주석 도구: 공백뿐인 글자는 자리 표시로 남고, 바깥을 �
   await pickTool(page, "주석", "말풍선");
   await drag(page, [0.55, 0.65], [0.65, 0.5]);
   await editor.fill("배당");
-  await page.screenshot({ path: testInfo.outputPath("text-editor.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("text-editor.png") });
   await page.locator(".draw-text-editor").getByRole("button", { name: "세부 설정", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "말풍선 세부 설정" });
   await expect(dialog).toBeVisible();

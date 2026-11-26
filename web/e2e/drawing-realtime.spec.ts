@@ -133,5 +133,5 @@ test("drawings survive realtime updates, series replacement, resync and controll
   await pushPrice(scenario, page, 206_000, "100007");
   await expectDrawing();
   expect(errors).toEqual([]);
-  await page.screenshot({ path: testInfo.outputPath("drawing-realtime.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("drawing-realtime.png") });
 });

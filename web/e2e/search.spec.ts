@@ -300,7 +300,7 @@ for (const [width, height] of [[1440, 900], [1024, 768], [390, 844]] as const) {
       expect(bounds!.y).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
       expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
-      await page.screenshot({ path: path.join(directory, `search-${width}x${height}-${state}.png`) });
+      if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.join(directory, `search-${width}x${height}-${state}.png`) });
     }
   });
 }

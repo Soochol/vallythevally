@@ -29,6 +29,7 @@ async function openLogin(page: Page) {
 const dialog = (page: Page) => page.getByRole("dialog", { name: "시스템 설정", exact: true });
 
 async function shot(page: Page, name: string) {
+  if (process.env.VALLY_E2E_SCREENSHOTS !== "1") return;
   await mkdir(SCREENS, { recursive: true });
   await page.screenshot({ path: path.join(SCREENS, name) });
 }

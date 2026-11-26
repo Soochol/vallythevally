@@ -15,6 +15,6 @@ for (const [serverTime, browserTime, market, connection] of [
     const footer = page.locator("footer").last();
     await expect(footer.getByLabel("장 상태와 서버 시계")).toContainText(market);
     await expect(footer.getByRole("status")).toHaveText(connection);
-    await page.screenshot({ path: info.outputPath("server-clock.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("server-clock.png") });
   });
 }

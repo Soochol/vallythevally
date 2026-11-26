@@ -44,7 +44,7 @@ test("패널은 조건 요약 한 줄만 보이고 편집 창은 패널 왼쪽�
   expect(windowBox.x + windowBox.width).toBeLessThanOrEqual(panelBox.x);
   expect(windowBox.x).toBeGreaterThanOrEqual(0);
   expect(windowBox.y + windowBox.height).toBeLessThanOrEqual(900);
-  await page.screenshot({ path: info.outputPath("editor-window.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("editor-window.png") });
 
   await panel(page).click({ position: { x: 4, y: 4 } });
   await expect(editorWindow(page)).toBeVisible();
@@ -172,7 +172,7 @@ test.describe("자료가 있는 저장소", () => {
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(chartOf(cell(page))).not.toHaveAttribute("data-bar-count", "0");
     await expect(editorWindow(page)).toBeVisible();
-    await page.screenshot({ path: info.outputPath("editor-with-results.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("editor-with-results.png") });
     await page.keyboard.press("Control+Enter");
     await expect(resultRows(page)).toHaveCount(4);
     await expect(editorWindow(page)).toBeVisible();

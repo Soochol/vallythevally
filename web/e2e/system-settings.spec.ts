@@ -118,8 +118,7 @@ test("1440×900 화면", async ({ page }) => {
   await openDesktop(page);
   await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
   await expect(dialog(page).getByRole("tabpanel")).toContainText("키움에 연결되어 있습니다");
-  await mkdir(path.resolve("../target/ux-screens"), { recursive: true });
-  await page.screenshot({ path: path.resolve("../target/ux-screens/system-settings-1440x900.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(path.resolve("../target/ux-screens"), { recursive: true }); await page.screenshot({ path: path.resolve("../target/ux-screens/system-settings-1440x900.png") }); }
   const box = await dialog(page).boundingBox();
   expect(Math.round(box!.width)).toBe(940);
   expect(Math.round(box!.height)).toBe(680);
@@ -138,8 +137,7 @@ test.describe("360px 폭", () => {
     await expect(menu(page, "일반")).toBeVisible();
     expect((await menu(page, "일반").boundingBox())!.height).toBe(48);
     await noHorizontalScroll(page);
-    await mkdir(path.resolve("../target/ux-screens"), { recursive: true });
-    await page.screenshot({ path: path.resolve("../target/ux-screens/system-settings-360x800-list.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(path.resolve("../target/ux-screens"), { recursive: true }); await page.screenshot({ path: path.resolve("../target/ux-screens/system-settings-360x800-list.png") }); }
 
     await menu(page, "일반").click();
     const panel = dialog(page).getByRole("tabpanel");
@@ -147,7 +145,7 @@ test.describe("360px 폭", () => {
     await expect(menu(page, "일반")).toHaveCount(0);
     await expect(panel.getByRole("heading", { name: "일반" })).toBeFocused();
     await noHorizontalScroll(page);
-    await page.screenshot({ path: path.resolve("../target/ux-screens/system-settings-360x800-content.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve("../target/ux-screens/system-settings-360x800-content.png") });
 
     await dialog(page).getByRole("button", { name: "시스템 설정 목록으로" }).click();
     await expect(menu(page, "일반")).toBeFocused();

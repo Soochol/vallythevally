@@ -41,8 +41,8 @@ python3 scripts/dev.py --bundled cargo check -p server
 관리 명령을 우회해 직접 Cargo 시험을 실행한다면 컴파일만 공통 잠금 아래에서 준비하고 같은 옵션으로 잠금 밖에서 실행한다. 이 수동 절차는 `dev.py cargo test`가 자동 처리하는 단계다.
 
 ```sh
-flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=4 cargo test --locked -p server --test contract --no-run
-cargo test --locked -p server --test contract
+flock "$(git rev-parse --path-format=absolute --git-common-dir)/compile.lock" env CARGO_BUILD_JOBS=8 cargo test --locked -p server --test integration --no-run
+cargo test --locked -p server --test integration -- contract
 ```
 
 시간에 민감한 Rust 서버 시험의 부하·타이밍 재현도 PC 전체에 부하를 걸지 않고 다음 수단으로 한다. 결정적 방법은 합성 transport의 `delay`(`crates/server/tests/support/mod.rs`, 시험에서 `fake.delay`)로 응답을 늦추고, `fake.hold`로 조건에 맞는 요청을 붙잡았다가 시험이 `arrived`를 기다린 뒤 `release`로 풀고, `VALLY_CLOCK_START`와 `clock().jump`로 시계를 옮기는 것이다. 그 실행에만 거는 제한은 실행만 코어 몇 개에 묶는 것이다. 먼저 제한 없이 한 번 돌려 컴파일해 둔 뒤 다음처럼 돌린다. 필요하면 `RUST_TEST_THREADS`를 함께 정한다. 컴파일까지 묶으면 컴파일만 느려진다.
@@ -58,7 +58,7 @@ taskset -c 0-1 python3 scripts/dev.py cargo test -p server --test <이름>
 `screener_run`의 전 종목 규모(4,000종목) 시간 예산 시험은 `#[ignore]`라서 `cargo test -p server`에 들지 않는다. 같은 판정 흐름의 결과 확인은 요약 쪽 크기(100종목)의 3.5배인 350종목으로 기본 실행에서 돈다. 부하가 없는 기계에서 사람이 직접 돌린다.
 
 ```sh
-python3 scripts/dev.py cargo test -p server --test screener_run -- --ignored a_screen_over_4000_stocks_finishes_within_the_time_budget --nocapture
+python3 scripts/dev.py cargo test -p server --test integration -- --ignored a_screen_over_4000_stocks_finishes_within_the_time_budget --nocapture
 ```
 
 ## 개발 프로필 디버그 정보

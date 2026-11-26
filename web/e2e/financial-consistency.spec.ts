@@ -98,7 +98,7 @@ test.describe("재무 시각과 가격 시각", () => {
       expect(await page.evaluate(() => window.chartProbe.chart.timeScale().width()) - restored.candleX!).toBeCloseTo(right, 2);
     }
     await writeFile(info.outputPath("axis-evidence.json"), JSON.stringify({ before, after, expected, compare }, null, 2));
-    await page.screenshot({ path: info.outputPath("axis.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("axis.png") });
   });
 
   test("과거 가격 조회가 이미 존재하는 재무 시각을 채워도 화면 범위와 저장 드로잉을 보존한다", async ({ page, scenario }, info) => {

@@ -57,8 +57,7 @@ test("차트 옆을 고르면 지표 버튼이 지표 창을 보여 지표를 �
   const editor = inspector(page).getByRole("group", { name: "이동평균 단순 9 설정", exact: true });
   await editor.getByRole("group", { name: "색상표", exact: true }).getByRole("button", { name: "분홍 #EE9DD0", exact: true }).click();
   await pollSaved(() => maColors(scenario)).toEqual([["#EE9DD0"]]);
-  await mkdir(resolve("../target/ux-screens"), { recursive: true });
-  await page.screenshot({ path: resolve("../target/ux-screens/indicator-inspector-open-1440x900.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(resolve("../target/ux-screens"), { recursive: true }); await page.screenshot({ path: resolve("../target/ux-screens/indicator-inspector-open-1440x900.png") }); }
   await ma.click();
   await expect(ma).toHaveAttribute("aria-expanded", "false");
   await ma.click();
@@ -83,7 +82,7 @@ test("차트 옆을 고르면 지표 버튼이 지표 창을 보여 지표를 �
   await cell(page).focus();
   await page.keyboard.press("i");
   await expect(search(page)).toBeFocused();
-  await page.screenshot({ path: resolve("../target/ux-screens/indicator-inspector-1440x900.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: resolve("../target/ux-screens/indicator-inspector-1440x900.png") });
 
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

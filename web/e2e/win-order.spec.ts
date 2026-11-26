@@ -215,7 +215,7 @@ test("걸린 주문은 같은 가격 합계의 칩이고 사다리 아래 두 �
   await expect(page.getByText("매도 접수", { exact: true })).toHaveCount(0);
   await expect(page.getByText("매수 접수", { exact: true })).toHaveCount(0);
   await expect(page.getByTestId("order-list")).toHaveCount(0);
-  await page.screenshot({ path: "../target/ux-screens/win-order.png" });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: "../target/ux-screens/win-order.png" });
 });
 
 test("접수 합계 칸은 사다리 주문 칸과 같은 열이고 사다리와 총잔량 띠 사이 줄에 있다", async ({ page, scenario }) => {

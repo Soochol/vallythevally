@@ -124,8 +124,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768
         for (let i = 1; i < sorted.length; i++) expect(sorted[i]!.y - sorted[i - 1]!.y, JSON.stringify(axis)).toBeGreaterThanOrEqual((sorted[i]!.height + sorted[i - 1]!.height) / 2);
       }
     }).toPass({ timeout: 3000 });
-    await mkdir(SCREENS, { recursive: true });
-    await page.screenshot({ path: path.join(SCREENS, `chart-display-${viewport.width}x${viewport.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(SCREENS, { recursive: true }); await page.screenshot({ path: path.join(SCREENS, `chart-display-${viewport.width}x${viewport.height}.png`) }); }
     if (viewport.width === 1440) {
       await page.setViewportSize({ width: 390, height: 844 });
       const selected = page.getByRole("navigation", { name: "봉 주기" }).getByRole("button", { name: "연", exact: true });

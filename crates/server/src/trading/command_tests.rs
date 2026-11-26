@@ -82,7 +82,9 @@ async fn write_is_sent_once_and_never_retried() {
         *f.mode.lock().unwrap() = mode;
         let (code, command) = order(&f.app, PLACE, buy("cmd-once-0001", 1, 71_000)).await;
         assert_eq!((code, command["state"].clone(), command["reason"].clone()), (StatusCode::OK, json!("unknown"), Value::Null), "{mode:?}: {command}");
+        tokio::time::pause();
         tokio::time::sleep(Duration::from_millis(1500)).await;
+        tokio::time::resume();
         assert_eq!(writes(&f).len(), 1, "{mode:?}: 쓰기는 한 번만 나간다");
         let (_, again) = order(&f.app, PLACE, buy("cmd-once-0001", 1, 71_000)).await;
         assert_eq!(again["state"], "unknown");
@@ -588,7 +590,7 @@ async fn a_dropped_http_request_does_not_strand_the_command() {
     for (i, wait) in [0u64, 1, 5, 20, 60].into_iter().enumerate() {
         let id = format!("cmd-drop-{i:04}");
         let _ = tokio::time::timeout(Duration::from_millis(wait), order(&f.app, PLACE, buy(&id, 1, 71_000))).await;
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
         let (_, command) = order(&f.app, PLACE, buy(&id, 1, 71_000)).await;
         assert!(command["state"] == "accepted" || command["state"] == "rejected" && command["reason"] == "not_sent", "{wait}ms: {command}");
         assert_ne!(command["state"], "prepared", "{wait}ms");

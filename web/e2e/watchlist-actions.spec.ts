@@ -46,11 +46,11 @@ test("13종목이 34px 한 줄로 세로 스크롤 없이 보인다", async ({ s
   for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
     await page.setViewportSize(size);
     await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
-    await page.screenshot({ path: path.resolve(`../target/ux-screens/watchlist-${size.width}x${size.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve(`../target/ux-screens/watchlist-${size.width}x${size.height}.png`) });
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("navigation", { name: "휴대폰 탭" }).getByRole("button", { name: "관심종목" }).click();
-  await page.screenshot({ path: path.resolve("../target/ux-screens/watchlist-390x844.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve("../target/ux-screens/watchlist-390x844.png") });
 });
 
 test("열이 모두 빠져도 찾을 수 없는 종목 줄의 접근성 이름에 찾을 수 없음이 남는다", async ({ scenario, page }) => {
@@ -124,7 +124,7 @@ test("긴 종목명도 숫자 열을 밀지 않고 보통 이름은 기본 폭�
       await expect(name).toHaveAttribute("title", `${(await name.textContent())!} ${code}`);
     }
     expect(await row(page, "0000D0").locator("b").evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-    await page.screenshot({ path: path.resolve(`../target/ux-screens/watchlist-review-${size.width}x${size.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve(`../target/ux-screens/watchlist-review-${size.width}x${size.height}.png`) });
   }
 });
 

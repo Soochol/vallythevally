@@ -120,7 +120,7 @@ for (const action of ["십자선", "휠 확대", "끌기"]) {
     expect(await name.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     await expect(cell(page).getByRole("heading", { name: LONG_NAME, exact: true })).toBeVisible();
     await expect(name).not.toHaveAttribute("title");
-    await page.screenshot({ path: info.outputPath(`name-${action}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath(`name-${action}.png`) });
   });
 }
 

@@ -20,7 +20,7 @@ test("지표·비교 창은 배경 가림막 없이, 종목 검색 창은 가림
   await expect(cell(page).getByText("이동평균 단순 20", { exact: false }).first()).toBeVisible();
   expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(0, 0, 0, 0)", blur: "none" });
   expect(await styleOf(dialog)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none", radius: "8px" });
-  await page.screenshot({ path: info.outputPath("1440-indicator-preview.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-indicator-preview.png") });
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("/");
@@ -28,7 +28,7 @@ test("지표·비교 창은 배경 가림막 없이, 종목 검색 창은 가림
   await expect(search).toBeVisible();
   expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(5, 9, 5, 0.7)", blur: "none" });
   expect(await styleOf(search)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
-  await page.screenshot({ path: info.outputPath("1440-search.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-search.png") });
 });
 
 test("메뉴와 팝오버는 같은 유리 표면을 쓴다", async ({ page }, info) => {
@@ -43,7 +43,7 @@ test("메뉴와 팝오버는 같은 유리 표면을 쓴다", async ({ page }, i
   const minutes = page.locator(".minute-menu");
   await expect(minutes).toBeVisible();
   expect(await styleOf(minutes)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "8px" });
-  await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
   await page.keyboard.press("Escape");
 });
 
@@ -66,14 +66,14 @@ test("틀·알림·툴팁·가림막 위 대화상자는 흐림 없이 불투명
   const naming = page.getByRole("dialog", { name: "새 이름으로 저장", exact: true });
   await expect(naming).toBeVisible();
   expect(await styleOf(naming)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
-  await page.screenshot({ path: info.outputPath("1440-naming-dialog.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-naming-dialog.png") });
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "스크리너 닫기", exact: true }).click();
   const toast = page.locator(".ui-toast").filter({ hasText: "스크리너 창을 닫았습니다" });
   await expect(toast).toBeVisible();
   expect(await styleOf(toast)).toMatchObject({ background: "rgb(45, 54, 45)", blur: "none" });
-  await page.screenshot({ path: info.outputPath("1440-toast.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-toast.png") });
 });
 
 test("투명도 줄이기를 켜면 유리 표면은 흐림 없이 불투명하게 그려진다", async ({ context, page }) => {

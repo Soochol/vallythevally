@@ -51,7 +51,7 @@ for (const history of ["loaded", "older"] as const) {
       await page.mouse.move(box.x + x, box.y + handle.y + 70, { steps: 12 });
       await page.mouse.up();
       if (clone) await page.keyboard.up("Control");
-      await page.screenshot({ path: testInfo.outputPath("after-body-drag.png") });
+      if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("after-body-drag.png") });
       await pollSaved(async () => (await drawings(scenario)).length).toBe(clone ? 2 : 1);
       const moved = async () => (await drawings(scenario)).find((drawing) => clone ? drawing.id !== saved.id : drawing.id === saved.id);
       await pollSaved(async () => (await moved())?.points[0]?.price).not.toBe(point.price);

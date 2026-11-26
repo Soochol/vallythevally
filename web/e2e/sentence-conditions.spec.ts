@@ -33,10 +33,12 @@ test("문장형 숫자 팝오버를 적용한 미저장 조건식을 실행하�
   ] });
   expect(scenario.documents.screens().screens).toEqual([]);
   await expect(editor.getByText("변경됨", { exact: true })).toBeVisible();
-  await mkdir(resolve("../target/ux-screens"), { recursive: true });
-  for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
-    await page.setViewportSize(size);
-    await page.screenshot({ path: resolve(`../target/ux-screens/sentence-editor-${size.width}x${size.height}.png`) });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") {
+    await mkdir(resolve("../target/ux-screens"), { recursive: true });
+    for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+      await page.setViewportSize(size);
+      await page.screenshot({ path: resolve(`../target/ux-screens/sentence-editor-${size.width}x${size.height}.png`) });
+    }
   }
   await conditionAction(editor, 1, "조건 지우기");
   await editor.getByRole("button", { name: "저장", exact: true }).click();

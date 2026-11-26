@@ -139,7 +139,7 @@ test("four chart text and full controls remain readable inside their panes", asy
     await settle(page, 4);
     const charts = await geometry(page);
     captures.push({ size, charts });
-    await page.screenshot({ path: testInfo.outputPath(`readability-${size.width}x${size.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath(`readability-${size.width}x${size.height}.png`) });
     await testInfo.attach(`rectangles-${size.width}x${size.height}`, { body: JSON.stringify(charts, null, 2), contentType: "application/json" });
     await expect.poll(() => page.evaluate(() => [document.documentElement.scrollWidth - innerWidth, document.documentElement.scrollHeight - innerHeight])).toEqual([0, 0]);
     readable(charts);
@@ -305,9 +305,11 @@ test("tall normal charts and repeated resize restore geometry and saved presenta
     expect(storedPresentation(scenario)).toBe(saved);
     expect(storedDocuments(scenario)).toBe(documents);
   }
-  const path = testInfo.outputPath("tall-normal.png");
-  await page.screenshot({ path });
-  await testInfo.attach("tall-normal", { path, contentType: "image/png" });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") {
+    const path = testInfo.outputPath("tall-normal.png");
+    await page.screenshot({ path });
+    await testInfo.attach("tall-normal", { path, contentType: "image/png" });
+  }
 });
 
 test("full pinned rail restores its capacity and saved state after a short resize", async ({ page, scenario }) => {

@@ -80,7 +80,7 @@ PC 전체에 인위적 부하를 걸지 않는다. 무한 루프, `stress`·`str
 env VALLY_E2E_CPU_THROTTLE=4 python3 scripts/web.py e2e --repeat-each=20 --workers=6 e2e/<파일>.spec.ts:<줄>
 ```
 
-`VALLY_E2E_CPU_THROTTLE`은 1 이상의 수이며, `scenario` fixture가 그 context의 모든 페이지에 Chromium CPU 제한을 건다. 실제 부하는 시험 실행기와 정적 호스트도 느리게 하므로 완전히 같지는 않지만, 브라우저 안의 타이머·애니메이션·렌더 경합을 반복으로 재현하기에는 충분하다. `--repeat-each`와 `--workers`는 Playwright 인수다. `--workers`가 6을 넘으면 6으로 줄어든다.
+`VALLY_E2E_CPU_THROTTLE`은 1 이상의 수이며, `scenario` fixture가 그 context의 모든 페이지에 Chromium CPU 제한을 건다. 실제 부하는 시험 실행기와 정적 호스트도 느리게 하므로 완전히 같지는 않지만, 브라우저 안의 타이머·애니메이션·렌더 경합을 반복으로 재현하기에는 충분하다. `--repeat-each`와 `--workers`는 Playwright 인수다. `--workers`가 12를 넘으면 12로 줄어든다.
 
 ## 기계 검사
 

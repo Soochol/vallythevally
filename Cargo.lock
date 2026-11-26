@@ -634,6 +634,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 name = "collector"
 version = "0.1.0"
 dependencies = [
+ "account-server",
  "arrow-array",
  "arrow-schema",
  "axum",
@@ -655,6 +656,7 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "tracing",
+ "tracing-log",
  "tracing-subscriber",
  "zip",
  "zstd 0.13.3",

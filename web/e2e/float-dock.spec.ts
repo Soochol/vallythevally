@@ -34,7 +34,7 @@ test("드로잉 도구는 작업 영역 왼쪽의 세로 막대이고 고른 도
   const menuBox = await boxOf(menu);
   const docked = await boxOf(dock(page));
   expect(menuBox.x).toBeGreaterThanOrEqual(docked.x + docked.width);
-  await page.screenshot({ path: info.outputPath("1440-dock.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-dock.png") });
   await menu.getByRole("menuitem", { name: /수평선/ }).click();
   await expect(dock(page).getByRole("button", { name: "수평선", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
@@ -81,7 +81,7 @@ test("위쪽 드로잉을 고르면 스타일 막대가 드로잉 가까이 위�
   expect(top - (styleBox.y + styleBox.height)).toBeLessThan(40);
   const rail = await boxOf(dock(page));
   expect(styleBox.x).toBeGreaterThanOrEqual(rail.x + rail.width);
-  await page.screenshot({ path: info.outputPath("1440-style-bar.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-style-bar.png") });
 });
 
 test.describe("선택한 드로잉이 있는 1024×330 짧은 칸", () => {
@@ -116,6 +116,6 @@ test.describe("휴대폰", () => {
     expect(tabs.x + tabs.width).toBeLessThan(390);
     expect(tabs.y + tabs.height).toBeLessThanOrEqual(844);
     await expect(dock(page)).toBeHidden();
-    await page.screenshot({ path: info.outputPath("390-phone.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("390-phone.png") });
   });
 });

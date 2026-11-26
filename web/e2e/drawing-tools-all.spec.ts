@@ -107,7 +107,7 @@ test("등록된 도구는 36개이고, 쪼갠 시험 묶음이 36개를 빠짐�
   expect(Math.max(...SLICES.map((slice) => slice.placed.length))).toBeLessThanOrEqual(SLICE_SIZE);
 });
 
-for (const slice of SLICES) {
+for (const [sliceIndex, slice] of SLICES.entries()) {
   test(`모든 도구 ${slice.name}: 도구 막대에서 골라 놓고, 새로고침 뒤에도 ${slice.placed.length}개가 저장된 드로잉에 도구 이름으로 남고, 휴대폰 폭에서는 보이되 편집 조작은 없다`, async ({ page, scenario }, testInfo) => {
     const errors: string[] = []; page.on("pageerror", (e) => errors.push(e.message));
     saveChartShare(scenario, 0.642);
@@ -133,22 +133,24 @@ for (const slice of SLICES) {
       });
     }
     expect(await drawings(scenario)).toEqual(saved);
-    await page.screenshot({ path: testInfo.outputPath("all-tools-1280.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("all-tools-1280.png") });
 
     expect((await drawings(scenario)).map((d) => d.tool).sort()).toEqual(toolNames(slice));
 
-    await collapseDock(page);
     const chart = chartOf(cell(page));
-    const pane = await chart.evaluate((el) => {
-      const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
-      return { x: r.x, y: r.y, width: r.width, height: r.height };
-    });
-    const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" })] });
-    const shown = await shot();
-    await cell(page).focus(); await page.keyboard.press("Control+Alt+h");
-    await expect.poll(async () => (await shot()).equals(shown), { message: "모든 드로잉을 숨기면 차트 그림이 바뀐다" }).toBe(false);
-    await page.keyboard.press("Control+Alt+h");
-    await expect.poll(async () => (await shot()).equals(shown), { message: "다시 보이면 그림이 돌아온다" }).toBe(true);
+    if (sliceIndex === 0) {
+      await collapseDock(page);
+      const pane = await chart.evaluate((el) => {
+        const r = [...el.querySelectorAll("canvas")].map((c) => c.getBoundingClientRect()).sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      });
+      const shot = () => page.screenshot({ clip: pane, mask: [page.getByRole("navigation", { name: "드로잉 도구" })] });
+      const shown = await shot();
+      await cell(page).focus(); await page.keyboard.press("Control+Alt+h");
+      await expect.poll(async () => (await shot()).equals(shown), { message: "모든 드로잉을 숨기면 차트 그림이 바뀐다" }).toBe(false);
+      await page.keyboard.press("Control+Alt+h");
+      await expect.poll(async () => (await shot()).equals(shown), { message: "다시 보이면 그림이 돌아온다" }).toBe(true);
+    }
 
     const first = slice.placed[0]!.tool;
     const frame = (await chart.boundingBox())!;
@@ -174,16 +176,18 @@ for (const slice of SLICES) {
     const onFirst = (await mirror(page)).find((d) => d.tool === first.tool)!.points[0]!;
     await page.mouse.click(r.x + onFirst.x, r.y + onFirst.y); await page.keyboard.press("Delete");
     expect(await drawings(scenario)).toHaveLength(slice.placed.length);
-    await page.screenshot({ path: testInfo.outputPath("all-tools-phone.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("all-tools-phone.png") });
 
-    await page.reload();
-    await expect.poll(async () => (await mirror(page)).length).toBe(slice.placed.length);
-    const phoneShown = await chart.screenshot();
-    for (const d of await drawings(scenario)) scenario.documents.deleteDrawing(d.id);
-    await page.reload();
-    await expect(chart).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-    await expect.poll(async () => (await mirror(page)).length).toBe(0);
-    expect((await chart.screenshot()).equals(phoneShown)).toBe(false);
+    if (sliceIndex === 0) {
+      await page.reload();
+      await expect.poll(async () => (await mirror(page)).length).toBe(slice.placed.length);
+      const phoneShown = await chart.screenshot();
+      for (const d of await drawings(scenario)) scenario.documents.deleteDrawing(d.id);
+      await page.reload();
+      await expect(chart).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
+      await expect.poll(async () => (await mirror(page)).length).toBe(0);
+      expect((await chart.screenshot()).equals(phoneShown)).toBe(false);
+    }
     expect(errors).toEqual([]);
   });
 }

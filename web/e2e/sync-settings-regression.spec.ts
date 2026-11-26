@@ -47,7 +47,7 @@ test('first slow GET must retain preexisting drawings after creation', async ({p
   release();
   await expect.poll(async ()=>(await mirror(page)).length).toBe(2);
   console.log('SLOW_GET',JSON.stringify({existing:existing.id,server:(await drawings(scenario)).map(d=>d.id),visible:await mirror(page)}));
-  await page.screenshot({path:info.outputPath('slow-get.png')});
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({path:info.outputPath('slow-get.png')});
   expect((await mirror(page)).map((d:{id:string})=>d.id)).toContain(existing.id);
 });
 
@@ -66,7 +66,7 @@ test('server accepted extreme timestamp must not blank settings', async ({page,s
   await expect(page.getByRole('spinbutton',{name:'가격',exact:true})).toBeVisible();
   await expect(page.getByLabel('시각',{exact:true})).toHaveCount(0);
   console.log('EXTREME_TIME',JSON.stringify({errors,body:await page.locator('body').innerText()}));
-  await page.screenshot({path:info.outputPath('extreme-time.png')});
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({path:info.outputPath('extreme-time.png')});
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('spinbutton',{name:'가격',exact:true}).fill('5500');
   await page.getByRole('button',{name:'확인',exact:true}).click();
@@ -101,7 +101,7 @@ test('late PUT response must not allow undo to delete newer other-tab work', asy
   await cell(page).focus(); await page.keyboard.press('Control+z');
   await expect.soft(page.getByText('다른 곳에서 바뀐 드로잉이라 되돌리지 않았습니다')).toBeVisible();
   expect((await drawings(scenario)).find(d=>d.id===initial.id)?.style).toMatchObject({line:{width:4}});
-  await page.screenshot({path:info.outputPath('late-ack-loss.png')});
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({path:info.outputPath('late-ack-loss.png')});
   console.log('BROWSER_LATE_ACK',JSON.stringify({initialRevision:initial.revision,newerRevision:remote.revision,newerStyle:remote.style,afterUndo:await drawings(scenario)}));
   expect((await drawings(scenario)).map(d=>d.id)).toContain(initial.id);
 });

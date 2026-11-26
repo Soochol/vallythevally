@@ -165,6 +165,7 @@ fn millis(d: Duration) -> f64 {
 }
 
 #[tokio::test]
+#[ignore = "4000종목 계측 벤치마크"]
 async fn one_screener_run_splits_into_quote_receiving_and_judging_time() {
     let days = last_open_days(HISTORY_BARS, day(2026, 11, 6));
     let today = *days.last().unwrap();

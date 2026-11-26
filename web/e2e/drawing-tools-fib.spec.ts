@@ -36,7 +36,7 @@ test("피보나치 되돌림과 확장을 놓고, 수준을 끄고, 새로고침
 
   await page.keyboard.press("Escape");
   await expect.poll(async () => (await mirror(page)).some((d) => d.selected)).toBe(false);
-  await page.screenshot({ path: testInfo.outputPath("fib.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("fib.png") });
   const before = await mirror(page);
   const saved = await drawings(scenario);
   await page.reload();
@@ -108,7 +108,7 @@ test("피보나치 팬·시간대와 갠 팬·상자를 놓고, 핸들을 끌고
   await expect.poll(async () => (await mirror(page)).some((d) => d.selected)).toBe(false);
   const before = await settledMirror(page);
   expect(before.map((d) => d.tool).sort()).toEqual(["fibfan", "fibtime", "gannbox", "gannfan"]);
-  await page.screenshot({ path: testInfo.outputPath("fib-gann.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("fib-gann.png") });
   const saved = await drawings(scenario);
   await page.reload();
   await expect.poll(async () => (await mirror(page)).length).toBe(4);

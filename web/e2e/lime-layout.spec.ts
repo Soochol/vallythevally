@@ -37,5 +37,5 @@ test("라이트 저장값도 라임 다크로 열고 분봉은 하나의 메뉴�
   }
   expect(asked).toEqual([]);
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.screenshot({ path: info.outputPath("chart.png"), fullPage: true });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("chart.png"), fullPage: true });
 });
