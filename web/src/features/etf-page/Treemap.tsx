@@ -7,8 +7,8 @@ import { type TreemapLens, formatPercent, maAlignedCount, squarify } from "./etf
 
 const BOX_WIDTH = 160;
 const BOX_HEIGHT = 90;
-const MIN_MIX_PERCENT = 12;
-const MAX_MIX_PERCENT = 34;
+const MIN_MIX_PERCENT = 5;
+const MAX_MIX_PERCENT = 24;
 
 function tileFill(
   holding: EtfHolding,

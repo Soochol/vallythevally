@@ -540,6 +540,7 @@ export function SharesTab({ code, hasCatalogHero, onOpenFlows, onOpenHistory }: 
                 </Chip>
               ))}
             </div>
+            <span className="etf-controls-sep" aria-hidden="true" />
             <Segmented
               label="시계열 기간"
               mode="pressed"

@@ -446,7 +446,7 @@ function ConvictionRadar({
             y={RADAR_TOP}
             width={Math.max(24, radarRight - laneDividerX)}
             height={plotH}
-            rx={6}
+            rx={0}
             className="etf-radar-lane"
           />
           <line
@@ -470,12 +470,12 @@ function ConvictionRadar({
             y={zoneY}
             width={Math.max(40, radarRight - zoneX)}
             height={zoneH}
-            rx={8}
+            rx={2}
             className="etf-radar-zone"
             data-direction={direction}
           />
           <g className="etf-radar-zone-pill" data-direction={direction}>
-            <rect x={zoneBadgeX} y={zoneY + 8} width={174} height={22} rx={11} />
+            <rect x={zoneBadgeX} y={zoneY + 8} width={174} height={22} rx={2} />
             <text
               x={zoneBadgeX + 87}
               y={zoneY + 23}
@@ -579,7 +579,7 @@ function ConvictionRadar({
             className="etf-radar-tooltip"
             data-testid="etf-radar-tooltip"
             style={{
-              left: `${hoveredItem.cx + 268 > svgW ? Math.max(8, hoveredItem.cx - 260) : hoveredItem.cx + 18}px`,
+              left: `${hoveredItem.cx + hoveredItem.r + 264 > svgW ? Math.max(8, hoveredItem.cx - hoveredItem.r - 258) : hoveredItem.cx + hoveredItem.r + 18}px`,
               top: `${Math.min(RADAR_H - 180, Math.max(8, hoveredItem.cy - 48))}px`,
             }}
           >
@@ -864,6 +864,7 @@ export function AccumulationTab({ onOpenFund, onOpenReverse }: AccumulationTabPr
               setExpanded(null);
             }}
           />
+          <span className="etf-controls-sep" aria-hidden="true" />
           <Segmented
             label="집계 기간"
             mode="pressed"
@@ -877,6 +878,7 @@ export function AccumulationTab({ onOpenFund, onOpenReverse }: AccumulationTabPr
               setExpanded(null);
             }}
           />
+          <span className="etf-controls-sep" aria-hidden="true" />
           <Segmented
             label="대상 ETF"
             mode="pressed"

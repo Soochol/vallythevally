@@ -88,10 +88,21 @@ function shortDate(date: string): string {
   return date.length >= 10 ? date.slice(5).replace("-", ".") : date;
 }
 
+const QUADRANT_BADGE_BOXES: readonly LabelBox[] = [
+  { x1: PAD_L + 6, x2: PAD_L + 118, y1: PAD_T + 6, y2: PAD_T + 36 },
+  { x1: SVG_W - PAD_R - 110, x2: SVG_W - PAD_R - 6, y1: PAD_T + 6, y2: PAD_T + 36 },
+  { x1: PAD_L + 6, x2: PAD_L + 110, y1: SVG_H - PAD_B - 36, y2: SVG_H - PAD_B - 6 },
+  { x1: SVG_W - PAD_R - 122, x2: SVG_W - PAD_R - 6, y1: SVG_H - PAD_B - 36, y2: SVG_H - PAD_B - 6 },
+];
+
 function placeNodeLabels(
   entries: readonly { series: MarketOverviewRrgSeries; head: Point2D; isActive: boolean }[],
+  center: Point2D,
 ): Map<string, PlacedLabel> {
-  const placed: LabelBox[] = [];
+  const placed: LabelBox[] = [
+    ...QUADRANT_BADGE_BOXES,
+    { x1: center.x - 19, x2: center.x + 19, y1: center.y - 13, y2: center.y + 13 },
+  ];
   const positions = new Map<string, PlacedLabel>();
   const ordered = [...entries].sort((a, b) => {
     if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
@@ -175,7 +186,7 @@ function RrgPlot({ seriesList }: { seriesList: readonly MarketOverviewRrgSeries[
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
-  const labelPositions = placeNodeLabels(projectedEntries);
+  const labelPositions = placeNodeLabels(projectedEntries, center);
   const drawOrder = [...projectedEntries].sort((a, b) => Number(a.isActive) - Number(b.isActive));
 
   const ratioDelta =
@@ -229,24 +240,24 @@ function RrgPlot({ seriesList }: { seriesList: readonly MarketOverviewRrgSeries[
           <line className="mk-rrg-axis" x1={PAD_L} y1={center.y} x2={SVG_W - PAD_R} y2={center.y} />
 
           <g className="mk-rrg-origin" aria-hidden="true">
-            <rect x={center.x - 15} y={center.y - 9} width={30} height={18} rx={4} />
+            <rect x={center.x - 15} y={center.y - 9} width={30} height={18} rx={2} />
             <text className="mk-num" x={center.x} y={center.y + 4} textAnchor="middle">100</text>
           </g>
 
           <g className="mk-rrg-quad-pill" data-quadrant="improving">
-            <rect x={PAD_L + 10} y={PAD_T + 10} width={104} height={22} rx={11} />
+            <rect x={PAD_L + 10} y={PAD_T + 10} width={104} height={22} rx={2} />
             <text className="mk-rrg-quad-text" data-quadrant="improving" x={PAD_L + 62} y={PAD_T + 25} textAnchor="middle">개선 Improving</text>
           </g>
           <g className="mk-rrg-quad-pill" data-quadrant="leading">
-            <rect x={SVG_W - PAD_R - 106} y={PAD_T + 10} width={96} height={22} rx={11} />
+            <rect x={SVG_W - PAD_R - 106} y={PAD_T + 10} width={96} height={22} rx={2} />
             <text className="mk-rrg-quad-text" data-quadrant="leading" x={SVG_W - PAD_R - 58} y={PAD_T + 25} textAnchor="middle">주도 Leading</text>
           </g>
           <g className="mk-rrg-quad-pill" data-quadrant="lagging">
-            <rect x={PAD_L + 10} y={SVG_H - PAD_B - 32} width={96} height={22} rx={11} />
+            <rect x={PAD_L + 10} y={SVG_H - PAD_B - 32} width={96} height={22} rx={2} />
             <text className="mk-rrg-quad-text" data-quadrant="lagging" x={PAD_L + 58} y={SVG_H - PAD_B - 17} textAnchor="middle">소외 Lagging</text>
           </g>
           <g className="mk-rrg-quad-pill" data-quadrant="weakening">
-            <rect x={SVG_W - PAD_R - 118} y={SVG_H - PAD_B - 32} width={108} height={22} rx={11} />
+            <rect x={SVG_W - PAD_R - 118} y={SVG_H - PAD_B - 32} width={108} height={22} rx={2} />
             <text className="mk-rrg-quad-text" data-quadrant="weakening" x={SVG_W - PAD_R - 64} y={SVG_H - PAD_B - 17} textAnchor="middle">약화 Weakening</text>
           </g>
 

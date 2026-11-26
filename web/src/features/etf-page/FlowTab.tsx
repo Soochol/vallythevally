@@ -215,6 +215,7 @@ export function FlowTab({ onOpenShares, onOpenAccumulation }: FlowTabProps) {
             value={windowOption}
             onChange={(next) => setWindowOption(next)}
           />
+          <span className="etf-controls-sep" aria-hidden="true" />
           <Segmented
             label="유출입 방향"
             mode="pressed"
@@ -224,6 +225,7 @@ export function FlowTab({ onOpenShares, onOpenAccumulation }: FlowTabProps) {
             value={direction}
             onChange={(next) => setDirection(next)}
           />
+          <span className="etf-controls-sep" aria-hidden="true" />
           <Select
             label="자금 정렬"
             className="etf-flow-sort"

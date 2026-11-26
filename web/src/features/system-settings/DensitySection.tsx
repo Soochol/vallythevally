@@ -5,7 +5,7 @@ import { Segmented } from "../ui/Segmented";
 export function DensitySection() {
   const density = useSyncExternalStore(subscribeDensity, () => appliedDensity(), () => DEFAULT_DENSITY);
   return (
-    <section aria-label="목록 밀도" className="flex flex-col gap-3 border-t border-line bg-bg py-4">
+    <section aria-label="목록 밀도" className="flex flex-col gap-3 border-t border-line bg-transparent py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-m font-semibold">목록 밀도</h3>

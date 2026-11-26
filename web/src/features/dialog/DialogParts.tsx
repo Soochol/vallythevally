@@ -96,14 +96,14 @@ export function Segment<T extends string | number>({
   onChange(v: T): void;
 }) {
   return (
-    <div role="group" aria-label={label} className="inline-flex w-max overflow-hidden rounded-m border border-line">
+    <div role="group" aria-label={label} className="inline-flex w-max overflow-hidden rounded-m border border-line-strong bg-bg">
       {options.map(([v, text]) => (
         <button
           key={v}
           type="button"
           aria-pressed={v === value}
           onClick={() => onChange(v)}
-          className="inline-flex h-9 items-center justify-center border-r border-line px-3 text-text-2 last:border-r-0 hover:text-text aria-pressed:bg-accent-soft aria-pressed:font-semibold aria-pressed:text-accent"
+          className="inline-flex h-8 items-center justify-center border-r border-line px-3 text-text-2 last:border-r-0 hover:bg-hover hover:text-text aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-accent-ink"
         >
           {text}
         </button>

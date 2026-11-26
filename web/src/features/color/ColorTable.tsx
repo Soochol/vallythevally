@@ -41,7 +41,7 @@ export function ColorTable<T extends string = never>({ label, value, theme = [],
     </div>
     <div className="color-table-foot">
       <span className="ui-field"><span>HEX</span>{hex}</span>
-      <button ref={trigger} type="button" className="tb-btn" aria-haspopup="dialog" aria-expanded={custom} onClick={() => setCustom((open) => !open)}>직접 고르기</button>
+      <button ref={trigger} type="button" className="btn btn-sm" aria-haspopup="dialog" aria-expanded={custom} onClick={() => setCustom((open) => !open)}>직접 고르기</button>
     </div>
     </>}
     {custom && !folded && <ColorDialog label={label} initial={hex} width={width} trigger={trigger} startCustom onCancel={() => setCustom(false)} onApply={(color) => { onChange(color); setCustom(false); }} />}

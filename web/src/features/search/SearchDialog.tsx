@@ -204,7 +204,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
             <li id={optionId(i)} role="option" aria-selected={i === activeIndex} aria-disabled={!selectable}
               data-symbol={row.kind === "symbol" && selectable ? row.info.code : undefined}
               onPointerMove={() => selectable && i !== activeIndex && setActive(i)} onClick={(e) => choose(row, e)}
-              className={`group/row ${ROW_GRID} ${row.kind === "symbol" ? SYMBOL_COLUMNS : COMMAND_COLUMNS} aria-selected:bg-accent-soft aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]`}>
+              className={`group/row ${ROW_GRID} ${row.kind === "symbol" ? SYMBOL_COLUMNS : COMMAND_COLUMNS} aria-selected:bg-[color-mix(in_srgb,var(--accent)_9%,transparent)] aria-selected:shadow-[inset_2px_0_0_var(--accent)] aria-disabled:cursor-default aria-disabled:opacity-70 max-md:min-h-[44px]`}>
               {row.kind === "symbol" ? <>
                 <WatchStar included={watchlist.symbols.includes(row.info.code)} disabled={!selectable} addName={putName} removeName={watchlist.name} onToggle={() => toggleOrAdd(row.info, true)} />
                 <span className="flex min-w-0 items-baseline gap-2">
@@ -212,7 +212,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
                   <span className="flex-none whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span>
                   {putGroup?.symbols.includes(row.info.code) && <span className="max-w-[9rem] flex-none truncate text-xs text-text-2">✓ {putGroup.name}에 있음</span>}
                 </span>
-                <span data-cell="market" className="justify-self-start whitespace-nowrap rounded-s bg-raised px-1 text-xs text-text-3 max-md:hidden">{row.info.kind === "etf" || row.info.kind === "etn" ? KIND_LABEL[row.info.kind] : MARKET_LABEL[row.info.market]}</span>
+                <span data-cell="market" className="justify-self-start whitespace-nowrap rounded-s border border-line bg-surface px-1 text-xs text-text-2 max-md:hidden">{row.info.kind === "etf" || row.info.kind === "etn" ? KIND_LABEL[row.info.kind] : MARKET_LABEL[row.info.market]}</span>
                 <QuoteCells quote={bySymbol.get(row.info.code)} />
               </> : <>
                 <span className="text-text-3">{row.command.icon ? <row.command.icon size={16} /> : <ChevronIcon size={16} />}</span>

@@ -147,7 +147,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
                   </button>
                 )}
                 {!usePopover && kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
-                  {PERIOD_PRESETS.map((preset) => <button key={preset} type="button" aria-pressed={text === preset} className="h-6 rounded-m bg-[var(--hover)] px-2 text-xs text-text-2 aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => setText(f.key, preset)}>{preset}</button>)}
+                  {PERIOD_PRESETS.map((preset) => <button key={preset} type="button" aria-pressed={text === preset} className="h-6 rounded-s border border-line bg-bg px-2 text-xs text-text-2 hover:text-text aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-accent-ink" onClick={() => setText(f.key, preset)}>{preset}</button>)}
                 </span>}
                 <span className="flex items-center gap-1.5">
                   <input
