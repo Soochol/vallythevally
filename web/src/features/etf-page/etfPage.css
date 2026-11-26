@@ -180,7 +180,7 @@
 .etf-radar-legend span[data-tone="removed"]::before { background: var(--warning); }
 .etf-radar-legend span[data-tone="inverse"]::before { background: var(--down); }
 .etf-radar-stage { width: 100%; overflow-x: auto; border-radius: var(--r-m); background: var(--surface); }
-.etf-radar-svg { display: block; width: 100%; height: var(--size-220); }
+.etf-radar-svg { display: block; width: 100%; height: auto; }
 .etf-radar-zone { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 4 3; stroke-width: 1; }
 .etf-radar-zone[data-direction="sell"] { fill: var(--down-soft); stroke: var(--down); }
 .etf-radar-zone-label { fill: var(--accent); font-size: var(--fs-xs); font-weight: 600; }
