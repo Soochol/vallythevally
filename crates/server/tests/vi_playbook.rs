@@ -76,15 +76,36 @@ fn vi_sql(
 }
 
 fn expected_sql(symbol: &str, recv_ms: i64, hhmmss: &str, price: u64, qty: u64) -> String {
+    expected_sql_with_delta(symbol, recv_ms, hhmmss, price, qty, qty as i64)
+}
+
+fn expected_sql_with_delta(symbol: &str, recv_ms: i64, hhmmss: &str, price: u64, cumulative_qty: u64, delta_qty: i64) -> String {
     format!(
-        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, 0::BIGINT AS f11, 0.0::DOUBLE AS f12, {qty}::BIGINT AS f15, {qty}::BIGINT AS f13, 2::BIGINT AS f25"
+        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, 0::BIGINT AS f11, 0.0::DOUBLE AS f12, {delta_qty}::BIGINT AS f15, {cumulative_qty}::BIGINT AS f13, 2::BIGINT AS f25"
     )
 }
 
 fn tick_sql(symbol: &str, recv_ms: i64, hhmmss: &str, price: u64, signed_qty: i64) -> String {
+    tick_sql_exchange(symbol, recv_ms, hhmmss, price, signed_qty, "KRX")
+}
+
+fn tick_sql_exchange(symbol: &str, recv_ms: i64, hhmmss: &str, price: u64, signed_qty: i64, exchange: &str) -> String {
+    let f15_plus = signed_qty > 0;
     format!(
-        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, 100::BIGINT AS f1313, 'KRX' AS f9081"
+        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, {f15_plus}::BOOLEAN AS f15_plus, 100::BIGINT AS f1313, '{exchange}' AS f9081"
     )
+}
+
+fn write_complete_with_raw_count(data: &Path, date: &str, raw_count: u64) {
+    let folder = data.join("store").join(date);
+    std::fs::create_dir_all(&folder).unwrap();
+    let complete = json!({
+        "format_version": 1,
+        "verify": {"passed": true, "buckets": BUCKETS},
+        "raw_files": {"collect-01/1530-000.jsonl.zst": raw_count},
+        "stocks": [{"code": "005930", "key": "collect-01", "registered": true, "received": true, "gaps": [], "handoff": null}],
+    });
+    std::fs::write(folder.join("complete.json"), complete.to_string()).unwrap();
 }
 
 struct Harness {
@@ -288,6 +309,334 @@ async fn aggregates_multi_day_vi_events_horizons_mae_and_late_drop() {
     assert_eq!(down_all["horizons"][0]["winRatePct"], 100.0);
     assert_eq!(down_all["horizons"][0]["avgReturnPct"], -2.0);
     assert_eq!(down_all["horizons"][0]["avgMaePct"], -1.0);
+}
+
+#[tokio::test]
+async fn late_drop_uses_fid13_cumulative_volume_not_fid15_delta() {
+    let h = Harness::start(true).await;
+
+    let d1 = KstDate::new(2026, 11, 20).unwrap();
+    write_complete(&h.data, "20261120");
+    write_parquet(
+        &h.data,
+        "20261120",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d1, 9, 10, 0), "005930", "2", "1", 70_000, "091000", "091200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0H",
+        "005930_AL",
+        &[
+            expected_sql_with_delta("005930_AL", at_ms(d1, 9, 10, 15), "091015", 71_000, 100_000, 100_000),
+            expected_sql_with_delta("005930_AL", at_ms(d1, 9, 11, 10), "091110", 71_200, 110_000, 10_000),
+            expected_sql_with_delta("005930_AL", at_ms(d1, 9, 11, 55), "091155", 71_300, 110_500, 500),
+        ],
+    );
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 0), "091200", 71_000, 100),
+            tick_sql("005930_AL", at_ms(d1, 9, 13, 0), "091300", 72_000, 100),
+        ],
+    );
+
+    let d2 = KstDate::new(2026, 11, 23).unwrap();
+    write_complete(&h.data, "20261123");
+    write_parquet(
+        &h.data,
+        "20261123",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d2, 9, 10, 0), "005930", "2", "1", 72_000, "091000", "091200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261123",
+        "0H",
+        "005930_AL",
+        &[
+            expected_sql_with_delta("005930_AL", at_ms(d2, 9, 10, 30), "091030", 73_000, 120_000, 120_000),
+            expected_sql_with_delta("005930_AL", at_ms(d2, 9, 11, 55), "091155", 73_000, 48_000, -72_000),
+        ],
+    );
+    write_parquet(
+        &h.data,
+        "20261123",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d2, 9, 12, 0), "091200", 73_000, 100),
+            tick_sql("005930_AL", at_ms(d2, 9, 13, 0), "091300", 71_500, -100),
+        ],
+    );
+
+    let (status, body) = h.get("/api/symbols/005930/vi-playbook?direction=up&kind=all").await;
+    assert_eq!(status, 200, "{body}");
+    let matches = body["recentMatches"].as_array().unwrap();
+    assert_eq!(matches.len(), 2);
+    assert_eq!(matches[0]["date"], "2026-11-23");
+    assert_eq!(matches[0]["lateDropDetected"], true);
+    assert_eq!(matches[1]["date"], "2026-11-20");
+    assert_eq!(matches[1]["lateDropDetected"], false);
+}
+
+#[tokio::test]
+async fn cache_invalidates_when_earlier_finalized_day_is_updated() {
+    let h = Harness::start(true).await;
+
+    let d1 = KstDate::new(2026, 11, 20).unwrap();
+    write_complete_with_raw_count(&h.data, "20261120", 10);
+    write_parquet(
+        &h.data,
+        "20261120",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d1, 9, 10, 0), "005930", "2", "1", 70_000, "091000", "091200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 0), "091200", 70_000, 100),
+            tick_sql("005930_AL", at_ms(d1, 9, 13, 0), "091300", 70_700, 100),
+        ],
+    );
+
+    let d2 = KstDate::new(2026, 11, 23).unwrap();
+    write_complete_with_raw_count(&h.data, "20261123", 10);
+    write_parquet(
+        &h.data,
+        "20261123",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d2, 9, 10, 0), "005930", "2", "1", 80_000, "091000", "091200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261123",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d2, 9, 12, 0), "091200", 80_000, 100),
+            tick_sql("005930_AL", at_ms(d2, 9, 13, 0), "091300", 80_800, 100),
+        ],
+    );
+
+    let (status, first) = h.get("/api/symbols/005930/vi-playbook?direction=up&kind=all").await;
+    assert_eq!(status, 200, "{first}");
+    assert_eq!(first["recentMatches"][1]["return1mPct"], 1.0);
+
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 0), "091200", 70_000, 100),
+            tick_sql("005930_AL", at_ms(d1, 9, 13, 0), "091300", 73_500, 100),
+        ],
+    );
+    write_complete_with_raw_count(&h.data, "20261120", 123456);
+
+    let (status, refreshed) = h.get("/api/symbols/005930/vi-playbook?direction=up&kind=all").await;
+    assert_eq!(status, 200, "{refreshed}");
+    assert_eq!(refreshed["recentMatches"][1]["return1mPct"], 5.0);
+}
+
+#[tokio::test]
+async fn handles_out_of_order_hhmmss_ticks_and_expected_rows() {
+    let h = Harness::start(true).await;
+
+    let d1 = KstDate::new(2026, 11, 20).unwrap();
+    write_complete(&h.data, "20261120");
+    write_parquet(
+        &h.data,
+        "20261120",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d1, 9, 10, 0), "005930", "2", "1", 70_000, "091000", "091200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0H",
+        "005930_AL",
+        &[
+            expected_sql_with_delta("005930_AL", at_ms(d1, 9, 10, 10), "091155", 70_000, 10_000, 1_000),
+            expected_sql_with_delta("005930_AL", at_ms(d1, 9, 10, 20), "091015", 71_000, 10_000, 10_000),
+        ],
+    );
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 1), "091600", 72_800, 100),
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 2), "091200", 70_000, 100),
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 3), "091230", 69_300, -50),
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 4), "091300", 71_400, 100),
+        ],
+    );
+
+    let (status, body) = h.get("/api/symbols/005930/vi-playbook?direction=up&kind=all").await;
+    assert_eq!(status, 200, "{body}");
+    let m = &body["recentMatches"][0];
+    assert_eq!(m["releasePrice"], 70_000);
+    assert_eq!(m["return1mPct"], 2.0);
+    assert_eq!(m["return3mPct"], 2.0);
+    assert_eq!(m["return5mPct"], 4.0);
+    assert_eq!(m["mae5mPct"], -1.0);
+    assert_eq!(m["lateDropDetected"], true);
+}
+
+#[tokio::test]
+async fn skips_corrupt_parquet_days_without_aborting_playbook() {
+    let h = Harness::start(true).await;
+
+    let d1 = KstDate::new(2026, 11, 20).unwrap();
+    write_complete(&h.data, "20261120");
+    write_parquet(
+        &h.data,
+        "20261120",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d1, 9, 10, 0), "005930", "2", "1", 70_000, "091000", "091200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d1, 9, 12, 0), "091200", 70_000, 100),
+            tick_sql("005930_AL", at_ms(d1, 9, 13, 0), "091300", 71_400, 100),
+        ],
+    );
+
+    let d2 = KstDate::new(2026, 11, 21).unwrap();
+    write_complete(&h.data, "20261121");
+    write_parquet(
+        &h.data,
+        "20261121",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d2, 9, 10, 0), "005930", "2", "1", 75_000, "091000", "091200", "2")],
+    );
+    let corrupt_expected = h.data.join("store/20261121/0H").join(bucket_file("005930_AL"));
+    std::fs::create_dir_all(corrupt_expected.parent().unwrap()).unwrap();
+    std::fs::write(&corrupt_expected, b"not a parquet file").unwrap();
+    write_parquet(
+        &h.data,
+        "20261121",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql("005930_AL", at_ms(d2, 9, 12, 0), "091200", 75_000, 100),
+            tick_sql("005930_AL", at_ms(d2, 9, 13, 0), "091300", 76_500, 100),
+        ],
+    );
+
+    write_complete(&h.data, "20261122");
+    let corrupt_vi = h.data.join("store/20261122/1h").join(bucket_file("005930"));
+    std::fs::create_dir_all(corrupt_vi.parent().unwrap()).unwrap();
+    std::fs::write(&corrupt_vi, b"corrupt vi parquet").unwrap();
+
+    let d4 = KstDate::new(2026, 11, 23).unwrap();
+    write_complete(&h.data, "20261123");
+    write_parquet(
+        &h.data,
+        "20261123",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d4, 9, 10, 0), "005930", "2", "1", 80_000, "091000", "091200", "2")],
+    );
+    let corrupt_ticks = h.data.join("store/20261123/0B").join(bucket_file("005930_AL"));
+    std::fs::create_dir_all(corrupt_ticks.parent().unwrap()).unwrap();
+    std::fs::write(&corrupt_ticks, b"corrupt ticks parquet").unwrap();
+
+    let (status, body) = h.get("/api/symbols/005930/vi-playbook?direction=up&kind=all").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["sampleCount"], 2);
+    assert_eq!(body["lookbackDays"], 2);
+    let matches = body["recentMatches"].as_array().unwrap();
+    assert_eq!(matches[0]["date"], "2026-11-21");
+    assert_eq!(matches[0]["return1mPct"], 2.0);
+    assert_eq!(matches[0]["lateDropDetected"], false);
+    assert_eq!(matches[1]["date"], "2026-11-20");
+    assert_eq!(matches[1]["return1mPct"], 2.0);
+}
+
+#[tokio::test]
+async fn isolates_krx_and_nxt_trade_ticks_by_vi_market() {
+    let h = Harness::start(true).await;
+
+    let d1 = KstDate::new(2026, 11, 20).unwrap();
+    write_complete(&h.data, "20261120");
+    write_parquet(
+        &h.data,
+        "20261120",
+        "1h",
+        "005930",
+        &[vi_sql("005930", at_ms(d1, 9, 10, 0), "005930", "2", "1", 70_000, "091000", "091200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261120",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql_exchange("005930_AL", at_ms(d1, 9, 12, 0), "091200", 90_000, 100, "NXT"),
+            tick_sql_exchange("005930_AL", at_ms(d1, 9, 12, 1), "091201", 70_000, 100, "KRX"),
+            tick_sql_exchange("005930_AL", at_ms(d1, 9, 12, 30), "091230", 50_000, -100, "NXT"),
+            tick_sql_exchange("005930_AL", at_ms(d1, 9, 13, 0), "091300", 72_100, 100, "KRX"),
+        ],
+    );
+
+    let d2 = KstDate::new(2026, 11, 23).unwrap();
+    write_complete(&h.data, "20261123");
+    write_parquet(
+        &h.data,
+        "20261123",
+        "1h",
+        "005930_NX",
+        &[vi_sql("005930_NX", at_ms(d2, 10, 10, 0), "005930_NX", "2", "1", 80_000, "101000", "101200", "2")],
+    );
+    write_parquet(
+        &h.data,
+        "20261123",
+        "0B",
+        "005930_AL",
+        &[
+            tick_sql_exchange("005930_AL", at_ms(d2, 10, 12, 0), "101200", 60_000, 100, "KRX"),
+            tick_sql_exchange("005930_AL", at_ms(d2, 10, 12, 1), "101201", 80_000, 100, "NXT"),
+            tick_sql_exchange("005930_AL", at_ms(d2, 10, 12, 30), "101230", 40_000, -100, "KRX"),
+            tick_sql_exchange("005930_AL", at_ms(d2, 10, 13, 0), "101300", 78_400, -100, "NXT"),
+        ],
+    );
+
+    let (status, body) = h.get("/api/symbols/005930/vi-playbook?direction=up&kind=all").await;
+    assert_eq!(status, 200, "{body}");
+    let matches = body["recentMatches"].as_array().unwrap();
+    assert_eq!(matches.len(), 2);
+
+    assert_eq!(matches[0]["date"], "2026-11-23");
+    assert_eq!(matches[0]["releasePrice"], 80_000);
+    assert_eq!(matches[0]["return1mPct"], -2.0);
+    assert_eq!(matches[0]["mae5mPct"], -2.0);
+
+    assert_eq!(matches[1]["date"], "2026-11-20");
+    assert_eq!(matches[1]["releasePrice"], 70_000);
+    assert_eq!(matches[1]["return1mPct"], 3.0);
+    assert_eq!(matches[1]["mae5mPct"], 0.0);
 }
 
 #[tokio::test]

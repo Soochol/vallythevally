@@ -358,10 +358,55 @@ impl<'a> Scanner<'a> {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
+enum BufferedInput<'a> {
+    Book { code: &'a str, asks: [BookSideLevel; BOOK_DEPTH], bids: [BookSideLevel; BOOK_DEPTH] },
+    Trade { code: &'a str, price_won: u64, signed_qty: i64 },
+}
+
+#[derive(Default)]
+struct FastBuffer<'a> {
+    first: Option<BufferedInput<'a>>,
+    rest: Vec<BufferedInput<'a>>,
+}
+
+impl<'a> FastBuffer<'a> {
+    #[inline]
+    fn push(&mut self, item: BufferedInput<'a>) {
+        if self.first.is_none() {
+            self.first = Some(item);
+        } else {
+            self.rest.push(item);
+        }
+    }
+
+    fn flush(self, sink: &mut impl FnMut(MicroInput<'_>)) {
+        if let Some(first) = self.first {
+            emit_buffered(&first, sink);
+        }
+        for item in &self.rest {
+            emit_buffered(item, sink);
+        }
+    }
+}
+
+#[inline]
+fn emit_buffered(item: &BufferedInput<'_>, sink: &mut impl FnMut(MicroInput<'_>)) {
+    match item {
+        BufferedInput::Book { code, asks, bids } => sink(MicroInput::Book { code, asks, bids }),
+        BufferedInput::Trade { code, price_won, signed_qty } => sink(MicroInput::Trade {
+            code,
+            price_won: *price_won,
+            signed_qty: *signed_qty,
+        }),
+    }
+}
+
 fn read_micro_fast(text: &str, sink: &mut impl FnMut(MicroInput<'_>)) -> Option<Reading> {
     let mut sc = Scanner::new(text);
     sc.expect_byte(b'{')?;
     let mut reading = Reading::default();
+    let mut buffer = FastBuffer::default();
     if sc.peek()? == b'}' {
         sc.pos += 1;
         sc.skip_ws();
@@ -371,7 +416,7 @@ fn read_micro_fast(text: &str, sink: &mut impl FnMut(MicroInput<'_>)) -> Option<
         let key = sc.read_str()?;
         sc.expect_byte(b':')?;
         if key == b"data" {
-            read_data_array(&mut sc, &mut reading, sink)?;
+            read_data_array(&mut sc, &mut reading, &mut buffer)?;
         } else {
             sc.skip_value()?;
         }
@@ -385,17 +430,21 @@ fn read_micro_fast(text: &str, sink: &mut impl FnMut(MicroInput<'_>)) -> Option<
         }
     }
     sc.skip_ws();
-    (sc.pos == sc.bytes.len()).then_some(reading)
+    if sc.pos != sc.bytes.len() {
+        return None;
+    }
+    buffer.flush(sink);
+    Some(reading)
 }
 
-fn read_data_array(sc: &mut Scanner<'_>, reading: &mut Reading, sink: &mut impl FnMut(MicroInput<'_>)) -> Option<()> {
+fn read_data_array<'a>(sc: &mut Scanner<'a>, reading: &mut Reading, buffer: &mut FastBuffer<'a>) -> Option<()> {
     sc.expect_byte(b'[')?;
     if sc.peek()? == b']' {
         sc.pos += 1;
         return Some(());
     }
     loop {
-        read_entry(sc, reading, sink)?;
+        read_entry(sc, reading, buffer)?;
         match sc.peek()? {
             b',' => sc.pos += 1,
             b']' => {
@@ -407,10 +456,10 @@ fn read_data_array(sc: &mut Scanner<'_>, reading: &mut Reading, sink: &mut impl 
     }
 }
 
-fn read_entry(sc: &mut Scanner<'_>, reading: &mut Reading, sink: &mut impl FnMut(MicroInput<'_>)) -> Option<()> {
+fn read_entry<'a>(sc: &mut Scanner<'a>, reading: &mut Reading, buffer: &mut FastBuffer<'a>) -> Option<()> {
     sc.expect_byte(b'{')?;
     let mut kind: Option<&[u8]> = None;
-    let mut item: Option<&[u8]> = None;
+    let mut item: Option<&'a [u8]> = None;
     let mut values_slice_start: Option<usize> = None;
     let mut asks = [BookSideLevel::default(); BOOK_DEPTH];
     let mut bids = [BookSideLevel::default(); BOOK_DEPTH];
@@ -481,12 +530,12 @@ fn read_entry(sc: &mut Scanner<'_>, reading: &mut Reading, sink: &mut impl FnMut
     }
     if kind == b"0D" {
         reading.books += 1;
-        sink(MicroInput::Book { code, asks: &asks, bids: &bids });
+        buffer.push(BufferedInput::Book { code, asks, bids });
     } else {
         match (trade_price, trade_qty) {
             (Some(price_won), Some(signed_qty)) => {
                 reading.trades += 1;
-                sink(MicroInput::Trade { code, price_won, signed_qty });
+                buffer.push(BufferedInput::Trade { code, price_won, signed_qty });
             }
             _ => reading.skipped += 1,
         }
@@ -586,5 +635,19 @@ mod tests {
         let esc_read = read_micro_frame(escaped, |item| esc_out.push(format!("{item:?}"))).unwrap();
         assert_eq!(esc_read.trades, 1);
         assert_eq!(esc_out.len(), 1);
+    }
+
+    #[test]
+    fn fast_path_does_not_emit_earlier_entries_when_frame_is_malformed() {
+        let broken_later_entry = r#"{"trnm":"REAL","data":[{"type":"0B","item":"005930_AL","values":{"20":"090501","10":"+70100","15":"+50"}},{"type":"0B","item":"005930_AL","values":{BROKEN}}]}"#;
+        let mut emitted = 0usize;
+        let result = read_micro_frame(broken_later_entry, |_| emitted += 1);
+        assert!(result.is_err());
+        assert_eq!(emitted, 0);
+
+        let trailing_garbage = r#"{"trnm":"REAL","data":[{"type":"0B","item":"005930_AL","values":{"20":"090501","10":"+70100","15":"+50"}}]} trailing"#;
+        let result2 = read_micro_frame(trailing_garbage, |_| emitted += 1);
+        assert!(result2.is_err());
+        assert_eq!(emitted, 0);
     }
 }

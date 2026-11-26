@@ -12,6 +12,7 @@ use ts_rs::TS;
 use crate::api::{self, ApiErrorCode, BrokerDaySource, SymbolCode, UnixSeconds};
 use crate::collected::kind::{CollectedProgramRow, CollectedTradeTick};
 use crate::http::{ApiFailure, AppState};
+use crate::market_source::stream::TradeSide;
 use crate::shared_data::CollectorPaths;
 
 pub const MID_MIN_WON: u64 = 5_000_000;
@@ -131,12 +132,17 @@ struct TickMinuteSlot {
 impl TickMinuteSlot {
     fn add_tick(&mut self, tick: &CollectedTradeTick) {
         let value_won = tick.value_won();
-        let signed_won = if tick.signed_qty > 0 { i128::from(value_won) } else { -i128::from(value_won) };
-        match classify_tick_tier(value_won) {
-            TickTier::Whale => self.whale_won += signed_won,
-            TickTier::Large => self.large_won += signed_won,
-            TickTier::Mid => self.mid_won += signed_won,
-            TickTier::Retail => self.retail_won += signed_won,
+        if let Some(side) = tick.side() {
+            let signed_won = match side {
+                TradeSide::Buy => i128::from(value_won),
+                TradeSide::Sell => -i128::from(value_won),
+            };
+            match classify_tick_tier(value_won) {
+                TickTier::Whale => self.whale_won += signed_won,
+                TickTier::Large => self.large_won += signed_won,
+                TickTier::Mid => self.mid_won += signed_won,
+                TickTier::Retail => self.retail_won += signed_won,
+            }
         }
         self.total_traded_won += u128::from(value_won);
         self.has_ticks = true;
@@ -762,11 +768,19 @@ mod tests {
     }
 
     fn tick(hh: u32, mm: u32, ss: u32, price_won: u64, signed_qty: i64) -> CollectedTradeTick {
+        let side = if signed_qty > 0 {
+            Some(TradeSide::Buy)
+        } else if signed_qty < 0 {
+            Some(TradeSide::Sell)
+        } else {
+            None
+        };
         CollectedTradeTick {
             recv_ms: 0,
             hhmmss: TimeOfDay::hms(hh, mm, ss).unwrap(),
             price_won,
             signed_qty,
+            side,
             instant_value_thousand_won: None,
             exchange: None,
         }

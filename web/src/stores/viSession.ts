@@ -28,17 +28,25 @@ export interface ViTrapAlert {
   readonly detectedAt: UnixSeconds;
 }
 
+export type ViPlaybookStatus = "loading" | "ready" | "error";
+
 export type ViViewState =
   | { readonly kind: "inactive" }
   | {
       readonly kind: "active";
+      readonly sessionKey: string;
       readonly trigger: ViState;
       readonly elapsedSec: number;
       readonly remainingSec: number;
       readonly expectedSeries: readonly ViExpectedPoint[];
       readonly trapAlert: ViTrapAlert | null;
       readonly playbook: ViPlaybook | null;
+      readonly playbookStatus: ViPlaybookStatus;
     };
+
+export function viSessionKey(code: SymbolCode, vi: ViState): string {
+  return `${code}:${vi.market}:${vi.direction ?? "unknown"}:${vi.triggeredAt ?? "live"}`;
+}
 
 export interface ViTiming {
   readonly elapsedSec: number;
@@ -68,9 +76,11 @@ export function detectTrapAlert(
   series: readonly ViExpectedPoint[],
   direction: ViDirection | null,
   elapsedSec: number,
+  triggeredAt: UnixSeconds | null,
 ): ViTrapAlert | null {
-  if (elapsedSec < VI_LATE_WINDOW_ELAPSED_SEC || series.length < 2) return null;
+  if (elapsedSec < VI_LATE_WINDOW_ELAPSED_SEC || triggeredAt === null || series.length < 2) return null;
   const latest = series[series.length - 1]!;
+  if (latest.t - triggeredAt < VI_LATE_WINDOW_ELAPSED_SEC) return null;
   let extremePrice = series[0]!.price;
   let peakQty = series[0]!.qty;
   for (let i = 1; i < series.length - 1; i++) {
@@ -97,24 +107,36 @@ export function detectTrapAlert(
 }
 
 export interface ViViewInput {
+  readonly sessionKey?: string;
   readonly vi: ViState | null;
   readonly nowSec: UnixSeconds;
   readonly expectedSeries: readonly ViExpectedPoint[];
   readonly playbook: ViPlaybook | null;
+  readonly playbookStatus?: ViPlaybookStatus;
 }
 
-export function resolveViViewState({ vi, nowSec, expectedSeries, playbook }: ViViewInput): ViViewState {
+export function resolveViViewState({
+  sessionKey,
+  vi,
+  nowSec,
+  expectedSeries,
+  playbook,
+  playbookStatus,
+}: ViViewInput): ViViewState {
   if (vi === null || !vi.active) return { kind: "inactive" };
   const { elapsedSec, remainingSec } = computeViTiming(vi, nowSec);
-  const trapAlert = detectTrapAlert(expectedSeries, vi.direction, elapsedSec);
+  const trapAlert = detectTrapAlert(expectedSeries, vi.direction, elapsedSec, vi.triggeredAt);
+  const resolvedStatus: ViPlaybookStatus = playbookStatus ?? (playbook !== null ? "ready" : "loading");
   return {
     kind: "active",
+    sessionKey: sessionKey ?? viSessionKey(vi.symbol, vi),
     trigger: vi,
     elapsedSec,
     remainingSec,
     expectedSeries,
     trapAlert,
     playbook,
+    playbookStatus: resolvedStatus,
   };
 }
 
@@ -134,22 +156,30 @@ export function useViSession(
   code: SymbolCode,
   vi: ViState | null,
   expected: FeedExpected | null,
-  enabled: boolean,
+  trackingEnabled: boolean,
+  overlayVisible: boolean = trackingEnabled,
 ): ViViewState {
-  const active = enabled && vi !== null && vi.active;
-  const sessionKey = active ? `${code}:${vi.market}:${vi.triggeredAt ?? "live"}` : null;
+  const trackingActive = trackingEnabled && vi !== null && vi.active;
+  const visible = trackingActive && overlayVisible;
+  const sessionKey = trackingActive ? viSessionKey(code, vi) : null;
   const direction: ViDirection = vi?.direction ?? "up";
-  const playbookQuery = useViPlaybook(code, direction, "all", active);
+  const playbookQuery = useViPlaybook(code, direction, "all", trackingActive);
+  const playbookStatus: ViPlaybookStatus =
+    playbookQuery.data !== undefined
+      ? "ready"
+      : playbookQuery.isError
+        ? "error"
+        : "loading";
 
   const [nowSec, setNowSec] = useState<UnixSeconds>(() => Math.floor(Date.now() / 1000));
   const [tracked, setTracked] = useState<TrackedSeries>({ key: null, points: [] });
 
   useEffect(() => {
-    if (!active) return;
+    if (!visible) return;
     setNowSec(Math.floor(Date.now() / 1000));
     const timer = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), TICK_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [active, sessionKey]);
+  }, [visible, sessionKey]);
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -167,13 +197,15 @@ export function useViSession(
   }, [sessionKey, expected?.price, expected?.qty]);
 
   return useMemo(() => {
-    if (!active) return { kind: "inactive" };
+    if (!visible || vi === null || sessionKey === null) return { kind: "inactive" };
     const points = tracked.key === sessionKey ? tracked.points : [];
     return resolveViViewState({
+      sessionKey,
       vi,
       nowSec,
       expectedSeries: points,
       playbook: playbookQuery.data ?? null,
+      playbookStatus,
     });
-  }, [active, vi, nowSec, tracked, sessionKey, playbookQuery.data]);
+  }, [visible, vi, sessionKey, nowSec, tracked, playbookQuery.data, playbookStatus]);
 }

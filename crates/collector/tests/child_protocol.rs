@@ -575,7 +575,7 @@ async fn a_child_writes_all_new_flow_kinds_readable_by_collected() {
 
     let day = only_day(data.path());
     let day_str = day.to_string();
-    for (type_code, expected_count) in [("0B", 200usize), ("0w", 100), ("1h", 100), ("0H", 100)] {
+    for (type_code, expected_count) in [("0B", 200usize), ("0w", 100), ("1h", 50), ("0H", 100)] {
         let blocks = FlowCursor::new(flow_path(shared.path(), &day_str, type_code, "005930", "k1")).read_new().unwrap();
         let recv_times: Vec<i64> = blocks.iter().flat_map(|b| b.rows.iter().map(|r| r.recv_ms)).collect();
         assert_eq!(recv_times.len(), expected_count, "{type_code}");
@@ -605,7 +605,7 @@ async fn a_child_writes_all_new_flow_kinds_readable_by_collected() {
 
     let vi = collected.vi_day(paths.clone(), stock, date, &day_str, None, now).await.unwrap();
     assert_eq!(vi.source, BrokerDaySource::Flow);
-    assert_eq!(vi.snapshots.len(), 100);
+    assert_eq!(vi.snapshots.len(), 50);
     assert!(vi.snapshots.windows(2).all(|w| w[0].recv_ms <= w[1].recv_ms));
 
     let expected = collected.expected_day(paths, stock, date, &day_str, None, now).await.unwrap();

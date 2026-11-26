@@ -193,7 +193,7 @@ function OrderBody({
   const sellOrdered = sellOrderQuantity(data.groups, data.pending, code, data.openOrdersListedAt);
   const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
-  const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live" && !explorerOn && shownLadder);
+  const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", !explorerOn && shownLadder);
   const micro = useMicroFeed(code, market.venue, replay.kind === "live");
   const ladderMicroCues = useMemo<ReadonlyMap<number, LadderMicroCue> | undefined>(() => {
     if (!settings.microCues || replay.kind !== "live" || micro.cuesByPrice.size === 0) return undefined;

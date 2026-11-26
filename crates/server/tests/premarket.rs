@@ -75,8 +75,9 @@ fn expected_sql(symbol: &str, recv_ms: i64, hhmmss: &str, price: i64, change: i6
 }
 
 fn tick_sql(symbol: &str, recv_ms: i64, hhmmss: &str, price: i64, signed_qty: i64) -> String {
+    let f15_plus = signed_qty > 0;
     format!(
-        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, 100::BIGINT AS f1313, 'KRX' AS f9081"
+        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, {f15_plus}::BOOLEAN AS f15_plus, 100::BIGINT AS f1313, 'KRX' AS f9081"
     )
 }
 
@@ -86,6 +87,7 @@ fn ext_sql(symbol: &str, recv_ms: i64, f592: &str) -> String {
 
 struct Harness {
     app: Router,
+    clock: Clock,
     data: PathBuf,
     _tmp: tempfile::TempDir,
 }
@@ -114,7 +116,7 @@ impl Harness {
         symbols.replace(Directory::build(infos));
         let state = application(ApplicationInputs {
             rest,
-            clock,
+            clock: clock.clone(),
             symbols,
             db,
             screener_store: store,
@@ -126,7 +128,7 @@ impl Harness {
         if enabled {
             state.collector_paths.configure(CollectorPaths::hoga_only(data.clone()));
         }
-        Harness { app: router(state), data, _tmp: tmp }
+        Harness { app: router(state), clock, data, _tmp: tmp }
     }
 
     async fn get(&self, path: &str) -> (u16, Value) {
@@ -380,6 +382,267 @@ async fn rejects_bad_dates_too_many_days_and_index_symbols() {
         400
     );
     assert_eq!(h.get("/api/premarket/snapshot?date=2026-11-23").await.0, 400);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn expected_sql_text(symbol: &str, recv_ms: i64, hhmmss: &str, f10: &str, f11: Option<&str>, f12: &str, f15: &str, f13: &str) -> String {
+    let f11_expr = match f11 {
+        Some(val) => format!("'{val}'::VARCHAR"),
+        None => "NULL::VARCHAR".to_owned(),
+    };
+    format!(
+        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, '{f10}' AS f10, {f11_expr} AS f11, '{f12}' AS f12, '{f15}' AS f15, '{f13}' AS f13, '2' AS f25"
+    )
+}
+
+fn tick_sql_text(symbol: &str, recv_ms: i64, hhmmss: &str, f10: &str, f15: &str) -> String {
+    let f15_plus = f15.starts_with('+');
+    format!(
+        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, '{f10}' AS f10, '{f15}' AS f15, {f15_plus}::BOOLEAN AS f15_plus, 100::BIGINT AS f1313, 'KRX' AS f9081"
+    )
+}
+
+#[tokio::test]
+async fn expected_qty_and_turnover_use_cumulative_f13_across_compare_store_and_flow() {
+    let h = Harness::start(true, &[("005930", "삼성전자")]).await;
+    let store_date = "20261123";
+    write_complete(&h.data, store_date, &["005930"]);
+    let mut oh: HashMap<String, Vec<String>> = HashMap::new();
+    oh.insert(
+        bucket_file("005930_AL"),
+        vec![expected_sql_text("005930_AL", at_ms(23, 8, 59, 45), "085945", "+71400", Some("+1400"), "+2.00", "+20", "355581")],
+    );
+    write_parquet_buckets(&h.data, store_date, "0H", &oh);
+
+    let expected_turnover = ((71_400.0_f64 * 355_581.0_f64) / 1_000_000.0 * 100.0).round() / 100.0;
+
+    let (s_cmp, b_cmp) = h.get("/api/symbols/005930/premarket/compare?days=20261123").await;
+    assert_eq!(s_cmp, 200, "{b_cmp}");
+    let cmp: PreMarketCompare = serde_json::from_value(b_cmp).unwrap();
+    assert_eq!(cmp.series[0].points[0].expected_qty, 355_581);
+    assert_eq!(cmp.series[0].points[0].expected_turnover_million_won, expected_turnover);
+
+    let (s_snap, b_snap) = h.get("/api/premarket/snapshot?date=20261123").await;
+    assert_eq!(s_snap, 200, "{b_snap}");
+    let snap: PreMarketSnapshot = serde_json::from_value(b_snap).unwrap();
+    assert_eq!(snap.rows[0].expected_turnover_million_won, expected_turnover);
+
+    let flow_file = flow_path(&h.shared(), "20261124", ExpectedTrades::TYPE_CODE, "005930", "k1");
+    FlowWriter::open(&flow_file, FlowDescription::new(ExpectedTrades::TYPE_CODE, "005930", "20261124", "k1", ExpectedTrades::fids()))
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_ms(24, 8, 59, 45),
+            values: vec![
+                Some("085945".into()),
+                Some("+71400".into()),
+                Some("+1400".into()),
+                Some("+2.00".into()),
+                Some("+20".into()),
+                Some("355581".into()),
+                Some("2".into()),
+            ],
+        }])
+        .unwrap();
+
+    let (s_flow, b_flow) = h.get("/api/premarket/snapshot?date=20261124").await;
+    assert_eq!(s_flow, 200, "{b_flow}");
+    let flow_snap: PreMarketSnapshot = serde_json::from_value(b_flow).unwrap();
+    assert_eq!(flow_snap.rows[0].expected_turnover_million_won, expected_turnover);
+}
+
+#[tokio::test]
+async fn compare_and_snapshot_agree_on_dense_streams_and_0858_spoof_pumps() {
+    let h = Harness::start(true, &[("005930", "삼성전자"), ("000660", "SK하이닉스")]).await;
+    let date = "20261123";
+    write_complete(&h.data, date, &["005930", "000660"]);
+
+    let mut oh: HashMap<String, Vec<String>> = HashMap::new();
+    let spike_sec = 8 * 3600 + 52 * 60 + 1;
+    let samsung_rows = oh.entry(bucket_file("005930_AL")).or_default();
+    for sec in (8 * 3600 + 30 * 60)..=(9 * 3600) {
+        let hr = sec / 3600;
+        let mn = (sec % 3600) / 60;
+        let sc = sec % 60;
+        let (price, chg, pct) = if sec == spike_sec {
+            (74_200, 4_200, 6.0)
+        } else {
+            (70_700, 700, 1.0)
+        };
+        samsung_rows.push(expected_sql("005930_AL", at_ms(23, hr, mn, sc), &format!("{hr:02}{mn:02}{sc:02}"), price, chg, pct, 10_000));
+    }
+    oh.entry(bucket_file("000660_AL")).or_default().extend([
+        expected_sql("000660_AL", at_ms(23, 8, 52, 0), "085200", 201_000, 1_000, 0.5, 10_000),
+        expected_sql("000660_AL", at_ms(23, 8, 58, 45), "085845", 212_000, 12_000, 6.0, 50_000),
+        expected_sql("000660_AL", at_ms(23, 8, 59, 45), "085945", 202_000, 2_000, 1.0, 15_000),
+    ]);
+    write_parquet_buckets(&h.data, date, "0H", &oh);
+
+    let (_, snap_body) = h.get("/api/premarket/snapshot?date=20261123").await;
+    let snap: PreMarketSnapshot = serde_json::from_value(snap_body).unwrap();
+
+    for code in ["005930", "000660"] {
+        let (_, cmp_body) = h.get(&format!("/api/symbols/{code}/premarket/compare?days=20261123")).await;
+        let cmp: PreMarketCompare = serde_json::from_value(cmp_body).unwrap();
+        let row = snap.rows.iter().find(|r| r.code.0 == code).unwrap();
+        assert_eq!(cmp.series[0].classification, PreMarketSignal::SpoofWarning);
+        assert_eq!(cmp.series[0].late_drop_pct, -5.0);
+        assert_eq!(row.signal, cmp.series[0].classification);
+        assert_eq!(row.late_drop_pct, cmp.series[0].late_drop_pct);
+    }
+}
+
+#[tokio::test]
+async fn snapshot_ignores_nx_rows_null_f11_not_trade_and_signed_zero_ticks() {
+    let h = Harness::start(true, &[("005930", "삼성전자"), ("000660", "SK하이닉스")]).await;
+    let date = "20261123";
+    write_complete(&h.data, date, &["005930", "000660"]);
+
+    let mut oh: HashMap<String, Vec<String>> = HashMap::new();
+    oh.entry(bucket_file("005930_AL")).or_default().extend([
+        expected_sql_text("005930_AL", at_ms(23, 8, 52, 0), "085200", "+72800", Some("+2800"), "+4.00", "+10", "20000"),
+        expected_sql_text("005930_AL", at_ms(23, 8, 59, 45), "085945", "+72800", None, "+4.00", "+10", "25000"),
+    ]);
+    oh.entry(bucket_file("005930_NX")).or_default().extend([
+        expected_sql_text("005930_NX", at_ms(23, 8, 55, 0), "085500", "+77000", Some("+7000"), "+10.00", "+10", "90000"),
+        expected_sql_text("005930_NX", at_ms(23, 8, 59, 55), "085955", "+70000", Some("0"), "0.00", "+10", "90000"),
+    ]);
+    oh.entry(bucket_file("000660_AL")).or_default().push(
+        expected_sql_text("000660_AL", at_ms(23, 8, 59, 45), "085945", "+204000", None, "+2.00", "+10", "15000"),
+    );
+    write_parquet_buckets(&h.data, date, "0H", &oh);
+
+    let mut ob: HashMap<String, Vec<String>> = HashMap::new();
+    ob.entry(bucket_file("005930_AL")).or_default().extend([
+        tick_sql_text("005930_AL", at_ms(23, 9, 0, 0), "090000", "-0", "+10"),
+        tick_sql_text("005930_AL", at_ms(23, 9, 0, 1), "090001", "+99999", "0"),
+        tick_sql_text("005930_AL", at_ms(23, 9, 0, 2), "090002", "+72800", "+100"),
+        tick_sql_text("005930_AL", at_ms(23, 9, 9, 50), "090950", "+73500", "-50"),
+        tick_sql_text("005930_AL", at_ms(23, 9, 9, 55), "090955", "+50000", "+0"),
+        tick_sql_text("005930_AL", at_ms(23, 9, 10, 0), "091000", "-0", "-10"),
+    ]);
+    ob.entry(bucket_file("005930_NX")).or_default().extend([
+        tick_sql_text("005930_NX", at_ms(23, 9, 0, 0), "090000", "+60000", "+100"),
+        tick_sql_text("005930_NX", at_ms(23, 9, 10, 0), "091000", "+60000", "+100"),
+    ]);
+    ob.entry(bucket_file("000660_AL")).or_default().extend([
+        tick_sql_text("000660_AL", at_ms(23, 9, 0, 1), "090001", "+204000", "+100"),
+        tick_sql_text("000660_AL", at_ms(23, 9, 10, 0), "091000", "+206000", "+100"),
+    ]);
+    write_parquet_buckets(&h.data, date, "0B", &ob);
+
+    let (status, body) = h.get("/api/premarket/snapshot?date=20261123").await;
+    assert_eq!(status, 200, "{body}");
+    let snap: PreMarketSnapshot = serde_json::from_value(body).unwrap();
+
+    let samsung = snap.rows.iter().find(|r| r.code.0 == "005930").unwrap();
+    assert_eq!(samsung.signal, PreMarketSignal::GenuineGap);
+    assert_eq!(samsung.late_drop_pct, 0.0);
+    assert_eq!(samsung.expected_price_won, 72_800);
+    assert_eq!(samsung.actual_0900_pct, Some(4.0));
+    assert_eq!(samsung.actual_0910_pct, Some(5.0));
+
+    let hynix = snap.rows.iter().find(|r| r.code.0 == "000660").unwrap();
+    assert_eq!(hynix.actual_0900_pct, None);
+    assert_eq!(hynix.actual_0910_pct, None);
+}
+
+#[tokio::test]
+async fn dates_cache_invalidates_when_complete_json_appears_in_existing_day_dir() {
+    let h = Harness::start(true, &[("005930", "삼성전자")]).await;
+    let date = "20261123";
+    let mut oh: HashMap<String, Vec<String>> = HashMap::new();
+    oh.insert(
+        bucket_file("005930_AL"),
+        vec![expected_sql("005930_AL", at_ms(23, 8, 59, 45), "085945", 72_800, 2_800, 4.0, 20_000)],
+    );
+    write_parquet_buckets(&h.data, date, "0H", &oh);
+
+    let (s1, b1) = h.get("/api/premarket/snapshot").await;
+    assert_eq!(s1, 200, "{b1}");
+    let snap1: PreMarketSnapshot = serde_json::from_value(b1).unwrap();
+    assert!(snap1.available_dates.is_empty());
+
+    write_complete(&h.data, date, &["005930"]);
+
+    let (s2, b2) = h.get("/api/premarket/snapshot").await;
+    assert_eq!(s2, 200, "{b2}");
+    let snap2: PreMarketSnapshot = serde_json::from_value(b2).unwrap();
+    assert_eq!(snap2.available_dates, vec!["20261123"]);
+    assert_eq!(snap2.rows.len(), 1);
+    assert_eq!(snap2.rows[0].code.0, "005930");
+}
+
+#[tokio::test]
+async fn flow_snapshot_cache_invalidates_on_backward_clock_step_and_flow_append() {
+    let h = Harness::start(true, &[("005930", "삼성전자")]).await;
+    let flow_file = flow_path(&h.shared(), "20261124", ExpectedTrades::TYPE_CODE, "005930", "k1");
+    let mut writer = FlowWriter::open(
+        &flow_file,
+        FlowDescription::new(ExpectedTrades::TYPE_CODE, "005930", "20261124", "k1", ExpectedTrades::fids()),
+    )
+    .unwrap();
+    writer
+        .append(&[FlowRow {
+            recv_ms: at_ms(24, 8, 55, 0),
+            values: vec![
+                Some("085500".into()),
+                Some("+72800".into()),
+                Some("+2800".into()),
+                Some("+4.00".into()),
+                Some("+10".into()),
+                Some("10000".into()),
+                Some("2".into()),
+            ],
+        }])
+        .unwrap();
+
+    let (_, b1) = h.get("/api/premarket/snapshot?date=20261124").await;
+    let snap1: PreMarketSnapshot = serde_json::from_value(b1).unwrap();
+    assert_eq!(snap1.rows[0].expected_price_won, 72_800);
+    assert_eq!(snap1.rows[0].signal, PreMarketSignal::GenuineGap);
+
+    writer
+        .append(&[FlowRow {
+            recv_ms: at_ms(24, 8, 59, 45),
+            values: vec![
+                Some("085945".into()),
+                Some("+70700".into()),
+                Some("+700".into()),
+                Some("+1.00".into()),
+                Some("+10".into()),
+                Some("12000".into()),
+                Some("2".into()),
+            ],
+        }])
+        .unwrap();
+
+    h.clock.jump(-300);
+
+    let (_, b2) = h.get("/api/premarket/snapshot?date=20261124").await;
+    let snap2: PreMarketSnapshot = serde_json::from_value(b2).unwrap();
+    assert_eq!(snap2.rows[0].expected_price_won, 70_700);
+    assert_eq!(snap2.rows[0].signal, PreMarketSignal::SpoofWarning);
+    assert_eq!(snap2.rows[0].late_drop_pct, -3.0);
+
+    writer
+        .append(&[FlowRow {
+            recv_ms: at_ms(24, 8, 59, 55),
+            values: vec![
+                Some("085955".into()),
+                Some("+73500".into()),
+                Some("+3500".into()),
+                Some("+5.00".into()),
+                Some("+10".into()),
+                Some("15000".into()),
+                Some("2".into()),
+            ],
+        }])
+        .unwrap();
+
+    let (_, b3) = h.get("/api/premarket/snapshot?date=20261124").await;
+    let snap3: PreMarketSnapshot = serde_json::from_value(b3).unwrap();
+    assert_eq!(snap3.rows[0].expected_price_won, 73_500);
+    assert_eq!(snap3.rows[0].signal, PreMarketSignal::GenuineGap);
 }
 
 #[tokio::test]

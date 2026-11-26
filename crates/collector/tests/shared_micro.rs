@@ -55,6 +55,7 @@ async fn micro_live_tap_persists_spoof_and_iceberg_events_to_me_flow() {
     let stats = worker.micro_stats().unwrap();
 
     feed.offer_frame(base_ms + 1_000, &book_frame("005930", 5_000, 2_000));
+    feed.offer_frame(base_ms + 1_200, &trade_frame("005930", 70_100, 173));
     feed.offer_frame(base_ms + 1_500, &book_frame("005930", 200, 2_000));
 
     feed.offer_frame(base_ms + 2_000, &book_frame("005930", 1_000, 2_000));
@@ -86,9 +87,10 @@ async fn micro_live_tap_persists_spoof_and_iceberg_events_to_me_flow() {
     assert_eq!(rows[0].values[0].as_deref(), Some("S"));
     assert_eq!(rows[0].values[1].as_deref(), Some("A"));
     assert_eq!(rows[0].values[2].as_deref(), Some("70100"));
-    assert_eq!(rows[0].values[3].as_deref(), Some("4800"));
+    assert_eq!(rows[0].values[3].as_deref(), Some("4627"));
     assert_eq!(rows[0].values[4].as_deref(), Some("5000"));
-    assert_eq!(rows[0].values[5].as_deref(), Some("10000"));
+    assert_eq!(rows[0].values[5].as_deref(), Some("9639"));
+    assert_eq!(rows[0].values[6].as_deref(), Some("173"));
 
     assert_eq!(rows[1].values[0].as_deref(), Some("I"));
     assert_eq!(rows[1].values[1].as_deref(), Some("A"));
@@ -96,6 +98,7 @@ async fn micro_live_tap_persists_spoof_and_iceberg_events_to_me_flow() {
     assert_eq!(rows[1].values[3].as_deref(), Some("1800"));
     assert_eq!(rows[1].values[4].as_deref(), Some("1000"));
     assert_eq!(rows[1].values[5].as_deref(), Some("18000"));
+    assert_eq!(rows[1].values[6].as_deref(), Some("1800"));
 
     let no_spoof_path = flow_path(dir.path(), &date, MICRO_TYPE_CODE, "000660", "k1");
     assert!(!no_spoof_path.exists());

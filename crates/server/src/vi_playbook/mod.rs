@@ -15,6 +15,7 @@ use crate::collected::Collected;
 use crate::collected::kind::{CollectedExpectedTrade, CollectedTradeTick, CollectedViEvent, ViKind};
 use crate::collected_store::read_stamp;
 use crate::http::{ApiFailure, AppState};
+use crate::market_source::stream::Exchange;
 use crate::market_source::vi::{ViDirection as SourceViDirection, ViMarket};
 use crate::shared_data::CollectorPaths;
 
@@ -103,6 +104,7 @@ pub struct ViPlaybook {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
+    hoga_dir: PathBuf,
     stock: StockCode,
     direction: ViDirection,
     kind: ViPlaybookKind,
@@ -253,10 +255,11 @@ fn collect_finalized_days(hoga_dir: &Path, candidate_days: Vec<String>) -> Resul
         let start = finalized.len() - LOOKBACK_TRADING_DAYS;
         finalized.drain(..start);
     }
-    let store_stamp = match finalized.last() {
-        Some((newest_date, _, token)) => format!("{}:{newest_date}:{token}", finalized.len()),
-        None => String::from("0"),
-    };
+    let store_stamp = finalized
+        .iter()
+        .map(|(date_str, _, token)| format!("{date_str}:{token}"))
+        .collect::<Vec<_>>()
+        .join(",");
     let days = finalized.into_iter().map(|(date_str, date, _)| (date_str, date)).collect();
     Ok(FinalizedDays { days, store_stamp })
 }
@@ -277,14 +280,15 @@ pub async fn query_playbook(
     if candidate_days.is_empty() {
         return Ok(empty_playbook(stock, direction, kind, 0));
     }
-    let finalized = tokio::task::spawn_blocking(move || collect_finalized_days(&hoga_dir, candidate_days))
+    let scan_dir = hoga_dir.clone();
+    let finalized = tokio::task::spawn_blocking(move || collect_finalized_days(&scan_dir, candidate_days))
         .await
         .map_err(|e| format!("VI 확정 일자 확인 작업이 멈췄습니다: {e}"))??;
-    let lookback_days = finalized.days.len() as u32;
     if finalized.days.is_empty() {
         return Ok(empty_playbook(stock, direction, kind, 0));
     }
     let cache_key = CacheKey {
+        hoga_dir,
         stock,
         direction,
         kind,
@@ -294,22 +298,43 @@ pub async fn query_playbook(
         return Ok(cached);
     }
     let mut evaluated: Vec<EvaluatedEpisode> = Vec::new();
+    let mut scanned_days = 0u32;
     for (date_str, date) in finalized.days.into_iter().rev() {
-        let vi_slice = collected.vi_day(paths.clone(), stock, date, &date_str, None, now).await?;
+        let vi_slice = match collected.vi_day(paths.clone(), stock, date, &date_str, None, now).await {
+            Ok(slice) => slice,
+            Err(reason) => {
+                tracing::warn!(symbol = stock.as_str(), date = %date_str, reason = %reason, "손상된 VI 일자를 건너뜁니다");
+                continue;
+            }
+        };
         let episodes: Vec<ViEpisode> = extract_episodes(&vi_slice.snapshots)
             .into_iter()
             .filter(|episode| matches_filter(episode, direction, kind))
             .collect();
         if episodes.is_empty() {
+            scanned_days += 1;
             continue;
         }
-        let expected_slice = collected.expected_day(paths.clone(), stock, date, &date_str, None, now).await?;
-        let ticks_slice = collected.ticks_day(paths.clone(), stock, date, &date_str, None, now).await?;
+        let expected_snapshots = match collected.expected_day(paths.clone(), stock, date, &date_str, None, now).await {
+            Ok(slice) => slice.snapshots,
+            Err(reason) => {
+                tracing::warn!(symbol = stock.as_str(), date = %date_str, reason = %reason, "손상된 예상체결 일자를 비우고 계속합니다");
+                Vec::new()
+            }
+        };
+        let ticks_slice = match collected.ticks_day(paths.clone(), stock, date, &date_str, None, now).await {
+            Ok(slice) => slice,
+            Err(reason) => {
+                tracing::warn!(symbol = stock.as_str(), date = %date_str, reason = %reason, "손상된 체결 일자를 건너뜁니다");
+                continue;
+            }
+        };
+        scanned_days += 1;
         for episode in episodes {
-            evaluated.push(evaluate_episode(date, episode, &expected_slice.snapshots, &ticks_slice.snapshots));
+            evaluated.push(evaluate_episode(date, episode, &expected_snapshots, &ticks_slice.snapshots));
         }
     }
-    let playbook = aggregate_playbook(stock, direction, kind, lookback_days, evaluated);
+    let playbook = aggregate_playbook(stock, direction, kind, scanned_days, evaluated);
     cache.insert(cache_key, playbook.clone());
     Ok(playbook)
 }
@@ -397,7 +422,7 @@ fn detect_late_drop(
     trigger_secs: u32,
     release_secs: u32,
 ) -> bool {
-    let window: Vec<&CollectedExpectedTrade> = expected
+    let mut window: Vec<&CollectedExpectedTrade> = expected
         .iter()
         .filter(|row| {
             let secs = row.hhmmss.secs();
@@ -407,6 +432,7 @@ fn detect_late_drop(
     if window.len() < 2 {
         return false;
     }
+    window.sort_by_key(|row| (row.hhmmss.secs(), row.recv_ms));
     let late_start = release_secs.saturating_sub(LATE_WINDOW_SECS);
     let mut running_extreme_price = window[0].price_won;
     let mut running_peak_qty = window[0].expected_qty;
@@ -489,6 +515,13 @@ fn evaluate_horizon(
     })
 }
 
+fn tick_matches_market(tick: &CollectedTradeTick, market: ViMarket) -> bool {
+    match market {
+        ViMarket::Krx => matches!(tick.exchange, Some(Exchange::Krx) | None),
+        ViMarket::Nxt => matches!(tick.exchange, Some(Exchange::Nxt)),
+    }
+}
+
 fn evaluate_episode(
     date: KstDate,
     episode: ViEpisode,
@@ -497,10 +530,11 @@ fn evaluate_episode(
 ) -> EvaluatedEpisode {
     let trigger_secs = episode.triggered.secs();
     let release_secs = release_anchor_secs(episode);
-    let post_ticks: Vec<&CollectedTradeTick> = ticks
+    let mut post_ticks: Vec<&CollectedTradeTick> = ticks
         .iter()
-        .filter(|tick| tick.hhmmss.secs() >= release_secs && tick.price_won > 0)
+        .filter(|tick| tick_matches_market(tick, episode.market) && tick.hhmmss.secs() >= release_secs && tick.price_won > 0)
         .collect();
+    post_ticks.sort_by_key(|tick| (tick.hhmmss.secs(), tick.recv_ms));
     let release_price = post_ticks.first().map(|tick| tick.price_won).or(episode.trigger_price_won);
     let outcomes = match release_price {
         Some(entry) if entry > 0 => HORIZON_MINUTES.map(|minutes| evaluate_horizon(&post_ticks, episode.direction, entry, release_secs, minutes)),
@@ -627,22 +661,40 @@ mod tests {
             recv_ms: 0,
             hhmmss,
             price_won,
-            change_won: 0,
+            change_won: Some(0),
             change_pct: None,
             expected_qty,
-            cumulative_qty: 0,
+            delta_qty: 0,
             change_sign: None,
         }
     }
 
     fn tick_row(hhmmss: TimeOfDay, price_won: u64) -> CollectedTradeTick {
+        tick_row_with(0, hhmmss, price_won, None)
+    }
+
+    fn tick_row_with(recv_ms: i64, hhmmss: TimeOfDay, price_won: u64, exchange: Option<Exchange>) -> CollectedTradeTick {
         CollectedTradeTick {
-            recv_ms: 0,
+            recv_ms,
             hhmmss,
             price_won,
             signed_qty: 10,
+            side: Some(crate::market_source::stream::TradeSide::Buy),
             instant_value_thousand_won: None,
-            exchange: None,
+            exchange,
+        }
+    }
+
+    fn expected_row_with(recv_ms: i64, hhmmss: TimeOfDay, price_won: u64, expected_qty: u64, delta_qty: i64) -> CollectedExpectedTrade {
+        CollectedExpectedTrade {
+            recv_ms,
+            hhmmss,
+            price_won,
+            change_won: Some(0),
+            change_pct: None,
+            expected_qty,
+            delta_qty,
+            change_sign: None,
         }
     }
 
@@ -737,18 +789,85 @@ mod tests {
         let cache = ViPlaybookCache::with_capacity(2);
         let stock = |code: &str| StockCode::parse(code).unwrap();
         let make = |code: &str| empty_playbook(stock(code), ViDirection::Up, ViPlaybookKind::All, 1);
-        let key = |code: &str| CacheKey {
+        let key = |dir: &str, code: &str| CacheKey {
+            hoga_dir: PathBuf::from(dir),
             stock: stock(code),
             direction: ViDirection::Up,
             kind: ViPlaybookKind::All,
-            store_stamp: "1:20261123:10-0".to_owned(),
+            store_stamp: "20261123:10-0".to_owned(),
         };
-        cache.insert(key("005930"), make("005930"));
-        cache.insert(key("000660"), make("000660"));
-        assert!(cache.get(&key("005930")).is_some());
-        cache.insert(key("035420"), make("035420"));
-        assert!(cache.get(&key("005930")).is_some());
-        assert!(cache.get(&key("000660")).is_none());
-        assert!(cache.get(&key("035420")).is_some());
+        cache.insert(key("/tmp/a", "005930"), make("005930"));
+        cache.insert(key("/tmp/a", "000660"), make("000660"));
+        assert!(cache.get(&key("/tmp/a", "005930")).is_some());
+        assert!(cache.get(&key("/tmp/b", "005930")).is_none());
+        cache.insert(key("/tmp/a", "035420"), make("035420"));
+        assert!(cache.get(&key("/tmp/a", "005930")).is_some());
+        assert!(cache.get(&key("/tmp/a", "000660")).is_none());
+        assert!(cache.get(&key("/tmp/a", "035420")).is_some());
+    }
+
+    #[test]
+    fn evaluates_out_of_order_ticks_and_expected_rows_by_hhmmss() {
+        let date = KstDate::new(2026, 11, 20).unwrap();
+        let ep = ViEpisode {
+            market: ViMarket::Krx,
+            kind: ViKind::Dynamic,
+            direction: SourceViDirection::Up,
+            trigger_price_won: Some(10_000),
+            triggered: hms(9, 10, 0),
+            released: Some(hms(9, 12, 0)),
+        };
+        let out_of_order_expected = vec![
+            expected_row_with(10, hms(9, 11, 55), 10_200, 12_000, 2_000),
+            expected_row_with(20, hms(9, 10, 10), 10_000, 10_000, 10_000),
+            expected_row_with(30, hms(9, 11, 58), 10_200, 4_800, -7_200),
+        ];
+        let out_of_order_ticks = vec![
+            tick_row_with(10, hms(9, 16, 0), 10_600, Some(Exchange::Krx)),
+            tick_row_with(20, hms(9, 12, 0), 10_000, Some(Exchange::Krx)),
+            tick_row_with(30, hms(9, 12, 30), 9_800, Some(Exchange::Krx)),
+            tick_row_with(40, hms(9, 13, 0), 10_300, Some(Exchange::Krx)),
+            tick_row_with(50, hms(9, 17, 0), 10_400, Some(Exchange::Krx)),
+        ];
+        let evaluated = evaluate_episode(date, ep, &out_of_order_expected, &out_of_order_ticks);
+        assert_eq!(evaluated.summary.release_price, Some(10_000));
+        assert_eq!(evaluated.summary.return_1m_pct, Some(3.0));
+        assert_eq!(evaluated.summary.return_3m_pct, Some(3.0));
+        assert_eq!(evaluated.summary.return_5m_pct, Some(4.0));
+        assert_eq!(evaluated.summary.mae_5m_pct, Some(-2.0));
+        assert!(evaluated.summary.late_drop_detected);
+    }
+
+    #[test]
+    fn filters_post_ticks_by_episode_market() {
+        let date = KstDate::new(2026, 11, 20).unwrap();
+        let krx_ep = ViEpisode {
+            market: ViMarket::Krx,
+            kind: ViKind::Dynamic,
+            direction: SourceViDirection::Up,
+            trigger_price_won: Some(10_000),
+            triggered: hms(9, 10, 0),
+            released: Some(hms(9, 12, 0)),
+        };
+        let mixed_ticks = vec![
+            tick_row_with(10, hms(9, 12, 0), 12_000, Some(Exchange::Nxt)),
+            tick_row_with(20, hms(9, 12, 1), 10_000, Some(Exchange::Krx)),
+            tick_row_with(30, hms(9, 12, 30), 8_000, Some(Exchange::Nxt)),
+            tick_row_with(40, hms(9, 13, 0), 10_500, None),
+            tick_row_with(50, hms(9, 13, 0), 11_400, Some(Exchange::Nxt)),
+        ];
+        let krx_eval = evaluate_episode(date, krx_ep, &[], &mixed_ticks);
+        assert_eq!(krx_eval.summary.release_price, Some(10_000));
+        assert_eq!(krx_eval.summary.return_1m_pct, Some(5.0));
+        assert_eq!(krx_eval.summary.mae_5m_pct, Some(0.0));
+
+        let nxt_ep = ViEpisode {
+            market: ViMarket::Nxt,
+            ..krx_ep
+        };
+        let nxt_eval = evaluate_episode(date, nxt_ep, &[], &mixed_ticks);
+        assert_eq!(nxt_eval.summary.release_price, Some(12_000));
+        assert_eq!(nxt_eval.summary.return_1m_pct, Some(-5.0));
+        assert_eq!(nxt_eval.summary.mae_5m_pct, Some(-33.33));
     }
 }

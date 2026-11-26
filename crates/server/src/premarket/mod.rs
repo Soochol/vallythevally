@@ -26,9 +26,9 @@ use crate::symbols::Directory;
 const PREMARKET_START_SEC: u32 = 8 * 3600 + 30 * 60;
 const PREMARKET_END_SEC: u32 = 9 * 3600;
 const PEAK_WINDOW_START_SEC: u32 = 8 * 3600 + 50 * 60;
-const PEAK_WINDOW_END_SEC: u32 = 8 * 3600 + 58 * 60;
 const CRITICAL_WINDOW_START_SEC: u32 = 8 * 3600 + 58 * 60;
 const LATE_WINDOW_START_SEC: u32 = 8 * 3600 + 59 * 60 + 30;
+const MAX_STORE_DAY_FOLDERS: usize = 60;
 const OUTCOME_0900_SEC: u32 = 9 * 3600;
 const OUTCOME_0905_SEC: u32 = 9 * 3600 + 5 * 60;
 const OUTCOME_0910_SEC: u32 = 9 * 3600 + 10 * 60;
@@ -140,14 +140,16 @@ struct CachedSnapshotRow {
 }
 
 struct FlowSnapshotCache {
+    shared_dir: PathBuf,
     date: String,
     at_unix: i64,
+    flow_stamps: Vec<(PathBuf, FileStamp)>,
     rows: Arc<Vec<CachedSnapshotRow>>,
 }
 
 struct DatesCache {
     hoga_dir: Option<PathBuf>,
-    store_stamp: Option<FileStamp>,
+    store_day_stamps: Vec<(String, Option<FileStamp>)>,
     shared_dir: Option<PathBuf>,
     today_str: String,
     flow_stamp: Option<FileStamp>,
@@ -352,8 +354,12 @@ impl PreMarketService {
         if date == now.kst_date()
             && let Some(shared_dir) = paths.shared_dir().map(Path::to_path_buf)
         {
+            let flow_stamps = read_flow_snapshot_stamps(&shared_dir, &date_str)?;
             if let Some(cached) = self.flow_snapshot_cache.lock().expect("premarket flow snapshot cache").as_ref()
+                && cached.shared_dir == shared_dir
                 && cached.date == date_str
+                && cached.flow_stamps == flow_stamps
+                && now.unix() >= cached.at_unix
                 && now.unix() - cached.at_unix < FLOW_SNAPSHOT_TTL_SECS
             {
                 return Ok(PreMarketSnapshot {
@@ -363,15 +369,18 @@ impl PreMarketService {
                     rows: materialize_rows(&cached.rows, directory.as_deref()),
                 });
             }
+            let shared_clone = shared_dir.clone();
             let date_owned = date_str.clone();
-            let scanned = tokio::task::spawn_blocking(move || scan_flow_day_snapshot(&shared_dir, &date_owned))
+            let scanned = tokio::task::spawn_blocking(move || scan_flow_day_snapshot(&shared_clone, &date_owned))
                 .await
                 .map_err(|e| format!("장전 실시간 스냅샷 작업이 멈췄습니다: {e}"))??;
             if let Some(rows) = scanned {
                 let rows = Arc::new(rows);
                 *self.flow_snapshot_cache.lock().expect("premarket flow snapshot cache") = Some(FlowSnapshotCache {
+                    shared_dir,
                     date: date_str.clone(),
                     at_unix: now.unix(),
+                    flow_stamps,
                     rows: Arc::clone(&rows),
                 });
                 return Ok(PreMarketSnapshot {
@@ -397,9 +406,9 @@ impl PreMarketService {
             return Ok(Vec::new());
         }
         let today_str = now.kst_date().yyyymmdd();
-        let store_stamp = match &hoga_dir {
-            Some(dir) => read_path_stamp(&dir.join("store"))?,
-            None => None,
+        let store_day_stamps = match &hoga_dir {
+            Some(dir) => read_store_day_stamps(dir)?,
+            None => Vec::new(),
         };
         let flow_stamp = match &shared_dir {
             Some(dir) => read_path_stamp(&dir.join(SYMBOL_FLOW_FOLDER).join(&today_str).join(ExpectedTrades::TYPE_CODE))?,
@@ -407,7 +416,7 @@ impl PreMarketService {
         };
         if let Some(cached) = self.dates_cache.lock().expect("premarket dates cache").as_ref()
             && cached.hoga_dir == hoga_dir
-            && cached.store_stamp == store_stamp
+            && cached.store_day_stamps == store_day_stamps
             && cached.shared_dir == shared_dir
             && cached.today_str == today_str
             && cached.flow_stamp == flow_stamp
@@ -436,7 +445,7 @@ impl PreMarketService {
         .map_err(|e| format!("장전 날짜 목록 작업이 멈췄습니다: {e}"))??;
         *self.dates_cache.lock().expect("premarket dates cache") = Some(DatesCache {
             hoga_dir,
-            store_stamp,
+            store_day_stamps,
             shared_dir,
             today_str,
             flow_stamp,
@@ -565,17 +574,17 @@ fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-fn prev_close_of(price_won: u64, change_won: i64) -> Option<u64> {
-    let prev = i64::try_from(price_won).ok()?.checked_sub(change_won)?;
+fn prev_close_of(price_won: u64, change_won: Option<i64>) -> Option<u64> {
+    let prev = i64::try_from(price_won).ok()?.checked_sub(change_won?)?;
     u64::try_from(prev).ok().filter(|&v| v > 0)
 }
 
-fn expected_return_pct(price_won: u64, change_won: i64, change_pct: Option<f64>) -> f64 {
+fn expected_return_pct(price_won: u64, change_won: Option<i64>, change_pct: Option<f64>) -> f64 {
     if let Some(pct) = change_pct.filter(|v| v.is_finite()) {
         return round2(pct);
     }
-    if let Some(base) = prev_close_of(price_won, change_won) {
-        return round2((change_won as f64 / base as f64) * 100.0);
+    if let (Some(change), Some(base)) = (change_won, prev_close_of(price_won, change_won)) {
+        return round2((change as f64 / base as f64) * 100.0);
     }
     0.0
 }
@@ -594,7 +603,7 @@ fn classify_series(points: &[PreMarketPoint]) -> (f64, PreMarketSignal) {
     }
     let peak_return = points
         .iter()
-        .filter(|p| p.sec_of_day >= PEAK_WINDOW_START_SEC && p.sec_of_day <= PEAK_WINDOW_END_SEC)
+        .filter(|p| p.sec_of_day >= PEAK_WINDOW_START_SEC && p.sec_of_day < LATE_WINDOW_START_SEC)
         .map(|p| p.expected_return_pct)
         .fold(f64::NEG_INFINITY, f64::max);
     let peak_return = if peak_return.is_finite() {
@@ -628,7 +637,7 @@ fn classify_series(points: &[PreMarketPoint]) -> (f64, PreMarketSignal) {
     (late_drop_pct, signal)
 }
 
-fn downsample_points(raw: &[CollectedExpectedTrade]) -> (Vec<PreMarketPoint>, Option<u64>) {
+fn collect_second_points(raw: &[CollectedExpectedTrade]) -> (Vec<PreMarketPoint>, Option<u64>) {
     let mut by_second: BTreeMap<u32, PreMarketPoint> = BTreeMap::new();
     let mut prev_close: Option<u64> = None;
     for row in raw {
@@ -648,15 +657,19 @@ fn downsample_points(raw: &[CollectedExpectedTrade]) -> (Vec<PreMarketPoint>, Op
         };
         by_second.insert(sec, point);
     }
-    if by_second.len() <= DENSE_THRESHOLD_SECONDS {
-        return (by_second.into_values().collect(), prev_close);
+    (by_second.into_values().collect(), prev_close)
+}
+
+fn downsample_points(points: Vec<PreMarketPoint>) -> Vec<PreMarketPoint> {
+    if points.len() <= DENSE_THRESHOLD_SECONDS {
+        return points;
     }
     let mut bucketed: BTreeMap<u32, PreMarketPoint> = BTreeMap::new();
-    for (sec, point) in by_second {
-        let key = if sec >= CRITICAL_WINDOW_START_SEC { sec } else { (sec / 5) * 5 };
+    for point in points {
+        let key = if point.sec_of_day >= CRITICAL_WINDOW_START_SEC { point.sec_of_day } else { (point.sec_of_day / 5) * 5 };
         bucketed.insert(key, point);
     }
-    (bucketed.into_values().collect(), prev_close)
+    bucketed.into_values().collect()
 }
 
 fn compute_tick_outcomes(ticks: &[CollectedTradeTick], prev_close: Option<u64>) -> (Option<u64>, Option<f64>, Option<f64>, Option<f64>) {
@@ -693,8 +706,9 @@ fn build_day_series(
     expected: &[CollectedExpectedTrade],
     ticks: &[CollectedTradeTick],
 ) -> PreMarketDaySeries {
-    let (points, prev_close) = downsample_points(expected);
-    let (late_drop_pct, classification) = classify_series(&points);
+    let (full_points, prev_close) = collect_second_points(expected);
+    let (late_drop_pct, classification) = classify_series(&full_points);
+    let points = downsample_points(full_points);
     let (open_price_won, return_0900_pct, return_0905_pct, return_0910_pct) = if source == api::BrokerDaySource::Store {
         compute_tick_outcomes(ticks, prev_close)
     } else {
@@ -797,6 +811,69 @@ fn normalize_stock_code(raw: &str) -> Option<String> {
     StockCode::parse(base).ok().map(|code| code.as_str().to_owned())
 }
 
+fn normalize_al_stock_code(raw: &str) -> Option<String> {
+    let base = raw.trim().strip_suffix("_AL")?;
+    StockCode::parse(base).ok().map(|code| code.as_str().to_owned())
+}
+
+fn read_store_day_stamps(hoga_dir: &Path) -> Result<Vec<(String, Option<FileStamp>)>, String> {
+    let store_dir = hoga_dir.join("store");
+    let entries = match std::fs::read_dir(&store_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}를 읽을 수 없습니다: {e}", store_dir.display())),
+    };
+    let mut dates = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("{} 항목을 읽을 수 없습니다: {e}", store_dir.display()))?;
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        if KstDate::parse_yyyymmdd(&name).is_none() {
+            continue;
+        }
+        if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+            dates.push(name);
+        }
+    }
+    dates.sort_unstable_by(|a, b| b.cmp(a));
+    dates.truncate(MAX_STORE_DAY_FOLDERS);
+    dates.reverse();
+    let mut stamps = Vec::with_capacity(dates.len());
+    for date in dates {
+        let stamp = read_stamp(hoga_dir, &date)?;
+        stamps.push((date, stamp));
+    }
+    Ok(stamps)
+}
+
+fn read_flow_type_stamps(shared_dir: &Path, date_str: &str, type_code: &str, out: &mut Vec<(PathBuf, FileStamp)>) -> Result<(), String> {
+    let type_dir = shared_dir.join(SYMBOL_FLOW_FOLDER).join(date_str).join(type_code);
+    let entries = match std::fs::read_dir(&type_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}를 읽을 수 없습니다: {e}", type_dir.display())),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("{} 항목을 읽을 수 없습니다: {e}", type_dir.display()))?;
+        if !entry.file_type().is_ok_and(|ft| ft.is_dir()) {
+            continue;
+        }
+        for file in list_flow_files(&entry.path())? {
+            if let Some(stamp) = read_path_stamp(&file)? {
+                out.push((file, stamp));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_flow_snapshot_stamps(shared_dir: &Path, date_str: &str) -> Result<Vec<(PathBuf, FileStamp)>, String> {
+    let mut stamps = Vec::new();
+    read_flow_type_stamps(shared_dir, date_str, ExpectedTrades::TYPE_CODE, &mut stamps)?;
+    read_flow_type_stamps(shared_dir, date_str, "0g", &mut stamps)?;
+    stamps.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(stamps)
+}
+
 fn parse_hhmmss_secs(raw: Option<&str>) -> Option<u32> {
     let text = raw?.trim();
     if text.len() != 6 || !text.bytes().all(|b| b.is_ascii_digit()) {
@@ -817,7 +894,7 @@ fn parse_magnitude_u64(raw: Option<&str>) -> Option<u64> {
 fn parse_signed_i64(raw: Option<&str>) -> Option<i64> {
     let text = raw?.trim();
     if text.is_empty() {
-        return Some(0);
+        return None;
     }
     text.parse::<i64>().ok()
 }
@@ -841,7 +918,7 @@ struct SnapshotSample {
     sec: u32,
     recv_ms: i64,
     price_won: u64,
-    change_won: i64,
+    change_won: Option<i64>,
     change_pct: Option<f64>,
     expected_qty: u64,
 }
@@ -928,10 +1005,10 @@ fn scan_closed_day_snapshot(
         }
     };
     let expected_sql = format!(
-        "SELECT symbol, recv_ms, CAST(f20 AS VARCHAR), CAST(f10 AS VARCHAR), {}, {}, {} FROM read_parquet({expected_list}, union_by_name = true) WHERE recv_ms >= $1 AND recv_ms < $2 AND TRIM(CAST(f20 AS VARCHAR)) >= '083000' AND TRIM(CAST(f20 AS VARCHAR)) <= '090000'",
+        "SELECT symbol, recv_ms, CAST(f20 AS VARCHAR), CAST(f10 AS VARCHAR), {}, {}, {} FROM read_parquet({expected_list}, union_by_name = true) WHERE recv_ms >= $1 AND recv_ms < $2 AND ENDS_WITH(TRIM(CAST(symbol AS VARCHAR)), '_AL') AND TRIM(CAST(f20 AS VARCHAR)) >= '083000' AND TRIM(CAST(f20 AS VARCHAR)) <= '090000'",
         col_or_null("f11"),
         col_or_null("f12"),
-        col_or_null("f15"),
+        col_or_null("f13"),
     );
     let mut by_stock: HashMap<String, Vec<SnapshotSample>> = HashMap::new();
     {
@@ -939,7 +1016,7 @@ fn scan_closed_day_snapshot(
         let mut rows = stmt.query(params![day_start_ms, day_end_ms]).map_err(|e| format!("장전 0H 스냅샷 쿼리 실행 실패: {e}"))?;
         while let Some(row) = rows.next().map_err(|e| format!("장전 0H 스냅샷 행 읽기 실패: {e}"))? {
             let raw_symbol: String = row.get(0).map_err(|e| format!("symbol 읽기 실패: {e}"))?;
-            let Some(code) = normalize_stock_code(&raw_symbol) else { continue };
+            let Some(code) = normalize_al_stock_code(&raw_symbol) else { continue };
             if !index.stocks.contains_key(&code) {
                 continue;
             }
@@ -948,15 +1025,15 @@ fn scan_closed_day_snapshot(
             let f10: Option<String> = row.get(3).map_err(|e| format!("f10 읽기 실패: {e}"))?;
             let f11: Option<String> = row.get(4).map_err(|e| format!("f11 읽기 실패: {e}"))?;
             let f12: Option<String> = row.get(5).map_err(|e| format!("f12 읽기 실패: {e}"))?;
-            let f15: Option<String> = row.get(6).map_err(|e| format!("f15 읽기 실패: {e}"))?;
+            let f13: Option<String> = row.get(6).map_err(|e| format!("f13 읽기 실패: {e}"))?;
             let Some(sec) = parse_hhmmss_secs(f20.as_deref()) else { continue };
             if !(PREMARKET_START_SEC..=PREMARKET_END_SEC).contains(&sec) {
                 continue;
             }
             let Some(price_won) = parse_magnitude_u64(f10.as_deref()).filter(|&v| v > 0) else { continue };
-            let change_won = parse_signed_i64(f11.as_deref()).unwrap_or(0);
+            let change_won = parse_signed_i64(f11.as_deref());
             let change_pct = parse_opt_f64(f12.as_deref());
-            let expected_qty = parse_magnitude_u64(f15.as_deref()).unwrap_or(0);
+            let expected_qty = parse_magnitude_u64(f13.as_deref()).unwrap_or(0);
             by_stock.entry(code).or_default().push(SnapshotSample {
                 sec,
                 recv_ms,
@@ -999,9 +1076,14 @@ fn scan_closed_day_snapshot(
     if !tick_files.is_empty() {
         let tick_list = sql_parquet_list(&tick_files)?;
         let tick_cols = parquet_columns(&conn, &tick_list)?;
-        if tick_cols.contains("symbol") && tick_cols.contains("recv_ms") && tick_cols.contains("f20") && tick_cols.contains("f10") {
+        if tick_cols.contains("symbol")
+            && tick_cols.contains("recv_ms")
+            && tick_cols.contains("f20")
+            && tick_cols.contains("f10")
+            && tick_cols.contains("f15")
+        {
             let tick_sql = format!(
-                "SELECT symbol, arg_min(CAST(f10 AS VARCHAR), (TRIM(CAST(f20 AS VARCHAR)), recv_ms)), arg_max(CAST(f10 AS VARCHAR), (TRIM(CAST(f20 AS VARCHAR)), recv_ms)) FROM read_parquet({tick_list}, union_by_name = true) WHERE recv_ms >= $1 AND recv_ms < $2 AND TRIM(CAST(f20 AS VARCHAR)) >= '090000' AND TRIM(CAST(f20 AS VARCHAR)) <= '091000' AND TRIM(COALESCE(CAST(f10 AS VARCHAR), '')) <> '' AND TRIM(CAST(f10 AS VARCHAR)) <> '0' GROUP BY symbol"
+                "SELECT symbol, arg_min(CAST(f10 AS VARCHAR), (TRIM(CAST(f20 AS VARCHAR)), recv_ms)), arg_max(CAST(f10 AS VARCHAR), (TRIM(CAST(f20 AS VARCHAR)), recv_ms)) FROM read_parquet({tick_list}, union_by_name = true) WHERE recv_ms >= $1 AND recv_ms < $2 AND ENDS_WITH(TRIM(CAST(symbol AS VARCHAR)), '_AL') AND LENGTH(TRIM(CAST(f20 AS VARCHAR))) = 6 AND TRIM(CAST(f20 AS VARCHAR)) >= '090000' AND TRIM(CAST(f20 AS VARCHAR)) <= '091000' AND TRY_CAST(CASE WHEN LEFT(TRIM(CAST(f10 AS VARCHAR)), 1) IN ('+', '-') THEN SUBSTRING(TRIM(CAST(f10 AS VARCHAR)), 2) ELSE TRIM(CAST(f10 AS VARCHAR)) END AS BIGINT) > 0 AND TRY_CAST(CASE WHEN LEFT(TRIM(CAST(f15 AS VARCHAR)), 1) = '+' THEN SUBSTRING(TRIM(CAST(f15 AS VARCHAR)), 2) ELSE TRIM(CAST(f15 AS VARCHAR)) END AS BIGINT) <> 0 GROUP BY symbol"
             );
             let mut stmt = conn.prepare(&tick_sql).map_err(|e| format!("장전 0B 스냅샷 쿼리 준비 실패: {e}"))?;
             let mut rows = stmt.query(params![day_start_ms, day_end_ms]).map_err(|e| format!("장전 0B 스냅샷 쿼리 실행 실패: {e}"))?;
@@ -1009,7 +1091,7 @@ fn scan_closed_day_snapshot(
                 let raw_symbol: String = row.get(0).map_err(|e| format!("0B symbol 읽기 실패: {e}"))?;
                 let open_raw: Option<String> = row.get(1).map_err(|e| format!("0B 시가 읽기 실패: {e}"))?;
                 let late_raw: Option<String> = row.get(2).map_err(|e| format!("0B 0910가 읽기 실패: {e}"))?;
-                let Some(code) = normalize_stock_code(&raw_symbol) else { continue };
+                let Some(code) = normalize_al_stock_code(&raw_symbol) else { continue };
                 if let (Some(open_won), Some(late_won)) = (
                     parse_magnitude_u64(open_raw.as_deref()).filter(|&v| v > 0),
                     parse_magnitude_u64(late_raw.as_deref()).filter(|&v| v > 0),
@@ -1186,18 +1268,112 @@ mod tests {
                 recv_ms: i64::from(sec) * 1000,
                 hhmmss: TimeOfDay::hms(h, m, s).unwrap(),
                 price_won: 70_000 + u64::from(sec - PREMARKET_START_SEC),
-                change_won: i64::from(sec - PREMARKET_START_SEC),
+                change_won: Some(i64::from(sec - PREMARKET_START_SEC)),
                 change_pct: Some(1.0),
                 expected_qty: 100,
-                cumulative_qty: 100,
+                delta_qty: 100,
                 change_sign: Some(2),
             });
         }
-        let (points, prev_close) = downsample_points(&raw);
+        let (full_points, prev_close) = collect_second_points(&raw);
+        let points = downsample_points(full_points);
         assert_eq!(prev_close, Some(70_000));
         let critical: Vec<u32> = points.iter().filter(|p| p.sec_of_day >= CRITICAL_WINDOW_START_SEC).map(|p| p.sec_of_day).collect();
         assert_eq!(critical.len(), (PREMARKET_END_SEC - CRITICAL_WINDOW_START_SEC + 1) as usize);
         assert!(points.len() <= 460);
+    }
+
+    #[test]
+    fn classifies_spoof_pump_between_085801_and_085929_when_earlier_samples_exist() {
+        let points = vec![
+            pt(8 * 3600 + 52 * 60, 70_350, 0.5, 10_000),
+            pt(8 * 3600 + 58 * 60 + 45, 74_200, 6.0, 50_000),
+            pt(8 * 3600 + 59 * 60 + 45, 70_700, 1.0, 15_000),
+        ];
+        assert_eq!(classify_series(&points), (-5.0, PreMarketSignal::SpoofWarning));
+    }
+
+    #[test]
+    fn build_day_series_classifies_before_downsampling_dense_streams() {
+        let mut raw = Vec::new();
+        let spike_sec = 8 * 3600 + 52 * 60 + 1;
+        for sec in PREMARKET_START_SEC..=PREMARKET_END_SEC {
+            let h = sec / 3600;
+            let m = (sec % 3600) / 60;
+            let s = sec % 60;
+            let (price_won, change_won, change_pct) = if sec == spike_sec {
+                (74_200, 4_200, 6.0)
+            } else {
+                (70_700, 700, 1.0)
+            };
+            raw.push(CollectedExpectedTrade {
+                recv_ms: i64::from(sec) * 1000,
+                hhmmss: TimeOfDay::hms(h, m, s).unwrap(),
+                price_won,
+                change_won: Some(change_won),
+                change_pct: Some(change_pct),
+                expected_qty: 10_000,
+                delta_qty: 10,
+                change_sign: Some(2),
+            });
+        }
+        let series = build_day_series("20261123", api::BrokerDaySource::Store, &raw, &[]);
+        assert!(series.points.len() <= 460);
+        assert_eq!(series.classification, PreMarketSignal::SpoofWarning);
+        assert_eq!(series.late_drop_pct, -5.0);
+    }
+
+    #[test]
+    fn missing_change_won_does_not_overwrite_prev_close_or_fabricate_zero_outcomes() {
+        let raw_preserved = vec![
+            CollectedExpectedTrade {
+                recv_ms: 1000,
+                hhmmss: TimeOfDay::hms(8, 52, 0).unwrap(),
+                price_won: 73_500,
+                change_won: Some(3_500),
+                change_pct: Some(5.0),
+                expected_qty: 20_000,
+                delta_qty: 10,
+                change_sign: Some(2),
+            },
+            CollectedExpectedTrade {
+                recv_ms: 2000,
+                hhmmss: TimeOfDay::hms(8, 59, 45).unwrap(),
+                price_won: 71_400,
+                change_won: None,
+                change_pct: Some(2.0),
+                expected_qty: 25_000,
+                delta_qty: 10,
+                change_sign: None,
+            },
+        ];
+        let ticks = vec![CollectedTradeTick {
+            recv_ms: 3000,
+            hhmmss: TimeOfDay::hms(9, 0, 1).unwrap(),
+            price_won: 71_400,
+            signed_qty: 100,
+            side: Some(crate::market_source::stream::TradeSide::Buy),
+            instant_value_thousand_won: None,
+            exchange: None,
+        }];
+        let preserved = build_day_series("20261123", api::BrokerDaySource::Store, &raw_preserved, &ticks);
+        assert_eq!(preserved.return_0900_pct, Some(2.0));
+
+        let raw_all_missing = vec![CollectedExpectedTrade {
+            recv_ms: 2000,
+            hhmmss: TimeOfDay::hms(8, 59, 45).unwrap(),
+            price_won: 71_400,
+            change_won: None,
+            change_pct: Some(2.0),
+            expected_qty: 25_000,
+            delta_qty: 10,
+            change_sign: None,
+        }];
+        let missing = build_day_series("20261123", api::BrokerDaySource::Store, &raw_all_missing, &ticks);
+        assert_eq!(missing.open_price_won, Some(71_400));
+        assert_eq!(missing.return_0900_pct, None);
+        assert_eq!(missing.return_0905_pct, None);
+        assert_eq!(missing.return_0910_pct, None);
     }
 
     #[test]
