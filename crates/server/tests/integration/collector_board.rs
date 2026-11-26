@@ -19,7 +19,6 @@ use server::collector::wire::{COVERAGE_REQUEST, CollectorDayState, DISK_REQUEST,
 use server::collector::telegram::Telegram;
 use server::collector::{CollectorBoard, DaemonJudgment, HEARTBEAT_EVERY, MAX_LINE_BYTES, MISSED_HEARTBEATS, RECONNECT_BACKOFF};
 use server::config::Secret;
-use server::db::AppDb;
 use server::http::{AppState, router};
 use server::instance::InstanceLock;
 use server::kiwoom::auth::KiwoomAuth;
@@ -384,10 +383,10 @@ impl Fixture {
 
         let clock = Clock::fake(server::kiwoom::wire::parse_kst_datetime("20261118090000").unwrap());
         let rest = KiwoomRest::new(ScriptedTransport::new().transport(), KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None), clock.clone());
-        let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
+        let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
-        let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
+        let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
         let state = application_with_system(
             ApplicationInputs { rest, clock, symbols: Arc::new(SymbolDirectory::default()), db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false },
             system,

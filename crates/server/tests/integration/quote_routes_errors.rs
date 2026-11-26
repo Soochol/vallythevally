@@ -10,7 +10,6 @@ use serde_json::{Value, json};
 use server::app::{Adapters, ApplicationInputs, StartOptions, StreamSource, application, start_with};
 use server::clock::{Clock, kst};
 use server::config::{Config, Secret};
-use server::db::AppDb;
 use server::http::router;
 use server::instance::InstanceLock;
 use server::kiwoom::auth::KiwoomAuth;
@@ -53,10 +52,10 @@ impl Harness {
             nxt_enabled: true,
         }]));
         let tmp = tempfile::tempdir().unwrap();
-        let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
+        let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
-        let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
+        let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
         let state = application(ApplicationInputs {
             rest: rest.clone(),
             clock,

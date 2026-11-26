@@ -81,6 +81,12 @@ impl Server {
             let value = |key: &str| overrides.get(key).map(String::as_str);
             let config = harness_config(&overrides, &lock, &static_dir);
             let instance = server::instance::InstanceLock::acquire(&lock).unwrap();
+            if !overrides.contains_key("VALLY_DB_PATH") {
+                support::template_db::seed_vally_db(&config.db_path);
+            }
+            if !overrides.contains_key("VALLY_SCREENER_DB_PATH") {
+                support::template_db::seed_screener_duckdb(&config.screener_db_path);
+            }
             let millis = |key: &str| std::time::Duration::from_millis(value(key).map_or(1, |millis| millis.parse().unwrap()));
             let stream = if value("VALLY_KIWOOM_WS_URL").is_some() { server::app::StreamSource::Connect } else { server::app::StreamSource::Detached(stream_events) };
             let adapters = server::app::Adapters { kiwoom: transport.transport(), kis, kis_feed, stream, kiwoom_spacing: Some(millis("KIWOOM_SEND_SPACING_MILLIS")) };

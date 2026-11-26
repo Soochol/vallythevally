@@ -14,7 +14,6 @@ use server::api::{ExcludeKind, Market};
 use server::app::{ApplicationInputs, application};
 use server::clock::Clock;
 use server::config::Secret;
-use server::db::AppDb;
 use server::http::{AppState, router};
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
@@ -22,7 +21,7 @@ use server::kiwoom::stream::KiwoomStream;
 use server::kiwoom::wire::{MillionWon, ScreenerListing};
 use server::market_overview::derived::{DerivedInputs, StockCatalog, TodayOverlay, attribution_of, derive_market_snapshot, histogram_of, ma_thrust_of, venue_share_of};
 use server::market_overview::{MarketOverviewPhase, MarketOverviewScope};
-use server::screener::store::{DayBar, ListedMeta, Store, Write};
+use server::screener::store::{DayBar, ListedMeta, Write};
 use server::shared_data::{Broker, DataKind, Header, IndexRow, Loaded, SnapshotBody, SnapshotRow, SourceKey, write_snapshot};
 use server::symbols::{Directory, SymbolDirectory};
 use support::ScriptedTransport;
@@ -119,11 +118,11 @@ impl Harness {
             symbols.replace(Directory::build(symbol_infos).with_screener_listing(listed.clone()));
         }
         let tmp = tempfile::tempdir().unwrap();
-        let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
+        let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
         let store_path = tmp.path().join("screener.duckdb");
-        let store = Store::open(&store_path).unwrap();
+        let store = crate::support::template_db::open_screener_store(&store_path);
         if !listed.is_empty() {
             store.replace_listing(&listed).unwrap();
         }

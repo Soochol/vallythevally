@@ -251,6 +251,8 @@ async fn start_site(idp: &Arc<FakeIdp>, env: &[(&str, &str)]) -> Site {
     vars.extend(public_vars(idp, &format!("127.0.0.1:{public_port}"), &public_origin));
     vars.extend(env.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())));
     let config = Config::from_values(vars).map(|(config, _)| config).unwrap_or_else(|e| panic!("설정 오류: {e}"));
+    crate::support::template_db::seed_vally_db(&config.db_path);
+    crate::support::template_db::seed_screener_duckdb(&config.screener_db_path);
     let wire = Wire::default();
     let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
     let (events, stream_events) = tokio::sync::mpsc::channel(16);
@@ -278,7 +280,9 @@ async fn start_site(idp: &Arc<FakeIdp>, env: &[(&str, &str)]) -> Site {
         google: GoogleConfig { client_id: "google-id".into(), client_secret: Secret::new(GOOGLE_SECRET), authorize_url: endpoint("/google/authorize"), token_url: endpoint("/google/token") },
         naver: NaverConfig { client_id: "naver-id".into(), client_secret: Secret::new(NAVER_SECRET), authorize_url: endpoint("/naver/authorize"), token_url: endpoint("/naver/token"), profile_url: endpoint("/naver/profile") },
     };
-    let pool = open_database(&work.path().join("data/public-accounts.db")).await.unwrap();
+    let accounts_db = work.path().join("data/public-accounts.db");
+    crate::support::template_db::seed_account_db(&accounts_db);
+    let pool = open_database(&accounts_db).await.unwrap();
     let login_router = Accounts::new(account_config, AccountOptions::default(), pool, Arc::new(SystemClock)).browser_router();
     let site = Site {
         state,
