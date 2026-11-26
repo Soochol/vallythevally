@@ -7,7 +7,6 @@ use serde_json::{Value, json};
 use server::app::{ApplicationInputs, application};
 use server::clock::Clock;
 use server::config::Secret;
-use server::db::AppDb;
 use server::screener::store::{DayBar, Store, Write};
 use server::kiwoom::wire::MillionWon;
 use domain::{Ohlcv, Price, StockCode, Volume};
@@ -78,7 +77,7 @@ impl Harness {
         let symbols = Arc::new(SymbolDirectory::default());
         symbols.replace(Directory::build(Vec::new()));
         let tmp = tempfile::tempdir().unwrap();
-        let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
+        let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
         let store = seed(&tmp.path().join("screener.duckdb"));

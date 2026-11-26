@@ -10,7 +10,6 @@ use serde_json::{Value, json};
 use server::app::{ApplicationInputs, application};
 use server::clock::Clock;
 use server::config::Secret;
-use server::db::AppDb;
 use server::http::router;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
@@ -41,10 +40,10 @@ impl Fixture {
         };
         symbols.replace(Directory::build(vec![listed("005930", "삼성전자", true), listed("005935", "삼성전자우", false)]));
         let tmp = tempfile::tempdir().unwrap();
-        let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
+        let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
-        let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
+        let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
         let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
         if connected {
             rest.set_access(Access::Open);

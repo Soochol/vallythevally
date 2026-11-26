@@ -51,15 +51,23 @@ struct Work {
 }
 
 impl Work {
-    fn new() -> Work {
+    fn with_script(script: &str) -> Work {
         let dir = tempfile::tempdir().unwrap();
         let dist = dir.path().join("dist");
         std::fs::create_dir_all(dist.join("assets")).unwrap();
         std::fs::create_dir_all(dist.join("fonts")).unwrap();
         std::fs::write(dist.join("index.html"), "<!doctype html><title>vally</title><script src=\"/assets/app-1a2b3c.js\"></script>").unwrap();
-        std::fs::write(dist.join("assets/app-1a2b3c.js"), bundle_text()).unwrap();
+        std::fs::write(dist.join("assets/app-1a2b3c.js"), script).unwrap();
         std::fs::write(dist.join("fonts/face.woff2"), pseudo_random_bytes(4096)).unwrap();
         Work { dir }
+    }
+
+    fn new() -> Work {
+        Self::with_script("export default 1;\n")
+    }
+
+    fn with_compressible_bundle() -> Work {
+        Self::with_script(&bundle_text())
     }
 
     fn path(&self) -> &Path {
@@ -290,6 +298,8 @@ impl<'a> Spec<'a> {
         }
         vars.extend(self.env.into_iter().map(|(key, value)| (key.to_owned(), value)));
         let config = config_of(vars).unwrap_or_else(|e| panic!("설정 오류: {e}"));
+        support::template_db::seed_vally_db(&config.db_path);
+        support::template_db::seed_screener_duckdb(&config.screener_db_path);
         let fake = self.fake.unwrap_or_default();
         let lock = server::instance::InstanceLock::acquire(&config.lock_path).unwrap();
         let (events, stream_events) = tokio::sync::mpsc::channel(16);
@@ -323,7 +333,9 @@ impl<'a> Spec<'a> {
                     google: GoogleConfig { client_id: "google-id".into(), client_secret: Secret::new(GOOGLE_SECRET), authorize_url: endpoint("/google/authorize"), token_url: endpoint("/google/token") },
                     naver: NaverConfig { client_id: "naver-id".into(), client_secret: Secret::new(NAVER_SECRET), authorize_url: endpoint("/naver/authorize"), token_url: endpoint("/naver/token"), profile_url: endpoint("/naver/profile") },
                 };
-                let pool = open_database(&self.work.path().join("data/public-accounts.db")).await.unwrap();
+                let accounts_db = self.work.path().join("data/public-accounts.db");
+                support::template_db::seed_account_db(&accounts_db);
+                let pool = open_database(&accounts_db).await.unwrap();
                 Accounts::new(account_config, AccountOptions::default(), pool, Arc::new(SystemClock)).browser_router()
             }
             false => Router::new(),
@@ -1118,6 +1130,7 @@ async fn a_full_total_in_flight_cap_refuses_public_requests_while_the_operator_l
     let work = Work::new();
     let idp = start_idp().await;
     let site = Spec::new(&work, &idp).env(&[("VALLY_PUBLIC_MAX_IN_FLIGHT", "3")]).frozen_clock().start().await;
+    site.load_symbols();
     let sessions = [site.login("a").await, site.login("b").await, site.login("c").await, site.login("d").await];
     let pending: Vec<_> = sessions[..3].iter().map(|who| tokio::spawn({
         let request = site.public_get("/api/test/hold").header("cookie", &who.cookie);
@@ -1157,6 +1170,7 @@ async fn a_panicking_route_is_500_and_both_listeners_keep_answering() {
     let work = Work::new();
     let idp = start_idp().await;
     let site = Spec::new(&work, &idp).start().await;
+    site.load_symbols();
     let who = site.login("alice").await;
     for _ in 0..3 {
         let reply = site.get(&who, "/api/test/panic").await;
@@ -1248,7 +1262,7 @@ async fn fetch(client: &reqwest::Client, url: String, headers: &[(&str, &str)]) 
 
 #[tokio::test]
 async fn the_public_listener_serves_screen_files_in_brotli_and_gzip_with_etags() {
-    let work = Work::new();
+    let work = Work::with_compressible_bundle();
     let idp = start_idp().await;
     let site = Spec::new(&work, &idp).start().await;
     let raw = std::fs::read(work.dist().join("assets/app-1a2b3c.js")).unwrap();
@@ -1313,7 +1327,7 @@ fn deflate_size(data: &[u8], level: i64) -> usize {
 
 #[tokio::test]
 async fn the_operator_listener_compresses_javascript_at_quality_four() {
-    let work = Work::new();
+    let work = Work::with_compressible_bundle();
     let idp = start_idp().await;
     let site = Spec::new(&work, &idp).without_public().start().await;
     let raw = std::fs::read(work.dist().join("assets/app-1a2b3c.js")).unwrap();
@@ -1344,6 +1358,7 @@ async fn the_operator_listener_refuses_foreign_origins_hosts_and_sites() {
     let work = Work::new();
     let idp = start_idp().await;
     let site = Spec::new(&work, &idp).start().await;
+    site.load_symbols();
     let own_origin = format!("http://127.0.0.1:{}", site.operator_port);
     assert_eq!(operator_ws(&site, &[]).await, Ok(()), "Origin 없는 /api/ws");
     assert_eq!(operator_ws(&site, &[("origin", own_origin.clone())]).await, Ok(()), "같은 출처의 /api/ws");

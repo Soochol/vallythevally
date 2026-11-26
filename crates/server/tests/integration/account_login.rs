@@ -38,7 +38,9 @@ impl Accounts {
             naver: NaverConfig { client_id: "naver-id".into(), client_secret: Secret::new(NAVER_SECRET), authorize_url: endpoint("/naver/authorize"), token_url: endpoint("/naver/token"), profile_url: endpoint("/naver/profile") },
         };
         let dir = tempfile::tempdir().unwrap();
-        let pool = open_database(&dir.path().join("account.db")).await.unwrap();
+        let accounts_db = dir.path().join("account.db");
+        crate::support::template_db::seed_account_db(&accounts_db);
+        let pool = open_database(&accounts_db).await.unwrap();
         let requests = Arc::new(AtomicUsize::new(0));
         let setup_requests = Arc::new(AtomicUsize::new(0));
         let (counter, setup_counter) = (requests.clone(), setup_requests.clone());

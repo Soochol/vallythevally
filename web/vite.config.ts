@@ -31,6 +31,6 @@ export default defineConfig(({ mode }) => {
             },
           },
     },
-    test: { environment: "node", include: ["src/**/*.test.ts", "dev/**/*.test.ts"], css: { include: [/\.css\?raw$/] } },
+    test: { environment: "node", include: ["src/**/*.test.{ts,tsx}", "dev/**/*.test.ts"], css: { include: [/\.css\?raw$/] } },
   };
 });

@@ -4,6 +4,7 @@ pub mod investors;
 pub mod kis_server;
 pub mod krx;
 pub mod summary;
+pub mod template_db;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -9,7 +9,6 @@ use serde_json::{Value, json};
 use server::app::{ApplicationInputs, application};
 use server::clock::{Clock, kst};
 use server::config::Secret;
-use server::db::AppDb;
 use server::http::router;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
@@ -81,10 +80,10 @@ impl Harness {
         let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
         let rest = KiwoomRest::new(Arc::new(kiwoom.clone()), auth, clock.clone());
         let tmp = tempfile::tempdir().unwrap();
-        let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
+        let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
-        let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
+        let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
         let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols: Arc::new(SymbolDirectory::default()), db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
         rest.set_access(Access::Open);
         Harness { app: router(state), clock, kiwoom, _tmp: tmp }

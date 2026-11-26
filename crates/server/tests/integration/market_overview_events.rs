@@ -17,7 +17,6 @@ use server::api::{Market as ApiMarket, ViDirection};
 use server::app::{ApplicationInputs, application};
 use server::clock::Clock;
 use server::config::Secret;
-use server::db::AppDb;
 use server::http::{AppState, router};
 use server::kis::api::KisApiId;
 use server::kis::feed::KisFeedParts;
@@ -74,10 +73,10 @@ impl Harness {
             listed("247540", "에코프로비엠", Market::Kosdaq),
         ]));
         let tmp = tempfile::tempdir().unwrap();
-        let db = AppDb::open(&tmp.path().join("db.sqlite")).await.unwrap();
+        let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
         let (stream, _desired) = KiwoomStream::detached();
         let (_events, events) = tokio::sync::mpsc::channel(1);
-        let store = server::screener::store::Store::open(&tmp.path().join("screener.duckdb")).unwrap();
+        let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
         let state = application(ApplicationInputs {
             rest: rest.clone(),
             clock,
