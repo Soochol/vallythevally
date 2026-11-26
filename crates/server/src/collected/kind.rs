@@ -27,10 +27,17 @@ pub trait CollectedKind: 'static {
     type View: Clone + Send + Sync + 'static;
 
     fn fids() -> &'static [u32];
+    fn plus_sign_fids() -> &'static [u32] {
+        &[]
+    }
     fn store_symbols(stock_code: &str) -> Vec<String> {
         vec![format!("{stock_code}_AL")]
     }
     fn decode(recv_ms: i64, values: &FidValues<'_>) -> Option<Self::View>;
+    fn decode_store(symbol: &str, recv_ms: i64, values: &FidValues<'_>) -> Option<Self::View> {
+        let _ = symbol;
+        Self::decode(recv_ms, values)
+    }
 }
 
 pub struct Brokers;
@@ -157,7 +164,15 @@ impl CollectedKind for ViEvents {
     }
 
     fn store_symbols(stock_code: &str) -> Vec<String> {
-        vec![format!("{stock_code}_AL"), stock_code.to_owned()]
+        vec![stock_code.to_owned(), format!("{stock_code}_NX")]
+    }
+
+    fn decode_store(symbol: &str, recv_ms: i64, values: &FidValues<'_>) -> Option<Self::View> {
+        let mut event = Self::decode(recv_ms, values)?;
+        if symbol.trim().ends_with("_NX") {
+            event.market = ViMarket::Nxt;
+        }
+        Some(event)
     }
 
     fn decode(recv_ms: i64, values: &FidValues<'_>) -> Option<Self::View> {
@@ -210,10 +225,10 @@ pub struct CollectedExpectedTrade {
     pub recv_ms: i64,
     pub hhmmss: TimeOfDay,
     pub price_won: u64,
-    pub change_won: i64,
+    pub change_won: Option<i64>,
     pub change_pct: Option<f64>,
     pub expected_qty: u64,
-    pub cumulative_qty: u64,
+    pub delta_qty: i64,
     pub change_sign: Option<i8>,
 }
 
@@ -231,10 +246,10 @@ impl CollectedKind for ExpectedTrades {
             recv_ms,
             hhmmss: parse_hhmmss(values.get(20))?,
             price_won,
-            change_won: parse_signed_or_zero(values.get(11))?,
+            change_won: parse_optional_signed(values.get(11)),
             change_pct: parse_optional_f64(values.get(12)),
-            expected_qty: parse_magnitude_or_zero(values.get(15))?,
-            cumulative_qty: parse_magnitude_or_zero(values.get(13))?,
+            expected_qty: parse_magnitude_or_zero(values.get(13))?,
+            delta_qty: parse_signed_or_zero(values.get(15))?,
             change_sign: parse_optional_i8(values.get(25)),
         })
     }
@@ -243,6 +258,7 @@ impl CollectedKind for ExpectedTrades {
 pub struct TradeTicks;
 
 const TRADE_TICK_FIDS: [u32; 5] = [20, 10, 15, 1313, 9081];
+const TRADE_TICK_PLUS_FIDS: [u32; 1] = [15];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CollectedTradeTick {
@@ -250,6 +266,7 @@ pub struct CollectedTradeTick {
     pub hhmmss: TimeOfDay,
     pub price_won: u64,
     pub signed_qty: i64,
+    pub side: Option<TradeSide>,
     pub instant_value_thousand_won: Option<i64>,
     pub exchange: Option<Exchange>,
 }
@@ -259,8 +276,8 @@ impl CollectedTradeTick {
         self.signed_qty.unsigned_abs()
     }
 
-    pub fn side(&self) -> TradeSide {
-        if self.signed_qty > 0 { TradeSide::Buy } else { TradeSide::Sell }
+    pub fn side(&self) -> Option<TradeSide> {
+        self.side
     }
 
     pub fn value_won(&self) -> u64 {
@@ -276,12 +293,22 @@ impl CollectedKind for TradeTicks {
         &TRADE_TICK_FIDS
     }
 
+    fn plus_sign_fids() -> &'static [u32] {
+        &TRADE_TICK_PLUS_FIDS
+    }
+
     fn decode(recv_ms: i64, values: &FidValues<'_>) -> Option<Self::View> {
         let price_won = parse_optional_nonzero_won(values.get(10))??;
-        let signed_qty = parse_signed(values.get(15)?)?;
+        let qty_text = values.get(15)?.trim();
+        let signed_qty = parse_signed(qty_text)?;
         if signed_qty == 0 {
             return None;
         }
+        let side = match qty_text.as_bytes().first() {
+            Some(b'+') => Some(TradeSide::Buy),
+            Some(b'-') => Some(TradeSide::Sell),
+            _ => None,
+        };
         let exchange = match trimmed_or_empty(values.get(9081)) {
             "KRX" => Some(Exchange::Krx),
             "NXT" => Some(Exchange::Nxt),
@@ -292,6 +319,7 @@ impl CollectedKind for TradeTicks {
             hhmmss: parse_hhmmss(values.get(20))?,
             price_won,
             signed_qty,
+            side,
             instant_value_thousand_won: parse_optional_signed(values.get(1313)),
             exchange,
         })
@@ -300,7 +328,7 @@ impl CollectedKind for TradeTicks {
 
 pub struct MicroEvents;
 
-const MICRO_FIDS: [u32; 6] = [1, 2, 3, 4, 5, 6];
+const MICRO_FIDS: [u32; 7] = [1, 2, 3, 4, 5, 6, 7];
 
 impl CollectedKind for MicroEvents {
     const TYPE_CODE: &'static str = "ME";
@@ -325,16 +353,20 @@ impl CollectedKind for MicroEvents {
         let cancelled_or_absorbed_qty = parse_magnitude(values.get(4)?)?;
         let displayed_qty = parse_magnitude(values.get(5)?)?;
         let ratio_bps = parse_optional_u32(values.get(6))?;
-        let executed_qty = match kind {
-            domain::MicroEventKind::IcebergAbsorb => cancelled_or_absorbed_qty,
-            domain::MicroEventKind::SpoofCancel => {
-                if ratio_bps >= 10_000 || ratio_bps == 0 {
-                    0
-                } else {
-                    let drop = (u128::from(cancelled_or_absorbed_qty) * 10_000 + u128::from(ratio_bps) / 2) / u128::from(ratio_bps);
-                    (drop as u64).saturating_sub(cancelled_or_absorbed_qty)
+        let executed_qty = match values.get(7).and_then(parse_magnitude) {
+            Some(qty) => qty,
+            None => match kind {
+                domain::MicroEventKind::IcebergAbsorb => cancelled_or_absorbed_qty,
+                domain::MicroEventKind::SpoofCancel => {
+                    if ratio_bps >= 10_000 || ratio_bps == 0 {
+                        0
+                    } else {
+                        let drop = (u128::from(cancelled_or_absorbed_qty) * 10_000 + u128::from(ratio_bps) / 2) / u128::from(ratio_bps);
+                        let approx = (drop as u64).saturating_sub(cancelled_or_absorbed_qty);
+                        approx.min(displayed_qty.saturating_sub(cancelled_or_absorbed_qty))
+                    }
                 }
-            }
+            },
         };
         Some(domain::MicroEvent {
             recv_ms,
@@ -414,7 +446,21 @@ fn parse_optional_u32(raw: Option<&str>) -> Option<u32> {
     if text.is_empty() {
         return None;
     }
-    text.strip_prefix('+').unwrap_or(text).parse::<u32>().ok()
+    let unsigned = match text.as_bytes().first() {
+        Some(b'+') => &text[1..],
+        Some(b'-') => {
+            let digits = &text[1..];
+            if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                return None;
+            }
+            return (digits.parse::<u32>().ok() == Some(0)).then_some(0);
+        }
+        _ => text,
+    };
+    if unsigned.is_empty() || !unsigned.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    unsigned.parse::<u32>().ok()
 }
 
 fn parse_optional_i8(raw: Option<&str>) -> Option<i8> {

@@ -114,7 +114,13 @@ fn lookup_cache(service: &MicroEventService, dir: &Path, date_str: &str, cache_k
     if let Some(events) = service.cache.lock().expect("micro events cache").get(cache_key, &stamp) {
         return Ok(CacheLookup::Hit(events));
     }
-    let (_, state) = service.store.load_day_index(dir, date_str)?;
+    let (_, state) = match service.store.load_day_index(dir, date_str) {
+        Ok(loaded) => loaded,
+        Err(reason) => {
+            tracing::warn!(date = %date_str, reason = %reason, "complete.json을 읽지 못해 미시 이벤트 저장소 조회를 건너뜁니다");
+            return Ok(CacheLookup::NotCollected);
+        }
+    };
     match state {
         DayIndexState::Ready(index) if index.stocks.contains_key(&cache_key.0) => Ok(CacheLookup::Miss),
         _ => Ok(CacheLookup::NotCollected),
@@ -129,7 +135,13 @@ fn compute_and_cache_store_day(
     stock_str: &str,
     cache_key: &(String, String),
 ) -> Result<Option<Arc<Vec<MicroEvent>>>, String> {
-    let (Some(stamp), state) = service.store.load_day_index(dir, date_str)? else {
+    let (Some(stamp), state) = (match service.store.load_day_index(dir, date_str) {
+        Ok(loaded) => loaded,
+        Err(reason) => {
+            tracing::warn!(date = %date_str, reason = %reason, "complete.json을 읽지 못해 미시 이벤트 저장소 조회를 건너뜁니다");
+            return Ok(None);
+        }
+    }) else {
         return Ok(None);
     };
     if let Some(events) = service.cache.lock().expect("micro events cache").get(cache_key, &stamp) {
@@ -138,11 +150,11 @@ fn compute_and_cache_store_day(
     let DayIndexState::Ready(index) = state else {
         return Ok(None);
     };
-    if !index.stocks.contains_key(stock_str) {
+    let Some(coverage) = index.stocks.get(stock_str) else {
         return Ok(None);
-    }
+    };
     let day_dir = dir.join("store").join(date_str);
-    let events = Arc::new(compute_store_day(&day_dir, date, stock_str, index.buckets)?);
+    let events = Arc::new(compute_store_day(&day_dir, date, stock_str, index.buckets, &coverage.gaps)?);
     service.cache.lock().expect("micro events cache").insert(cache_key.clone(), stamp, Arc::clone(&events));
     Ok(Some(events))
 }
@@ -159,7 +171,35 @@ struct StoredTrade {
     signed_qty: i64,
 }
 
-fn compute_store_day(day_dir: &Path, date: KstDate, stock_code: &str, buckets: u64) -> Result<Vec<MicroEvent>, String> {
+fn normalize_gaps(gaps_ms: &[(i64, i64)]) -> Vec<(i64, i64)> {
+    let mut intervals: Vec<(i64, i64)> = gaps_ms.iter().copied().filter(|&(from_ms, to_ms)| to_ms > from_ms).collect();
+    intervals.sort_unstable();
+    let mut merged: Vec<(i64, i64)> = Vec::with_capacity(intervals.len());
+    for (from_ms, to_ms) in intervals {
+        if let Some(last) = merged.last_mut()
+            && from_ms <= last.1
+        {
+            last.1 = last.1.max(to_ms);
+        } else {
+            merged.push((from_ms, to_ms));
+        }
+    }
+    merged
+}
+
+fn reset_if_crossed_gap(detector: &mut MicroEventDetector, gaps: &[(i64, i64)], gap_idx: &mut usize, prev_ms: Option<i64>, curr_ms: i64) {
+    let Some(prev) = prev_ms else {
+        return;
+    };
+    while *gap_idx < gaps.len() && gaps[*gap_idx].1 <= prev {
+        *gap_idx += 1;
+    }
+    if *gap_idx < gaps.len() && curr_ms > gaps[*gap_idx].0 {
+        detector.reset();
+    }
+}
+
+fn compute_store_day(day_dir: &Path, date: KstDate, stock_code: &str, buckets: u64, gaps_ms: &[(i64, i64)]) -> Result<Vec<MicroEvent>, String> {
     let symbol = format!("{stock_code}_AL");
     let bucket_file = bucket_file_name(&symbol, buckets);
     let book_path = day_dir.join("0D").join(&bucket_file);
@@ -177,17 +217,24 @@ fn compute_store_day(day_dir: &Path, date: KstDate, stock_code: &str, buckets: u
         Vec::new()
     };
 
+    let gaps = normalize_gaps(gaps_ms);
+    let mut gap_idx = 0usize;
+    let mut prev_ms: Option<i64> = None;
     let mut detector = MicroEventDetector::default();
     let mut out = Vec::new();
     let mut trade_idx = 0usize;
     for book in &books {
         while trade_idx < trades.len() && trades[trade_idx].recv_ms <= book.recv_ms {
             let trade = &trades[trade_idx];
+            reset_if_crossed_gap(&mut detector, &gaps, &mut gap_idx, prev_ms, trade.recv_ms);
             detector.on_trade(trade.recv_ms, trade.price_won, trade.signed_qty);
+            prev_ms = Some(trade.recv_ms);
             trade_idx += 1;
         }
+        reset_if_crossed_gap(&mut detector, &gaps, &mut gap_idx, prev_ms, book.recv_ms);
         let (events, _) = detector.on_book(book.recv_ms, &book.asks, &book.bids);
         out.extend(events);
+        prev_ms = Some(book.recv_ms);
     }
     Ok(out)
 }

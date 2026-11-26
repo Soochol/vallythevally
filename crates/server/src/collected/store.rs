@@ -37,12 +37,18 @@ pub(super) fn read_day<K: CollectedKind>(
     let day_start_ms = kst(date, 0, 0, 0).unix() * 1000;
     let day_end_ms = day_start_ms + 86_400_000;
     let fids = K::fids();
-    let sql = build_query(fids);
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패: {e}"))?;
+    let plus_fids = K::plus_sign_fids();
     let mut ordered: Vec<(i64, i64, K::View)> = Vec::new();
     let mut skipped: u64 = 0;
     for (symbol, path) in &targets {
         let path_text = path_str(path)?;
+        let active_plus: Vec<u32> = plus_fids
+            .iter()
+            .copied()
+            .filter(|fid| parquet_has_column(&conn, path_text, &format!("f{fid}_plus")))
+            .collect();
+        let sql = build_query(fids, &active_plus);
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패: {e}"))?;
         let mut raw_rows = stmt
             .query(params![path_text, symbol, day_start_ms, day_end_ms])
             .map_err(|e| format!("수집 저장소 조회 실행 실패({path_text}): {e}"))?;
@@ -55,7 +61,7 @@ pub(super) fn read_day<K: CollectedKind>(
                 values.push(value);
             }
             let fid_values = FidValues::new(fids, &values);
-            let Some(view) = K::decode(recv_ms, &fid_values) else {
+            let Some(view) = K::decode_store(symbol, recv_ms, &fid_values) else {
                 skipped += 1;
                 continue;
             };
@@ -72,10 +78,22 @@ pub(super) fn read_day<K: CollectedKind>(
     Ok(StoreDay { snapshots, gaps })
 }
 
-fn build_query(fids: &[u32]) -> String {
+fn parquet_has_column(conn: &duckdb::Connection, path_text: &str, column: &str) -> bool {
+    conn.prepare("SELECT 1 FROM parquet_schema($1) WHERE name = $2 LIMIT 1")
+        .and_then(|mut s| s.exists(params![path_text, column]))
+        .unwrap_or(false)
+}
+
+fn build_query(fids: &[u32], plus_sign_fids: &[u32]) -> String {
     let mut cols = String::from("recv_ms, file_row_number");
     for fid in fids {
-        cols.push_str(&format!(", CAST(f{fid} AS VARCHAR)"));
+        if plus_sign_fids.contains(fid) {
+            cols.push_str(&format!(
+                ", CASE WHEN f{fid}_plus AND f{fid} IS NOT NULL THEN '+' || CAST(f{fid} AS VARCHAR) ELSE CAST(f{fid} AS VARCHAR) END"
+            ));
+        } else {
+            cols.push_str(&format!(", CAST(f{fid} AS VARCHAR)"));
+        }
     }
     format!(
         "SELECT {cols} FROM read_parquet($1, file_row_number = true) WHERE symbol = $2 AND recv_ms >= $3 AND recv_ms < $4 ORDER BY recv_ms ASC, file_row_number ASC"

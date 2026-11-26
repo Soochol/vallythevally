@@ -66,8 +66,9 @@ fn write_parquet(data: &Path, date: &str, type_code: &str, symbol_bucket: &str, 
 }
 
 fn tick_sql(recv_ms: i64, hhmmss: &str, price: u64, signed_qty: i64) -> String {
+    let f15_plus = signed_qty > 0;
     format!(
-        "SELECT '005930_AL' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, 0::BIGINT AS f1313, 'KRX' AS f9081"
+        "SELECT '005930_AL' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{hhmmss}' AS f20, {price}::BIGINT AS f10, {signed_qty}::BIGINT AS f15, {f15_plus}::BOOLEAN AS f15_plus, 0::BIGINT AS f1313, 'KRX' AS f9081"
     )
 }
 
@@ -440,11 +441,17 @@ fn tick_cvd_aggregates_100k_rows_within_250ms() {
             _ => (70_000, 2_000),
         };
         let signed_qty = if i % 3 == 0 { -qty } else { qty };
+        let side = if signed_qty > 0 {
+            Some(server::market_source::stream::TradeSide::Buy)
+        } else {
+            Some(server::market_source::stream::TradeSide::Sell)
+        };
         ticks.push(CollectedTradeTick {
             recv_ms: i as i64,
             hhmmss: TimeOfDay::hms(hh, mm, ss).unwrap(),
             price_won: price,
             signed_qty,
+            side,
             instant_value_thousand_won: None,
             exchange: None,
         });
@@ -468,4 +475,32 @@ fn tick_cvd_aggregates_100k_rows_within_250ms() {
     );
     assert_eq!(last_len, 390);
     assert!(median < 250.0, "median {median:.3}ms exceeded 250ms budget");
+}
+
+#[test]
+fn unsigned_call_auction_ticks_do_not_skew_cvd_buckets() {
+    let day = date_of(23);
+    let ticks = vec![
+        CollectedTradeTick {
+            recv_ms: 1,
+            hhmmss: TimeOfDay::hms(9, 0, 0).unwrap(),
+            price_won: 100_000,
+            signed_qty: 2_000,
+            side: None,
+            instant_value_thousand_won: None,
+            exchange: None,
+        },
+        CollectedTradeTick {
+            recv_ms: 2,
+            hhmmss: TimeOfDay::hms(9, 0, 5).unwrap(),
+            price_won: 100_000,
+            signed_qty: -1_000,
+            side: Some(server::market_source::stream::TradeSide::Sell),
+            instant_value_thousand_won: None,
+            exchange: None,
+        },
+    ];
+    let points = aggregate_tick_cvd_day(day, &ticks, Period::M1, None, None);
+    assert_eq!(points.len(), 1);
+    assert!((points[0].whale_net_million_won - (-100.0)).abs() < 1e-9);
 }

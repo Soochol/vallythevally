@@ -302,7 +302,13 @@ fn check_store_cache<K: CollectedKind>(
     if let Some(day) = kind.store_cache.lock().expect("collected store cache").get(cache_key, &stamp) {
         return Ok(StoreLookup::Hit(stamp, day));
     }
-    let (_, state) = collected.store.load_day_index(dir, date_str)?;
+    let (_, state) = match collected.store.load_day_index(dir, date_str) {
+        Ok(loaded) => loaded,
+        Err(reason) => {
+            tracing::warn!(type_code = K::TYPE_CODE, date = %date_str, reason = %reason, "complete.json을 읽지 못해 저장소 조회를 건너뜁니다");
+            return Ok(StoreLookup::NotCollected);
+        }
+    };
     match state {
         DayIndexState::Ready(index) if index.stocks.contains_key(&cache_key.0) => Ok(StoreLookup::Miss),
         _ => Ok(StoreLookup::NotCollected),
@@ -318,7 +324,13 @@ fn load_store_day<K: CollectedKind>(
     stock_str: &str,
     cache_key: &(String, String),
 ) -> Result<Option<LoadedStoreDay<K::View>>, String> {
-    let (Some(stamp), state) = collected.store.load_day_index(dir, date_str)? else {
+    let (Some(stamp), state) = (match collected.store.load_day_index(dir, date_str) {
+        Ok(loaded) => loaded,
+        Err(reason) => {
+            tracing::warn!(type_code = K::TYPE_CODE, date = %date_str, reason = %reason, "complete.json을 읽지 못해 저장소 조회를 건너뜁니다");
+            return Ok(None);
+        }
+    }) else {
         return Ok(None);
     };
     if let Some(day) = kind.store_cache.lock().expect("collected store cache").get(cache_key, &stamp) {

@@ -565,17 +565,17 @@ fn round2(value: f64) -> f64 {
     (value * 100.0).round() / 100.0
 }
 
-fn prev_close_of(price_won: u64, change_won: i64) -> Option<u64> {
-    let prev = i64::try_from(price_won).ok()?.checked_sub(change_won)?;
+fn prev_close_of(price_won: u64, change_won: Option<i64>) -> Option<u64> {
+    let prev = i64::try_from(price_won).ok()?.checked_sub(change_won?)?;
     u64::try_from(prev).ok().filter(|&v| v > 0)
 }
 
-fn expected_return_pct(price_won: u64, change_won: i64, change_pct: Option<f64>) -> f64 {
+fn expected_return_pct(price_won: u64, change_won: Option<i64>, change_pct: Option<f64>) -> f64 {
     if let Some(pct) = change_pct.filter(|v| v.is_finite()) {
         return round2(pct);
     }
-    if let Some(base) = prev_close_of(price_won, change_won) {
-        return round2((change_won as f64 / base as f64) * 100.0);
+    if let (Some(change), Some(base)) = (change_won, prev_close_of(price_won, change_won)) {
+        return round2((change as f64 / base as f64) * 100.0);
     }
     0.0
 }
@@ -817,7 +817,7 @@ fn parse_magnitude_u64(raw: Option<&str>) -> Option<u64> {
 fn parse_signed_i64(raw: Option<&str>) -> Option<i64> {
     let text = raw?.trim();
     if text.is_empty() {
-        return Some(0);
+        return None;
     }
     text.parse::<i64>().ok()
 }
@@ -841,7 +841,7 @@ struct SnapshotSample {
     sec: u32,
     recv_ms: i64,
     price_won: u64,
-    change_won: i64,
+    change_won: Option<i64>,
     change_pct: Option<f64>,
     expected_qty: u64,
 }
@@ -931,7 +931,7 @@ fn scan_closed_day_snapshot(
         "SELECT symbol, recv_ms, CAST(f20 AS VARCHAR), CAST(f10 AS VARCHAR), {}, {}, {} FROM read_parquet({expected_list}, union_by_name = true) WHERE recv_ms >= $1 AND recv_ms < $2 AND TRIM(CAST(f20 AS VARCHAR)) >= '083000' AND TRIM(CAST(f20 AS VARCHAR)) <= '090000'",
         col_or_null("f11"),
         col_or_null("f12"),
-        col_or_null("f15"),
+        col_or_null("f13"),
     );
     let mut by_stock: HashMap<String, Vec<SnapshotSample>> = HashMap::new();
     {
@@ -948,15 +948,15 @@ fn scan_closed_day_snapshot(
             let f10: Option<String> = row.get(3).map_err(|e| format!("f10 읽기 실패: {e}"))?;
             let f11: Option<String> = row.get(4).map_err(|e| format!("f11 읽기 실패: {e}"))?;
             let f12: Option<String> = row.get(5).map_err(|e| format!("f12 읽기 실패: {e}"))?;
-            let f15: Option<String> = row.get(6).map_err(|e| format!("f15 읽기 실패: {e}"))?;
+            let f13: Option<String> = row.get(6).map_err(|e| format!("f13 읽기 실패: {e}"))?;
             let Some(sec) = parse_hhmmss_secs(f20.as_deref()) else { continue };
             if !(PREMARKET_START_SEC..=PREMARKET_END_SEC).contains(&sec) {
                 continue;
             }
             let Some(price_won) = parse_magnitude_u64(f10.as_deref()).filter(|&v| v > 0) else { continue };
-            let change_won = parse_signed_i64(f11.as_deref()).unwrap_or(0);
+            let change_won = parse_signed_i64(f11.as_deref());
             let change_pct = parse_opt_f64(f12.as_deref());
-            let expected_qty = parse_magnitude_u64(f15.as_deref()).unwrap_or(0);
+            let expected_qty = parse_magnitude_u64(f13.as_deref()).unwrap_or(0);
             by_stock.entry(code).or_default().push(SnapshotSample {
                 sec,
                 recv_ms,
@@ -1186,10 +1186,10 @@ mod tests {
                 recv_ms: i64::from(sec) * 1000,
                 hhmmss: TimeOfDay::hms(h, m, s).unwrap(),
                 price_won: 70_000 + u64::from(sec - PREMARKET_START_SEC),
-                change_won: i64::from(sec - PREMARKET_START_SEC),
+                change_won: Some(i64::from(sec - PREMARKET_START_SEC)),
                 change_pct: Some(1.0),
                 expected_qty: 100,
-                cumulative_qty: 100,
+                delta_qty: 100,
                 change_sign: Some(2),
             });
         }

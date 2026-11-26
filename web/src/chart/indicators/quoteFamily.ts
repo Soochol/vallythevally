@@ -11,9 +11,11 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { fetchMicroEvents, kstYyyymmdd } from "../../api/microEvents";
 import { fetchQuoteDepth, fetchQuoteTotals } from "../../api/quoteMinutes";
+import type { FeedEvent, FeedRequest } from "../../api/socket";
 import { formatPrice, formatVolume } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import type { ShownVenue } from "../../lib/venue";
+import { marketSocket } from "../../stores/realtime";
 import { TrackedValues } from "../legendShapes";
 import { QuoteFeed, type QuoteKey, type QuoteRange, type QuoteState, type QuoteView } from "../quotes/feed";
 import { QuoteDepthHeatmap, type QuoteDepthLayer } from "../quotes/heatmap";
@@ -33,6 +35,7 @@ export interface QuoteFamilyDeps {
   readonly fetchQuoteTotals?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteTotalsPage>;
   readonly fetchQuoteDepth?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
   readonly fetchMicroEvents?: (symbol: SymbolCode, date: string, signal: AbortSignal) => Promise<MicroEventsPage>;
+  readonly subscribeFeed?: (request: FeedRequest, handler: (m: FeedEvent) => void) => () => void;
   readonly now?: () => UnixSeconds;
 }
 
@@ -96,6 +99,35 @@ function periodSeconds(period: Period): number {
   }
 }
 
+const KST_OFFSET_SEC = 9 * 3_600;
+const DAY_SECONDS = 86_400;
+
+function barDates(bars: readonly Bar[]): string[] {
+  const dates: string[] = [];
+  let lastDayIndex = -1;
+  for (let i = 0; i < bars.length; i++) {
+    const t = bars[i]!.t;
+    const dayIndex = Math.floor((t + KST_OFFSET_SEC) / DAY_SECONDS);
+    if (dayIndex !== lastDayIndex) {
+      lastDayIndex = dayIndex;
+      const date = kstYyyymmdd(t * 1000);
+      if (!dates.includes(date)) dates.push(date);
+    }
+  }
+  return dates;
+}
+
+function microEventKey(event: MicroEvent): string {
+  return `${event.recvMs}:${event.kind}:${event.side}:${event.priceWon}:${event.cancelledOrAbsorbedQty}`;
+}
+
+function mergeMicroLists(existing: readonly MicroEvent[], incoming: readonly MicroEvent[]): MicroEvent[] {
+  const seen = new Map<string, MicroEvent>();
+  for (const event of existing) seen.set(microEventKey(event), event);
+  for (const event of incoming) seen.set(microEventKey(event), event);
+  return [...seen.values()].sort((a, b) => a.recvMs - b.recvMs);
+}
+
 const defaultNowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
 
 export class QuoteIndicatorController {
@@ -103,6 +135,7 @@ export class QuoteIndicatorController {
   private readonly depthFeeds = new Map<string, QuoteFeed<QuoteDepthPoint>>();
   private readonly fetchDepth: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
   private readonly loadMicroEvents: (symbol: SymbolCode, date: string, signal: AbortSignal) => Promise<MicroEventsPage>;
+  private readonly subscribeMicroFeed: (request: FeedRequest, handler: (m: FeedEvent) => void) => () => void;
   private readonly now: () => UnixSeconds;
   private readonly heatmap: QuoteDepthHeatmap;
   private readonly depthLegends = new Map<string, DepthLegend>();
@@ -111,8 +144,12 @@ export class QuoteIndicatorController {
   private totalsOverride: QuoteView<QuoteTotalPoint> | null | undefined = undefined;
   private depthOverrides: ReadonlyMap<string, QuoteView<QuoteDepthPoint>> | null = null;
   private totalsActive = false;
-  private microKey: string | null = null;
-  private microAbort: AbortController | null = null;
+  private microSymbol: SymbolCode | null = null;
+  private microVenue: ShownVenue | null = null;
+  private readonly microByDate = new Map<string, MicroEvent[]>();
+  private readonly microFetched = new Set<string>();
+  private readonly microInFlight = new Map<string, AbortController>();
+  private microLiveStop: (() => void) | null = null;
   private microEvents: readonly MicroEvent[] = [];
   private disposed = false;
 
@@ -120,6 +157,7 @@ export class QuoteIndicatorController {
     this.now = deps.now ?? defaultNowSeconds;
     this.fetchDepth = deps.fetchQuoteDepth ?? fetchQuoteDepth;
     this.loadMicroEvents = deps.fetchMicroEvents ?? fetchMicroEvents;
+    this.subscribeMicroFeed = deps.subscribeFeed ?? ((request, handler) => marketSocket.subscribeFeed(request, handler));
     this.totalsFeed = new QuoteFeed<QuoteTotalPoint>({
       fetch: deps.fetchQuoteTotals ?? fetchQuoteTotals,
       changed: (from) => {
@@ -133,6 +171,7 @@ export class QuoteIndicatorController {
       bars: () => this.host.bars(),
       tokens: () => this.host.tokens(),
       layers: () => this.depthLayers(),
+      periodSec: () => (this.target ? periodSeconds(this.target.period) : 60),
     });
   }
 
@@ -197,7 +236,7 @@ export class QuoteIndicatorController {
       feed.open({ symbol: target!.symbol, venue: target!.venue!, period: target!.period, variant: config.spec.source });
     }
     const microWanted = activeDepth.some((c) => isQuoteDepth(c.spec) && (c.spec.showSpoof === true || c.spec.showIceberg === true));
-    this.syncMicroEvents(microWanted && target !== null ? target.symbol : null);
+    this.syncMicroEvents(microWanted && target !== null && target.venue !== null ? { symbol: target.symbol, venue: target.venue } : null);
     this.cover(this.host.bars());
     this.heatmap.redraw();
   }
@@ -208,6 +247,7 @@ export class QuoteIndicatorController {
     if (!first || !last) return;
     if (this.totalsActive) this.totalsFeed.cover(first.t, last.t);
     for (const feed of this.depthFeeds.values()) feed.cover(first.t, last.t);
+    this.coverMicroEvents(bars);
   }
 
   redrawHeatmap(): void {
@@ -345,10 +385,7 @@ export class QuoteIndicatorController {
 
   dispose(): void {
     this.disposed = true;
-    this.microAbort?.abort();
-    this.microAbort = null;
-    this.microKey = null;
-    this.microEvents = [];
+    this.clearMicroState();
     if (this.mainSeries !== null) {
       this.mainSeries.detachPrimitive(this.heatmap);
       this.mainSeries = null;
@@ -359,31 +396,111 @@ export class QuoteIndicatorController {
     this.depthLegends.clear();
   }
 
-  private syncMicroEvents(symbol: SymbolCode | null): void {
-    if (symbol === null) {
-      this.microAbort?.abort();
-      this.microAbort = null;
-      this.microKey = null;
-      this.microEvents = [];
+  private clearMicroState(): void {
+    for (const abort of this.microInFlight.values()) abort.abort();
+    this.microInFlight.clear();
+    this.microLiveStop?.();
+    this.microLiveStop = null;
+    this.microSymbol = null;
+    this.microVenue = null;
+    this.microByDate.clear();
+    this.microFetched.clear();
+    this.microEvents = [];
+  }
+
+  private syncMicroEvents(next: { readonly symbol: SymbolCode; readonly venue: ShownVenue } | null): void {
+    if (next === null) {
+      this.clearMicroState();
       return;
     }
-    const date = kstYyyymmdd(this.now() * 1000);
-    const key = `${symbol}:${date}`;
-    if (this.microKey === key) return;
-    this.microAbort?.abort();
-    this.microKey = key;
-    this.microEvents = [];
+    if (this.microSymbol !== next.symbol) {
+      this.clearMicroState();
+      this.microSymbol = next.symbol;
+      this.microVenue = next.venue;
+      return;
+    }
+    if (this.microVenue !== next.venue) {
+      this.microVenue = next.venue;
+      this.microLiveStop?.();
+      this.microLiveStop = null;
+    }
+  }
+
+  private coverMicroEvents(bars: readonly Bar[]): void {
+    const symbol = this.microSymbol;
+    if (this.disposed || symbol === null) return;
+    const dates = barDates(bars);
+    const today = kstYyyymmdd(this.now() * 1000);
+    for (const date of dates) {
+      if (!this.microFetched.has(date) && !this.microInFlight.has(date)) {
+        this.fetchMicroDate(symbol, date);
+      }
+    }
+    if (dates.includes(today)) {
+      if (this.microLiveStop === null) {
+        const venue = this.microVenue ?? undefined;
+        this.microLiveStop = this.subscribeMicroFeed({ symbol, kind: "micro", venue }, (message) => {
+          if (this.disposed || this.microSymbol !== symbol) return;
+          if (message.type === "feed_micro") {
+            this.appendLiveMicroEvent(message.event);
+          } else if (message.type === "resync") {
+            this.refreshMicroDate(symbol, kstYyyymmdd(this.now() * 1000));
+          }
+        });
+      }
+    } else if (this.microLiveStop !== null) {
+      this.microLiveStop();
+      this.microLiveStop = null;
+    }
+  }
+
+  private fetchMicroDate(symbol: SymbolCode, date: string): void {
     const abort = new AbortController();
-    this.microAbort = abort;
+    this.microInFlight.set(date, abort);
     this.loadMicroEvents(symbol, date, abort.signal).then(
       (page) => {
-        if (this.disposed || abort.signal.aborted || this.microKey !== key) return;
-        this.microEvents = page.events;
+        if (this.microInFlight.get(date) === abort) this.microInFlight.delete(date);
+        if (this.disposed || abort.signal.aborted || this.microSymbol !== symbol) return;
+        this.microFetched.add(date);
+        const merged = mergeMicroLists(this.microByDate.get(date) ?? [], page.events);
+        this.microByDate.set(date, merged);
+        this.rebuildMicroEvents();
         this.heatmap.redraw();
         this.host.onDepthChanged();
       },
-      () => {},
+      () => {
+        if (this.microInFlight.get(date) === abort) this.microInFlight.delete(date);
+      },
     );
+  }
+
+  private refreshMicroDate(symbol: SymbolCode, date: string): void {
+    const existing = this.microInFlight.get(date);
+    if (existing) {
+      existing.abort();
+      this.microInFlight.delete(date);
+    }
+    this.microFetched.delete(date);
+    this.fetchMicroDate(symbol, date);
+  }
+
+  private appendLiveMicroEvent(event: MicroEvent): void {
+    const date = kstYyyymmdd(event.recvMs);
+    const current = this.microByDate.get(date) ?? [];
+    const merged = mergeMicroLists(current, [event]);
+    this.microByDate.set(date, merged);
+    this.rebuildMicroEvents();
+    this.heatmap.redraw();
+    this.host.onDepthChanged();
+  }
+
+  private rebuildMicroEvents(): void {
+    const combined: MicroEvent[] = [];
+    for (const events of this.microByDate.values()) {
+      for (const event of events) combined.push(event);
+    }
+    combined.sort((a, b) => a.recvMs - b.recvMs);
+    this.microEvents = combined;
   }
 
   private depthLayers(): QuoteDepthLayer[] {

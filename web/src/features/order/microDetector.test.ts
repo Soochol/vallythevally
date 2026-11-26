@@ -51,4 +51,27 @@ describe("ClientMicroDetector", () => {
     const viBids = first.bids.slice(0, 3).map((l) => ({ ...l, qty: 100 }));
     expect(detector.onBook(2_000, viAsks, viBids).events).toEqual([]);
   });
+
+  it("ignores zero-qty placeholder levels in the single-price auction guard", () => {
+    const detector = new ClientMicroDetector();
+    const first = book(5_000, 5_000);
+    detector.onBook(1_000, first.asks, first.bids);
+    const placeholderAsks = [
+      { priceWon: 70_100, qty: 100 },
+      { priceWon: 70_200, qty: 100 },
+      { priceWon: 70_300, qty: 100 },
+      { priceWon: 70_400, qty: 0 },
+      { priceWon: 70_500, qty: 0 },
+    ];
+    const placeholderBids = [
+      { priceWon: 70_000, qty: 100 },
+      { priceWon: 69_900, qty: 100 },
+      { priceWon: 69_800, qty: 100 },
+      { priceWon: 69_700, qty: 0 },
+      { priceWon: 69_600, qty: 0 },
+    ];
+    expect(detector.onBook(2_000, placeholderAsks, placeholderBids).events).toEqual([]);
+    const restored = book(100, 100);
+    expect(detector.onBook(3_000, restored.asks, restored.bids).events).toEqual([]);
+  });
 });

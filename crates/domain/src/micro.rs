@@ -145,8 +145,8 @@ impl MicroEventDetector {
         self.evict_ofi(recv_ms);
         self.evict_trades(recv_ms);
 
-        let ask_count = asks.iter().filter(|level| level.price_won > 0).count();
-        let bid_count = bids.iter().filter(|level| level.price_won > 0).count();
+        let ask_count = asks.iter().filter(|level| level.price_won > 0 && level.qty > 0).count();
+        let bid_count = bids.iter().filter(|level| level.price_won > 0 && level.qty > 0).count();
         if ask_count <= SINGLE_PRICE_MAX_LEVELS && bid_count <= SINGLE_PRICE_MAX_LEVELS {
             self.prev_asks.clear();
             self.prev_bids.clear();
@@ -213,8 +213,8 @@ impl MicroEventDetector {
             MicroSide::Bid => &self.prev_bids,
         };
         let boundary_price = match side {
-            MicroSide::Ask => curr_levels.iter().filter(|level| level.price_won > 0).map(|level| level.price_won).max(),
-            MicroSide::Bid => curr_levels.iter().filter(|level| level.price_won > 0).map(|level| level.price_won).min(),
+            MicroSide::Ask => curr_levels.iter().filter(|level| level.price_won > 0 && level.qty > 0).map(|level| level.price_won).max(),
+            MicroSide::Bid => curr_levels.iter().filter(|level| level.price_won > 0 && level.qty > 0).map(|level| level.price_won).min(),
         };
 
         for prev in prev_levels {
@@ -595,5 +595,21 @@ mod tests {
         }
         let (_, surge) = detector.on_book(63_000, &asks, &bids);
         assert!(surge.tape_speed_ratio_bps > 15_000, "got {}", surge.tape_speed_ratio_bps);
+    }
+
+    #[test]
+    fn single_price_auction_guard_ignores_zero_qty_placeholder_levels() {
+        let mut detector = MicroEventDetector::default();
+        let (asks1, bids1) = normal_book(5_000, 5_000);
+        detector.on_book(1_000, &asks1, &bids1);
+
+        let placeholder_asks = levels(&[(70_100, 100), (70_200, 100), (70_300, 100), (70_400, 0), (70_500, 0)]);
+        let placeholder_bids = levels(&[(70_000, 100), (69_900, 100), (69_800, 100), (69_700, 0), (69_600, 0)]);
+        let (vi_events, _) = detector.on_book(2_000, &placeholder_asks, &placeholder_bids);
+        assert!(vi_events.is_empty());
+
+        let (asks2, bids2) = normal_book(100, 100);
+        let (after_vi_events, _) = detector.on_book(3_000, &asks2, &bids2);
+        assert!(after_vi_events.is_empty());
     }
 }

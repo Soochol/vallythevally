@@ -36,16 +36,20 @@ fn at_ms(date: KstDate, hour: u32, minute: u32, second: u32) -> i64 {
     kst(date, hour, minute, second).unix() * 1000
 }
 
-fn write_complete(data: &Path, date: &str) {
+fn write_complete_with_gaps(data: &Path, date: &str, gaps: Value) {
     let folder = data.join("store").join(date);
     std::fs::create_dir_all(&folder).unwrap();
     let complete = json!({
         "format_version": 1,
         "verify": {"passed": true, "buckets": BUCKETS},
         "raw_files": {"collect-01/1530-000.jsonl.zst": 10},
-        "stocks": [{"code": "005930", "key": "collect-01", "registered": true, "received": true, "gaps": [], "handoff": null}],
+        "stocks": [{"code": "005930", "key": "collect-01", "registered": true, "received": true, "gaps": gaps, "handoff": null}],
     });
     std::fs::write(folder.join("complete.json"), complete.to_string()).unwrap();
+}
+
+fn write_complete(data: &Path, date: &str) {
+    write_complete_with_gaps(data, date, json!([]));
 }
 
 fn write_parquet(data: &Path, date: &str, type_code: &str, symbol_bucket: &str, rows: &[String]) {
@@ -222,4 +226,130 @@ async fn micro_events_endpoint_computes_closed_day_from_parquet_0d_and_0b() {
     assert_eq!(events[0]["priceWon"], 70100);
     assert_eq!(events[0]["cancelledOrAbsorbedQty"], 4900);
     assert_eq!(events[0]["ratioBps"], 10000);
+}
+
+#[tokio::test]
+async fn micro_events_me_flow_preserves_exact_executed_qty_via_fid7_and_clamps_legacy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let shared = tmp.path().join("shared");
+    let today = KstDate::parse_yyyymmdd("20261125").unwrap();
+    let now = kst(today, 10, 0, 0);
+
+    let path7 = flow_path(&shared, "20261125", "ME", "005930", "k1");
+    let desc7 = FlowDescription::new("ME", "005930", "20261125", "k1", &[1, 2, 3, 4, 5, 6, 7]);
+    FlowWriter::open(&path7, desc7)
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_ms(today, 9, 15, 0),
+            values: vec![
+                Some("S".into()),
+                Some("A".into()),
+                Some("70100".into()),
+                Some("99995".into()),
+                Some("100000".into()),
+                Some("9999".into()),
+                Some("5".into()),
+            ],
+        }])
+        .unwrap();
+
+    let path6 = flow_path(&shared, "20261125", "ME", "005930", "k2");
+    let desc6 = FlowDescription::new("ME", "005930", "20261125", "k2", &[1, 2, 3, 4, 5, 6]);
+    FlowWriter::open(&path6, desc6)
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_ms(today, 9, 16, 0),
+            values: vec![
+                Some("S".into()),
+                Some("A".into()),
+                Some("70100".into()),
+                Some("99995".into()),
+                Some("100000".into()),
+                Some("9999".into()),
+            ],
+        }])
+        .unwrap();
+
+    let h = Harness::start(now, None, Some(shared)).await;
+    let (status, body) = h.get("/api/symbols/005930/micro-events?date=20261125").await;
+    assert_eq!(status, 200);
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["executedQty"], 5);
+    assert_eq!(events[1]["executedQty"], 5);
+}
+
+#[tokio::test]
+async fn micro_events_store_resets_detector_across_complete_json_gaps() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hoga = tmp.path().join("hoga");
+    let past = KstDate::parse_yyyymmdd("20261120").unwrap();
+    let today = KstDate::parse_yyyymmdd("20261125").unwrap();
+    let now = kst(today, 10, 0, 0);
+
+    write_complete_with_gaps(
+        &hoga,
+        "20261120",
+        json!([{"from_ms": at_ms(past, 9, 5, 10), "to_ms": at_ms(past, 9, 6, 0)}]),
+    );
+    write_parquet(
+        &hoga,
+        "20261120",
+        "0D",
+        "005930_AL",
+        &[
+            book_sql("005930_AL", at_ms(past, 9, 5, 0), 5_000, 2_000),
+            book_sql("005930_AL", at_ms(past, 9, 6, 1), 100, 2_000),
+            book_sql("005930_AL", at_ms(past, 9, 6, 5), 4_000, 2_000),
+            book_sql("005930_AL", at_ms(past, 9, 6, 7), 100, 2_000),
+        ],
+    );
+
+    let h = Harness::start(now, Some(hoga), None).await;
+    let (status, body) = h.get("/api/symbols/005930/micro-events?date=20261120").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["source"], "store");
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["recvMs"], at_ms(past, 9, 6, 7));
+    assert_eq!(events[0]["cancelledOrAbsorbedQty"], 3900);
+}
+
+#[tokio::test]
+async fn micro_events_corrupt_complete_json_falls_back_to_today_me_flow() {
+    let tmp = tempfile::tempdir().unwrap();
+    let hoga = tmp.path().join("hoga");
+    let shared = hoga.join("shared");
+    let today = KstDate::parse_yyyymmdd("20261125").unwrap();
+    let now = kst(today, 10, 0, 0);
+
+    let corrupt_dir = hoga.join("store").join("20261125");
+    std::fs::create_dir_all(&corrupt_dir).unwrap();
+    std::fs::write(corrupt_dir.join("complete.json"), "{broken").unwrap();
+
+    let path = flow_path(&shared, "20261125", "ME", "005930", "k1");
+    let desc = FlowDescription::new("ME", "005930", "20261125", "k1", &[1, 2, 3, 4, 5, 6, 7]);
+    FlowWriter::open(&path, desc)
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_ms(today, 9, 15, 0),
+            values: vec![
+                Some("S".into()),
+                Some("A".into()),
+                Some("70100".into()),
+                Some("4000".into()),
+                Some("5000".into()),
+                Some("9000".into()),
+                Some("444".into()),
+            ],
+        }])
+        .unwrap();
+
+    let h = Harness::start(now, Some(hoga), Some(shared)).await;
+    let (status, body) = h.get("/api/symbols/005930/micro-events?date=20261125").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["source"], "flow");
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["executedQty"], 444);
 }

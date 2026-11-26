@@ -20,7 +20,7 @@ const EMPTY_STATE: MicroFeedState = { cuesByPrice: EMPTY_CUES, ofi: null };
 function levelsOf(levels: FeedBook["asks"]): MicroBookLevel[] {
   const out: MicroBookLevel[] = [];
   for (const level of levels) {
-    if (level !== null && level.price > 0) {
+    if (level !== null && level.price > 0 && level.qty > 0) {
       out.push({ priceWon: Math.round(level.price), qty: level.qty });
     }
   }
@@ -48,6 +48,8 @@ export function useMicroFeed(code: SymbolCode, venue: Venue, enabled: boolean): 
 
     let active = true;
     let serverMicroActive = false;
+    let pinnedBookSub: string | null = null;
+    let pinnedTradeSub: string | null = null;
     const fallback = new ClientMicroDetector();
     const abort = new AbortController();
 
@@ -69,17 +71,28 @@ export function useMicroFeed(code: SymbolCode, venue: Venue, enabled: boolean): 
         fold((prev) => ({ ...prev, ofi: message.ofi }));
       } else if (message.type === "resync") {
         serverMicroActive = false;
+        pinnedBookSub = null;
+        pinnedTradeSub = null;
         fallback.reset();
       }
     });
 
-    const stopTap = marketSocket.onFeedTap((request, event) => {
+    const stopTap = marketSocket.onFeedTap((request, event, sub) => {
       if (!active || serverMicroActive || request.symbol !== code) return;
+      const requestVenue = request.venue ?? "combined";
+      if (requestVenue !== venue) return;
       if (request.kind === "trades" && event.type === "feed_trades") {
+        if (pinnedTradeSub !== null && pinnedTradeSub !== sub && marketSocket.hasFeedSub(pinnedTradeSub)) return;
+        pinnedTradeSub = sub;
         for (const trade of event.trades) {
           fallback.onTrade(trade.t * 1000, Math.round(trade.price), trade.qty);
         }
       } else if (request.kind === "book" && event.type === "feed_book") {
+        if (pinnedBookSub !== null && pinnedBookSub !== sub) {
+          if (marketSocket.hasFeedSub(pinnedBookSub)) return;
+          fallback.reset();
+        }
+        pinnedBookSub = sub;
         const recvMs = event.book.t * 1000;
         const { events, ofi } = fallback.onBook(recvMs, levelsOf(event.book.asks), levelsOf(event.book.bids));
         fold((prev) => ({

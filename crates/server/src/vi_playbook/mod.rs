@@ -627,10 +627,10 @@ mod tests {
             recv_ms: 0,
             hhmmss,
             price_won,
-            change_won: 0,
+            change_won: Some(0),
             change_pct: None,
             expected_qty,
-            cumulative_qty: 0,
+            delta_qty: 0,
             change_sign: None,
         }
     }
@@ -641,6 +641,7 @@ mod tests {
             hhmmss,
             price_won,
             signed_qty: 10,
+            side: Some(crate::market_source::stream::TradeSide::Buy),
             instant_value_thousand_won: None,
             exchange: None,
         }
