@@ -7,7 +7,7 @@ import { WINDOW_KIND_LIST, WINDOW_KINDS, type WindowKind } from "../../layout/ki
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import type { CommandIcon, SearchCommand } from "../commands/registry";
-import { BookIcon, BrokersIcon, CameraIcon, ChartIcon, CopyIcon, EtfIcon, FunnelIcon, GearIcon, HeatmapIcon, IndicatorIcon, KeyboardIcon, ListIcon, LogScaleIcon, MarketIcon, OrderIcon, PreMarketIcon, ProgramIcon, RankingIcon, TradesIcon, UndoIcon, WorkspaceIcon } from "../icons";
+import { BookIcon, BrokersIcon, CameraIcon, ChartIcon, ClockIcon, CopyIcon, EtfIcon, FunnelIcon, GearIcon, HeatmapIcon, IndicatorIcon, KeyboardIcon, ListIcon, LogScaleIcon, MarketIcon, OrderIcon, PreMarketIcon, ProgramIcon, RankingIcon, TradesIcon, UndoIcon, WorkspaceIcon } from "../icons";
 import { RAIL_PAGES } from "../page-rail/pages";
 import { CHART_LIMIT_REASON, WINDOW_LIMIT_REASON, addWindow, workspaceRoom } from "../workspace/manage";
 import { openIndicatorCommand } from "../indicator-command/open";
@@ -45,7 +45,7 @@ const WINDOW_ICONS: Record<WindowKind, CommandIcon> = {
   book: BookIcon, program: ProgramIcon, brokers: BrokersIcon, order: OrderIcon, ranking: RankingIcon, premarket: PreMarketIcon,
 };
 
-const PAGE_ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon } as const;
+const PAGE_ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon, replay: ClockIcon } as const;
 
 const addWindowCommands = (): readonly SearchCommand[] => WINDOW_KIND_LIST.map((kind): SearchCommand => ({
   id: `add-window-${kind}`,

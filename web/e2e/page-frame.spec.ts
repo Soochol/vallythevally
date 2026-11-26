@@ -5,7 +5,7 @@ import { cell, expect, test, withFirstChart } from "./harness";
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 900 } });
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } as const;
-const PAGES = [["시장 종합", "/market"], ["히트맵", "/heatmap"], ["ETF", "/etf"]] as const;
+const PAGES = [["시장 종합", "/market"], ["히트맵", "/heatmap"], ["ETF", "/etf"], ["호가 복기", "/replay"]] as const;
 const bar = (page: Page) => page.getByRole("toolbar", { name: "페이지 도구 막대" });
 
 for (const [label, path] of PAGES) {
@@ -74,7 +74,7 @@ test.describe("390×844", () => {
     await expect(page.getByRole("main", { name: "시장 종합", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "시장 종합", exact: true }).click();
     const menu = page.getByRole("menu", { name: "페이지 이동" });
-    await expect(menu.getByRole("menuitemradio")).toHaveText(["작업 영역", "시장 종합", "히트맵", "ETF"]);
+    await expect(menu.getByRole("menuitemradio")).toHaveText(["작업 영역", "시장 종합", "히트맵", "ETF", "호가 복기"]);
     await expect(menu.getByRole("menuitemradio", { name: "시장 종합" })).toHaveAttribute("aria-checked", "true");
     await menu.getByRole("menuitemradio", { name: "히트맵" }).click();
     await expect(page).toHaveURL(/\/heatmap$/);

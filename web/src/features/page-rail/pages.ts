@@ -1,4 +1,4 @@
-export type PageId = "workspace" | "home" | "market" | "heatmap" | "etf";
+export type PageId = "workspace" | "home" | "market" | "heatmap" | "etf" | "replay";
 
 export interface PageEntry {
   id: PageId;
@@ -11,6 +11,7 @@ export const RAIL_PAGES = [
   { id: "market", path: "/market", label: "시장 종합" },
   { id: "heatmap", path: "/heatmap", label: "히트맵" },
   { id: "etf", path: "/etf", label: "ETF" },
+  { id: "replay", path: "/replay", label: "호가 복기" },
 ] as const satisfies readonly PageEntry[];
 
 export const HOME_PAGE = { id: "home", path: "/home", label: "랜딩" } as const satisfies PageEntry;
@@ -26,6 +27,6 @@ export function pageOfPath(pathname: string): PageId | null {
 
 export const pathOfPage = (id: PageId): string => ALL_PAGES.find((page) => page.id === id)!.path;
 
-export type ContentPageId = "market" | "heatmap" | "etf";
+export type ContentPageId = "market" | "heatmap" | "etf" | "replay";
 
-export const isContentPage = (id: PageId): id is ContentPageId => id === "market" || id === "heatmap" || id === "etf";
+export const isContentPage = (id: PageId): id is ContentPageId => id === "market" || id === "heatmap" || id === "etf" || id === "replay";
