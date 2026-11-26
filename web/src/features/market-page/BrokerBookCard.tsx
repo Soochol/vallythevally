@@ -140,7 +140,7 @@ export function BrokerBookCard({ scope, enabled }: { scope: MarketOverviewScope;
     <CardShell title="창구·호가 압력" card="broker-book" note={`${scopeLabel(scope)} 기준 · 총 호가 잔량 · 외국인·프로그램 상위`}>
       <Loaded query={query} label="창구·호가 압력" skeleton={PRO_SKELETON}>
         {(card) => (
-          <PartView part={card.brokerBook}>
+          <PartView part={card.brokerBook} onRetry={() => void query.refetch()}>
             {(book) => <BrokerBookBody book={book} />}
           </PartView>
         )}

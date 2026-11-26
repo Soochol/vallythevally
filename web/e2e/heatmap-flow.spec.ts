@@ -25,7 +25,7 @@ test("흐름 비교로 바꾸면 테마마다 선이 있고 주소에 보기가 
   await expect(main(page).getByRole("tab", { name: "흐름 비교" })).toHaveAttribute("aria-selected", "true");
   await expect(line(page)).toHaveCount(2);
 
-  await main(page).getByRole("tab", { name: "보드" }).click();
+  await main(page).getByRole("tab", { name: "히트맵" }).click();
   await expect(main(page).getByRole("region", { name: "반도체 지도" })).toBeVisible();
   await expect(page).not.toHaveURL(/view=/);
 });

@@ -785,3 +785,25 @@ fn attribution_rejects_non_finite_and_invalid_index_inputs() {
     assert!(attribution_of(Market::Kospi, 2_500.0, f64::INFINITY, &refs, &shares, &names).is_none());
     assert!(attribution_of(Market::Kospi, 2_500.0, -100.0, &refs, &shares, &names).is_none());
 }
+
+#[tokio::test]
+async fn daily_bars_backfill_histogram_when_combined_snapshot_is_missing() {
+    let bar_last = day(2026, 11, 6);
+    let today = day(2026, 11, 9);
+    let days = trading_days_ending(bar_last, 20);
+    let listed = vec![
+        listing("005930", "삼성전자", Market::Kospi, 2_000_000, vec![]),
+        listing("000660", "SK하이닉스", Market::Kospi, 1_000_000, vec![]),
+    ];
+    let mut up = vec![100u64; 20];
+    up[19] = 104;
+    let mut down = vec![100u64; 20];
+    down[19] = 97;
+    let h = Harness::start(at(today, 10, 0, 0), listed, vec![bar_series("005930", &days, &up), bar_series("000660", &days, &down)]).await;
+
+    let (status, body) = h.get("/api/market-overview/derived?scope=kospi").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["histogram"]["status"], "ok");
+    let total: u64 = body["histogram"]["value"].as_array().unwrap().iter().map(|b| b["count"].as_u64().unwrap()).sum();
+    assert_eq!(total, 2);
+}

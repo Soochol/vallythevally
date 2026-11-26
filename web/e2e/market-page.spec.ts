@@ -209,6 +209,8 @@ test("프로 인텔리전스 한 구역만 실패해도 나머지 프로 카드�
   });
   await page.goto("/market");
   await expect(card(page, "창구·호가 압력").getByRole("alert")).toContainText("호가 압력 자료가 비어 있습니다");
+  await expect(card(page, "창구·호가 압력").locator('[data-kind="not-prepared"]')).toBeVisible();
+  await expect(card(page, "창구·호가 압력").getByRole("button", { name: "다시 확인" })).toBeVisible();
   await expect(card(page, "로테이션 RRG").locator(".mk-rrg-trail")).toHaveCount(4);
   await expect(card(page, "장중 세션 DNA").locator(".mk-dna-window")).toHaveCount(6);
   await expect(card(page, "핵심 공시 레이더").locator(".mk-disc-item")).toHaveCount(4);
@@ -314,14 +316,31 @@ const rightEdgeOfText = (page: Page, selector: string) =>
 test.describe("1440×900 격자", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test("같은 줄의 수급·업종, 거래대금·종목, 기여도·추세 카드는 아래 끝이 같다", async ({ page }) => {
+  test("같은 줄의 거래대금·종목, 기여도·추세 카드는 아래 끝이 같고 업종 지도·RRG는 전체 폭으로 크게 보인다", async ({ page }) => {
     await page.goto("/market");
+    const index = card(page, "지수·폭");
     const flow = card(page, "누가 사고 파나");
     const sector = card(page, "업종 지도");
+    const rrg = card(page, "로테이션 RRG");
     await expect(flow.getByRole("img", { name: "장중 누적선" })).toBeVisible();
     await expect(sector.locator(".mk-tile").first()).toBeVisible();
-    const [flowBox, sectorBox] = [await flow.boundingBox(), await sector.boundingBox()];
-    expect(flowBox!.y + flowBox!.height).toBeCloseTo(sectorBox!.y + sectorBox!.height, 0);
+    await expect(rrg.locator(".mk-rrg-svg")).toBeVisible();
+    const [indexBox, flowBox, sectorBox, rrgBox] = [
+      await index.boundingBox(),
+      await flow.boundingBox(),
+      await sector.boundingBox(),
+      await rrg.boundingBox(),
+    ];
+    expect(flowBox!.width).toBeCloseTo(indexBox!.width, 0);
+    expect(sectorBox!.width).toBeCloseTo(indexBox!.width, 0);
+    expect(rrgBox!.width).toBeCloseTo(indexBox!.width, 0);
+    const mapBox = (await sector.locator(".mk-map").boundingBox())!;
+    expect(mapBox.height).toBeGreaterThanOrEqual(440);
+    const radarBox = (await index.locator(".mk-radar-svg").boundingBox())!;
+    expect(radarBox.width).toBeGreaterThanOrEqual(200);
+    await expect(index.locator(".mk-radar-vlabel")).toHaveCount(5);
+    const rrgSvgBox = (await rrg.locator(".mk-rrg-svg").boundingBox())!;
+    expect(rrgSvgBox.height).toBeGreaterThanOrEqual(440);
     const [turnoverBox, stocksBox] = [await card(page, "거래대금 추이").boundingBox(), await card(page, "종목").boundingBox()];
     expect(turnoverBox!.y + turnoverBox!.height).toBeCloseTo(stocksBox!.y + stocksBox!.height, 0);
     const [attrBox, maBox] = [await card(page, "지수 기여도").boundingBox(), await card(page, "시장 추세 체력").boundingBox()];
