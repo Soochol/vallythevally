@@ -1,10 +1,10 @@
 import { Link } from "react-router";
-import { EtfIcon, HeatmapIcon, KeyboardIcon, MarketIcon, WorkspaceIcon } from "../icons";
+import { ClockIcon, EtfIcon, HeatmapIcon, KeyboardIcon, MarketIcon, WorkspaceIcon } from "../icons";
 import { useSelectionStore } from "../../stores/selection";
 import { RAIL_PAGES, type PageId } from "./pages";
 import "./pageRail.css";
 
-const ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon } as const;
+const ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon, replay: ClockIcon } as const;
 
 export function PageRail({ page }: { page: PageId }) {
   return (

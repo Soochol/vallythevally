@@ -7,6 +7,7 @@ test("주소가 페이지로 풀리고 끝의 빗금과 query는 무시한다", 
   expect(pageOfPath("/market")).toBe("market");
   expect(pageOfPath("/heatmap/")).toBe("heatmap");
   expect(pageOfPath("/etf")).toBe("etf");
+  expect(pageOfPath("/replay")).toBe("replay");
 });
 
 test("모르는 주소와 수집기 주소는 페이지가 아니다", () => {
