@@ -136,3 +136,28 @@ test("통합 표시와 스냅샷 안내 문구가 없다", async ({ page, scenar
   await expect(window_(page)).not.toContainText("받은 스냅샷만");
   await expect(window_(page).getByRole("slider")).toHaveCount(0);
 });
+
+test("기본 보기는 매도·매수 상위 5개 표와 외국계 순매수를 보이고 새로고침 뒤에도 기억한다", async ({ page, scenario }) => {
+  await openWithThree(page, scenario);
+  send(scenario, FOREIGN);
+  const viewGroup = window_(page).getByRole("group", { name: "보기" });
+  await expect(viewGroup.getByRole("button")).toHaveText(["입체", "거래원", "기본"]);
+  await viewGroup.getByRole("button", { name: "기본", exact: true }).click();
+
+  await expect(window_(page).getByTestId("broker-table")).toBeVisible();
+  await expect(window_(page).getByTestId("broker-table-row")).toHaveCount(5);
+  await expect(window_(page).getByTestId("broker-card")).toHaveCount(0);
+  await expect(window_(page).getByRole("group", { name: "카드 모양" })).toHaveCount(0);
+  await expect(window_(page).getByTestId("broker-sell-name").first()).toHaveText("삼성");
+  await expect(window_(page).getByTestId("broker-sell-qty").first()).toHaveText("130");
+  await expect(window_(page).getByTestId("broker-buy-name").first()).toHaveText("키움");
+  await expect(window_(page).getByTestId("broker-buy-qty").first()).toHaveText("700");
+  await expect(window_(page).getByTestId("broker-table-totals")).toContainText("630");
+  await expect(window_(page).getByTestId("broker-table-totals")).toContainText("950");
+  await expect(window_(page).getByTestId("broker-table-foreign")).toContainText("+250");
+  await expect(window_(page).getByTestId("broker-table-stamp")).toContainText("09:33:00");
+
+  await pollSaved(() => savedBrokers(scenario)).toMatchObject({ kind: "brokers", view: "table" });
+  await page.reload();
+  await expect(window_(page).getByRole("group", { name: "보기" }).getByRole("button", { name: "기본", exact: true })).toHaveAttribute("aria-pressed", "true");
+});

@@ -6,6 +6,7 @@ import type { BrokerCards, BrokerView } from "../../stores/layout";
 import { BoardView } from "../brokers/BoardView";
 import { DetailTable } from "../brokers/DetailTable";
 import { ListView } from "../brokers/ListView";
+import { TableView } from "../brokers/TableView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "../brokers/board";
 import { gapContaining } from "../brokers/chartSync";
 import type { BrokerDayResult } from "../brokers/useBrokerDay";
@@ -18,12 +19,10 @@ import {
   formatSignedQty,
   formatWonCompact,
 } from "./replayModel";
-import { ReplayBrokerTable } from "./ReplayBrokerTable";
 import type { ReplayPaperEngine } from "./replayPaperEngine";
 
 type RightBottomPane = "brokers" | "journal";
 type JournalTab = "fills" | "open" | "stats";
-type ReplayBrokerView = BrokerView | "table";
 
 interface Props {
   readonly engine: ReplayEngine;
@@ -75,7 +74,7 @@ export function ReplayTapeAndBrokers({
   const [bottomPane, setBottomPane] = useState<RightBottomPane>("brokers");
   const [journalTab, setJournalTab] = useState<JournalTab>("fills");
   const [paperTick, setPaperTick] = useState(0);
-  const [brokerView, setBrokerView] = useState<ReplayBrokerView>("board");
+  const [brokerView, setBrokerView] = useState<BrokerView>("board");
   const [brokerCards, setBrokerCards] = useState<BrokerCards>("bars");
   const [selectedBroker, setSelectedBroker] = useState<string | null>(null);
   const [hoverBrokerCursor, setHoverBrokerCursor] = useState<UnixSeconds | null>(null);
@@ -384,7 +383,7 @@ export function ReplayTapeAndBrokers({
           )}
 
           {showContent && brokerView === "table" && (
-            <ReplayBrokerTable snapshots={grid.snapshots} cursor={effectiveCursor} />
+            <TableView snapshots={grid.snapshots} cursor={effectiveCursor} testIdPrefix="replay-broker" />
           )}
         </div>
       ) : (
