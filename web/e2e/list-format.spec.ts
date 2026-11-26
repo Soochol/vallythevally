@@ -81,14 +81,14 @@ test("두 목록의 줄은 같은 글자 크기·굵기·배지·높이·열 폭
   const watchedName = watchRow(page, "005930").locator("b");
   const resultName = rowOf(page, rows[0]!.symbol).locator("b");
   const names = [await look(watchedName), await look(resultName)];
-  for (const name of names) expect([name.fontSize, name.fontWeight]).toEqual(["14px", "600"]);
+  for (const name of names) expect([name.fontSize, name.fontWeight]).toEqual(["13px", "600"]);
   expect(names[0]!.color).toBe(names[1]!.color);
 
   const watchPrice = watchRow(page, "005930").locator("[data-main] > span").nth(1);
   const resultPrice = rowOf(page, rows[0]!.symbol).locator("td").nth(1).locator("span").first();
   const prices = [await look(watchPrice), await look(resultPrice)];
-  expect(prices[0]!.fontSize).toBe("14px");
-  expect(prices[1]!.fontSize).toBe("14px");
+  expect(prices[0]!.fontSize).toBe("13px");
+  expect(prices[1]!.fontSize).toBe("13px");
   expect(prices[0]!.width + COLUMN_GAP).toBe((await look(rowOf(page, rows[0]!.symbol).locator("td").nth(1))).width);
 
   const watchRates = [watchRow(page, "005930"), watchRow(page, "000660"), watchRow(page, "035420")].map((r) => r.locator("[data-main] > span").nth(2));
@@ -98,7 +98,7 @@ test("두 목록의 줄은 같은 글자 크기·굵기·배지·높이·열 폭
     const { width: listedWidth, ...listed } = await look(resultRates[i]!);
     const { width: watchedWidth, ...same } = watched;
     expect({ direction, ...listed }).toEqual({ direction, ...same });
-    expect([watched.fontSize, watched.fontWeight]).toEqual(["12px", direction === "보합" ? "400" : "600"]);
+    expect([watched.fontSize, watched.fontWeight]).toEqual(["11px", direction === "보합" ? "500" : "600"]);
     expect(watchedWidth).toBe(RATE_WIDTH);
     expect(listedWidth).toBe(RATE_WIDTH + COLUMN_GAP - SCREENER_CELL_PAD_LEFT);
   }
@@ -300,9 +300,9 @@ test("보는 종목 줄 위의 상승·하락 배지는 글자와 바탕의 대�
 test("상승 배지에는 ▲, 하락 배지에는 ▼가 있고 보합 배지에는 방향 표시가 없다", async ({ scenario, screener, page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const rows = await showBoth(scenario, screener, page);
-  await expect(rateCell(page, "005930")).toContainText("▲ 1.71%");
-  await expect(rateCell(page, "000660")).toContainText("▼ 1.34%");
+  await expect(rateCell(page, "005930")).toContainText("▲1.71%");
+  await expect(rateCell(page, "000660")).toContainText("▼1.34%");
   await expect(rateCell(page, "035420")).not.toContainText(/[▲▼]/);
-  await expect(rowOf(page, rows[0]!.symbol).locator("td").nth(2)).toContainText("▲ 3.21%");
-  await expect(rowOf(page, rows[1]!.symbol).locator("td").nth(2)).toContainText("▼ 2.50%");
+  await expect(rowOf(page, rows[0]!.symbol).locator("td").nth(2)).toContainText("▲3.21%");
+  await expect(rowOf(page, rows[1]!.symbol).locator("td").nth(2)).toContainText("▼2.50%");
 });
