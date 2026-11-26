@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Market } from "../../api/generated/Market";
 import type { MarketOverviewBreadth } from "../../api/generated/MarketOverviewBreadth";
 import type { MarketOverviewIndex } from "../../api/generated/MarketOverviewIndex";
@@ -6,7 +7,7 @@ import { useMarketIndex } from "../../api/marketOverview";
 import { useOverviewOn } from "../status/marketFeed";
 import { CardShell, FeedUnavailable, Loaded, PartView } from "./CardPart";
 import { breadthShares, formatOptionalCount } from "./breadth";
-import { diagnoseMarket, type HealthAxis } from "./marketDiagnosis";
+import { diagnoseMarket, type HealthAxis, type MarketDiagnosisTone } from "./marketDiagnosis";
 import { formatEok, formatLevel, pointChangeOf, signedPoints, signedRate, toneOf } from "./marketFormat";
 
 function BreadthBar({ breadth }: { breadth: MarketOverviewBreadth }) {
@@ -62,16 +63,31 @@ function MarketTilePlaceholder() {
   );
 }
 
-const RADAR_SIZE = 112;
-const RADAR_CENTER = RADAR_SIZE / 2;
-const RADAR_RADIUS = 38;
-const RADAR_RINGS = [0.33, 0.66, 1] as const;
+const RADAR_W = 260;
+const RADAR_H = 226;
+const RADAR_CX = 130;
+const RADAR_CY = 112;
+const RADAR_RADIUS = 74;
+const RADAR_RINGS = [
+  { ratio: 1, kind: "outer" },
+  { ratio: 0.75, kind: "mid" },
+  { ratio: 0.5, kind: "inner" },
+  { ratio: 0.25, kind: "mid" },
+] as const;
+
+const VERTEX_LABEL_OFFSETS = [
+  { dx: 0, dy: -16, anchor: "middle" },
+  { dx: 12, dy: -2, anchor: "start" },
+  { dx: 10, dy: 14, anchor: "start" },
+  { dx: -10, dy: 14, anchor: "end" },
+  { dx: -12, dy: -2, anchor: "end" },
+] as const;
 
 function radarPoint(index: number, total: number, ratio: number): [number, number] {
   const angle = -Math.PI / 2 + (index * 2 * Math.PI) / total;
   return [
-    RADAR_CENTER + Math.cos(angle) * RADAR_RADIUS * ratio,
-    RADAR_CENTER + Math.sin(angle) * RADAR_RADIUS * ratio,
+    RADAR_CX + Math.cos(angle) * RADAR_RADIUS * ratio,
+    RADAR_CY + Math.sin(angle) * RADAR_RADIUS * ratio,
   ];
 }
 
@@ -84,40 +100,98 @@ function polygonPoints(values: readonly number[]): string {
     .join(" ");
 }
 
-function HealthRadar({ axes, overallScore }: { axes: readonly HealthAxis[]; overallScore: number }) {
+function HealthRadar({
+  axes,
+  overallScore,
+  tone,
+  activeAxis,
+  onHoverAxis,
+}: {
+  axes: readonly HealthAxis[];
+  overallScore: number;
+  tone: MarketDiagnosisTone;
+  activeAxis: HealthAxis["id"] | null;
+  onHoverAxis: (id: HealthAxis["id"] | null) => void;
+}) {
   const summaryLabel = axes.map((axis) => `${axis.label} ${axis.score}점`).join(", ");
   return (
-    <div className="mk-radar-wrap">
+    <div className="mk-radar-stage">
       <svg
         className="mk-radar-svg"
-        viewBox={`0 0 ${RADAR_SIZE} ${RADAR_SIZE}`}
+        viewBox={`0 0 ${RADAR_W} ${RADAR_H}`}
         role="img"
         aria-label={`시장 체력 5축 요약 종합 ${overallScore}점 (${summaryLabel})`}
       >
         {RADAR_RINGS.map((ring) => (
           <polygon
-            key={ring}
+            key={ring.ratio}
             className="mk-radar-ring"
-            points={polygonPoints(axes.map(() => ring))}
+            data-ring={ring.kind}
+            points={polygonPoints(axes.map(() => ring.ratio))}
           />
         ))}
         {axes.map((axis, index) => {
           const [x, y] = radarPoint(index, axes.length, 1);
-          return <line key={axis.id} className="mk-radar-axis" x1={RADAR_CENTER} y1={RADAR_CENTER} x2={x} y2={y} />;
+          return (
+            <line
+              key={axis.id}
+              className="mk-radar-axis"
+              data-active={activeAxis === axis.id ? "true" : "false"}
+              x1={RADAR_CX}
+              y1={RADAR_CY}
+              x2={x}
+              y2={y}
+            />
+          );
         })}
+        <text className="mk-radar-tick" x={RADAR_CX + 4} y={RADAR_CY - RADAR_RADIUS * 0.5 + 3}>50</text>
+        <text className="mk-radar-tick" x={RADAR_CX + 4} y={RADAR_CY - RADAR_RADIUS + 10}>100</text>
         <polygon
           className="mk-radar-shape"
+          data-tone={tone}
           points={polygonPoints(axes.map((axis) => axis.score / 100))}
         />
+        {axes.map((axis, index) => {
+          const [px, py] = radarPoint(index, axes.length, axis.score / 100);
+          const isActive = activeAxis === axis.id;
+          return (
+            <circle
+              key={`dot-${axis.id}`}
+              className="mk-radar-dot"
+              data-tone={tone}
+              data-active={isActive ? "true" : "false"}
+              cx={px}
+              cy={py}
+              r={isActive ? 5.5 : 4}
+              onMouseEnter={() => onHoverAxis(axis.id)}
+              onMouseLeave={() => onHoverAxis(null)}
+            />
+          );
+        })}
+        {axes.map((axis, index) => {
+          const [vx, vy] = radarPoint(index, axes.length, 1);
+          const offset = VERTEX_LABEL_OFFSETS[index] ?? VERTEX_LABEL_OFFSETS[0];
+          const lx = vx + offset.dx;
+          const ly = vy + offset.dy;
+          const isActive = activeAxis === axis.id;
+          return (
+            <g
+              key={`lbl-${axis.id}`}
+              className="mk-radar-vertex"
+              data-active={isActive ? "true" : "false"}
+              onMouseEnter={() => onHoverAxis(axis.id)}
+              onMouseLeave={() => onHoverAxis(null)}
+            >
+              <text className="mk-radar-vlabel" x={lx} y={ly} textAnchor={offset.anchor}>
+                {axis.label}
+              </text>
+              <text className="mk-radar-vscore mk-num" data-tone={tone} x={lx} y={ly + 13} textAnchor={offset.anchor}>
+                {axis.score}
+              </text>
+            </g>
+          );
+        })}
       </svg>
-      <ul className="mk-radar-scores" aria-label="5축 체력 점수">
-        {axes.map((axis) => (
-          <li key={axis.id} data-axis={axis.id}>
-            <span>{axis.label}</span>
-            <strong className="mk-num">{axis.score}</strong>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
@@ -194,6 +268,7 @@ export function IndexCard({
   const on = useOverviewOn("index");
   const kospiQuery = useMarketIndex("kospi", { enabled: enabled && on });
   const kosdaqQuery = useMarketIndex("kosdaq", { enabled: enabled && on });
+  const [activeAxis, setActiveAxis] = useState<HealthAxis["id"] | null>(null);
 
   const kospiIndex = kospiQuery.data?.index.status === "ok" ? kospiQuery.data.index.value : null;
   const kosdaqIndex = kosdaqQuery.data?.index.status === "ok" ? kosdaqQuery.data.index.value : null;
@@ -222,7 +297,7 @@ export function IndexCard({
                 skeleton={{ shape: "line", minHeight: "var(--mk-skeleton-index-tile)", placeholder: <MarketTilePlaceholder /> }}
               >
                 {(card) => (
-                  <PartView part={card.index}>
+                  <PartView part={card.index} onRetry={() => void kospiQuery.refetch()}>
                     {(index) => (
                       <MarketCommandTile
                         market="kospi"
@@ -242,7 +317,7 @@ export function IndexCard({
                 skeleton={{ shape: "line", minHeight: "var(--mk-skeleton-index-tile)", placeholder: <MarketTilePlaceholder /> }}
               >
                 {(card) => (
-                  <PartView part={card.index}>
+                  <PartView part={card.index} onRetry={() => void kosdaqQuery.refetch()}>
                     {(index) => (
                       <MarketCommandTile
                         market="kosdaq"
@@ -268,11 +343,36 @@ export function IndexCard({
                     <span className="mk-diagnosis-badge" data-tone={diagnosis.tone} data-kind={diagnosis.kind}>
                       {diagnosis.badge}
                     </span>
-                    <span className="mk-diagnosis-score mk-num">체력 {diagnosis.overallScore}점</span>
+                    <span className="mk-diagnosis-score mk-num" data-tone={diagnosis.tone}>
+                      체력 <strong>{diagnosis.overallScore}</strong>점
+                    </span>
                   </div>
                   <p className="mk-diagnosis-line">{diagnosis.summary}</p>
+                  <ul className="mk-radar-scores" aria-label="5축 체력 점수">
+                    {diagnosis.axes.map((axis) => (
+                      <li
+                        key={axis.id}
+                        data-axis={axis.id}
+                        data-active={activeAxis === axis.id ? "true" : "false"}
+                        onMouseEnter={() => setActiveAxis(axis.id)}
+                        onMouseLeave={() => setActiveAxis(null)}
+                      >
+                        <span className="mk-radar-axis-name">{axis.label}</span>
+                        <span className="mk-radar-bar" aria-hidden="true">
+                          <i data-tone={diagnosis.tone} style={{ width: `${axis.score}%` }} />
+                        </span>
+                        <strong className="mk-num">{axis.score}</strong>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <HealthRadar axes={diagnosis.axes} overallScore={diagnosis.overallScore} />
+                <HealthRadar
+                  axes={diagnosis.axes}
+                  overallScore={diagnosis.overallScore}
+                  tone={diagnosis.tone}
+                  activeAxis={activeAxis}
+                  onHoverAxis={setActiveAxis}
+                />
               </>
             )}
           </div>

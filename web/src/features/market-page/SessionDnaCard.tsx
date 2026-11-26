@@ -6,7 +6,7 @@ import { formatPercent, scopeLabel } from "./derivedFormat";
 import { formatCount, formatEok, signedEok, toneOf } from "./marketFormat";
 import { SESSION_SUBJECTS, sessionBarPercent, sessionMaxAbsEok, venueSplitOf } from "./proFormat";
 
-const PRO_SKELETON = { shape: "chart", minHeight: "var(--mk-skeleton-pro)" } as const;
+const DNA_SKELETON = { shape: "chart", minHeight: "var(--mk-skeleton-dna)" } as const;
 
 function SessionDnaBody({ dna }: { dna: MarketOverviewSessionDna }) {
   const maxAbs = sessionMaxAbsEok(dna.windows);
@@ -106,9 +106,9 @@ export function SessionDnaCard({ scope, enabled }: { scope: MarketOverviewScope;
       card="session-dna"
       note={day === null ? `${scopeLabel(scope)} 기준 · 08:00–20:00 KST` : `${scopeLabel(scope)} · ${day} · 08:00–20:00 KST`}
     >
-      <Loaded query={query} label="장중 세션 DNA" skeleton={PRO_SKELETON}>
+      <Loaded query={query} label="장중 세션 DNA" skeleton={DNA_SKELETON}>
         {(card) => (
-          <PartView part={card.sessionDna}>
+          <PartView part={card.sessionDna} onRetry={() => void query.refetch()}>
             {(dna) => <SessionDnaBody dna={dna} />}
           </PartView>
         )}

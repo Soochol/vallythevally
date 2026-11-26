@@ -67,6 +67,7 @@ export function layoutSectorMap(sectors: readonly SectorTileInput[], width: numb
 export const SECTOR_RATE_RANGE = 3;
 
 export type SectorTileLabel = "full" | "rate" | "none";
+export type SectorTileTier = "xl" | "lg" | "md" | "sm" | "none";
 
 const FULL_MIN_WIDTH_PX = 56;
 const FULL_MIN_HEIGHT_PX = 34;
@@ -76,5 +77,13 @@ const RATE_MIN_HEIGHT_PX = 20;
 export function sectorTileLabel(widthPx: number, heightPx: number): SectorTileLabel {
   if (widthPx >= FULL_MIN_WIDTH_PX && heightPx >= FULL_MIN_HEIGHT_PX) return "full";
   if (widthPx >= RATE_MIN_WIDTH_PX && heightPx >= RATE_MIN_HEIGHT_PX) return "rate";
+  return "none";
+}
+
+export function sectorTileTier(widthPx: number, heightPx: number): SectorTileTier {
+  if (widthPx >= 170 && heightPx >= 110) return "xl";
+  if (widthPx >= 110 && heightPx >= 68) return "lg";
+  if (widthPx >= FULL_MIN_WIDTH_PX && heightPx >= FULL_MIN_HEIGHT_PX) return "md";
+  if (widthPx >= RATE_MIN_WIDTH_PX && heightPx >= RATE_MIN_HEIGHT_PX) return "sm";
   return "none";
 }

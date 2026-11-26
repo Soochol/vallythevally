@@ -90,11 +90,11 @@ export function BreadthXrayCard({ scope, enabled }: { scope: MarketOverviewScope
           <div className="mk-xray-grid">
             <section className="mk-xray-part" aria-label="등락률 9구간 분포">
               <h3>등락률 9구간 분포</h3>
-              <PartView part={card.histogram}>{(buckets) => <HistogramPlot buckets={buckets} />}</PartView>
+              <PartView part={card.histogram} onRetry={() => void query.refetch()}>{(buckets) => <HistogramPlot buckets={buckets} />}</PartView>
             </section>
             <section className="mk-xray-part mk-xray-venue" aria-label="거래소 거래대금 비중">
               <h3>거래소 거래대금 비중 (KRX · NXT)</h3>
-              <PartView part={card.venueShare}>{(share) => <VenueShareView share={share} />}</PartView>
+              <PartView part={card.venueShare} onRetry={() => void query.refetch()}>{(share) => <VenueShareView share={share} />}</PartView>
             </section>
           </div>
         )}

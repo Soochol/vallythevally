@@ -70,7 +70,7 @@ export function PointAttributionCard({ scope, enabled }: { scope: MarketOverview
     >
       <Loaded query={query} label="지수 기여도" skeleton={ATTRIBUTION_SKELETON}>
         {(card) => (
-          <PartView part={card.attribution}>
+          <PartView part={card.attribution} onRetry={() => void query.refetch()}>
             {(value) => {
               const allRows = [...value.topPositive, ...value.topNegative];
               const maxAbs = Math.max(0.01, ...allRows.map((row) => Math.abs(row.points)));
