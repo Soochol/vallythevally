@@ -22,6 +22,7 @@ pub enum CollectorPhase {
 pub enum CollectorKeyRole {
     Collecting,
     Spare,
+    Rest,
     #[serde(other)]
     Unknown,
 }
@@ -58,6 +59,27 @@ pub struct CollectorRest {
     pub finished_jobs: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CollectorTrUsage {
+    pub tr: String,
+    pub sent: u32,
+    pub rate_limited: u32,
+    pub resent: u32,
+    #[ts(type = "number")]
+    pub max_wait_ms: u64,
+    pub max_per_second: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CollectorKeyUsage {
+    #[ts(type = "number")]
+    pub minute_start: i64,
+    pub key_max_per_second: u32,
+    pub trs: Vec<CollectorTrUsage>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct CollectorKey {
@@ -70,6 +92,9 @@ pub struct CollectorKey {
     pub register_failures: u32,
     pub restarts: u32,
     pub rest: CollectorRest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub usage: Option<CollectorKeyUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -196,26 +221,28 @@ pub struct CollectorDisk {
     pub disk: CollectorDiskUsage,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StatusReply {
     pub sent_at: String,
     pub status: CollectorStatus,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Heartbeat {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<String>,
     pub sequence: u64,
     pub phase: CollectorPhase,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonError {
     pub code: String,
     pub message: String,
     pub supported_version: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Reply {
     Status(Box<StatusReply>),
@@ -223,6 +250,13 @@ pub enum Reply {
     Coverage(CollectorCoverage),
     Disk(CollectorDisk),
     Error(DaemonError),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WireReply {
+    pub v: u64,
+    #[serde(flatten)]
+    pub body: Reply,
 }
 
 #[derive(Debug, Clone, PartialEq)]

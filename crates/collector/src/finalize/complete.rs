@@ -1,7 +1,6 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
@@ -150,26 +149,24 @@ pub fn recover_interrupted_swap(data_dir: &Path, date: u32) -> io::Result<()> {
         return Ok(());
     }
     if published.is_dir() {
-        return replaced.iter().try_for_each(fs::remove_dir_all);
-    }
-    if temporary.join(COMPLETE_FILE_NAME).is_file() {
+        replaced.iter().try_for_each(fs::remove_dir_all)?;
+    } else if temporary.join(COMPLETE_FILE_NAME).is_file() {
         fs::rename(&temporary, &published)?;
-        return replaced.iter().try_for_each(fs::remove_dir_all);
+        replaced.iter().try_for_each(fs::remove_dir_all)?;
+    } else {
+        let (newest, older) = replaced.split_last().expect("비어 있지 않다");
+        fs::rename(newest, &published)?;
+        older.iter().try_for_each(fs::remove_dir_all)?;
     }
-    let (newest, older) = replaced.split_last().expect("비어 있지 않다");
-    fs::rename(newest, &published)?;
-    older.iter().try_for_each(fs::remove_dir_all)
+    crate::fs_util::sync_dir(&store_root(data_dir))
+}
+
+pub fn recover_all_interrupted_swaps(data_dir: &Path) -> io::Result<()> {
+    crate::fs_util::recover_interrupted_dir_swaps(&store_root(data_dir), REPLACED_SUFFIX, Some(COMPLETE_FILE_NAME))
 }
 
 pub fn publish_store(data_dir: &Path, date: u32) -> io::Result<()> {
     let published = store_dir(data_dir, date);
     let temporary = temporary_store_dir(data_dir, date);
-    if !published.exists() {
-        return fs::rename(&temporary, &published);
-    }
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_millis());
-    let replaced = store_root(data_dir).join(format!("{date}{REPLACED_SUFFIX}{stamp}"));
-    fs::rename(&published, &replaced)?;
-    fs::rename(&temporary, &published)?;
-    fs::remove_dir_all(&replaced)
+    crate::fs_util::swap_directory(&temporary, &published, &format!("{date}{REPLACED_SUFFIX}"))
 }

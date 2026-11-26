@@ -1,12 +1,47 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use serde_json::{Map, Value};
 use tokio::sync::{mpsc, watch};
+use tokio::time::Instant;
 
 use crate::protocol::{Batch, Command, Event, ProtocolError, Rejection, SessionState};
 
 pub type Incoming = Result<Command, ProtocolError>;
 pub type Commands = mpsc::UnboundedReceiver<Incoming>;
+
+pub struct LoopProgress {
+    origin: Instant,
+    last_ms: AtomicU64,
+}
+
+impl LoopProgress {
+    pub fn new() -> LoopProgress {
+        LoopProgress {
+            origin: Instant::now(),
+            last_ms: AtomicU64::new(0),
+        }
+    }
+
+    pub fn touch(&self) {
+        let now_ms = Instant::now().saturating_duration_since(self.origin).as_millis() as u64;
+        self.last_ms.store(now_ms, Ordering::Release);
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        let now_ms = Instant::now().saturating_duration_since(self.origin).as_millis() as u64;
+        let last_ms = self.last_ms.load(Ordering::Acquire);
+        Duration::from_millis(now_ms.saturating_sub(last_ms))
+    }
+}
+
+impl Default for LoopProgress {
+    fn default() -> LoopProgress {
+        LoopProgress::new()
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct Events {
@@ -69,4 +104,5 @@ pub struct ChildLink {
     pub commands: Commands,
     pub events: Events,
     pub state: watch::Sender<SessionState>,
+    pub progress: Arc<LoopProgress>,
 }

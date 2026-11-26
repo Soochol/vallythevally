@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use arrow_array::{Array, Int64Array, RecordBatch, StringArray};
 use domain::StockCode;
@@ -438,24 +437,15 @@ fn list_book_files(data_dir: &Path, date: u32) -> io::Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+pub fn recover_all_interrupted_quote_swaps(shared_dir: &Path) -> io::Result<()> {
+    let sample = closed_day_dir(shared_dir, "0");
+    let parent = sample.parent().expect("분 호가 폴더에는 부모가 있다");
+    crate::fs_util::recover_interrupted_dir_swaps(parent, REPLACED_SUFFIX, None)
+}
+
 fn publish_closed_day(shared_dir: &Path, date_text: &str, tmp_dir: &Path) -> io::Result<()> {
     let final_dir = closed_day_dir(shared_dir, date_text);
-    match fs::symlink_metadata(&final_dir) {
-        Ok(_) => {
-            let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_millis());
-            let replaced = closed_day_dir(shared_dir, &format!("{date_text}{REPLACED_SUFFIX}{stamp}"));
-            fs::rename(&final_dir, &replaced)?;
-            if let Err(error) = fs::rename(tmp_dir, &final_dir) {
-                let _ = fs::rename(&replaced, &final_dir);
-                return Err(error);
-            }
-            remove_if_exists(&replaced)?;
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::rename(tmp_dir, &final_dir)?;
-        }
-        Err(error) => return Err(error),
-    }
+    crate::fs_util::swap_directory(tmp_dir, &final_dir, &format!("{date_text}{REPLACED_SUFFIX}"))?;
     remove_leftover_replaced(&final_dir, date_text);
     Ok(())
 }

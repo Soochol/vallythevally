@@ -1,4 +1,4 @@
-export type ThemeStyle = "editorial" | "bento" | "glass" | "forest";
+export type ThemeStyle = "editorial" | "bento" | "carbon" | "glass" | "forest";
 export type ThemeMode = "dark" | "light";
 export type ThemeKey = `${ThemeStyle}-${ThemeMode}`;
 
@@ -7,13 +7,15 @@ export interface Theme {
   readonly mode: ThemeMode;
 }
 
-export const THEME_STYLES = ["editorial", "bento", "glass", "forest"] as const satisfies readonly ThemeStyle[];
+export const THEME_STYLES = ["editorial", "bento", "carbon", "glass", "forest"] as const satisfies readonly ThemeStyle[];
 export const THEME_MODES = ["dark", "light"] as const satisfies readonly ThemeMode[];
 export const THEME_KEYS = [
   "editorial-dark",
   "editorial-light",
   "bento-dark",
   "bento-light",
+  "carbon-dark",
+  "carbon-light",
   "glass-dark",
   "glass-light",
   "forest-dark",
@@ -30,6 +32,7 @@ export const DEFAULT_THEME: Theme = { style: DEFAULT_THEME_STYLE, mode: DEFAULT_
 export const THEME_STYLE_OPTIONS = [
   { value: "editorial", label: "에디토리얼" },
   { value: "bento", label: "소프트 벤토" },
+  { value: "carbon", label: "카본 벤토" },
   { value: "glass", label: "플로팅 글래스" },
   { value: "forest", label: "포레스트" },
 ] as const satisfies readonly { value: ThemeStyle; label: string }[];
@@ -44,6 +47,8 @@ const THEME_BY_KEY: Record<ThemeKey, Theme> = {
   "editorial-light": { style: "editorial", mode: "light" },
   "bento-dark": { style: "bento", mode: "dark" },
   "bento-light": { style: "bento", mode: "light" },
+  "carbon-dark": { style: "carbon", mode: "dark" },
+  "carbon-light": { style: "carbon", mode: "light" },
   "glass-dark": { style: "glass", mode: "dark" },
   "glass-light": { style: "glass", mode: "light" },
   "forest-dark": { style: "forest", mode: "dark" },
@@ -54,6 +59,7 @@ const LEGACY_THEME_MAP: Record<string, Theme> = {
   dark: THEME_BY_KEY["editorial-dark"],
   light: THEME_BY_KEY["editorial-light"],
   bento: THEME_BY_KEY["bento-dark"],
+  carbon: THEME_BY_KEY["carbon-dark"],
   glass: THEME_BY_KEY["glass-dark"],
   forest: THEME_BY_KEY["forest-dark"],
 };

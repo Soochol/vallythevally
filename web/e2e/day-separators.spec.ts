@@ -156,6 +156,7 @@ test("지표 패널을 더하면 새 패널에도 날짜 구분선을 긋는다"
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("RSI");
   await dialog.getByRole("option", { name: "RSI 14 추가 후보", exact: true }).click();
+  await dialog.getByRole("button", { name: "RSI 14 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await expect(page.locator("[data-indicator-row]").filter({ hasText: "RSI 14" }).last()).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.chartProbe.chart.panes().length)).toBe(3);

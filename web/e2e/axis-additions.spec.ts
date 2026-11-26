@@ -50,6 +50,7 @@ async function addIndicator(page: Page, label: string, name: string) {
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill(label);
   await dialog.getByRole("option", { name: `${name} 추가 후보`, exact: true }).click();
+  await dialog.getByRole("button", { name: `${name} 추가`, exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
   await expect(page.locator("[data-indicator-row]").filter({ hasText: name }).last()).toBeVisible();
 }

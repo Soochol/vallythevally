@@ -343,3 +343,49 @@ test("다크·라이트 테마 전환과 종목 전환 대화상자가 정상 �
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.getByTestId("replay-ladder")).toBeVisible();
 });
+
+test("가상 매매 시뮬레이션 주문·미체결·체결·되감기 복원과 틱 Δt 고정폭이 동작한다", async ({ page, scenario }) => {
+  seedTickReplay(scenario);
+  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
+
+  await expect(page.getByTestId("replay-page")).toBeVisible();
+  await expect(page.getByTestId("replay-total-ask")).toHaveText("7,600");
+
+  await page.getByTestId("replay-mode-switch").getByRole("button", { name: "틱 단위", exact: true }).click();
+  const dtPill = page.getByTestId("replay-tick-dt");
+  await expect(dtPill).toBeVisible();
+  const dtWidthBefore = (await dtPill.boundingBox())!.width;
+
+  await page.getByRole("button", { name: "+1틱", exact: true }).click();
+  await expect(page.getByTestId("replay-clock")).toHaveText("09:00:10.250");
+  const dtWidthAfter = (await dtPill.boundingBox())!.width;
+  expect(Math.abs(dtWidthAfter - dtWidthBefore)).toBeLessThanOrEqual(0.5);
+
+  const qtyInput = page.getByTestId("replay-sim-qty-input");
+  await qtyInput.fill("10");
+  await page.locator('[data-testid="replay-sim-buy-cell"][data-price="71100"]').click();
+  await expect(page.getByTestId("replay-sim-qty")).toHaveText("10주");
+  await expect(page.getByTestId("replay-sim-avg")).toHaveText("71,100원");
+  await expect(page.getByTestId("replay-sim-avg-dot")).toBeVisible();
+
+  await page.locator('[data-testid="replay-sim-buy-cell"][data-price="70900"]').click();
+  await expect(page.locator('[data-testid="replay-sim-chip"][data-side="buy"][data-price="70900"]')).toHaveText("10");
+
+  await page.getByTestId("replay-tab-journal").click();
+  await expect(page.getByTestId("replay-sim-fill-row")).toHaveCount(1);
+
+  await page.getByTestId("replay-sim-flatten").click();
+  await expect(page.getByTestId("replay-sim-qty")).toHaveText("0주");
+  await expect(page.getByTestId("replay-sim-fill-row")).toHaveCount(2);
+
+  await page.getByRole("button", { name: "-1틱", exact: true }).click();
+  await expect(page.getByTestId("replay-sim-undo-rewind")).toBeVisible();
+  await expect(page.getByTestId("replay-sim-fill-row")).toHaveCount(0);
+
+  await page.getByTestId("replay-sim-undo-rewind").click();
+  await expect(page.getByTestId("replay-sim-fill-row")).toHaveCount(2);
+
+  await page.getByTestId("replay-sim-reset").click();
+  await expect(page.getByTestId("replay-sim-qty")).toHaveText("0주");
+  await expect(page.getByTestId("replay-sim-fill-row")).toHaveCount(0);
+});

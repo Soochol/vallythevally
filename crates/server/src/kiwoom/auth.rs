@@ -209,6 +209,10 @@ impl KiwoomAuth {
         self.lock().issued.as_ref().map(|i| i.expires_at)
     }
 
+    pub fn issued_at(&self) -> Option<KstTime> {
+        self.lock().issued.as_ref().map(|i| i.issued_at)
+    }
+
     pub fn has_credentials(&self) -> bool {
         self.lock().credentials.is_some()
     }

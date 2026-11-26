@@ -818,16 +818,92 @@ async fn a_daemon_started_at_eleven_keeps_the_existing_plan_and_launches_at_once
 
 #[tokio::test(start_paused = true)]
 async fn a_daemon_started_after_the_close_without_a_complete_file_finalizes_first_and_collects_nothing() {
-    let harness = Harness::start(Config { start: at(21, 0, 0), ..Config::default() });
+    let harness = Harness::start_with(Config { start: at(21, 0, 0), ..Config::default() }, |data| {
+        write(&data.join("universe").join(format!("{DATE}.json")), &universe_json(DATE, &MORNING_CODES));
+    });
     harness.until_finalize_finished(1).await;
     assert_eq!(harness.launcher.launched(), 0);
-    assert_eq!(harness.recorder.count("au10001"), 0, "토큰 요청이 없다");
-    assert_eq!(harness.recorder.count("ka10099") + harness.recorder.count("ka20006"), 0);
     assert!(!harness.data().join("plan").join(format!("{DATE}.json")).exists(), "계획을 만들지 않는다");
+    assert!(harness.recorder.count("ka10099") > 0);
+    assert_eq!(harness.recorder.count("ka20006"), 1);
+    assert!(harness.recorder.count("ka10095") > 0);
+    assert!(harness.recorder.count("au10001") > 0);
+    assert!(collector::universe::after_close_path(&harness.data(), DATE).is_file());
+    assert!(collector::turnover::turnover_path(&harness.data(), DATE).is_file());
+    let checked = harness.journal_of("index_checked");
+    assert_eq!(checked.len(), 1);
+    assert_eq!(checked[0]["result"], "agrees");
+    let finalize_at = harness.recorder.times_of("finalize")[0];
+    assert!(harness.recorder.times_of("ka20006")[0] <= finalize_at);
+    assert!(harness.recorder.times_of("au10001").iter().all(|time| *time <= finalize_at));
     assert_eq!(harness.finalizer.runs.lock().unwrap().len(), 1);
     assert!(harness.complete_exists());
-    assert!(harness.journal_of("index_checked").is_empty());
-    assert_eq!(harness.complete()["observation"]["index_check"]["result"], "not_recorded");
+    assert_eq!(harness.complete()["observation"]["index_check"]["result"], "agrees");
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_daemon_restarted_after_close_skips_completed_after_close_work_and_only_finalizes() {
+    let harness = Harness::start_with(Config { start: at(21, 0, 0), ..Config::default() }, |data| {
+        write(&data.join("universe").join(format!("{DATE}.json")), &universe_json(DATE, &MORNING_CODES));
+        write(&collector::universe::after_close_path(data, DATE), r#"{"format_version":1,"date":20261118}"#);
+        write(&collector::turnover::turnover_path(data, DATE), r#"{"format_version":1,"date":20261118,"traded_million_won":{}}"#);
+        write(
+            &journal_path(data, DATE),
+            &format!("{}\n", json!({"v": 1, "at": stamp(at(20, 6, 0)), "event": "index_checked", "result": "agrees", "mismatch": null, "detail": null})),
+        );
+        let root = data.parent().unwrap();
+        let issued_at = at(20, 6, 0).unix();
+        for key in active_keys(root) {
+            let lock = server::instance::InstanceLock::acquire(&key.lock_path).unwrap();
+            let file = server::kiwoom::token_file::TokenFile::new(key.token_path, &lock);
+            let saved = server::kiwoom::token_file::Saved {
+                credential: Some(key.identity.app_key_hash),
+                token: Some(server::kiwoom::token_file::SavedToken {
+                    value: format!("FAKE-TOKEN-postclose-{}", key.identity.name),
+                    expires_dt: "20991231000000".to_owned(),
+                    issued_at,
+                }),
+                last_request_at: issued_at,
+                disconnected: None,
+                auth_block: None,
+            };
+            file.save(&saved).unwrap();
+        }
+    });
+    harness.until_finalize_finished(1).await;
+    assert_eq!(harness.launcher.launched(), 0);
+    assert_eq!(harness.recorder.count("au10001"), 0);
+    assert_eq!(harness.recorder.count("ka10099"), 0);
+    assert_eq!(harness.recorder.count("ka10095"), 0);
+    assert_eq!(harness.recorder.count("ka20006"), 0);
+    assert_eq!(harness.finalizer.runs.lock().unwrap().len(), 1);
+    assert!(harness.complete_exists());
+    assert_eq!(harness.complete()["observation"]["index_check"]["result"], "agrees");
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_daemon_recovers_interrupted_store_and_quote_swaps_on_startup() {
+    let harness = Harness::start_with(Config { start: at(21, 0, 0), ..Config::default() }, |data| {
+        write(&data.join("store").join(DATE.to_string()).join("complete.json"), &complete_json(DATE, json!([])));
+        write(
+            &data.join("store").join("20261116.old-100").join("complete.json"),
+            &complete_json(20261116, json!([])),
+        );
+        write(
+            &data.join("shared").join("quote-minutes").join("20261116.old-100").join("005930.json.gz"),
+            "recovered",
+        );
+    });
+    harness.until(at(21, 1, 0)).await;
+    assert!(harness.data().join("store").join("20261116").join("complete.json").is_file());
+    assert!(!harness.data().join("store").join("20261116.old-100").exists());
+    assert_eq!(
+        std::fs::read_to_string(harness.data().join("shared").join("quote-minutes").join("20261116").join("005930.json.gz")).unwrap(),
+        "recovered",
+    );
+    assert!(!harness.data().join("shared").join("quote-minutes").join("20261116.old-100").exists());
     harness.finish().await;
 }
 

@@ -17,10 +17,10 @@ use server::kiwoom::error::{Category, CodeKey, WsRejection, classify};
 use server::kiwoom::rest::{KiwoomError, KiwoomRest};
 use server::kiwoom::wire::{self, WsControl, WsFrame};
 use tokio::sync::watch;
-use tokio::time::{Instant, sleep_until, timeout};
+use tokio::time::{Instant, Interval, MissedTickBehavior, interval_at, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
 
-use super::link::{ChildLink, Commands, Events};
+use super::link::{ChildLink, Commands, Events, LoopProgress};
 use super::output::Output;
 use super::registry::{Chunk, Registry};
 use super::ws::{Connector, Socket};
@@ -46,6 +46,7 @@ impl WallClock for SystemWallClock {
 pub struct Timings {
     pub control: Duration,
     pub silence: Duration,
+    pub close: Duration,
     pub backoff: [Duration; 5],
     pub stable_after: Duration,
     pub rate_limit_pause: Duration,
@@ -56,6 +57,7 @@ impl Default for Timings {
         Timings {
             control: Duration::from_secs(5),
             silence: Duration::from_secs(30),
+            close: Duration::from_secs(2),
             backoff: [1, 2, 5, 10, 30].map(Duration::from_secs),
             stable_after: Duration::from_secs(60),
             rate_limit_pause: Duration::from_secs(1),
@@ -203,11 +205,6 @@ enum Wake {
     Deadline,
 }
 
-enum Waited<T> {
-    Done(T),
-    Command(Command),
-}
-
 #[derive(Debug, Clone)]
 pub struct Credential {
     token: Secret<String>,
@@ -306,6 +303,14 @@ fn rejection_event(rejection: &WsRejection) -> Rejection {
     }
 }
 
+const PROGRESS_TICK: Duration = Duration::from_secs(2);
+
+fn progress_ticker() -> Interval {
+    let mut ticker = interval_at(Instant::now() + PROGRESS_TICK, PROGRESS_TICK);
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    ticker
+}
+
 async fn next_incoming(commands: &mut Option<Commands>) -> Result<Command, Exit> {
     let Some(receiver) = commands else {
         return std::future::pending().await;
@@ -317,40 +322,16 @@ async fn next_incoming(commands: &mut Option<Commands>) -> Result<Command, Exit>
     }
 }
 
-async fn next_command(shutdown: &mut watch::Receiver<bool>, commands: &mut Option<Commands>) -> Result<Command, Exit> {
-    if *shutdown.borrow() {
-        return Err(Exit::Shutdown);
-    }
-    tokio::select! {
-        command = next_incoming(commands) => command,
-        _ = shutdown.changed() => Err(Exit::Shutdown),
-    }
-}
-
-async fn interruptible<T>(
-    shutdown: &mut watch::Receiver<bool>,
-    commands: &mut Option<Commands>,
-    work: &mut (impl Future<Output = T> + Unpin),
-) -> Result<Waited<T>, Exit> {
-    if *shutdown.borrow() {
-        return Err(Exit::Shutdown);
-    }
-    tokio::select! {
-        output = &mut *work => Ok(Waited::Done(output)),
-        command = next_incoming(commands) => command.map(Waited::Command),
-        _ = shutdown.changed() => Err(Exit::Shutdown),
-    }
-}
-
 struct Conn {
     ws: Socket,
+    control: Duration,
     silence: Duration,
     silent_at: Instant,
 }
 
 impl Conn {
-    fn new(ws: Socket, silence: Duration) -> Conn {
-        Conn { ws, silence, silent_at: Instant::now() + silence }
+    fn new(ws: Socket, control: Duration, silence: Duration) -> Conn {
+        Conn { ws, control, silence, silent_at: Instant::now() + silence }
     }
 
     fn touch(&mut self) {
@@ -358,11 +339,23 @@ impl Conn {
     }
 
     async fn send(&mut self, text: String) -> Result<(), End> {
-        self.ws.send(Message::Text(text.into())).await.map_err(|error| End::Transport(error.to_string()))
+        match timeout(self.control, self.ws.send(Message::Text(text.into()))).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(End::Transport(error.to_string())),
+            Err(_) => Err(End::Transport("WebSocket 전송 시간이 초과됐습니다".to_owned())),
+        }
     }
 
-    async fn close(mut self) {
-        let _ = timeout(self.silence, self.ws.close()).await;
+    async fn flush(&mut self) -> Result<(), End> {
+        match timeout(self.control, self.ws.flush()).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(End::Transport(error.to_string())),
+            Err(_) => Err(End::Transport("WebSocket 전송 시간이 초과됐습니다".to_owned())),
+        }
+    }
+
+    async fn close(mut self, limit: Duration) {
+        let _ = timeout(limit, self.ws.close()).await;
     }
 }
 
@@ -424,6 +417,7 @@ pub struct Session {
     commands: Option<Commands>,
     events: Events,
     state: watch::Sender<SessionState>,
+    progress: Arc<LoopProgress>,
     tap: Option<LiveTapFeed>,
     halt_on_rejected_register: bool,
     gap: Gap,
@@ -439,9 +433,9 @@ impl Session {
     pub fn new(parts: SessionParts) -> Session {
         let child = parts.child;
         let halt_on_rejected_register = child.is_none();
-        let (commands, events, state) = match child {
-            Some(link) => (Some(link.commands), link.events, link.state),
-            None => (None, Events::none(), watch::channel(SessionState::Backoff).0),
+        let (commands, events, state, progress) = match child {
+            Some(link) => (Some(link.commands), link.events, link.state, link.progress),
+            None => (None, Events::none(), watch::channel(SessionState::Backoff).0, Arc::new(LoopProgress::new())),
         };
         Session {
             tokens: parts.tokens,
@@ -455,6 +449,7 @@ impl Session {
             commands,
             events,
             state,
+            progress,
             tap: parts.tap,
             halt_on_rejected_register,
             gap: Gap::Unknown,
@@ -501,16 +496,39 @@ impl Session {
 
     async fn wait_for<T>(&mut self, work: impl Future<Output = T>) -> Result<T, Exit> {
         let mut work = Box::pin(work);
+        let mut tick = progress_ticker();
         loop {
-            match interruptible(&mut self.shutdown, &mut self.commands, &mut work).await? {
-                Waited::Done(output) => return Ok(output),
-                Waited::Command(command) => self.take_command(command)?,
+            self.progress.touch();
+            if *self.shutdown.borrow() {
+                return Err(Exit::Shutdown);
+            }
+            tokio::select! {
+                output = &mut work => return Ok(output),
+                command = next_incoming(&mut self.commands) => self.take_command(command?)?,
+                _ = tick.tick() => {}
+                _ = self.shutdown.changed() => return Err(Exit::Shutdown),
+            }
+        }
+    }
+
+    async fn next_command(&mut self) -> Result<Command, Exit> {
+        let mut tick = progress_ticker();
+        loop {
+            self.progress.touch();
+            if *self.shutdown.borrow() {
+                return Err(Exit::Shutdown);
+            }
+            tokio::select! {
+                command = next_incoming(&mut self.commands) => return command,
+                _ = tick.tick() => {}
+                _ = self.shutdown.changed() => return Err(Exit::Shutdown),
             }
         }
     }
 
     async fn drive(&mut self) -> Exit {
         loop {
+            self.progress.touch();
             if self.retry_at > Instant::now() {
                 self.set_state(SessionState::Backoff);
             }
@@ -529,7 +547,7 @@ impl Session {
             let (connector, control) = (self.connector.clone(), self.timings.control);
             let connected = match self.wait_for(async move { timeout(control, connector.connect()).await }).await {
                 Err(exit) => return exit,
-                Ok(Ok(Ok(socket))) => Some(Conn::new(socket, self.timings.silence)),
+                Ok(Ok(Ok(socket))) => Some(Conn::new(socket, self.timings.control, self.timings.silence)),
                 Ok(Ok(Err(error))) => {
                     tracing::warn!(%error, "키움 WebSocket에 연결하지 못했습니다");
                     None
@@ -547,8 +565,9 @@ impl Session {
             let interrupt = self.serve(&mut conn).await;
             self.logged_in = false;
             self.queue.clear();
-            conn.close().await;
-            if let Err(error) = self.out.flush_if_dirty() {
+            let flushed = self.out.flush_if_dirty();
+            conn.close(self.timings.close).await;
+            if let Err(error) = flushed {
                 return error.into();
             }
             match interrupt {
@@ -603,7 +622,7 @@ impl Session {
         }
         self.set_state(SessionState::WaitingForToken);
         while self.tokens.credential().is_none() {
-            let command = next_command(&mut self.shutdown, &mut self.commands).await?;
+            let command = self.next_command().await?;
             self.take_command(command)?;
         }
         Ok(TokenReady::Ready)
@@ -781,6 +800,7 @@ impl Session {
 
     async fn recv(&mut self, conn: &mut Conn, deadline: Option<Instant>) -> Result<Wake, Interrupt> {
         loop {
+            self.progress.touch();
             let message = tokio::select! {
                 message = conn.ws.next() => message,
                 () = sleep_until(conn.silent_at) => return Err(End::Silent.into()),
@@ -796,13 +816,14 @@ impl Session {
                 _ = self.shutdown.changed() => return Err(Exit::Shutdown.into()),
                 command = next_incoming(&mut self.commands) => return Ok(Wake::Command(command?)),
             };
+            self.progress.touch();
             let recv_ms = self.wall_clock.now_ms();
             let text = match message {
                 Some(Ok(Message::Text(text))) => text,
                 Some(Ok(Message::Close(frame))) => return Err(End::Closed(frame.map(|frame| u16::from(frame.code))).into()),
                 Some(Ok(Message::Ping(_))) => {
                     conn.touch();
-                    conn.ws.flush().await.map_err(|error| End::Transport(error.to_string()))?;
+                    conn.flush().await?;
                     continue;
                 }
                 Some(Ok(_)) => {
@@ -825,14 +846,14 @@ impl Session {
             FrameKind::Ping => conn.send(text.to_owned()).await?,
             FrameKind::NotJson => self.out.write_text(recv_ms, text)?,
             FrameKind::Real => {
-                self.out.write_frame(recv_ms, text)?;
+                self.out.write_frame(recv_ms, bytes)?;
                 if let Some(tap) = &self.tap {
                     tap.offer_frame(recv_ms, bytes);
                 }
                 self.report_market_hours(text, recv_ms);
             }
             FrameKind::Control => {
-                self.out.write_frame(recv_ms, text)?;
+                self.out.write_frame(recv_ms, bytes)?;
                 if let Ok(WsFrame::Ack { control, result }) = wire::parse_ws_frame(text) {
                     return Ok(Some(Wake::Ack(control, result)));
                 }

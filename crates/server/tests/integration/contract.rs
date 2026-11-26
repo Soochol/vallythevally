@@ -8,7 +8,7 @@ use std::process::Command;
 
 use indicators::{LineId, MaMethod, Spec as IndicatorSpec};
 use server::api::*;
-use server::collector::wire::{CollectorAlert, CollectorCoverage, CollectorCoverageDay, CollectorDayBytes, CollectorDayState, CollectorDisk, CollectorDiskUsage, CollectorFilesystem, CollectorKey, CollectorKeyRole, CollectorKeyState, CollectorObservationDay, CollectorPhase, CollectorRenamedStock, CollectorRest, CollectorStatus, CollectorStock, CollectorToday, CollectorUniverseChanges, CollectorVerdict};
+use server::collector::wire::{CollectorAlert, CollectorCoverage, CollectorCoverageDay, CollectorDayBytes, CollectorDayState, CollectorDisk, CollectorDiskUsage, CollectorFilesystem, CollectorKey, CollectorKeyRole, CollectorKeyState, CollectorKeyUsage, CollectorObservationDay, CollectorPhase, CollectorRenamedStock, CollectorRest, CollectorStatus, CollectorStock, CollectorToday, CollectorTrUsage, CollectorUniverseChanges, CollectorVerdict};
 use server::collector::{CollectorAccess, CollectorAccessState, CollectorStatusPage, DaemonJudgment};
 use server::drawing_api::*;
 use server::market_overview::*;
@@ -95,6 +95,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<CollectorKey>(),
         generated::<CollectorKeyRole>(),
         generated::<CollectorKeyState>(),
+        generated::<CollectorKeyUsage>(),
         generated::<CollectorObservationDay>(),
         generated::<CollectorPhase>(),
         generated::<CollectorRenamedStock>(),
@@ -103,6 +104,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<CollectorStatusPage>(),
         generated::<CollectorStock>(),
         generated::<CollectorToday>(),
+        generated::<CollectorTrUsage>(),
         generated::<CollectorUniverseChanges>(),
         generated::<CollectorVerdict>(),
         generated::<DaemonJudgment>(),

@@ -14,6 +14,9 @@ test("테마와 밀도를 바꾸면 즉시 적용되고 새로고침·다른 페
 
   await page.getByRole("button", { name: "시스템 설정", exact: true }).click();
   await dialog(page).getByRole("tab", { name: /^일반/ }).click();
+  await dialog(page).getByRole("radiogroup", { name: "스타일", exact: true }).getByRole("radio", { name: "카본 벤토", exact: true }).click();
+  await expect(root(page)).toHaveAttribute("data-style", "carbon");
+
   await dialog(page).getByRole("radiogroup", { name: "스타일", exact: true }).getByRole("radio", { name: "소프트 벤토", exact: true }).click();
   await dialog(page).getByRole("radiogroup", { name: "색상 모드", exact: true }).getByRole("radio", { name: "화이트", exact: true }).click();
   await dialog(page).getByRole("radiogroup", { name: "목록 밀도", exact: true }).getByRole("radio", { name: "기본", exact: true }).click();

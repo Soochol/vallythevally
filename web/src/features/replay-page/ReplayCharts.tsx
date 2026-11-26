@@ -9,12 +9,14 @@ import {
   type ReplayMinutePoint,
   type ReplaySession,
 } from "./replayModel";
+import type { ReplayPaperEngine } from "./replayPaperEngine";
 
 export type ChartRangeMode = "all" | "focus";
 
 interface Props {
   readonly session: ReplaySession;
   readonly engine: ReplayEngine;
+  readonly paper?: ReplayPaperEngine;
   readonly blindMode: boolean;
   readonly bookmarks: readonly number[];
   readonly palette: CanvasPalette;
@@ -87,7 +89,7 @@ function resolvedBarForMinute(bar: ReplayMinutePoint, frame: ReplayEngineFrame, 
   return { ...bar, open: null, high: null, low: null, close: null, volume: 0 };
 }
 
-export function ReplayCharts({ session, engine, blindMode, bookmarks, palette, onScrub }: Props) {
+export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, palette, onScrub }: Props) {
   const [range, setRange] = useState<ChartRangeMode>("all");
   const [resizeTick, setResizeTick] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -203,6 +205,11 @@ export function ReplayCharts({ session, engine, blindMode, bookmarks, palette, o
             if (b.low !== null && b.low < minP) minP = b.low;
             if (b.high !== null && b.high > maxP) maxP = b.high;
             if (b.volume > maxV) maxV = b.volume;
+          }
+          const paperHolding = paper?.getHolding() ?? null;
+          if (paperHolding && paperHolding.quantity > 0 && paperHolding.avgPrice > 0) {
+            if (paperHolding.avgPrice < minP) minP = paperHolding.avgPrice;
+            if (paperHolding.avgPrice > maxP) maxP = paperHolding.avgPrice;
           }
           if (!Number.isFinite(minP) || !Number.isFinite(maxP)) {
             minP = frame.price ?? 0;
@@ -326,6 +333,49 @@ export function ReplayCharts({ session, engine, blindMode, bookmarks, palette, o
             ctx.lineTo(bx, padT + plotH);
             ctx.stroke();
             ctx.restore();
+          }
+
+          if (paperHolding && paperHolding.quantity > 0 && paperHolding.avgPrice > 0) {
+            const avgY = Math.round(yOf(paperHolding.avgPrice)) + 0.5;
+            if (avgY >= padT && avgY <= padT + priceH) {
+              ctx.save();
+              ctx.setLineDash([4, 4]);
+              ctx.strokeStyle = palette.up;
+              ctx.lineWidth = 1.3;
+              ctx.beginPath();
+              ctx.moveTo(PAD_L, avgY);
+              ctx.lineTo(PAD_L + plotW, avgY);
+              ctx.stroke();
+              ctx.restore();
+              ctx.fillStyle = palette.up;
+              ctx.fillRect(PAD_L + plotW + 2, avgY - 8, 54, 16);
+              ctx.fillStyle = palette.accentInk;
+              ctx.font = `700 11px ${palette.fontMono}`;
+              ctx.textAlign = "left";
+              ctx.fillText("평단", PAD_L + plotW + 6, avgY + 4);
+            }
+          }
+
+          if (paper) {
+            for (const fill of paper.getFills()) {
+              const fIdx = fill.ms / 60_000 - firstMin;
+              if (fIdx < startIdx || fIdx > endIdx) continue;
+              const fx = xOf(fIdx);
+              const fy = Math.max(padT + 8, Math.min(padT + priceH - 8, yOf(fill.price)));
+              ctx.fillStyle = fill.side === "buy" ? palette.up : palette.down;
+              ctx.beginPath();
+              if (fill.side === "buy") {
+                ctx.moveTo(fx, fy + 4);
+                ctx.lineTo(fx - 5, fy + 12);
+                ctx.lineTo(fx + 5, fy + 12);
+              } else {
+                ctx.moveTo(fx, fy - 4);
+                ctx.lineTo(fx - 5, fy - 12);
+                ctx.lineTo(fx + 5, fy - 12);
+              }
+              ctx.closePath();
+              ctx.fill();
+            }
           }
 
           const playX = xOf(curMinFloat);
@@ -633,8 +683,13 @@ export function ReplayCharts({ session, engine, blindMode, bookmarks, palette, o
       );
     };
 
-    return engine.subscribeFrame(paint);
-  }, [session, engine, blindMode, bookmarks, palette, range, resizeTick]);
+    const unsubFrame = engine.subscribeFrame(paint);
+    const unsubPaper = paper ? paper.subscribe(() => paint(engine.getFrame())) : undefined;
+    return () => {
+      unsubFrame();
+      unsubPaper?.();
+    };
+  }, [session, engine, paper, blindMode, bookmarks, palette, range, resizeTick]);
 
   const scrubFromPointer = (event: PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();

@@ -49,7 +49,7 @@ export const KEY_STATE: Record<CollectorKeyState, { label: string; tone: Tone }>
   unknown: { label: "알 수 없음", tone: "idle" },
 };
 
-export const KEY_ROLE: Record<CollectorKeyRole, string> = { collecting: "수집 키", spare: "예비 키", unknown: "알 수 없음" };
+export const KEY_ROLE: Record<CollectorKeyRole, string> = { collecting: "수집 키", spare: "예비 키", rest: "공용 키", unknown: "알 수 없음" };
 
 export const VERDICT: Record<CollectorVerdict, { label: string; tone: Tone }> = {
   observed: { label: "관측일", tone: "ok" },
@@ -77,6 +77,7 @@ export const ALERT_KIND: Record<string, string> = {
   observation_unknown: "관측일 불명",
   index_mismatch: "지수 대조 어긋남",
   stage_failed: "단계 실패",
+  shared_job_moved: "공용 자료 일 이동",
 };
 
 export const phaseLabel = (phase: CollectorPhase): string => ownEntry(PHASE_LABEL, phase) ?? String(phase);

@@ -4,6 +4,7 @@ pub mod calendar;
 pub mod collect;
 pub mod finalize;
 pub mod financials;
+pub mod fs_util;
 pub mod keys;
 pub mod kst;
 pub mod parse;
