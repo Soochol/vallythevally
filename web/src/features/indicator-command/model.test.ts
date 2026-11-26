@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { DEFAULT_CHART_SETTINGS, type ChartSettings } from "../../chart/settings";
-import { commandHints, commandKey, commandRows, modeAfterInput, selectedRow } from "./model";
+import { commandHints, commandKey, commandRows, groupDialogRows, INDICATOR_DIALOG_TABS, MA_GROUP_KEY, modeAfterInput, selectedDialogRow, selectedRow } from "./model";
 
 const empty = { rows: [], selectable: true, empty: true };
 const info: SymbolInfo = { code: "005930", name: "삼성전자", market: "kospi", kind: "common", nxtEnabled: true };
@@ -69,4 +69,22 @@ test("호가지표를 이름으로 찾고 따로 묶어 보인다", () => {
     expect(rows.some((row) => row.kind === "candidate" && row.candidate.kind === "quoteTotals" && row.group === "호가지표"), input).toBe(true);
   }
   expect(selectedRow(commandRows(withMa, "총잔량", "add", empty), "")).toMatchObject({ kind: "candidate", candidate: { kind: "quoteTotals", label: "총잔량", errors: [] } });
+});
+
+test("가운데 지표 창은 비교 탭을 빼고 이동평균선을 한 그룹으로 묶으며 분류별로 거른다", () => {
+  expect(INDICATOR_DIALOG_TABS.map((tab) => tab.mode)).toEqual(["current", "add"]);
+  const multiMa: ChartSettings = {
+    ...withMa,
+    indicators: [
+      ...withMa.indicators,
+      { id: "ma2", spec: { kind: "ma", method: "ema", period: 60 }, panel: "price", visible: true, style: { colors: ["ind-3"], width: 2 } },
+    ],
+  };
+  const currentRows = groupDialogRows(commandRows(multiMa, "", "current", empty), "current", "all", false);
+  expect(currentRows.map((row) => row.kind)).toEqual(["maGroup", "current"]);
+  expect(selectedDialogRow(currentRows, "current:ma2")).toMatchObject({ kind: "maGroup", key: MA_GROUP_KEY });
+
+  const addRows = groupDialogRows(commandRows(multiMa, "", "add", empty), "add", "fin", false);
+  expect(addRows.length).toBeGreaterThan(0);
+  expect(addRows.every((row) => row.group === "재무지표")).toBe(true);
 });

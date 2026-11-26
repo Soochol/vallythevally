@@ -2,25 +2,28 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
-import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
+import type { IndicatorConfig } from "../../chart/settings";
+import { chartWindows, DEFAULT_LAYOUT } from "../../stores/layout";
 import type { IndicatorCommandMode } from "../../stores/selection";
+import { MaGroupEditorView } from "../indicator-dialog/MaGroupEditor";
 import { IndicatorCommandBody } from "./IndicatorCommand";
 
 function markup(mode: IndicatorCommandMode) {
-  useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
+  const first = chartWindows(DEFAULT_LAYOUT)[0]!;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(IndicatorCommandBody, { cellId: chartWindows(DEFAULT_LAYOUT)[0]!.id, initialMode: mode })));
+  const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(IndicatorCommandBody, { cellId: first.id, initialMode: mode })));
   client.clear();
   return html;
 }
 
-test("지표 창은 세 탭과 띄운 지표 목록, 공유 설정 양식, 입력 경계를 가운데 창으로 보인다", () => {
+test("지표 창은 비교 종목 탭 없이 두 탭과 띄운 지표 목록을 가운데 창으로 보인다", () => {
   const html = markup("current");
   expect(html).toContain("지표·비교 입력창");
   expect(html).toContain('role="combobox"');
   expect(html).toContain('aria-label="지표·비교 찾기"');
-  expect(html.match(/role="tab"/g)).toHaveLength(3);
-  for (const label of ["이 칸에 띄운 지표", "지표 추가", "비교 종목"]) expect(html).toContain(label);
+  expect(html.match(/role="tab"/g)).toHaveLength(2);
+  for (const label of ["이 칸에 띄운 지표", "지표 추가"]) expect(html).toContain(label);
+  expect(html).not.toContain("비교 종목");
   expect(html).toContain('aria-label="거래량 설정"');
   expect(html).toContain('aria-label="거래량 숨기기"');
   expect(html).toContain('aria-label="거래량 지우기"');
@@ -35,22 +38,42 @@ test("지표 창은 세 탭과 띄운 지표 목록, 공유 설정 양식, 입�
   expect(html.match(/<footer/g)).toHaveLength(1);
 });
 
-test("지표 추가 탭은 종류별 묶음에 추가 후보를 두고 하단 추가 버튼 없이 자동 저장 안내를 보인다", () => {
+test("통합 이동평균선 편집기는 컬럼 헤더·구분·프리셋·빠른 추가·증감 버튼 없이 여러 선을 편집한다", () => {
+  const first = chartWindows(DEFAULT_LAYOUT)[0]!;
+  const indicators: IndicatorConfig[] = [
+    { id: "ma-5", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },
+    { id: "ma-20", spec: { kind: "ma", method: "ema", period: 20 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 2 } },
+  ];
+  const html = renderToStaticMarkup(createElement(MaGroupEditorView, { cellId: first.id, allIndicators: indicators }));
+  expect(html).toContain("이동평균선 2/2");
+  expect(html).toContain('aria-label="이동평균 단순 5 선 색 및 굵기 설정"');
+  expect(html).toContain('aria-label="이동평균 단순 5 기간"');
+  expect(html).toContain('aria-label="이동평균 지수 20 기간"');
+  expect(html).toContain('aria-label="추가할 이동평균 기간"');
+  expect(html).toContain("이동평균선 추가");
+  expect(html).not.toContain("빠른 추가");
+  expect(html).not.toContain("한국장");
+  expect(html).not.toContain("초단기");
+  expect(html).not.toContain("구분");
+  expect(html).not.toContain("기간 (봉)");
+});
+
+test("지표 추가 탭은 분류 필터와 서브텍스트 없는 후보 목록, 색상·굵기 팝오버 트리거를 보인다", () => {
   const html = markup("add");
+  expect(html).toContain('aria-label="지표 분류"');
   expect(html).toContain('aria-label="이동평균 단순 20 추가 후보"');
+  expect(html).not.toContain("ic-row-sub");
   for (const group of ["가격 패널", "아래 패널", "재무지표"]) expect(html).toContain(group);
   expect(html).not.toContain("btn-primary");
   expect(html).toContain('aria-label="선 미리보기"');
-  expect(html).toContain('aria-label="굵기"');
-  expect(html).toContain('aria-label="테마 색"');
-  expect(html).toContain('aria-label="색상표"');
-  expect(html).toContain("직접 고르기");
+  expect(html).toContain('aria-label="선 색 및 굵기 설정"');
   expect(html).not.toContain('aria-label="거래량 숨기기"');
 });
 
-test("비교 종목 탭은 같은 틀에서 비교 수·가격축을 보이고 하단 추가 버튼은 두지 않는다", () => {
+test("비교 모드로 열면 탭 없이 비교 수·가격축을 보이고 하단 추가 버튼은 두지 않는다", () => {
   const html = markup("compare");
   expect(html).toContain("지표·비교 입력창");
+  expect(html).not.toContain('role="tab"');
   expect(html).toContain("비교 종목 0/3");
   expect(html).toContain("가격축을 % 변화로");
   expect(html).not.toContain("비교 종목 추가");

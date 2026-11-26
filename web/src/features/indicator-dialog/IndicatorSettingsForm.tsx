@@ -5,6 +5,7 @@ import { loadValidator } from "../../chart/indicators/validate";
 import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, type LineWidth } from "../../chart/settings";
 import { isHexColor, type HexColor } from "../../lib/colors";
 import { Errors, Row, Segment } from "../dialog/DialogParts";
+import { ColorStyleTrigger } from "../color/ColorStylePopover";
 import { ColorTable, type ThemeSwatch } from "../color/ColorTable";
 import { useColorMore } from "../color/colorMore";
 import { canOverlayPrice, hasBarOpacity, hasColor, indicatorPeriodNotice, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
@@ -48,13 +49,14 @@ export function useValidator(): Validate | "loading" | "failed" {
   return validate;
 }
 
-export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSample = true, foldColors = false }: {
+export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSample = true, foldColors = false, colorControl = "table" }: {
   draft: Draft;
   color: IndicatorColor;
   errors: readonly FieldError[];
   onChange(draft: Draft): void;
   lineSample?: boolean;
   foldColors?: boolean;
+  colorControl?: "table" | "popover";
 }) {
   const ids = useId();
   const more = useColorMore();
@@ -65,14 +67,15 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
   const lined = hasColor(draft.form);
   const notice = indicatorPeriodNotice(kind);
   const css = indicatorCssColor(color);
+  const usePopover = colorControl === "popover";
   return <div className="@container flex flex-col gap-4">
     {notice && <p className="text-xs text-text-3">{notice}</p>}
     {lined && lineSample && <svg role="img" aria-label="선 미리보기" className="h-[60px] w-full flex-none rounded-m bg-chart-bg shadow-[inset_0_0_0_1px_var(--line)]" viewBox="0 0 636 60" preserveAspectRatio="none" fill="none">
       <path d="M0 44 C 50 42, 80 18, 140 24 S 230 48, 290 38 S 390 8, 450 16 S 560 34, 636 12" stroke={css} strokeWidth={draft.width} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>}
-    <div className={lined ? "grid gap-5 @min-[600px]:grid-cols-[minmax(0,1fr)_320px]" : "grid gap-5"}>
-      <section aria-labelledby={`${ids}-values`} className="flex min-w-0 flex-col gap-3">
-        <h4 id={`${ids}-values`} className="text-xs text-text-3">설정값</h4>
+    <div className={lined && !usePopover ? "grid gap-5 @min-[600px]:grid-cols-[minmax(0,1fr)_320px]" : "flex flex-col gap-3"}>
+      <section aria-labelledby={`${ids}-values`} className={usePopover ? "ic-card" : "flex min-w-0 flex-col gap-3"}>
+        <h4 id={`${ids}-values`} className={usePopover ? "ic-card-title" : "text-xs text-text-3"}>설정값</h4>
         {KINDS[kind].fields.length === 0 && <p className="text-s text-text-3">정할 값이 없는 지표입니다.</p>}
         {KINDS[kind].fields.map((f) => {
           const errors = placed.byField[f.key] ?? [];
@@ -143,7 +146,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
                     <span aria-hidden="true" className="ui-switch-track"><span /></span>
                   </button>
                 )}
-                {kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
+                {!usePopover && kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
                   {PERIOD_PRESETS.map((preset) => <button key={preset} type="button" aria-pressed={text === preset} className="h-6 rounded-m bg-[var(--hover)] px-2 text-xs text-text-2 aria-pressed:bg-accent-soft aria-pressed:text-accent" onClick={() => setText(f.key, preset)}>{preset}</button>)}
                 </span>}
                 <span className="flex items-center gap-1.5">
@@ -180,17 +183,38 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
           </span>
         </Row>}
       </section>
-      {lined && <section aria-labelledby={`${ids}-line`} className="flex min-w-0 flex-col gap-3">
-        <h4 id={`${ids}-line`} className="text-xs text-text-3">선</h4>
-        <Row label="선 굵기">
-          <div role="group" aria-label="굵기" className="grid w-full grid-cols-5 gap-1">
-            {WIDTHS.map(([width, name]) => <button key={width} type="button" aria-label={name} aria-pressed={draft.width === width} className="grid h-7 place-items-center rounded-m bg-[var(--hover)] aria-pressed:bg-accent-soft aria-pressed:shadow-[inset_0_0_0_1px_var(--accent)]" onClick={() => onChange({ ...draft, width })}>
-              <i className="w-6 rounded-full" style={{ height: width, background: css }} />
-            </button>)}
+      {lined && (usePopover ? (
+        <section aria-labelledby={`${ids}-line`} className="ic-card">
+          <div className="ic-card-head">
+            <h4 id={`${ids}-line`} className="ic-card-title">선 스타일</h4>
+            <span className="text-xs text-text-3">색상 · 굵기 선택</span>
           </div>
-        </Row>
-        <ColorTable label="선 색" value={color} theme={THEME_SWATCHES} width={draft.width} more={foldColors ? more : undefined} onChange={(next) => onChange({ ...draft, color: next })} />
-      </section>}
+          <Row label="색상 · 굵기">
+            <ColorStyleTrigger
+              label="선 색"
+              value={color}
+              theme={THEME_SWATCHES}
+              width={draft.width}
+              size="lg"
+              opacity={hasBarOpacity(kind) ? { value: draft.barOpacity, min: BAR_OPACITY_MIN, max: BAR_OPACITY_MAX, onChange: (barOpacity) => onChange({ ...draft, barOpacity }) } : undefined}
+              onColorChange={(next) => onChange({ ...draft, color: next })}
+              onWidthChange={(width) => onChange({ ...draft, width })}
+            />
+          </Row>
+        </section>
+      ) : (
+        <section aria-labelledby={`${ids}-line`} className="flex min-w-0 flex-col gap-3">
+          <h4 id={`${ids}-line`} className="text-xs text-text-3">선</h4>
+          <Row label="선 굵기">
+            <div role="group" aria-label="굵기" className="grid w-full grid-cols-5 gap-1">
+              {WIDTHS.map(([width, name]) => <button key={width} type="button" aria-label={name} aria-pressed={draft.width === width} className="grid h-7 place-items-center rounded-m bg-[var(--hover)] aria-pressed:bg-accent-soft aria-pressed:shadow-[inset_0_0_0_1px_var(--accent)]" onClick={() => onChange({ ...draft, width })}>
+                <i className="w-6 rounded-full" style={{ height: width, background: css }} />
+              </button>)}
+            </div>
+          </Row>
+          <ColorTable label="선 색" value={color} theme={THEME_SWATCHES} width={draft.width} more={foldColors ? more : undefined} onChange={(next) => onChange({ ...draft, color: next })} />
+        </section>
+      ))}
     </div>
   </div>;
 }

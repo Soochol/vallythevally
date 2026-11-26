@@ -33,12 +33,28 @@ export const COLOR_TABLE: readonly ColorTableRow[] = [
 
 export const PRESET_COLORS: readonly HexColor[] = COLOR_TABLE.flatMap((row) => row.swatches.map((swatch) => swatch.color));
 
+const TV_HUES = ["빨강", "주황", "노랑", "초록", "청록", "하늘", "파랑", "남색", "보라", "분홍"] as const;
+
+export const TV_GRAY_SWATCHES: readonly ColorSwatch[] = tableRow("무채색", GRAYS, [
+  "#FFFFFF", "#E0E3EB", "#B2B5BE", "#9598A1", "#787B86", "#5D606B", "#434651", "#2A2E39", "#181B22", "#000000",
+]).swatches;
+
+export const TV_COLOR_MATRIX: readonly ColorTableRow[] = [
+  tableRow("원색", TV_HUES, ["#F23645", "#FF9800", "#FFEB3B", "#4CAF50", "#089981", "#00BCD4", "#2962FF", "#673AB7", "#9C27B0", "#E91E63"]),
+  tableRow("아주 밝게", TV_HUES.map((hue) => `아주 밝은 ${hue}`), ["#FCCBCD", "#FFE0B2", "#FFF9C4", "#C8E6C9", "#ACE5DC", "#B2EBF2", "#BBD9FB", "#D1C4E9", "#E1BEE7", "#F8BBD0"]),
+  tableRow("밝게", TV_HUES.map((hue) => `밝은 ${hue}`), ["#FAA1A4", "#FFCC80", "#FFF59D", "#A5D6A7", "#70CCBD", "#80DEEA", "#90BFF9", "#B39DDB", "#CE93D8", "#F48FB1"]),
+  tableRow("중간", TV_HUES.map((hue) => `중간 ${hue}`), ["#F77C80", "#FFB74D", "#FFF176", "#81C784", "#42BDA8", "#4DD0E1", "#5B9CF6", "#9575CD", "#BA68C8", "#F06292"]),
+  tableRow("진하게", TV_HUES.map((hue) => `진한 ${hue}`), ["#CC2F3C", "#F57C00", "#FBC02D", "#388E3C", "#06806B", "#0097A7", "#1848CC", "#512DA8", "#7B1FA2", "#C2185B"]),
+  tableRow("아주 진하게", TV_HUES.map((hue) => `아주 진한 ${hue}`), ["#801922", "#E65100", "#F57F17", "#1B5E20", "#056656", "#006064", "#0C3299", "#311B92", "#4A148C", "#880E4F"]),
+];
+
 export const FALLBACK_PICKED_COLOR = "#C7F36B" as HexColor;
 
 export const sameColor = (a: string, b: string): boolean => a.toUpperCase() === b.toUpperCase();
 
 export function colorName(color: HexColor): string {
-  return COLOR_TABLE.flatMap((row) => row.swatches).find((swatch) => sameColor(swatch.color, color))?.name ?? color.toUpperCase();
+  const all = [...COLOR_TABLE, ...TV_COLOR_MATRIX].flatMap((row) => row.swatches).concat(TV_GRAY_SWATCHES);
+  return all.find((swatch) => sameColor(swatch.color, color))?.name ?? color.toUpperCase();
 }
 
 export interface HsvColor { h: number; s: number; v: number }
