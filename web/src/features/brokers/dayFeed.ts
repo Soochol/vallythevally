@@ -6,8 +6,9 @@ import type { FeedEvent } from "../../api/socket";
 import { appendSnapshots, type BrokerEvent, type BrokerState, EMPTY_BROKER_STATE, reduceBrokerEvents } from "./model";
 
 export const TODAY_POLL_MS = 2_000;
+export const FALLBACK_RECHECK_MS = 30_000;
 
-export type BrokerDayMode = "loading" | "collected" | "live";
+export type BrokerDayMode = "loading" | "collected" | "fallback" | "live";
 
 export interface BrokerDaySnapshot {
   readonly mode: BrokerDayMode;
@@ -19,7 +20,7 @@ export interface BrokerDaySnapshot {
 }
 
 export interface TodayBrokerFeedDeps {
-  fetchDay(code: SymbolCode, date: string, after?: string, signal?: AbortSignal): Promise<BrokerDay>;
+  fetchDay(code: SymbolCode, date: string, after?: string, signal?: AbortSignal, fallback?: "latest"): Promise<BrokerDay>;
   subscribeLive(code: SymbolCode, listener: (event: FeedEvent) => void): () => void;
   setTimer(fn: () => void, ms: number): number;
   clearTimer(id: number): void;
@@ -33,6 +34,7 @@ export interface TodayBrokerFeedConfig {
   readonly date: string;
   readonly enabled: boolean;
   readonly active: boolean;
+  readonly allowFallback?: boolean;
 }
 
 export interface TodayBrokerFeed {
@@ -75,7 +77,7 @@ function sameGaps(
 }
 
 function applyCollected(previous: BrokerDaySnapshot, reply: BrokerDay): BrokerDaySnapshot {
-  const base = reply.reset ? EMPTY_BROKER_STATE : previous.state;
+  const base = reply.reset || previous.mode !== "collected" ? EMPTY_BROKER_STATE : previous.state;
   const nextState = appendSnapshots(base, reply.snapshots, reply.gaps);
   const nextGaps = sameGaps(previous.gaps, reply.gaps) ? previous.gaps : reply.gaps;
   if (
@@ -91,6 +93,17 @@ function applyCollected(previous: BrokerDaySnapshot, reply: BrokerDay): BrokerDa
   return { mode: "collected", date: reply.date, source: reply.source, state: nextState, gaps: nextGaps, failed: false };
 }
 
+function toFallbackSnapshot(reply: BrokerDay): BrokerDaySnapshot {
+  return {
+    mode: "fallback",
+    date: reply.date,
+    source: reply.source,
+    state: appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps),
+    gaps: reply.gaps,
+    failed: false,
+  };
+}
+
 export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDeps): TodayBrokerFeed {
   const listeners = new Set<() => void>();
   let current: BrokerDaySnapshot = LOADING_BROKER_SNAPSHOT;
@@ -100,6 +113,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
 
   let active = false;
   let enabled = false;
+  let allowFallback = false;
   let date = "";
   let disposed = false;
 
@@ -108,6 +122,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
   let timer: number | null = null;
   let cursor = "";
   let polling = false;
+  let recheckingFallback = false;
   let inFlight = false;
   let paused = false;
 
@@ -146,6 +161,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
     controller?.abort();
     controller = null;
     polling = false;
+    recheckingFallback = false;
     inFlight = false;
     paused = false;
     cursor = "";
@@ -169,17 +185,32 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
     });
   };
 
-  const startLive = (expectedSession: number) => {
+  const startLive = (expectedSession: number, preserveFallback: boolean) => {
     stopLive();
-    emit({ mode: "live", date: null, source: "none", state: liveState, gaps: EMPTY_BROKER_GAPS, failed: false });
-    if (hadLiveSubscription) enqueueLive({ type: "resync" });
-    hadLiveSubscription = true;
+    if (!preserveFallback) {
+      emit({ mode: "live", date: null, source: "none", state: liveState, gaps: EMPTY_BROKER_GAPS, failed: false });
+      if (hadLiveSubscription) enqueueLive({ type: "resync" });
+      hadLiveSubscription = true;
+    }
     unsubscribeLive = deps.subscribeLive(code, (event) => {
       if (disposed || sessionId !== expectedSession) return;
-      if (event.type === "feed_brokers") enqueueLive({ type: "snapshot", brokers: event.brokers });
-      else if (event.type === "feed_link") enqueueLive({ type: "link", live: event.live });
-      else if (event.type === "resync") enqueueLive({ type: "resync" });
-      else if (event.type === "feed_subscribed") {
+      if (event.type === "feed_brokers") {
+        if (recheckingFallback) {
+          recheckingFallback = false;
+          clearPollTimer();
+          controller?.abort();
+          controller = null;
+          inFlight = false;
+        }
+        hadLiveSubscription = true;
+        enqueueLive({ type: "snapshot", brokers: event.brokers });
+      } else if (current.mode === "fallback") {
+        return;
+      } else if (event.type === "feed_link") {
+        enqueueLive({ type: "link", live: event.live });
+      } else if (event.type === "resync") {
+        enqueueLive({ type: "resync" });
+      } else if (event.type === "feed_subscribed") {
         if (current.mode === "live" && current.failed) {
           emit({ ...current, failed: false });
         }
@@ -204,18 +235,72 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
     }, TODAY_POLL_MS);
   };
 
+  const scheduleFallbackRecheck = (expectedSession: number) => {
+    if (disposed || sessionId !== expectedSession || !recheckingFallback) return;
+    if (!isVisible()) {
+      paused = true;
+      return;
+    }
+    clearPollTimer();
+    timer = deps.setTimer(() => {
+      timer = null;
+      void runFallbackRecheck(expectedSession);
+    }, FALLBACK_RECHECK_MS);
+  };
+
+  const runFallbackRecheck = async (expectedSession: number) => {
+    if (disposed || sessionId !== expectedSession || !recheckingFallback || inFlight) return;
+    inFlight = true;
+    controller = new AbortController();
+    const { signal } = controller;
+    try {
+      const reply = await deps.fetchDay(code, date, undefined, signal);
+      if (disposed || sessionId !== expectedSession || signal.aborted) return;
+      inFlight = false;
+      if (!recheckingFallback) return;
+      if (reply.source !== "none" && reply.date === date && reply.snapshots.length > 0) {
+        stopLive();
+        recheckingFallback = false;
+        cursor = reply.cursor;
+        if (reply.source === "store") {
+          polling = false;
+          emit(applyCollected(current, reply));
+          return;
+        }
+        polling = true;
+        emit(applyCollected(current, reply));
+        scheduleNext(expectedSession);
+        return;
+      }
+      scheduleFallbackRecheck(expectedSession);
+    } catch {
+      if (disposed || sessionId !== expectedSession || signal.aborted) return;
+      inFlight = false;
+      if (recheckingFallback) scheduleFallbackRecheck(expectedSession);
+    }
+  };
+
   const runRequest = async (initial: boolean, expectedSession: number) => {
     if (disposed || sessionId !== expectedSession || inFlight) return;
     inFlight = true;
     controller = new AbortController();
     const { signal } = controller;
+    const fallback = initial && allowFallback && liveState.grid.times.length === 0 ? "latest" : undefined;
     try {
-      const reply = await deps.fetchDay(code, date, initial ? undefined : cursor, signal);
+      const reply = await deps.fetchDay(code, date, initial ? undefined : cursor, signal, fallback);
       if (disposed || sessionId !== expectedSession || signal.aborted) return;
       inFlight = false;
       if (reply.source === "none") {
         polling = false;
-        startLive(expectedSession);
+        startLive(expectedSession, false);
+        return;
+      }
+      if (initial && reply.source === "store" && reply.date !== date) {
+        polling = false;
+        recheckingFallback = true;
+        emit(toFallbackSnapshot(reply));
+        startLive(expectedSession, true);
+        scheduleFallbackRecheck(expectedSession);
         return;
       }
       cursor = reply.cursor;
@@ -232,7 +317,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       inFlight = false;
       if (initial) {
         polling = false;
-        startLive(expectedSession);
+        startLive(expectedSession, false);
         return;
       }
       if (polling) scheduleNext(expectedSession);
@@ -247,13 +332,14 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
   };
 
   const syncVisibility = () => {
-    if (disposed || !polling) return;
+    if (disposed || (!polling && !recheckingFallback)) return;
     const currentSession = sessionId;
     if (isVisible()) {
       if (paused && !inFlight) {
         paused = false;
         clearPollTimer();
-        void runRequest(false, currentSession);
+        if (recheckingFallback) void runFallbackRecheck(currentSession);
+        else void runRequest(false, currentSession);
       }
     } else {
       paused = true;
@@ -273,9 +359,11 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
     },
     configure(next) {
       if (disposed) return;
+      const nextAllowFallback = next.allowFallback ?? false;
       const dateChanged = next.date !== date;
       const enabledChanged = next.enabled !== enabled;
       const activeChanged = next.active !== active;
+      const allowFallbackChanged = nextAllowFallback !== allowFallback;
       active = next.active;
       if (next.enabled && next.date !== liveDate) {
         if (liveDate !== null) {
@@ -286,6 +374,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       }
       date = next.date;
       enabled = next.enabled;
+      allowFallback = nextAllowFallback;
       if (!enabled) {
         if (enabledChanged || current !== LOADING_BROKER_SNAPSHOT) {
           stopSession();
@@ -293,7 +382,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
         }
         return;
       }
-      if (enabledChanged || dateChanged) {
+      if (enabledChanged || dateChanged || allowFallbackChanged) {
         startSession();
         return;
       }
@@ -303,7 +392,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       if (disposed || !enabled) return;
       if (current.mode === "live") {
         const expectedSession = sessionId;
-        startLive(expectedSession);
+        startLive(expectedSession, false);
         return;
       }
       startSession();

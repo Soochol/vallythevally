@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { ProgramTradePoint } from "../../api/generated/ProgramTradePoint";
-import { boldKeys, EMPTY_PROGRAM_LIVE, eokFromMillionWon, historyRows, isNoProgramData, joinHistoryAndLive, liveRow, MAX_LIVE_PROGRAM_LINES, MAX_PROGRAM_TREND_POINTS, nonZeroChangeLines, reduceProgramLive, rowsOf, sparklinePoints, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
+import { boldKeys, EMPTY_PROGRAM_LIVE, eokFromMillionWon, historyRows, isNoProgramData, joinHistoryAndLive, keepProgramHistory, liveRow, MAX_LIVE_PROGRAM_LINES, MAX_PROGRAM_TREND_POINTS, nonZeroChangeLines, reduceProgramLive, rowsOf, sparklinePoints, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
 
 const KST_0905 = Date.parse("2026-11-09T09:05:00+09:00") / 1000;
 const point = (time: string, netQuantity: number): ProgramTradePoint => ({ time, price: 70_000, buyQuantity: 10, sellQuantity: 5, netQuantity, buyAmount: 0, sellAmount: 0, netAmount: netQuantity * 70_000_000 });
@@ -28,6 +28,14 @@ test("조회와 실시간이 겹치면 첫 실시간 행 시각 이상의 조회
   expect(first.time).toBe("09:05:00");
   const joined = rowsOf(joinHistoryAndLive(history, live(first)));
   expect(joined.map((r) => [r.source, r.time])).toEqual([["history", "09:03:00"], ["history", "09:04:00"], ["live", "09:05:00"]]);
+});
+
+test("폴백 과거일 조회 뒤에 오늘 실시간 행이 오면 과거일 행을 전량 버려 날짜가 섞이지 않는다", () => {
+  const history = historyRows([point("09:00:00", 10), point("09:04:00", 20)]);
+  const first = liveRow({ t: KST_0905, price: 70_000, sellQty: 0, sellAmount: 0, buyQty: 0, buyAmount: 0, netQty: 5, netQtyChange: 5, netAmount: 0, netAmountChange: 0 }, 0);
+  expect(keepProgramHistory(history, null, true)).toHaveLength(2);
+  expect(keepProgramHistory(history, first.time, true)).toEqual([]);
+  expect(rowsOf(joinHistoryAndLive(history, live(first), true)).map((r) => [r.source, r.time])).toEqual([["live", "09:05:00"]]);
 });
 
 test("실시간 행이 없으면 조회 행을 모두 둔다", () => {

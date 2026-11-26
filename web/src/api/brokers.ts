@@ -10,9 +10,16 @@ const GC_TIME_MS = 30 * 60 * 1000;
 
 export type { BrokerDay, BrokerDays };
 
-export function fetchBrokerDay(symbol: SymbolCode, date: string, after?: string, signal?: AbortSignal): Promise<BrokerDay> {
+export function fetchBrokerDay(
+  symbol: SymbolCode,
+  date: string,
+  after?: string,
+  signal?: AbortSignal,
+  fallback?: "latest",
+): Promise<BrokerDay> {
   const params = new URLSearchParams({ date });
   if (after !== undefined && after !== "") params.set("after", after);
+  if (fallback !== undefined) params.set("fallback", fallback);
   return getJson<BrokerDay>(`/api/symbols/${encodeURIComponent(symbol)}/brokers?${params}`, signal);
 }
 

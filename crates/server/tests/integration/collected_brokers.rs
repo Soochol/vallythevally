@@ -251,11 +251,29 @@ async fn days_list_closed_days_and_today_flow() {
 async fn bad_requests_are_refused() {
     let h = Harness::start(true).await;
     h.write_flow("collect-01", &[flow_row(at(24, 9, 0, 5), "100")]);
-    for path in ["/api/symbols/IDX:001/brokers?date=20261124", "/api/symbols/005930/brokers?date=2026-11-24", "/api/symbols/005930/brokers"] {
+    for path in [
+        "/api/symbols/IDX:001/brokers?date=20261124",
+        "/api/symbols/005930/brokers?date=2026-11-24",
+        "/api/symbols/005930/brokers",
+        "/api/symbols/005930/brokers?date=20261124&fallback=bogus",
+    ] {
         assert_eq!(h.get(path).await.0, 400, "{path}");
     }
     let body = h.day(TODAY, Some("broken")).await;
     assert_eq!((body["reset"].as_bool(), buys(&body)), (Some(true), vec![100]));
+}
+
+#[tokio::test]
+async fn fallback_latest_returns_the_most_recent_closed_day_with_snapshots() {
+    let h = Harness::start(true).await;
+    write_store(&h.data, "20261120", &[store_sql("005930_AL", at(20, 15, 20, 0), 777)], json!([]));
+    write_store(&h.data, CLOSED, &[store_sql("000120_AL", at(23, 9, 0, 10), 999)], json!([]));
+    let exact = h.day(TODAY, None).await;
+    assert_eq!((exact["date"].as_str(), exact["source"].as_str()), (Some(TODAY), Some("none")));
+    let (status, fallback) = h.get(&format!("/api/symbols/005930/brokers?date={TODAY}&fallback=latest")).await;
+    assert_eq!(status, 200, "{fallback}");
+    assert_eq!((fallback["date"].as_str(), fallback["source"].as_str(), fallback["live"].as_bool()), (Some("20261120"), Some("store"), Some(false)));
+    assert_eq!(buys(&fallback), [777]);
 }
 
 #[tokio::test]

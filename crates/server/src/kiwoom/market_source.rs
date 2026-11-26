@@ -232,4 +232,8 @@ impl MarketSource for KiwoomRest {
             Ok(TapePage { rows: parsed.rows, skipped: parsed.skipped, next: page.next.map(cursor_of) })
         })
     }
+
+    fn supports_past_program_trades(&self) -> bool {
+        true
+    }
 }

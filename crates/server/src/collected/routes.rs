@@ -49,15 +49,28 @@ async fn broker_day(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("date 쿼리(YYYYMMDD)가 필요합니다"))?;
     let date = KstDate::parse_yyyymmdd(date_str).ok_or_else(|| ApiFailure::bad_request(format!("date는 YYYYMMDD 형식입니다: {date_str}")))?;
+    let fallback_latest = match q.get("fallback").map(String::as_str) {
+        None | Some("") | Some("none") => false,
+        Some("latest") => true,
+        Some(other) => return Err(ApiFailure::bad_request(format!("fallback은 latest만 지원합니다: {other}"))),
+    };
     let after = q.get("after").map(String::as_str);
-    let slice = st
-        .collected
-        .broker_day(st.collector_paths.snapshot(), stock, date, date_str, after, st.clock.now())
-        .await
-        .map_err(|e| internal_error("수집 거래원 자료를 읽지 못했습니다", e))?;
+    let (resolved_date, slice) = if fallback_latest {
+        st.collected
+            .broker_day_or_latest(st.collector_paths.snapshot(), stock, date, date_str, after, st.clock.now())
+            .await
+            .map_err(|e| internal_error("수집 거래원 자료를 읽지 못했습니다", e))?
+    } else {
+        let slice = st
+            .collected
+            .broker_day(st.collector_paths.snapshot(), stock, date, date_str, after, st.clock.now())
+            .await
+            .map_err(|e| internal_error("수집 거래원 자료를 읽지 못했습니다", e))?;
+        (date_str.to_owned(), slice)
+    };
     Ok(Json(api::BrokerDay {
         symbol: symbol_code(stock),
-        date: date_str.to_owned(),
+        date: resolved_date,
         source: slice.source,
         snapshots: slice.snapshots,
         gaps: slice.gaps,

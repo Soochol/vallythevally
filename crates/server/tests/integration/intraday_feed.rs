@@ -1,31 +1,39 @@
 use crate::support;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{Router, body::Body, http::Request};
 use domain::{KstDate, KstTime, Market, Symbol, SymbolInfo, SymbolKind, TimeOfDay};
+use duckdb::Connection;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use server::app::{ApplicationInputs, application};
-use server::clock::Clock;
+use server::clock::{Clock, kst};
 use server::config::Secret;
 use server::http::router;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
 use server::kiwoom::stream::KiwoomStream;
+use server::shared_data::CollectorPaths;
 use server::symbols::{Directory, SymbolDirectory};
-use support::{ScriptedTransport, fixture};
+use support::{ScriptedReply, ScriptedTransport, fixture};
 use tower::ServiceExt;
 
 struct Fixture {
     fake: ScriptedTransport,
     app: Router,
+    hoga_dir: PathBuf,
     _tmp: tempfile::TempDir,
 }
 
 impl Fixture {
     async fn start(connected: bool) -> Fixture {
+        Self::start_with_collector(connected, false).await
+    }
+
+    async fn start_with_collector(connected: bool, collector_enabled: bool) -> Fixture {
         let fake = ScriptedTransport::new();
         let clock = Clock::fake(KstTime::from_kst_civil(KstDate::new(2026, 11, 9).unwrap(), TimeOfDay::MIDNIGHT));
         let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
@@ -45,12 +53,16 @@ impl Fixture {
         let (_events, events) = tokio::sync::mpsc::channel(1);
         let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
         let state = application(ApplicationInputs { rest: rest.clone(), clock, symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
+        let hoga_dir = tmp.path().join("hoga");
+        if collector_enabled {
+            state.collector_paths.configure(CollectorPaths::hoga_only(hoga_dir.clone()));
+        }
         if connected {
             rest.set_access(Access::Open);
         }
         let app = router(state);
         tokio::time::pause();
-        Fixture { fake, app, _tmp: tmp }
+        Fixture { fake, app, hoga_dir, _tmp: tmp }
     }
 
     async fn get(&self, path: &str) -> (u16, Value) {
@@ -316,4 +328,87 @@ async fn the_later_pages_of_program_trades_leave_two_slots_in_the_window() {
     tokio::time::advance(Duration::from_secs(10)).await;
     assert_eq!(walk.await.unwrap().0, 200);
     assert_eq!(f.calls("ka90008").len(), 5);
+}
+
+fn write_program_store(hoga_dir: &Path, date: &str, recv_s: i64) {
+    let folder = hoga_dir.join("store").join(date);
+    let parquet = folder.join("0w").join("056.parquet");
+    std::fs::create_dir_all(parquet.parent().unwrap()).unwrap();
+    let sql = format!(
+        "SELECT '005930_AL' AS symbol, {}::BIGINT AS recv_ms, '152000' AS f20, 70500::BIGINT AS f10, 400::BIGINT AS f202, 28::BIGINT AS f204, 650::BIGINT AS f206, 46::BIGINT AS f208, 250::BIGINT AS f210, 50::BIGINT AS f211, 18::BIGINT AS f212, 4::BIGINT AS f213",
+        recv_s * 1000
+    );
+    let connection = Connection::open_in_memory().unwrap();
+    connection.execute_batch(&format!("SET threads = 1; COPY ({sql}) TO '{}' (FORMAT parquet)", parquet.display())).unwrap();
+    let complete = json!({
+        "format_version": 1,
+        "verify": {"passed": true, "buckets": 64},
+        "raw_files": {"collect-01/1520-000.jsonl.zst": 10},
+        "stocks": [{"code": "005930", "key": "collect-01", "registered": true, "received": true, "gaps": [], "handoff": null}],
+    });
+    std::fs::write(folder.join("complete.json"), complete.to_string()).unwrap();
+}
+
+#[tokio::test]
+async fn program_trades_fall_back_to_latest_collected_closed_day_when_today_is_empty() {
+    let f = Fixture::start_with_collector(true, true).await;
+    let closed_at = kst(KstDate::new(2026, 11, 6).unwrap(), 15, 20, 0).unix();
+    write_program_store(&f.hoga_dir, "20261106", closed_at);
+    f.fake.respond_with("ka90008", 200, json!({"return_code": 0, "return_msg": "ok", "stk_tm_prm_trde_trnsn": []}));
+    let (status, body) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["date"], json!("20261106"));
+    assert_eq!(f.calls("ka90008").len(), 1);
+    assert_eq!(
+        body["points"],
+        json!([{
+            "time": "15:20:00",
+            "price": 70_500,
+            "buyQuantity": 650,
+            "sellQuantity": 400,
+            "netQuantity": 250,
+            "buyAmount": 46_000_000,
+            "sellAmount": 28_000_000,
+            "netAmount": 18_000_000,
+        }])
+    );
+}
+
+#[tokio::test]
+async fn program_trades_fall_back_to_previous_trading_day_via_kiwoom_when_collector_is_absent() {
+    let f = Fixture::start_with_collector(true, false).await;
+    f.fake.script(
+        "ka90008",
+        vec![
+            ScriptedReply {
+                status: 200,
+                body: json!({"return_code": 0, "return_msg": "ok", "stk_tm_prm_trde_trnsn": []}),
+                delay: Duration::ZERO,
+            },
+            ScriptedReply {
+                status: 200,
+                body: fixture("ka90008_005930_AL_p2"),
+                delay: Duration::ZERO,
+            },
+        ],
+    );
+    let (status, body) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["date"], json!("20261106"));
+    assert_eq!(body["points"].as_array().unwrap().len(), 1);
+    let calls = f.calls("ka90008");
+    let dates: Vec<&str> = calls.iter().map(|c| c.body["date"].as_str().unwrap()).collect();
+    assert_eq!(dates, ["20261109", "20261106"]);
+}
+
+#[tokio::test]
+async fn program_trades_serve_collected_closed_day_even_when_source_is_disconnected() {
+    let f = Fixture::start_with_collector(false, true).await;
+    let closed_at = kst(KstDate::new(2026, 11, 6).unwrap(), 15, 20, 0).unix();
+    write_program_store(&f.hoga_dir, "20261106", closed_at);
+    let (status, body) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["date"], json!("20261106"));
+    assert_eq!(body["points"].as_array().unwrap().len(), 1);
+    assert!(f.calls("ka90008").is_empty());
 }

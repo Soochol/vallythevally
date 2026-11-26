@@ -169,7 +169,7 @@ test("날짜 이동 버튼이 없고 차트 동기화로 분봉의 날짜와 시
 
   await syncButton(page).click();
   await expect(syncButton(page)).toHaveAttribute("aria-pressed", "true");
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveAttribute("data-kind", "live");
+  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
 
   const earlyPos = await barCoordinate(page, at("09:30:00", "2026-11-06"));
   await page.mouse.move(earlyPos.x, earlyPos.y);
@@ -272,4 +272,40 @@ test("끊긴 구간은 카드마다 빗금으로 보인다", async ({ page, scen
   await openBrokers(page, scenario);
   await expect(window_(page).getByTestId("broker-card")).toHaveCount(2);
   await expect(window_(page).getByTestId("broker-gap")).toHaveCount(2);
+});
+
+test("당일 자료가 없으면 직전 마감일을 배지와 함께 바로 보이고 실시간이 오면 자동 전환한다", async ({ page, scenario }) => {
+  const past = day({
+    date: PAST,
+    source: "store",
+    live: false,
+    cursor: "s:1:2",
+    snapshots: [kiwoom(at("09:30:00", "2026-11-06"), 5_000), kiwoom(at("15:20:00", "2026-11-06"), 8_000)],
+  });
+  let jumpedDate: string | null = null;
+  scenario.on((url) => url.pathname === "/api/symbols/005930/brokers", (request) => {
+    const query = new URL(request.url()).searchParams;
+    if (query.get("fallback") === "latest") return { body: past };
+    return { body: day({ date: query.get("date") ?? TODAY, source: "none", live: false }) };
+  });
+  scenario.on((url) => url.pathname === "/api/bars/jump", (request) => {
+    jumpedDate = new URL(request.url()).searchParams.get("date");
+    const bars: Bar[] = [{ t: at("15:20:00", "2026-11-06"), o: 70_800, h: 70_900, l: 70_700, c: 70_900, v: 50 }];
+    return { body: { symbol: "005930", venue: "combined", period: "1m", date: jumpedDate ?? "2026-11-06", bars, nextBefore: null } };
+  });
+
+  await openBrokers(page, scenario);
+  await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+8,000");
+  await expect(window_(page).getByTestId("brokers-fallback-date")).toHaveText("11-06 마감");
+  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
+  await expect(window_(page).getByTestId("brokers-price")).toHaveText("70,900");
+  expect(jumpedDate).toBe("2026-11-06");
+
+  await expect.poll(() => brokerFeeds(scenario).length).toBe(1);
+  const request = brokerFeeds(scenario)[0]!;
+  if (request.type !== "subscribe_feed") throw new Error("거래원 구독이 없습니다");
+  scenario.live.emit({ type: "feed_brokers", sub: request.sub, brokers: kiwoom(at("09:32:00"), 300) });
+
+  await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+300");
+  await expect(window_(page).getByTestId("brokers-fallback-date")).toHaveCount(0);
 });
