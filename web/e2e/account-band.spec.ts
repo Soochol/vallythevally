@@ -6,8 +6,9 @@ import { type Scenario, expect, test } from "./harness";
 import { ACCOUNT, BASE, CODE, openOrderWindow, ordersOn, otherAccount, tradingApi, win } from "./order-window";
 
 const HYNIX = "000660";
-const ONE_LINE_BAND_PX = 40;
+const ONE_LINE_BAND_PX = 34;
 const ONE_LINE_PX = 28;
+const COMPACT_HEADER_TOTAL_PX = 96;
 const LONG_ALIAS = "가".repeat(20);
 const KINDS = ["open", "holdings", "fills"] as const;
 
@@ -77,37 +78,47 @@ async function expectTabsWhole(page: Page): Promise<Box[]> {
 
 async function expectOneLine(page: Page): Promise<void> {
   expect((await boxOf(page.getByTestId("order-account"))).height).toBeLessThanOrEqual(ONE_LINE_BAND_PX);
+  const symbol = await boxOf(page.getByTestId("order-symbol-head"));
   const name = await boxOf(label(page));
   expect(name.height).toBeLessThanOrEqual(ONE_LINE_PX);
   const tabs = await expectTabsWhole(page);
   const environment = page.getByTestId("account-mock");
-  const badges = [...(await environment.count() === 0 ? [] : [await boxOf(environment)]), await boxOf(page.getByTestId("account-route")), await boxOf(page.getByTestId("margin-policy"))];
-  const row = [name, ...badges, ...tabs];
+  const settings = await boxOf(page.getByTestId("order-settings-button"));
+  const row = [symbol, name, ...(await environment.count() === 0 ? [] : [await boxOf(environment)]), ...tabs, settings];
   for (const box of row) expect(Math.abs(centerY(box) - centerY(name))).toBeLessThan(4);
   for (const [index, box] of row.entries()) {
     const next = row[index + 1];
-    if (next !== undefined) expect(next.x).toBeGreaterThanOrEqual(box.x + box.width);
+    if (next !== undefined) expect(next.x).toBeGreaterThanOrEqual(box.x + box.width - 1);
   }
 }
 
-test("420px 창의 계좌 띠는 한 줄이고 단추는 미체결·보유종목·체결로 줄어든다", async ({ page, scenario }) => {
+async function expectCompactHeaderHeight(page: Page): Promise<void> {
+  const account = await boxOf(page.getByTestId("order-account"));
+  const summary = await boxOf(page.getByTestId("order-summary"));
+  const quantity = await boxOf(page.getByTestId("order-quantity-row"));
+  expect(Math.round(account.height + summary.height + quantity.height)).toBe(COMPACT_HEADER_TOTAL_PX);
+}
+
+test("420px 창의 상단 1줄은 한 줄이고 단추는 미체결·보유·체결로 줄어든다", async ({ page, scenario }) => {
   await openBand(page, scenario, { others: true, longAlias: true, allowMargin: true });
   await sizeWindow(page, 420);
   await shows(tab(page, "open"), "미체결 0");
-  await shows(tab(page, "holdings"), "보유종목 2");
+  await shows(tab(page, "holdings"), "보유 2");
   await shows(tab(page, "fills"), "체결 0");
   await expect(tab(page, "holdings")).toHaveAccessibleName("보유종목 2");
   await expectOneLine(page);
+  await expectCompactHeaderHeight(page);
   expect((await boxOf(label(page))).width).toBeGreaterThan(40);
   const ellipsis = await label(page).locator(".od-account-text").evaluate((element) => ({ overflow: element.scrollWidth > element.clientWidth, textOverflow: getComputedStyle(element).textOverflow }));
   expect(ellipsis).toEqual({ overflow: true, textOverflow: "ellipsis" });
 });
 
-test("모의: 420px 창의 계좌 띠는 모의투자 배지가 있어도 한 줄이다", async ({ page, scenario }) => {
+test("모의: 420px 창의 상단 1줄은 모의투자 배지가 있어도 한 줄이다", async ({ page, scenario }) => {
   await openBand(page, scenario, { others: true, longAlias: true, allowMargin: true, mock: true });
   await sizeWindow(page, 420);
   await expect(page.getByTestId("account-mock")).toHaveText("모의투자");
   await expectOneLine(page);
+  await expectCompactHeaderHeight(page);
 });
 
 test("520px 창부터는 단추 이름을 줄이지 않는다", async ({ page, scenario }) => {
@@ -117,22 +128,24 @@ test("520px 창부터는 단추 이름을 줄이지 않는다", async ({ page, s
   await shows(tab(page, "holdings"), "보유종목 2");
   await shows(tab(page, "fills"), "내 체결 0");
   await expectOneLine(page);
+  await expectCompactHeaderHeight(page);
 
   await sizeWindow(page, 519);
   await shows(tab(page, "open"), "미체결 0");
-  await shows(tab(page, "holdings"), "보유종목 2");
+  await shows(tab(page, "holdings"), "보유 2");
   await shows(tab(page, "fills"), "체결 0");
   await expectOneLine(page);
+  await expectCompactHeaderHeight(page);
 });
 
-test("372px 창의 계좌 띠는 두 줄이고 계좌 이름이 잘리지 않는다", async ({ page, scenario }) => {
+test("360px 좁은 창에서도 상단 3줄이 래핑 없이 96px 고정이고 단추는 미·보·체로 줄어든다", async ({ page, scenario }) => {
   await openBand(page, scenario, { allowMargin: true, rateOff: true });
-  await sizeWindow(page, 372);
-  await shows(tab(page, "open"), "미체결 0");
-  await shows(tab(page, "holdings"), "보유종목 2");
-  await shows(tab(page, "fills"), "체결 0");
-  const tabs = await expectTabsWhole(page);
-  const name = await boxOf(label(page));
-  for (const box of tabs) expect(box.y).toBeGreaterThanOrEqual(name.y + name.height);
+  await sizeWindow(page, 360);
+  await shows(tab(page, "open"), "미 0");
+  await shows(tab(page, "holdings"), "보 2");
+  await shows(tab(page, "fills"), "체 0");
+  await expect(tab(page, "holdings")).toHaveAccessibleName("보유종목 2");
+  await expectOneLine(page);
+  await expectCompactHeaderHeight(page);
   expect(await label(page).evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
 });

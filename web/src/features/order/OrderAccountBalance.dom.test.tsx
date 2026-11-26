@@ -34,7 +34,7 @@ test("보유종목은 실시간 구독되고 신용 종목은 제외되며 예�
   expect(lastWatch(env.socket.sent)).not.toContain("035420");
 
   const tab = screen.getByTestId("account-tab-holdings");
-  expect(tab.textContent).toBe("보유종목 2");
+  expect(tab.getAttribute("aria-label")).toBe("보유종목 2");
   expect(screen.queryByTestId("account-total-profit")).toBeNull();
 
   fireEvent.click(tab);

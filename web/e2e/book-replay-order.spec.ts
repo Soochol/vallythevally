@@ -73,7 +73,8 @@ test("호가 복기 동안 호가주문창은 그 봉의 호가를 보이고 주
   expect(Math.abs(ladderDuring.height - ladderBefore.height)).toBeLessThanOrEqual(1);
   await expect(win(page).getByTestId("order-total-ask")).toHaveText("1,234");
   await expect(win(page).getByTestId("order-total-bid")).toHaveText("2,345");
-  await expect(win(page).getByTestId("order-symbol-price")).toHaveText("70,300");
+  await expect(win(page).getByTestId("order-symbol-price")).toHaveCount(0);
+  await expect(win(page).locator(".mw-lr[data-current] .mw-px-num")).toHaveText("70,300");
   await expect(win(page).getByTestId("ladder-trade")).toHaveCount(2);
   await expect(win(page).getByTestId("ladder-info-card")).toHaveCount(0);
 
@@ -123,7 +124,7 @@ test("수집 호가가 없는 봉이면 호가주문창 사다리를 비운다",
   await expect(win(page).getByTestId("price-ladder")).toHaveCount(0);
   await expect(win(page).getByTestId("order-total-ask")).toHaveText("-");
   await expect(win(page).getByTestId("order-total-bid")).toHaveText("-");
-  await expect(win(page).getByTestId("order-symbol-price")).toHaveText("-");
+  await expect(win(page).getByTestId("order-symbol-price")).toHaveCount(0);
   expect(api.writes).toEqual([]);
   await expect(cell(page)).toBeVisible();
 });

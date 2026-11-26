@@ -21,7 +21,8 @@ test("매수 가능 칸과 자금 팝오버에서 미수 허용 확인·취소·
 
   const buyable = await screen.findByTestId("summary-buyable");
   await waitFor(() => expect(buyable.getAttribute("data-policy")).toBe("cash_only"));
-  expect(buyable.textContent).toContain("매수 가능 · 현금");
+  expect(buyable.getAttribute("aria-label")).toBe("매수 가능 · 현금");
+  expect(buyable.textContent).toContain("현금");
   expect(buyable.textContent).toContain("500,000,000원");
   expect(buyable.getAttribute("data-unpaid")).toBe("1000000");
   expect(screen.getByTestId("margin-policy").textContent).toBe("현금");
