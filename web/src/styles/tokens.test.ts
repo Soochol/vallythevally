@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { THEMES } from "../persist/theme";
+import { THEME_KEYS } from "../persist/theme";
 import tokensCss from "./tokens.css?raw";
 import { contrastRatio, deltaE2000, over, parseColor, parseThemeProperties, type Rgba } from "./colorMath";
 
@@ -19,7 +19,7 @@ const CHIP_TEXT_PAIRS = [
 const SERIES = Array.from({ length: 10 }, (_, index) => `--series-${index + 1}`);
 const SERIES_NEIGHBOURS = ["--up", "--down", "--danger", "--warning", "--success", "--accent"] as const;
 
-for (const theme of THEMES) {
+for (const theme of THEME_KEYS) {
   const tokens = parseThemeProperties(tokensCss, theme);
 
   const token = (name: string): string => {
@@ -134,7 +134,7 @@ for (const theme of THEMES) {
 }
 
 describe("공통 치수 토큰", () => {
-  const rootTokens = parseThemeProperties(tokensCss, "dark");
+  const rootTokens = parseThemeProperties(tokensCss, "editorial-dark");
   const token = (name: string): string => {
     const value = rootTokens.get(name);
     if (value === undefined) throw new Error(`${name}이 tokens.css에 없다`);
@@ -152,10 +152,18 @@ describe("공통 치수 토큰", () => {
     expect(["--ctl-xs", "--ctl-s", "--ctl-m", "--ctl-l"].map(token)).toEqual(["22px", "26px", "30px", "36px"]);
   });
 
-  it("소프트 벤토와 플로팅 글래스 조형·강조 토큰이 규격과 일치한다", () => {
-    const bento = parseThemeProperties(tokensCss, "bento");
-    expect(["--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => bento.get(name))).toEqual(["16px", "999px", "10px", "#42E3A8"]);
-    const glass = parseThemeProperties(tokensCss, "glass");
-    expect(["--r-l", "--r-pill", "--glass-blur", "--accent"].map((name) => glass.get(name))).toEqual(["12px", "999px", "blur(22px)", "#B49BFF"]);
+  it("소프트 벤토·플로팅 글래스·포레스트 다크·화이트 조형·강조 토큰이 규격과 일치한다", () => {
+    const bentoDark = parseThemeProperties(tokensCss, "bento-dark");
+    expect(["--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => bentoDark.get(name))).toEqual(["16px", "999px", "10px", "#42E3A8"]);
+    const bentoLight = parseThemeProperties(tokensCss, "bento-light");
+    expect(["--bg", "--surface", "--chart-bg", "--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => bentoLight.get(name))).toEqual(["#F2F4F6", "#FFFFFF", "#FFFFFF", "16px", "999px", "10px", "#006953"]);
+    const glassDark = parseThemeProperties(tokensCss, "glass-dark");
+    expect(["--r-l", "--r-pill", "--glass-blur", "--accent"].map((name) => glassDark.get(name))).toEqual(["12px", "999px", "blur(22px)", "#B49BFF"]);
+    const glassLight = parseThemeProperties(tokensCss, "glass-light");
+    expect(["--bg", "--surface", "--chart-bg", "--r-l", "--r-pill", "--glass-blur", "--accent"].map((name) => glassLight.get(name))).toEqual(["#ECEFF8", "#F7F8FD", "#F8F9FE", "12px", "999px", "blur(22px)", "#5A38C8"]);
+    const forestDark = parseThemeProperties(tokensCss, "forest-dark");
+    expect(["--bg", "--surface", "--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => forestDark.get(name))).toEqual(["#080B09", "#141914", "8px", "999px", "6px", "#C7F36B"]);
+    const forestLight = parseThemeProperties(tokensCss, "forest-light");
+    expect(["--bg", "--surface", "--chart-bg", "--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => forestLight.get(name))).toEqual(["#EEF2EB", "#F8FAF6", "#FAFBF8", "8px", "999px", "6px", "#226630"]);
   });
 });
