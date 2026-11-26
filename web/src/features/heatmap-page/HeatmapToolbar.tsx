@@ -120,7 +120,7 @@ export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit, listQu
           </>
         )}
         <ViewSettings settings={settings} onChange={onChange} tradedKnown={tradedKnown} showsStockControls={showsStockControls} />
-        <button type="button" className="btn btn-sm hm-edit-open" aria-haspopup="dialog" onClick={onEdit}>테마 편집</button>
+        <button type="button" className="btn btn-sm hm-edit-open" onClick={onEdit}>테마 편집</button>
       </div>
     </div>
   );

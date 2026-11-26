@@ -191,13 +191,15 @@ test("390px 흐름 비교의 눈금 글자는 실제 11px 이상으로 그려진
   for (const size of sizes) expect(size).toBeGreaterThanOrEqual(11);
 });
 
-test("테마 편집 서랍은 뒤가 비치지 않는다", async ({ page, scenario }) => {
+test("테마 편집은 모달 없이 페이지 안에서 멀티컬럼 시트로 열린다", async ({ page, scenario }) => {
   seedWideBoard(scenario, wideTable());
   await page.goto("/heatmap");
   await expect(main(page).locator(".hm-tile")).toHaveCount(72);
   await page.getByRole("button", { name: "테마 편집" }).click();
-  const drawer = page.getByRole("dialog", { name: "테마 편집" });
-  await expect(drawer).toBeVisible();
-  const blur = await drawer.evaluate((node) => getComputedStyle(node).backdropFilter);
-  expect(blur).toBe("none");
+  await expect(page.getByRole("dialog", { name: "테마 편집" })).toHaveCount(0);
+  const sheet = main(page).getByRole("region", { name: "테마 편집" });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator(".hm-edit-col")).toHaveCount(8);
+  const symBox = (await sheet.locator(".hm-edit-sym").first().boundingBox())!;
+  expect(symBox.height).toBeLessThanOrEqual(28);
 });
