@@ -2,25 +2,25 @@
 .drawing-toolbar::-webkit-scrollbar { display:none; }
 .drawing-toolbar>* { flex-shrink:0; }
 .drawing-toolbar-hidden { --rail-w:var(--size-12); justify-content:center; padding:0; border-right:0; background:transparent; }
-.draw-rail-handle { display:grid; place-items:center; width:100%; height:var(--size-64); border-radius:0; color:var(--text-3); cursor:pointer; background:var(--bg); border-right:var(--size-1) solid var(--line); }
-.draw-rail-handle:hover { color:var(--accent); background:var(--hover); }
+.draw-rail-handle { display:grid; place-items:center; width:100%; height:var(--size-64); border-radius:0; color:var(--text-3); cursor:pointer; background:var(--bg); border-right:var(--size-1) solid var(--line); transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.draw-rail-handle:hover { color:var(--text); background:var(--hover); }
 .draw-pinned { display:flex; flex:1 1 0; flex-direction:column; align-items:center; gap:var(--size-2); min-height:0; overflow:hidden; }
 .draw-pinned>* { flex-shrink:0; }
 .draw-pinned:not(:empty) { min-height:var(--size-30); }
-.draw-tool { display:grid; place-items:center; width:var(--size-30); height:var(--size-30); border-radius:0; color:var(--text-3); cursor:pointer; }
+.draw-tool { display:grid; place-items:center; width:var(--size-30); height:var(--size-30); border-radius:var(--r-s); color:var(--text-3); cursor:pointer; transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .draw-tool:hover { background:var(--hover); color:var(--text); }
-.draw-tool[aria-pressed=true] { color:var(--text); background:transparent; box-shadow:inset var(--size-2) 0 0 var(--accent); }
-.draw-tool[data-active-tool][aria-pressed=true] { color:var(--text); background:var(--accent-soft); box-shadow:inset var(--size-2) 0 0 var(--accent); }
+.draw-tool[aria-pressed=true] { border-radius:0; color:var(--text); background:transparent; box-shadow:inset var(--size-2) 0 0 var(--accent); }
+.draw-tool[data-active-tool][aria-pressed=true] { border-radius:0; color:var(--text); background:var(--accent-soft); box-shadow:inset var(--size-2) 0 0 var(--accent); }
 .draw-group { display:flex; position:relative; align-items:center; }
 .draw-group-toggle { position:absolute; right:0; bottom:0; }
-.draw-group-dot { display:grid; place-items:center; width:var(--size-12); height:var(--size-16); color:var(--text-2); border-radius:var(--r-s); }
-.draw-group-dot:hover { color:var(--accent); background:var(--raised); }
+.draw-group-dot { display:grid; place-items:center; width:var(--size-12); height:var(--size-16); color:var(--text-2); border-radius:var(--r-s); transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.draw-group-dot:hover { color:var(--text); background:var(--hover); }
 .draw-tool-menu { min-width:calc(var(--size-220) + var(--size-10)); max-height:calc(100dvh - var(--size-16)); overflow:auto; padding:var(--size-4); }
 .draw-tool-choice { display:flex; align-items:center; }
-.draw-tool-choice button { display:flex; align-items:center; gap:var(--size-8); height:var(--size-30); padding:var(--size-4) var(--size-8); border-radius:var(--r-s); font-size:var(--fs-s); }
+.draw-tool-choice button { display:flex; align-items:center; gap:var(--size-8); height:var(--size-30); padding:var(--size-4) var(--size-8); border-radius:var(--r-s); font-size:var(--fs-s); transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .draw-tool-choice button:first-child { flex:1; }
 .draw-tool-choice [role=menuitemcheckbox] { width:var(--size-30); justify-content:center; }
-.draw-tool-choice button:hover, .draw-tool-choice button:focus-visible { background:var(--raised); }
+.draw-tool-choice button:hover, .draw-tool-choice button:focus-visible { background:var(--hover); color:var(--text); }
 .draw-tool-choice [aria-checked=true] { color:var(--accent); }
 .draw-tool-choice [aria-checked=true] svg { fill:currentColor; }
 .draw-tool-menu kbd { margin-left:auto; color:var(--text-3); font-size:var(--fs-xs); }
