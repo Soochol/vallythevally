@@ -5,14 +5,14 @@
 .ui-dialog[data-size=compact] .ui-dialog-head h2 { font-size:var(--fs-l); font-weight:600; letter-spacing:0; }
 .ui-dialog[data-size=compact] .ui-dialog-foot { padding:var(--size-8) var(--size-16) var(--size-16); border-top:0; }
 .ui-dialog-head { display:flex; flex:none; align-items:center; gap:var(--size-16); padding:var(--size-24) var(--size-24); border-bottom:var(--size-1) solid var(--line); }
-.ui-dialog-head h2 { font-size:var(--size-21); font-weight:650; letter-spacing:var(--size-neg-point-5); }
+.ui-dialog-head h2 { font-size:var(--fs-h); font-weight:600; letter-spacing:-0.02em; }
 .ui-dialog-foot { display:flex; flex:none; align-items:center; gap:var(--size-8); padding:var(--size-16) var(--size-24); border-top:var(--size-1) solid var(--line); }
 .ui-field { flex-shrink:0; min-height:var(--ctl-l); border:var(--size-1) solid var(--line); border-radius:var(--r-m); background:var(--chart-bg); padding:var(--size-8) var(--size-8); outline:none; color:var(--text); }
 .ui-field:focus { border-color:var(--accent); }
 .ui-field-cell .ui-field { padding-right:var(--size-120); }
 .ui-field[aria-invalid=true] { border-color:var(--danger); }
 .ui-tabs { display:flex; flex:none; gap:var(--size-24); padding:0 var(--size-24); border-bottom:var(--size-1) solid var(--line); }
-.ui-tabs button { min-height:var(--size-42); padding:0 var(--size-4) var(--size-8); border-bottom:var(--size-2) solid transparent; color:var(--text-2); font-size:var(--size-13); white-space:nowrap; }
+.ui-tabs button { min-height:var(--size-42); padding:0 var(--size-4) var(--size-8); border-bottom:var(--size-2) solid transparent; color:var(--text-2); font-size:var(--fs-b); white-space:nowrap; }
 .ui-tabs button:disabled { color:var(--text-3); cursor:not-allowed; }
 .ui-tabs [aria-selected=true] { border-color:var(--accent); color:var(--accent); font-weight:600; }
 .ui-tabs button span { margin-left:var(--size-8); padding:var(--size-4) var(--size-8); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }

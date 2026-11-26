@@ -49,7 +49,7 @@ export function Topbar() {
         <div role="group" aria-label="봉 주기" className="ui-seg">
           <MinuteMenu value={cell.period} onChange={(period) => setPeriod(cellId, period)} />
           {PERIODS.filter((p) => !p.endsWith("m")).map((p) => (
-            <button key={p} type="button" className="seg-btn" aria-pressed={cell.period === p}
+            <button key={p} type="button" className="ui-seg-item" aria-pressed={cell.period === p}
               title={keyTitle(PERIOD_LABEL[p], keys, periodActionId(p))} onClick={() => setPeriod(cellId, p)}>{PERIOD_LABEL[p]}</button>
           ))}
         </div>

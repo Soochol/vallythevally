@@ -4,7 +4,7 @@ import { VENUE_LABEL, VENUES } from "../../lib/venue";
 import { useUiStore, useVenue } from "../../stores/ui";
 
 const PHONE_PILL =
-  "h-7 min-w-10 rounded-[var(--r-pill)] px-2 text-s text-text-2 aria-pressed:bg-accent aria-pressed:font-[650] aria-pressed:text-accent-ink";
+  "h-7 min-w-10 rounded-[var(--r-pill)] px-2 text-s text-text-2 aria-pressed:bg-accent aria-pressed:font-[600] aria-pressed:text-accent-ink";
 
 const VENUE_HINT = { combined: "KRX와 NXT를 합친 시세", krx: "한국거래소 정규장 시세", nxt: "넥스트레이드 시세 · 없는 종목은 통합" } as const;
 const VENUE_MENU_HEADING = "거래소 · 모든 차트와 관심종목에 적용";
