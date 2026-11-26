@@ -30,8 +30,8 @@
 .drawing-floating { display:flex; align-items:center; gap:var(--size-4); min-height:var(--size-38); padding:var(--size-4); max-width:calc(100dvw - var(--size-16)); flex-wrap:wrap; pointer-events:auto; white-space:nowrap; }
 .ui-popover.drawing-floating { max-width:min(calc(100dvw - var(--size-16)), var(--floating-max, 100dvw)); }
 .drawing-floating .icon-btn { width:var(--size-28); height:var(--size-28); }
-.drawing-floating .icon-btn svg { width:var(--size-17); height:var(--size-17); }
-.drawing-floating .draw-input { width:auto; max-width:calc(var(--size-60) + var(--size-20)); min-height:var(--size-27); padding:var(--size-2) var(--size-5); font-size:var(--fs-s); }
+.drawing-floating .icon-btn svg { width:var(--size-16); height:var(--size-16); }
+.drawing-floating .draw-input { width:auto; max-width:calc(var(--size-60) + var(--size-20)); min-height:var(--ctl-s); padding:var(--size-2) var(--size-5); font-size:var(--fs-s); }
 .draw-grip { cursor:grab; color:var(--text-3); width:var(--size-18); height:var(--size-28); touch-action:none; font-size:var(--fs-h); }
 .draw-grip:active { cursor:grabbing; }
 .draw-bar-sep { width:var(--size-1); height:var(--size-20); background:var(--line); margin:0 var(--size-3); }

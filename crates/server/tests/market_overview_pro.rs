@@ -1253,3 +1253,29 @@ fn disclosure_classifier_marks_rights_plus_bonus_issue_as_capital() {
     assert_eq!(classify_report("유무상증자결정"), Some(MarketOverviewDisclosureCategory::Capital));
     assert_eq!(classify_report("무상증자결정"), Some(MarketOverviewDisclosureCategory::Shareholder));
 }
+
+#[tokio::test]
+async fn weekend_pro_endpoint_retains_latest_friday_closing_boards() {
+    let friday = day(2026, 11, 6);
+    let saturday = day(2026, 11, 7);
+    let friday_ts = at(friday, 15, 30, 0).unix();
+    let listed = vec![listing("005930", "삼성전자", Market::Kospi, 1_000_000, vec![])];
+    let h = Harness::start(at(saturday, 12, 0, 0), listed, vec![]).await;
+
+    write_snap(&h.shared, DataKind::SnapshotKrx, friday, friday_ts, vec![snap_row("005930", "20261106", 70_000, 69_000, 5_000)], vec![]);
+    write_overview_sectors(
+        &h.shared,
+        friday,
+        friday_ts,
+        vec![MarketOverviewSector { code: "013".into(), name: "전기전자".into(), level: 1000.0, change_rate: 1.5, trade_value_eok: 500.0 }],
+        vec![],
+    );
+    h.poll().await;
+
+    let (status, body) = h.get("/api/market-overview/pro?scope=all").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["sessionDna"]["status"], "ok");
+    assert!((body["sessionDna"]["value"]["krxTradeValueEok"].as_f64().unwrap() - 50.0).abs() < 1e-9);
+    assert_eq!(body["rrg"]["status"], "ok");
+    assert_eq!(body["rrg"]["value"]["sectors"].as_array().unwrap().len(), 1);
+}

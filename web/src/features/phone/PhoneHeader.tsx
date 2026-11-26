@@ -32,7 +32,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <button type="button" className="min-w-0 flex-1 truncate text-left" aria-haspopup="dialog" onClick={() => openSearch()}>
-            <b className="text-l font-[650]">{info?.name ?? cell.symbol}</b>
+            <b className="text-l font-[600]">{info?.name ?? cell.symbol}</b>
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
           </button>
           <PhoneSystemButton />
@@ -42,7 +42,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
           <div className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
           {ready ? (
             <>
-              <strong className={`text-[24px] font-[650] tracking-[-0.02em] ${dir}`}>{formatPrice(ready.latest.c, isIndex)}</strong>
+              <strong className={`text-[24px] font-[600] tracking-[-0.02em] ${dir}`}>{formatPrice(ready.latest.c, isIndex)}</strong>
               {ready.prev && (
                 <span className={`whitespace-pre ${dir}`}>
                   {formatChange(chg, isIndex)} {formatPercent((chg / ready.prev.c) * 100)}
@@ -50,7 +50,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
               )}
             </>
           ) : (
-            <strong className="text-[24px] font-[650] text-text-3">—</strong>
+            <strong className="text-[24px] font-[600] text-text-3">—</strong>
           )}
           </div>
           <VenuePicker variant="phone" />

@@ -212,6 +212,42 @@ pub fn parse_scope(query: &HashMap<String, String>) -> Result<MarketOverviewScop
     }
 }
 
+fn daily_close_snapshot_rows(
+    closes: &HashMap<StockCode, Vec<(KstDate, Price)>>,
+    latest_day: Option<KstDate>,
+    catalog: &StockCatalog,
+    scope: MarketOverviewScope,
+) -> Vec<SnapshotRow> {
+    let Some(last) = latest_day else {
+        return Vec::new();
+    };
+    let day_str = last.yyyymmdd();
+    let mut rows = Vec::new();
+    for (&code, series) in closes {
+        if !catalog.includes_stock(code, scope) || series.len() < 2 || series[0].0 != last {
+            continue;
+        }
+        let current_won = series[0].1.centi() / 100;
+        let base_won = series[1].1.centi() / 100;
+        if current_won == 0 || base_won == 0 {
+            continue;
+        }
+        rows.push(SnapshotRow {
+            code: code.as_str().to_owned(),
+            day: day_str.clone(),
+            current_won,
+            base_won,
+            open_won: base_won,
+            high_won: current_won.max(base_won),
+            low_won: current_won.min(base_won),
+            volume: 0,
+            traded_million_won: 0,
+            traded_at: None,
+        });
+    }
+    rows
+}
+
 pub fn histogram_of(rows: &[&SnapshotRow]) -> Vec<MarketOverviewHistogramBucket> {
     let mut counts = [0u32; 9];
     for row in rows {
@@ -531,6 +567,11 @@ pub fn derive_market_snapshot(inputs: &DerivedInputs<'_>) -> MarketOverviewDeriv
         .map(|loaded| loaded.header.as_of)
         .max()
         .map(UnixSeconds);
+    let fallback_rows = if combined.is_none() {
+        daily_close_snapshot_rows(closes, latest_day, catalog, scope)
+    } else {
+        Vec::new()
+    };
     let histogram = if scope != MarketOverviewScope::All && catalog.is_empty() {
         not_prepared("종목 목록이 아직 준비되지 않아 시장별 등락 분포를 계산할 수 없습니다")
     } else {
@@ -543,6 +584,10 @@ pub fn derive_market_snapshot(inputs: &DerivedInputs<'_>) -> MarketOverviewDeriv
                     .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.includes_stock(code, scope)))
                     .collect();
                 MarketOverviewPart::Ok { value: histogram_of(&scoped) }
+            }
+            None if !fallback_rows.is_empty() => {
+                let refs: Vec<&SnapshotRow> = fallback_rows.iter().collect();
+                MarketOverviewPart::Ok { value: histogram_of(&refs) }
             }
             None => not_prepared("통합 시세 스냅샷이 아직 준비되지 않았습니다"),
         }
@@ -578,7 +623,6 @@ pub fn derive_market_snapshot(inputs: &DerivedInputs<'_>) -> MarketOverviewDeriv
     };
     let attribution_market = attribution_market_for(scope);
     let attribution = match combined {
-        None => not_prepared("통합 시세 스냅샷이 아직 준비되지 않았습니다"),
         Some(loaded) => match resolve_index_quote(attribution_market, combined, krx, overview_index) {
             None => not_prepared("지수 시세가 아직 준비되지 않았습니다"),
             Some((index_level, index_change_rate)) => {
@@ -601,6 +645,27 @@ pub fn derive_market_snapshot(inputs: &DerivedInputs<'_>) -> MarketOverviewDeriv
                 }
             }
         },
+        None if !fallback_rows.is_empty() => match resolve_index_quote(attribution_market, combined, krx, overview_index) {
+            None => not_prepared("지수 시세가 아직 준비되지 않았습니다"),
+            Some((index_level, index_change_rate)) => {
+                let market_rows: Vec<&SnapshotRow> = fallback_rows
+                    .iter()
+                    .filter(|row| StockCode::parse(&row.code).is_ok_and(|code| catalog.includes_in_market(code, attribution_market)))
+                    .collect();
+                match attribution_of(
+                    attribution_market,
+                    index_level,
+                    index_change_rate,
+                    &market_rows,
+                    &catalog.listed_shares,
+                    &catalog.names,
+                ) {
+                    Some(value) => MarketOverviewPart::Ok { value },
+                    None => not_prepared("상장주식수 자료가 없어 지수 기여도를 계산할 수 없습니다"),
+                }
+            }
+        },
+        None => not_prepared("통합 시세 스냅샷이 아직 준비되지 않았습니다"),
     };
     let (today_prices, overlay) = extract_today_overlay(combined, latest_day, catalog, scope);
     let ma_thrust = match latest_day {

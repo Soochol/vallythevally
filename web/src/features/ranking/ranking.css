@@ -4,7 +4,6 @@
 .rk-grow { flex:1; }
 .rk-cats, .rk-kinds { min-width:0; overflow-x:auto; scrollbar-width:none; }
 .rk-cats { flex:0 1 auto; }
-.rk-cats .ui-seg-item[aria-selected="true"] { background:var(--raised); color:var(--text); font-weight:600; }
 .rk-kinds { display:flex; flex:0 1 auto; gap:var(--size-4); }
 .rk-kind { height:var(--size-24); padding:0 var(--s3); border-radius:var(--r-pill); font-size:var(--fs-s); color:var(--text-2); white-space:nowrap; }
 .rk-kind:hover { background:var(--hover); color:var(--text); }

@@ -91,9 +91,10 @@ describe("정의되지 않은 토큰 규칙", () => {
     expect(findUndefinedTokens(sources, TOKENS_PATH, tokensText!)).toEqual([]);
   });
 
-  it("CSS가 쓰던 --size-3·--size-6·--size-180·--mono가 tokens.css에 정의돼 있다", () => {
+  it("CSS가 쓰는 --size-3·--size-6·--size-180이 tokens.css에 정의돼 있고 쓰지 않는 --mono는 없다", () => {
     const tokensText = rawSources[TOKENS_PATH]!;
-    for (const name of ["--size-3", "--size-6", "--size-180", "--mono"]) expect(tokensText).toMatch(new RegExp(`${name}\\s*:`));
+    for (const name of ["--size-3", "--size-6", "--size-180"]) expect(tokensText).toMatch(new RegExp(`${name}\\s*:`));
+    expect(tokensText).not.toMatch(/--mono\s*:/);
   });
 });
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::response::Json;
-use domain::{KstDate, KstTime, Price, StockCode};
+use domain::{KstDate, KstTime, Price, StockCode, Weekday};
 
 use super::broker_book::build_broker_book;
 use super::derived::{StockCatalog, not_prepared, parse_scope};
@@ -122,16 +122,29 @@ pub fn derive_pro_card(inputs: &ProInputs<'_>) -> MarketOverviewProCard {
     }
 }
 
+fn is_weekend_observation(now: KstTime) -> bool {
+    matches!(observation_day(now).weekday(), Weekday::Sat | Weekday::Sun)
+}
+
+fn board_matches_day(observation_date: &str, expected_day: &str, weekend: bool) -> bool {
+    weekend || observation_date == expected_day
+}
+
 fn collect_samples(st: &AppState, now: KstTime, scope: MarketOverviewScope) -> Vec<Sample> {
     let markets: &[Market] = match scope {
         MarketOverviewScope::All => &[Market::Kospi, Market::Kosdaq],
         MarketOverviewScope::Kospi => &[Market::Kospi],
         MarketOverviewScope::Kosdaq => &[Market::Kosdaq],
     };
+    let weekend = is_weekend_observation(now);
     let mut out = Vec::new();
     for &market in markets {
         if st.shared_data.is_enabled() {
-            out.extend(shared::samples(st, now, market));
+            if weekend {
+                out.extend(shared::latest_samples(st, market));
+            } else {
+                out.extend(shared::samples(st, now, market));
+            }
         } else {
             out.extend(st.market_overview.samples.samples(now, market));
         }
@@ -157,11 +170,12 @@ pub async fn pro(
         &store_snapshot.catalog
     };
     let expected_day = observation_day(now).yyyymmdd();
-    let combined = st.shared_data.snapshot_combined.current().filter(|loaded| loaded.header.observation_date == expected_day);
-    let krx = st.shared_data.snapshot_krx.current().filter(|loaded| loaded.header.observation_date == expected_day);
-    let nxt = st.shared_data.snapshot_nxt.current().filter(|loaded| loaded.header.observation_date == expected_day);
-    let overview_board = st.shared_data.market_overview.current().filter(|loaded| loaded.header.observation_date == expected_day);
-    let intraday_themes = st.shared_data.intraday_themes.current().filter(|loaded| loaded.header.observation_date == expected_day);
+    let weekend = is_weekend_observation(now);
+    let combined = st.shared_data.snapshot_combined.current().filter(|loaded| board_matches_day(&loaded.header.observation_date, &expected_day, weekend));
+    let krx = st.shared_data.snapshot_krx.current().filter(|loaded| board_matches_day(&loaded.header.observation_date, &expected_day, weekend));
+    let nxt = st.shared_data.snapshot_nxt.current().filter(|loaded| board_matches_day(&loaded.header.observation_date, &expected_day, weekend));
+    let overview_board = st.shared_data.market_overview.current().filter(|loaded| board_matches_day(&loaded.header.observation_date, &expected_day, weekend));
+    let intraday_themes = st.shared_data.intraday_themes.current().filter(|loaded| board_matches_day(&loaded.header.observation_date, &expected_day, weekend));
     let themes_catalog = st.kiwoom_catalog.latest().or_else(|| {
         st.shared_data.kiwoom_themes.current().map(|loaded| {
             Arc::new(StoredCatalog {
@@ -176,7 +190,7 @@ pub async fn pro(
             })
         })
     });
-    let rankings = st.shared_data.rankings.current().filter(|merged| merged.observation_date == expected_day);
+    let rankings = st.shared_data.rankings.current().filter(|merged| board_matches_day(&merged.observation_date, &expected_day, weekend));
     let samples = collect_samples(&st, now, scope);
     let disclosures = st.market_overview.load_security_disclosures().await;
     let card = derive_pro_card(&ProInputs {

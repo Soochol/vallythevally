@@ -159,7 +159,7 @@ const LadderLine = memo(function LadderLine({ row, side, columns, previousClose,
 }, sameLine);
 
 export const ladderColumns = (hasLeft: boolean, hasRight: boolean): string =>
-  `${hasLeft ? "var(--size-64) " : ""}minmax(0, 1fr) var(--mw-price-col, var(--size-133)) minmax(0, 1fr)${hasRight ? " var(--size-64)" : ""}`;
+  `${hasLeft ? "var(--size-64) " : ""}minmax(0, 1fr) var(--mw-price-col, calc(var(--size-84) + var(--size-48))) minmax(0, 1fr)${hasRight ? " var(--size-64)" : ""}`;
 
 export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, dayPrices = null, expectedPrice = null, firstBidIndex = ROWS_ABOVE_BASE, rateShown = true }: Props) {
   const columns = ladderColumns(slots?.left !== undefined, slots?.right !== undefined);
@@ -175,12 +175,12 @@ export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, dayPri
           expected={expectedPrice !== null && row.price === expectedPrice && !row.repeat} left={slots?.left?.(row)} right={slots?.right?.(row)} />
       ))}
       {cardRows > 0 && rowSlots?.infoCard && (
-        <div className="mw-info-layer" data-testid="ladder-info-layer" style={{ gridTemplateColumns: columns, top: "var(--s1)", height: `calc(${cardRows} * var(--size-24))` }}>
+        <div className="mw-info-layer" data-testid="ladder-info-layer" style={{ gridTemplateColumns: columns, top: "var(--s2)", height: `calc(${cardRows} * var(--size-24))` }}>
           <div className="mw-info-cell" style={{ gridColumn: slots?.left ? 4 : 3 }}>{rowSlots.infoCard(cardRows)}</div>
         </div>
       )}
       {boxRows > 0 && rowSlots?.bottomLeft && (
-        <div className="mw-box-layer" data-testid="ladder-box-layer" style={{ gridTemplateColumns: columns, top: `calc(var(--s1) + ${boxStart} * var(--size-24))`, height: `calc(${boxRows} * var(--size-24))` }}>
+        <div className="mw-box-layer" data-testid="ladder-box-layer" style={{ gridTemplateColumns: columns, top: `calc(var(--s2) + ${boxStart} * var(--size-24))`, height: `calc(${boxRows} * var(--size-24))` }}>
           <div className="mw-box" style={slots?.left ? { gridColumn: 2 } : undefined}>{rowSlots.bottomLeft(boxRows)}</div>
         </div>
       )}

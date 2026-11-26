@@ -1,8 +1,7 @@
 .workspace { position:relative; flex:1; min-width:0; min-height:0; margin:var(--island-gap); overflow:hidden; }
-.dock-group { position:absolute; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; contain:layout paint; border-radius:var(--r-l); background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--line); --strip-bg:var(--surface); }
+.dock-group { position:absolute; box-sizing:border-box; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; contain:layout paint; border:var(--size-1) solid var(--line); border-radius:var(--r-l); background:var(--surface); transition:border-color var(--dur) var(--ease); --strip-bg:var(--surface); }
 .dock-group[data-kind=chart] { background:var(--chart-bg); --strip-bg:var(--chart-bg); }
-.dock-group::after { content:""; position:absolute; inset:0; z-index:30; border-radius:inherit; pointer-events:none; box-shadow:inset 0 0 0 var(--size-1) transparent; transition:box-shadow .15s; }
-.dock-group[data-active-cell]::after { box-shadow:inset 0 0 0 var(--size-1) color-mix(in srgb,var(--accent) 45%,transparent); }
+.dock-group[data-active-cell] { border-color:color-mix(in srgb,var(--accent) 45%,transparent); }
 .dock-tabs { display:flex; flex:none; align-items:stretch; gap:var(--size-2); height:var(--size-34); padding:0 var(--size-4); border-bottom:var(--size-1) solid var(--line); }
 .dock-tab-viewport { position:relative; display:flex; flex:0 1 auto; min-width:0; margin-right:auto; }
 .dock-tab-scroll { display:flex; align-items:stretch; gap:var(--size-1); min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
@@ -18,7 +17,7 @@
 .dock-tab-group:not([data-selected]):hover { background:var(--hover); color:var(--text); }
 .dock-tab-group[data-selected] { background:var(--raised); color:var(--text); }
 .dock-tab-group[data-grabbed] { opacity:.4; }
-.dock-tab { position:relative; touch-action:none; user-select:none; display:flex; flex-shrink:0; align-items:center; align-self:stretch; gap:var(--size-5); max-width:var(--size-228); padding:0 var(--size-4) 0 var(--size-10); border-radius:var(--r-m) var(--r-m) 0 0; color:inherit; font-size:var(--fs-s); white-space:nowrap; outline:none; }
+.dock-tab { position:relative; touch-action:none; user-select:none; display:flex; flex-shrink:0; align-items:center; align-self:stretch; gap:var(--size-5); max-width:var(--size-220); padding:0 var(--size-4) 0 var(--size-10); border-radius:var(--r-m) var(--r-m) 0 0; color:inherit; font-size:var(--fs-s); white-space:nowrap; outline:none; }
 .dock-tab:focus-visible { box-shadow:inset 0 0 0 var(--size-2) var(--accent); }
 .dock-tab[aria-selected=true] { font-weight:600; }
 .dock-tab[data-active-cell] .dock-tab-name { color:var(--accent); }
@@ -62,7 +61,7 @@
 .link-swatch-menu[role=menu] { padding:var(--size-12); }
 .link-swatch-head { margin-bottom:var(--size-8); color:var(--text-3); font-size:var(--fs-xs); }
 .link-swatch-grid { display:grid; grid-template-columns:var(--swatch) 1px repeat(5,var(--swatch)); gap:var(--size-10); --swatch:var(--size-28); }
-.link-swatch { --link:var(--line-strong); display:grid; place-items:center; width:var(--swatch); height:var(--swatch); border-radius:var(--r-pill); background:var(--link); color:var(--bg); font-size:var(--fs-s); font-weight:800; line-height:1; outline:none; }
+.link-swatch { --link:var(--line-strong); display:grid; place-items:center; width:var(--swatch); height:var(--swatch); border-radius:var(--r-pill); background:var(--link); color:var(--bg); font-size:var(--fs-s); font-weight:700; line-height:1; outline:none; }
 .link-swatch:not([data-link]) { grid-column:1; grid-row:1 / 3; align-self:center; background:transparent; box-shadow:inset 0 0 0 var(--size-2) var(--line-strong); }
 .link-swatch[data-link=a] { --link:var(--link-a); }
 .link-swatch[data-link=b] { --link:var(--link-b); }
@@ -101,7 +100,7 @@
 .dock-balloon-bar { color:var(--text-3); }
 html.dock-resizing-col, html.dock-resizing-col * { cursor:col-resize !important; user-select:none !important; }
 html.dock-resizing-row, html.dock-resizing-row * { cursor:row-resize !important; user-select:none !important; }
-.dock-junction { position:absolute; z-index:21; touch-action:none; cursor:move; border-radius:var(--size-2); }
+.dock-junction { position:absolute; z-index:21; touch-action:none; cursor:move; border-radius:var(--r-s); }
 .dock-junction:hover, .dock-junction[data-dragging] { background:var(--accent); }
 .dock-junction-line { position:absolute; z-index:20; pointer-events:none; border-radius:var(--r-pill); background:var(--accent); }
 html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !important; user-select:none !important; }
@@ -114,7 +113,7 @@ html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !import
 .dock-drop-level[data-dock-level-frame=change] { border-color:var(--accent); }
 .dock-drop-level[data-dock-level-frame=blocked] { border-color:var(--warning); }
 .dock-drop-caption { display:grid; justify-items:center; gap:var(--size-4); max-width:100%; padding:var(--size-8) var(--size-12); border-radius:var(--r-m); background:var(--surface); color:var(--accent); font-size:var(--fs-s); box-shadow:var(--shadow-s); text-align:center; }
-.dock-tab-ghost { position:fixed; left:0; top:0; z-index:102; max-width:var(--size-228); padding:var(--size-4) var(--size-10); overflow:hidden; border-radius:var(--r-m); background:var(--overlay); box-shadow:var(--shadow-s); color:var(--text); font-size:var(--fs-s); text-overflow:ellipsis; white-space:nowrap; pointer-events:none; will-change:transform; }
+.dock-tab-ghost { position:fixed; left:0; top:0; z-index:102; max-width:var(--size-220); padding:var(--size-4) var(--size-10); overflow:hidden; border-radius:var(--r-m); background:var(--overlay); box-shadow:var(--shadow-s); color:var(--text); font-size:var(--fs-s); text-overflow:ellipsis; white-space:nowrap; pointer-events:none; will-change:transform; }
 .dock-drop-steps { display:flex; flex-wrap:wrap; justify-content:center; margin:0; padding:0; list-style:none; color:var(--text-2); }
 .dock-drop-steps li + li::before { content:" · "; white-space:pre; }
 .dock-drop-steps li[aria-current=step] { color:var(--accent); font-weight:600; }
@@ -125,9 +124,9 @@ html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !import
 html.dock-dragging, html.dock-dragging * { cursor:grabbing !important; user-select:none !important; }
 .canvas-workspace { position:absolute; inset:0; display:flex; flex-direction:column; }
 .canvas-stage { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; isolation:isolate; }
-.window-frame { --frame-ring:var(--line-strong); position:absolute; display:flex; flex-direction:column; overflow:hidden; contain:layout paint; isolation:isolate; border-radius:var(--r-l); background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--frame-ring); }
+.window-frame { --frame-ring:var(--line-strong); box-sizing:border-box; position:absolute; display:flex; flex-direction:column; overflow:hidden; contain:layout paint; isolation:isolate; border:var(--size-1) solid var(--frame-ring); border-radius:var(--r-l); background:var(--surface); }
 .window-frame[data-active-cell] { --frame-ring:var(--accent); }
-.canvas-stage:not([data-canvas-dragging]) .window-frame[data-front] { box-shadow:0 0 0 var(--size-1) var(--frame-ring), var(--shadow-s); }
+.canvas-stage:not([data-canvas-dragging]) .window-frame[data-front] { box-shadow:var(--shadow-s); }
 .window-head { height:var(--size-34); min-height:var(--size-34); display:flex; align-items:center; gap:var(--s3); padding:0 var(--s3) 0 var(--s4); background:var(--surface); cursor:grab; user-select:none; touch-action:none; outline-offset:calc(-1 * var(--size-2)); }
 .window-head:focus-visible { outline:var(--size-2) solid var(--accent); }
 .window-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--fs-s); }
@@ -150,16 +149,15 @@ html.dock-dragging, html.dock-dragging * { cursor:grabbing !important; user-sele
 .canvas-guide { position:absolute; z-index:101; pointer-events:none; background:var(--accent); }
 .canvas-guide-x { top:0; bottom:0; width:var(--size-1); } .canvas-guide-y { left:0; right:0; height:var(--size-1); }
 .canvas-kind-lane { container-type:inline-size; position:relative; height:var(--size-48); flex:none; display:flex; justify-content:center; align-items:center; gap:var(--s4); }
-.canvas-kind-dock { display:flex; align-items:center; gap:var(--s1); padding:var(--s1); border-radius:var(--r-pill); background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--line); }
+.canvas-kind-dock { display:flex; align-items:center; gap:var(--s1); padding:var(--s1); border:var(--size-1) solid var(--line); border-radius:var(--r-pill); background:var(--surface); }
 .canvas-kind-button { display:grid; place-items:center; width:var(--size-28); height:var(--size-28); border-radius:var(--r-pill); color:var(--text-2); }
 .canvas-kind-button:hover { background:var(--hover); color:var(--text); } .canvas-kind-button:disabled { opacity:.3; }
 .canvas-tidy { position:absolute; right:0; gap:var(--s3); }
 .canvas-kind-fold { display:none; }
 @container (width < 40rem) { .canvas-kind-dock { display:none; } .canvas-kind-fold { display:block; } }
 .layout-mode-control { display:flex; flex-direction:column; gap:var(--s3); margin-top:var(--s1); padding:var(--s3); border-top:var(--size-1) solid var(--line); color:var(--text-2); font-size:var(--fs-s); }
-.layout-mode-segments { display:flex; padding:var(--size-2); border-radius:var(--r-m); background:var(--bg); }
-.layout-mode-segments button { flex:1; padding:var(--s1) var(--s3); border-radius:var(--r-s); }
-.layout-mode-segments button[aria-pressed=true] { background:var(--accent-soft); color:var(--accent); }
+.layout-mode-segments { width:100%; background:var(--bg); }
+.layout-mode-segments .ui-seg-item { flex:1; }
 .dock-floats { position:absolute; inset:0; z-index:20; pointer-events:none; isolation:isolate; }
-.dock-floats .window-frame { pointer-events:auto; background:var(--surface); box-shadow:0 0 0 var(--size-1) var(--frame-ring), var(--shadow-s); }
+.dock-floats .window-frame { pointer-events:auto; background:var(--surface); box-shadow:var(--shadow-s); }
 .dock-floats .window-head { background:var(--raised); }

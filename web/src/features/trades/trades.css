@@ -17,7 +17,8 @@
 .tr-window[data-compact-strips] .tr-strips > .mw-strip { flex:none; flex-wrap:nowrap; gap:var(--s3); min-width:0; padding:0 var(--s3); border:0; white-space:nowrap; }
 .tr-window[data-compact-strips] .tr-strips > .mw-strip:first-child { flex:1 1 0; overflow:hidden; }
 .tr-window[data-compact-strips] .tr-strips .mw-ratio { min-width:var(--size-24); }
-.tr-window[data-compact-strips] .tr-strips .mw-seg { padding:0; gap:0; overflow:hidden; border-radius:var(--r-s); }
+.tr-window[data-compact-strips] .tr-strips .ui-seg { padding:0; gap:0; overflow:hidden; border-radius:var(--r-s); }
+.tr-window[data-compact-strips] .tr-strips .ui-seg .ui-seg-item { min-width:0; }
 .tr-window[data-compact-strips] .tr-strips .tr-figure { display:inline-flex; flex:0 1 auto; gap:var(--size-4); min-width:0; }
 .tr-window[data-compact-strips] .tr-strips .tr-figure[data-figure="strength"] { flex-shrink:0; }
 .tr-window[data-compact-strips] .tr-strips .tr-figure b { min-width:0; overflow:hidden; text-overflow:ellipsis; }
@@ -25,7 +26,7 @@
 @container strips (width < 360px) {
   .tr-window[data-compact-strips] .tr-strips .tr-name, .tr-window[data-compact-strips] .tr-strips .tr-detail { position:absolute; width:var(--size-1); height:var(--size-1); margin:calc(-1 * var(--size-1)); padding:0; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; }
   .tr-window[data-compact-strips] .tr-strips > .mw-strip { gap:var(--size-4); padding:0 var(--size-4); }
-  .tr-window[data-compact-strips] .tr-strips .mw-seg button { padding:0 var(--size-4); }
+  .tr-window[data-compact-strips] .tr-strips .ui-seg .ui-seg-item { padding:0 var(--size-4); }
 }
 .tr-gap { display:flex; align-items:center; justify-content:center; box-sizing:border-box; height:var(--size-24); padding:0 var(--s4); border-block:var(--size-1) dashed var(--line); overflow:hidden; color:var(--text-3); font-size:var(--fs-xs); white-space:nowrap; }
 .tr-empty { margin:0; padding:var(--s6) var(--s4); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }

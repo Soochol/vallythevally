@@ -1,16 +1,17 @@
 import { useRef, useState } from "react";
 import { COLOR_RANGES, legendStops } from "../../lib/heat/colors";
-import { ChevronIcon } from "../icons";
+import { ChevronIcon, CloseIcon, SearchIcon } from "../icons";
 import { Popover } from "../overlay/Popover";
 import { Segmented } from "../ui/Segmented";
-import { HEATMAP_SOURCES, HEATMAP_VIEWS, ORDER_LABEL, SIZE_LABEL, SOURCE_LABEL, SIZE_MODES, SORT_LABEL, SORT_MODES, THEME_ORDERS, VIEW_LABEL, type HeatmapSettings } from "./settings";
+import { HEATMAP_VIEWS, ORDER_LABEL, SIZE_LABEL, SIZE_MODES, SORT_LABEL, SORT_MODES, THEME_ORDERS, VIEW_LABEL, type HeatmapSettings } from "./settings";
 
 interface Props {
   settings: HeatmapSettings;
   onChange(next: HeatmapSettings): void;
-  onSelectSource(source: HeatmapSettings["source"]): void;
   tradedKnown: boolean;
   onEdit(): void;
+  listQuery: string;
+  onListQueryChange(query: string): void;
 }
 
 export function Legend({ range }: { range: HeatmapSettings["range"] }) {
@@ -50,23 +51,11 @@ function SegmentTabs<T extends string>({ label, values, labels, value, onSelect 
   );
 }
 
-export function SourceTabs({ settings, onSelect }: { settings: HeatmapSettings; onSelect(source: HeatmapSettings["source"]): void }) {
-  return (
-    <div role="tablist" aria-label="테마 출처" className="ui-seg hm-tabs" data-size="sm">
-      {HEATMAP_SOURCES.map((source) => (
-        <button key={source} type="button" role="tab" className="ui-seg-item" aria-selected={settings.source === source} onClick={() => onSelect(source)}>
-          {SOURCE_LABEL[source]}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function ViewSettings({ settings, onChange, tradedKnown, showsThemeOrder, showsStockControls }: Omit<Props, "onEdit" | "onSelectSource"> & { showsThemeOrder: boolean; showsStockControls: boolean }) {
+function ViewSettings({ settings, onChange, tradedKnown, showsStockControls }: Pick<Props, "settings" | "onChange" | "tradedKnown"> & { showsStockControls: boolean }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const set = <K extends keyof HeatmapSettings>(key: K, value: HeatmapSettings[K]) => onChange({ ...settings, [key]: value });
-  const summary = [showsThemeOrder ? ORDER_LABEL[settings.order] : null, showsStockControls ? SORT_LABEL[settings.sort] : null, showsStockControls ? `크기 ${SIZE_LABEL[settings.size]}` : null].filter((part) => part !== null).join(" · ");
+  const summary = [ORDER_LABEL[settings.order], showsStockControls ? SORT_LABEL[settings.sort] : null, showsStockControls ? `크기 ${SIZE_LABEL[settings.size]}` : null].filter((part) => part !== null).join(" · ");
   return (
     <>
       <button ref={button} type="button" className="btn btn-sm hm-settings" aria-haspopup="dialog" aria-expanded={open} aria-label="보기 설정" title={`보기 설정 · ${summary}`} onClick={() => setOpen((value) => !value)}>
@@ -76,7 +65,7 @@ function ViewSettings({ settings, onChange, tradedKnown, showsThemeOrder, showsS
       </button>
       {open && (
         <Popover anchor={button} role="dialog" aria-label="보기 설정" onClose={() => setOpen(false)} className="hm-settings-pop z-40">
-          {showsThemeOrder && <Segmented label="테마 순서" mode="pressed" size="sm" value={settings.order} options={THEME_ORDERS.map((order) => ({ value: order, label: ORDER_LABEL[order] }))} onChange={(order) => set("order", order)} />}
+          <Segmented label="테마 순서" mode="pressed" size="sm" value={settings.order} options={THEME_ORDERS.map((order) => ({ value: order, label: ORDER_LABEL[order] }))} onChange={(order) => set("order", order)} />
           {showsStockControls && (
             <>
               <Segmented label="칸 크기" mode="pressed" size="sm" value={settings.size} options={SIZE_MODES.map((mode) => ({ value: mode, label: SIZE_LABEL[mode] }))} onChange={(size) => set("size", size)} />
@@ -93,15 +82,10 @@ function ViewSettings({ settings, onChange, tradedKnown, showsThemeOrder, showsS
   );
 }
 
-export function HeatmapToolbar({ settings, onChange, onSelectSource, tradedKnown, onEdit }: Props) {
-  const kiwoom = settings.source === "kiwoom";
-  const themeMap = kiwoom && settings.view === "board" && settings.theme === null;
-  const showsThemeOrder = !kiwoom;
-  const showsStockControls = settings.view === "board" && !themeMap;
+export function HeatmapToolbar({ settings, onChange, tradedKnown, onEdit, listQuery, onListQueryChange }: Props) {
+  const showsStockControls = settings.view === "board";
   return (
     <div className="hm-toolbar">
-      <SourceTabs settings={settings} onSelect={onSelectSource} />
-      <span className="hm-toolbar-rule" aria-hidden="true" />
       <SegmentTabs label="보기" values={HEATMAP_VIEWS} labels={VIEW_LABEL} value={settings.view} onSelect={(view) => onChange({ ...settings, view })} />
       <div className="hm-toolbar-end">
         {settings.view === "board" && (
@@ -110,8 +94,33 @@ export function HeatmapToolbar({ settings, onChange, onSelectSource, tradedKnown
             <Legend range={settings.range} />
           </>
         )}
-        {(showsThemeOrder || showsStockControls) && <ViewSettings settings={settings} onChange={onChange} tradedKnown={tradedKnown} showsThemeOrder={showsThemeOrder} showsStockControls={showsStockControls} />}
-        {!kiwoom && <button type="button" className="btn btn-sm hm-edit-open" aria-haspopup="dialog" onClick={onEdit}>테마 편집</button>}
+        {settings.view === "list" && (
+          <>
+            <div className="hm-list-search">
+              <SearchIcon size={13} />
+              <input
+                type="search"
+                aria-label="종목·테마 검색"
+                placeholder="종목 · 테마 검색"
+                value={listQuery}
+                onChange={(event) => onListQueryChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape" || !listQuery) return;
+                  event.stopPropagation();
+                  onListQueryChange("");
+                }}
+              />
+              {listQuery && (
+                <button type="button" className="hm-list-search-clear" aria-label="검색 지우기" onClick={() => onListQueryChange("")}>
+                  <CloseIcon size={12} />
+                </button>
+              )}
+            </div>
+            <Segmented label="종목 정렬" mode="pressed" size="sm" value={settings.sort} options={SORT_MODES.map((mode) => ({ value: mode, label: SORT_LABEL[mode] }))} onChange={(sort) => onChange({ ...settings, sort })} />
+          </>
+        )}
+        <ViewSettings settings={settings} onChange={onChange} tradedKnown={tradedKnown} showsStockControls={showsStockControls} />
+        <button type="button" className="btn btn-sm hm-edit-open" aria-haspopup="dialog" onClick={onEdit}>테마 편집</button>
       </div>
     </div>
   );

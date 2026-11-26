@@ -189,8 +189,8 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
             autoComplete="off" spellCheck={false} className="min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-text-3" />
         </label>
         <button type="button" aria-label="검색 닫기" title="검색 닫기 (Esc)" className="icon-btn md:order-last" onClick={close}><CloseIcon /></button>
-        {mode.kind === "symbols" && <div role="group" aria-label="시장 필터" className="flex gap-1 max-md:w-full">
-          {MARKET_FILTERS.map(({ value, label }) => <button key={value} type="button" aria-pressed={market === value} onClick={() => setMarket(value)} className={`seg-btn px-2 text-xs ${market === value ? "bg-accent-soft text-accent" : "text-text-3"}`}>{label}</button>)}
+        {mode.kind === "symbols" && <div role="group" aria-label="시장 필터" className="ui-seg max-md:w-full" data-size="sm">
+          {MARKET_FILTERS.map(({ value, label }) => <button key={value} type="button" aria-pressed={market === value} onClick={() => setMarket(value)} className="ui-seg-item text-xs max-md:flex-1">{label}</button>)}
         </div>}
       </div>
       {offline ? <div role="status" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">

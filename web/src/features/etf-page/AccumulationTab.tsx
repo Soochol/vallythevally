@@ -154,19 +154,26 @@ const toWindow = (value: WindowOption): EtfAccumulationWindow => (value === "20"
 const rowEtfCount = (row: EtfAccumulationRow, direction: EtfAccumulationDirection): number =>
   direction === "sell" ? row.sellingEtfCount : row.buyingEtfCount;
 
-const RADAR_DEFAULT_W = 720;
-const RADAR_H = 420;
-const RADAR_LEFT = 48;
-const RADAR_RIGHT_PAD = 36;
-const RADAR_TOP = 28;
-const RADAR_BOTTOM = 382;
-const RADAR_LOG_GAIN = 10;
+const RADAR_DEFAULT_W = 860;
+const RADAR_H = 520;
+const RADAR_LEFT = 66;
+const RADAR_RIGHT_PAD = 28;
+const RADAR_TOP = 42;
+const RADAR_BOTTOM = 464;
+const RADAR_LOG_GAIN = 9;
+const RELAX_ITERATIONS = 42;
 
 interface LabelBox {
   x1: number;
   x2: number;
   y1: number;
   y2: number;
+}
+
+interface PlacedBubbleLabel {
+  x: number;
+  y: number;
+  anchor: "start" | "middle" | "end";
 }
 
 function overlapsAny(box: LabelBox, placed: readonly LabelBox[]): boolean {
@@ -236,44 +243,46 @@ function ConvictionRadar({
   const copy = DIRECTION_COPY[direction];
   const stage = useRef<HTMLDivElement>(null);
   const { w: measuredW } = useElementSize(stage);
-  const svgW = Math.max(320, measuredW > 0 ? Math.round(measuredW) : RADAR_DEFAULT_W);
+  const [hoveredCode, setHoveredCode] = useState<string | null>(null);
+  const svgW = Math.max(360, measuredW > 0 ? Math.round(measuredW) : RADAR_DEFAULT_W);
   const radarRight = svgW - RADAR_RIGHT_PAD;
   const magnitude = (change: number | null) =>
     change === null ? null : direction === "sell" ? Math.abs(change) : Math.max(0, change);
-  const rawMax = Math.max(0.35, ...rows.map((row) => magnitude(row.medianRealChange) ?? 0));
-  const maxChange = Math.max(0.4, Math.ceil(rawMax * 10) / 10);
+  const rawMax = Math.max(0.4, ...rows.map((row) => magnitude(row.medianRealChange) ?? 0));
+  const maxChange = Math.max(0.5, Math.ceil(rawMax * 10) / 10);
   const maxCount = Math.max(4, ...rows.map((row) => rowEtfCount(row, direction)));
-  const plotW = Math.max(160, radarRight - RADAR_LEFT);
+  const plotW = Math.max(200, radarRight - RADAR_LEFT);
   const plotH = RADAR_BOTTOM - RADAR_TOP;
-  const numericSpan = svgW < 420 ? plotW * 0.72 : plotW * 0.82;
-  const nullX = Math.min(svgW - 26, RADAR_LEFT + plotW * 0.93);
+  const laneDividerX = RADAR_LEFT + plotW * (svgW < 500 ? 0.78 : 0.84);
+  const numericSpan = Math.max(120, laneDividerX - RADAR_LEFT - 24);
+  const nullCenterX = (laneDividerX + radarRight) / 2;
   const maxLog = Math.log1p(maxChange * RADAR_LOG_GAIN);
   const xFor = (mag: number | null) =>
     mag === null
-      ? nullX
-      : RADAR_LEFT + (Math.log1p(Math.min(maxChange, Math.max(0, mag)) * RADAR_LOG_GAIN) / maxLog) * numericSpan;
+      ? nullCenterX
+      : RADAR_LEFT + 12 + (Math.log1p(Math.min(maxChange, Math.max(0, mag)) * RADAR_LOG_GAIN) / maxLog) * numericSpan;
   const yFor = (count: number) => RADAR_BOTTOM - ((count - 0.5) / maxCount) * plotH;
 
   const zoneX = xFor(0.15);
   const zoneY = RADAR_TOP;
-  const zoneH = Math.max(24, yFor(2.6) - RADAR_TOP);
-  const candidateTicks = [0, 0.15, 0.5, 1.0, maxChange].filter((tick) => tick <= maxChange + 1e-6);
+  const zoneH = Math.max(34, yFor(2.5) - RADAR_TOP);
+  const candidateTicks = [0, 0.08, 0.15, 0.3, 0.5, 1.0, maxChange].filter((tick) => tick <= maxChange + 1e-6);
   const xTicks: number[] = [];
   for (const tick of candidateTicks) {
     const prev = xTicks[xTicks.length - 1];
-    if (prev === undefined || xFor(tick) - xFor(prev) >= 48) {
+    if (prev === undefined || xFor(tick) - xFor(prev) >= 54) {
       xTicks.push(tick);
     }
   }
   if (xTicks[xTicks.length - 1] !== maxChange) {
-    if (xTicks.length > 1 && xFor(maxChange) - xFor(xTicks[xTicks.length - 1]!) < 44) {
+    if (xTicks.length > 1 && xFor(maxChange) - xFor(xTicks[xTicks.length - 1]!) < 48) {
       xTicks[xTicks.length - 1] = maxChange;
     } else {
       xTicks.push(maxChange);
     }
   }
-  const yTicks = Array.from({ length: Math.min(6, maxCount) }, (_, idx) =>
-    Math.max(1, Math.round(((idx + 1) * maxCount) / Math.min(6, maxCount))),
+  const yTicks = Array.from({ length: Math.min(8, maxCount) }, (_, idx) =>
+    Math.max(1, Math.round(((idx + 1) * maxCount) / Math.min(8, maxCount))),
   );
   const uniqueYTicks = [...new Set(yTicks)];
 
@@ -302,29 +311,60 @@ function ConvictionRadar({
   };
 
   const positioned = useMemo(() => {
-    const bucketCounts = new Map<string, number>();
     const items = rows.map((row) => {
       const count = rowEtfCount(row, direction);
       const mag = magnitude(row.medianRealChange);
-      const baseX = xFor(mag);
-      const baseY = yFor(count);
-      const key = `${Math.round(baseX / 14)}:${count}`;
-      const slot = bucketCounts.get(key) ?? 0;
-      bucketCounts.set(key, slot + 1);
-      const ring = Math.floor((slot + 1) / 2);
-      const sign = slot % 2 === 0 ? 1 : -1;
-      const dx = slot === 0 ? 0 : sign * Math.min(18, ring * 6) * (mag === null ? 0.7 : 1);
-      const dy = slot === 0 ? 0 : (((slot % 5) - 2) * 7);
-      const r = Math.min(18, 7 + count * 2.2);
-      const cx = Math.min(svgW - r - 6, Math.max(RADAR_LEFT + r, baseX + dx));
-      const cy = Math.min(RADAR_BOTTOM - r - 2, Math.max(RADAR_TOP + r + 2, baseY + dy));
+      const tx = xFor(mag);
+      const ty = yFor(count);
+      const r = Math.min(28, 10 + count * 3.1);
       const tone = bubbleTone(row);
       const highConviction = count >= 3 && (mag === null || mag >= 0.15);
-      return { row, count, mag, cx, cy, r, tone, highConviction };
+      return { row, count, mag, tx, ty, cx: tx, cy: ty, r, tone, highConviction, isNull: mag === null };
     });
 
-    const placed: LabelBox[] = [];
-    const labelVisible = new Set<string>();
+    const bandHalfH = (plotH / maxCount) * 0.42;
+    for (let iter = 0; iter < RELAX_ITERATIONS; iter += 1) {
+      for (let i = 0; i < items.length; i += 1) {
+        for (let j = i + 1; j < items.length; j += 1) {
+          const a = items[i]!;
+          const b = items[j]!;
+          const dx = b.cx - a.cx;
+          const dy = b.cy - a.cy;
+          const dist = Math.hypot(dx, dy) || 0.1;
+          const minDist = a.r + b.r + 5;
+          if (dist < minDist) {
+            const push = (minDist - dist) * 0.52;
+            const ux = dx / dist;
+            const uy = dy / dist;
+            a.cx -= ux * push * 0.65;
+            a.cy -= uy * push;
+            b.cx += ux * push * 0.65;
+            b.cy += uy * push;
+          }
+        }
+      }
+      for (const item of items) {
+        item.cx += (item.tx - item.cx) * 0.14;
+        item.cy += (item.ty - item.cy) * 0.12;
+        const minX = item.isNull ? laneDividerX + item.r + 6 : RADAR_LEFT + item.r + 6;
+        const maxX = item.isNull ? radarRight - item.r - 6 : laneDividerX - item.r - 8;
+        item.cx = Math.min(maxX, Math.max(minX, item.cx));
+        item.cy = Math.min(
+          Math.min(RADAR_BOTTOM - item.r - 4, item.ty + bandHalfH),
+          Math.max(Math.max(RADAR_TOP + item.r + 4, item.ty - bandHalfH), item.cy),
+        );
+      }
+    }
+
+    const placedLabels: LabelBox[] = [];
+    const bubbleBoxes = items.map((item) => ({
+      code: item.row.code,
+      x1: item.cx - item.r - 2,
+      x2: item.cx + item.r + 2,
+      y1: item.cy - item.r - 2,
+      y2: item.cy + item.r + 2,
+    }));
+    const labels = new Map<string, PlacedBubbleLabel>();
     const order = [...items].sort((a, b) => {
       const aSel = expanded === a.row.code ? 1 : 0;
       const bSel = expanded === b.row.code ? 1 : 0;
@@ -334,22 +374,51 @@ function ConvictionRadar({
       return (b.mag ?? 99) - (a.mag ?? 99);
     });
     for (const item of order) {
-      const labelW = Math.max(36, item.row.name.length * 10 + 8);
-      const labelH = 14;
-      const yTop = item.cy - item.r - 4 - labelH;
-      const box: LabelBox = {
-        x1: item.cx - labelW / 2,
-        x2: item.cx + labelW / 2,
-        y1: yTop,
-        y2: yTop + labelH,
-      };
-      if (expanded === item.row.code || !overlapsAny(box, placed)) {
-        placed.push(box);
-        labelVisible.add(item.row.code);
+      const labelW = Math.max(40, item.row.name.length * 10.5 + 10);
+      const labelH = 16;
+      const candidates: { label: PlacedBubbleLabel; box: LabelBox }[] = [
+        {
+          label: { x: item.cx, y: item.cy - item.r - 6, anchor: "middle" },
+          box: { x1: item.cx - labelW / 2, x2: item.cx + labelW / 2, y1: item.cy - item.r - 6 - labelH, y2: item.cy - item.r - 4 },
+        },
+        {
+          label: { x: item.cx + item.r + 6, y: item.cy + 4, anchor: "start" },
+          box: { x1: item.cx + item.r + 4, x2: item.cx + item.r + 4 + labelW, y1: item.cy - 9, y2: item.cy + 8 },
+        },
+        {
+          label: { x: item.cx, y: item.cy + item.r + 15, anchor: "middle" },
+          box: { x1: item.cx - labelW / 2, x2: item.cx + labelW / 2, y1: item.cy + item.r + 2, y2: item.cy + item.r + 2 + labelH },
+        },
+        {
+          label: { x: item.cx - item.r - 6, y: item.cy + 4, anchor: "end" },
+          box: { x1: item.cx - item.r - 4 - labelW, x2: item.cx - item.r - 4, y1: item.cy - 9, y2: item.cy + 8 },
+        },
+      ];
+      for (const candidate of candidates) {
+        const { box, label } = candidate;
+        if (box.x1 < RADAR_LEFT + 2 || box.x2 > radarRight - 2 || box.y1 < RADAR_TOP + 2 || box.y2 > RADAR_BOTTOM - 2) {
+          continue;
+        }
+        const hitBubble = bubbleBoxes.some((bb) => bb.code !== item.row.code && overlapsAny(box, [bb]));
+        if (expanded === item.row.code || (!hitBubble && !overlapsAny(box, placedLabels))) {
+          placedLabels.push(box);
+          labels.set(item.row.code, label);
+          break;
+        }
       }
     }
-    return { items, labelVisible };
-  }, [rows, direction, expanded, svgW, maxChange, maxCount, nullX, numericSpan, plotH]);
+    return { items, labels };
+  }, [rows, direction, expanded, svgW, maxChange, maxCount, laneDividerX, nullCenterX, numericSpan, plotH, radarRight]);
+
+  const focusCode = hoveredCode ?? expanded;
+  const hoveredItem = hoveredCode === null ? null : positioned.items.find((item) => item.row.code === hoveredCode) ?? null;
+  const focusItem = focusCode === null ? null : positioned.items.find((item) => item.row.code === focusCode) ?? null;
+  const drawOrder = [...positioned.items].sort((a, b) => {
+    if (a.row.code === focusCode) return 1;
+    if (b.row.code === focusCode) return -1;
+    return b.r - a.r;
+  });
+  const zoneBadgeX = Math.max(zoneX + 8, laneDividerX - 184);
 
   return (
     <section className="etf-card etf-card-wide" aria-label="컨빅션 버블 레이더">
@@ -373,27 +442,54 @@ function ConvictionRadar({
           aria-label={`컨빅션 버블 레이더 ${rows.length}종목`}
         >
           <rect
+            x={laneDividerX}
+            y={RADAR_TOP}
+            width={Math.max(24, radarRight - laneDividerX)}
+            height={plotH}
+            rx={6}
+            className="etf-radar-lane"
+          />
+          <line
+            x1={laneDividerX}
+            x2={laneDividerX}
+            y1={RADAR_TOP}
+            y2={RADAR_BOTTOM}
+            className="etf-radar-lane-divider"
+          />
+          <text
+            x={nullCenterX}
+            y={RADAR_TOP - 10}
+            textAnchor="middle"
+            className="etf-radar-lane-label"
+            data-direction={direction}
+          >
+            {copy.radarNullTick} 전용
+          </text>
+          <rect
             x={zoneX}
             y={zoneY}
             width={Math.max(40, radarRight - zoneX)}
             height={zoneH}
-            rx={6}
+            rx={8}
             className="etf-radar-zone"
             data-direction={direction}
           />
-          <text
-            x={radarRight - 8}
-            y={zoneY + 14}
-            textAnchor="end"
-            className="etf-radar-zone-label"
-            data-direction={direction}
-          >
-            {copy.radarZoneLabel}
-          </text>
+          <g className="etf-radar-zone-pill" data-direction={direction}>
+            <rect x={zoneBadgeX} y={zoneY + 8} width={174} height={22} rx={11} />
+            <text
+              x={zoneBadgeX + 87}
+              y={zoneY + 23}
+              textAnchor="middle"
+              className="etf-radar-zone-label"
+              data-direction={direction}
+            >
+              {copy.radarZoneLabel}
+            </text>
+          </g>
           {uniqueYTicks.map((tick) => (
             <g key={tick}>
               <line x1={RADAR_LEFT} x2={radarRight} y1={yFor(tick)} y2={yFor(tick)} className="etf-curve-grid" />
-              <text x={RADAR_LEFT - 8} y={yFor(tick) + 4} textAnchor="end" className="etf-curve-axis">
+              <text x={RADAR_LEFT - 10} y={yFor(tick) + 4} textAnchor="end" className="etf-radar-tick">
                 {tick}개
               </text>
             </g>
@@ -401,17 +497,37 @@ function ConvictionRadar({
           {xTicks.map((tick) => (
             <g key={tick}>
               <line x1={xFor(tick)} x2={xFor(tick)} y1={RADAR_TOP} y2={RADAR_BOTTOM} className="etf-curve-grid" />
-              <text x={xFor(tick)} y={RADAR_BOTTOM + 16} textAnchor="middle" className="etf-curve-axis">
+              <text x={xFor(tick)} y={RADAR_BOTTOM + 20} textAnchor="middle" className="etf-radar-tick">
                 {formatTick(tick)}
               </text>
             </g>
           ))}
-          <text x={xFor(null)} y={RADAR_BOTTOM + 16} textAnchor="middle" className="etf-curve-axis">
+          <text x={nullCenterX} y={RADAR_BOTTOM + 20} textAnchor="middle" className="etf-radar-lane-tick" data-direction={direction}>
             {copy.radarNullTick}
           </text>
-          {positioned.items.map(({ row, count, cx, cy, r, tone }) => {
+          <text x={(RADAR_LEFT + laneDividerX) / 2} y={RADAR_H - 12} textAnchor="middle" className="etf-radar-axis-title">
+            중앙 실질 증감률 (로그 스케일)
+          </text>
+          <text
+            x={16}
+            y={(RADAR_TOP + RADAR_BOTTOM) / 2}
+            textAnchor="middle"
+            className="etf-radar-axis-title"
+            transform={`rotate(-90 16 ${(RADAR_TOP + RADAR_BOTTOM) / 2})`}
+          >
+            동시 {copy.countAriaVerb} ETF 수
+          </text>
+          {focusItem !== null && (
+            <g className="etf-radar-guides" aria-hidden="true">
+              <line x1={RADAR_LEFT} x2={focusItem.cx} y1={focusItem.cy} y2={focusItem.cy} />
+              <line x1={focusItem.cx} x2={focusItem.cx} y1={focusItem.cy} y2={RADAR_BOTTOM} />
+            </g>
+          )}
+          {drawOrder.map(({ row, count, cx, cy, r, tone, highConviction }) => {
             const selected = expanded === row.code;
-            const showLabel = positioned.labelVisible.has(row.code);
+            const isFocus = focusCode === row.code;
+            const isDimmed = hoveredCode !== null && !isFocus;
+            const placed = positioned.labels.get(row.code);
             return (
               <g
                 key={row.code}
@@ -421,8 +537,13 @@ function ConvictionRadar({
                 data-bubble-code={row.code}
                 data-tone={tone}
                 data-selected={selected ? "true" : undefined}
+                data-dimmed={isDimmed ? "true" : undefined}
                 aria-pressed={selected}
                 aria-label={`${row.name} ${copy.countAriaVerb} ETF ${count}개`}
+                onMouseEnter={() => setHoveredCode(row.code)}
+                onMouseLeave={() => setHoveredCode((current) => (current === row.code ? null : current))}
+                onFocus={() => setHoveredCode(row.code)}
+                onBlur={() => setHoveredCode((current) => (current === row.code ? null : current))}
                 onClick={() => onToggle(row.code)}
                 onKeyDown={(event) => handleKey(event, row.code)}
               >
@@ -430,9 +551,21 @@ function ConvictionRadar({
                   {row.name} · {copy.countAriaVerb} ETF {count}개 · 중앙 실질 증감{" "}
                   {formatMedianRealChange(row.medianRealChange)}
                 </title>
+                {highConviction && <circle cx={cx} cy={cy} r={r + 5} className="etf-radar-ring" />}
                 <circle cx={cx} cy={cy} r={r} className="etf-radar-circle" />
-                {showLabel && (
-                  <text x={cx} y={cy - r - 4} textAnchor="middle" className="etf-radar-label">
+                {r >= 15 && (
+                  <text x={cx} y={cy + 4} textAnchor="middle" className="etf-radar-count">
+                    {count}
+                  </text>
+                )}
+                {placed !== undefined && (
+                  <text
+                    x={placed.x}
+                    y={placed.y}
+                    textAnchor={placed.anchor}
+                    className="etf-radar-label"
+                    data-strong={highConviction || isFocus ? "true" : undefined}
+                  >
                     {row.name}
                   </text>
                 )}
@@ -440,6 +573,62 @@ function ConvictionRadar({
             );
           })}
         </svg>
+        {hoveredItem !== null && (
+          <div
+            role="tooltip"
+            className="etf-radar-tooltip"
+            data-testid="etf-radar-tooltip"
+            style={{
+              left: `${hoveredItem.cx + 268 > svgW ? Math.max(8, hoveredItem.cx - 260) : hoveredItem.cx + 18}px`,
+              top: `${Math.min(RADAR_H - 180, Math.max(8, hoveredItem.cy - 48))}px`,
+            }}
+          >
+            <div className="etf-radar-tt-head">
+              <strong>{hoveredItem.row.name}</strong>
+              <span className="etf-row-code">{hoveredItem.row.code}</span>
+            </div>
+            <dl className="etf-radar-tt-stats">
+              <div>
+                <dt>{copy.countHeader}</dt>
+                <dd className="etf-num">
+                  {hoveredItem.count}개
+                  {direction === "buy" && hoveredItem.row.addedEtfCount > 0 && ` (신규 ${hoveredItem.row.addedEtfCount})`}
+                  {direction === "sell" && hoveredItem.row.removedEtfCount > 0 && ` (편출 ${hoveredItem.row.removedEtfCount})`}
+                </dd>
+              </div>
+              <div>
+                <dt>중앙 실질 증감</dt>
+                <dd className="etf-num" data-direction={direction === "buy" ? "up" : "down"}>
+                  {hoveredItem.row.medianRealChange === null
+                    ? copy.radarNullTick
+                    : formatMedianRealChange(hoveredItem.row.medianRealChange)}
+                </dd>
+              </div>
+            </dl>
+            <div className="etf-radar-tt-ma">
+              <span>이평선 20·60·120</span>
+              <MaMarks ma={hoveredItem.row.ma} />
+            </div>
+            {hoveredItem.row.contributors.length > 0 && (
+              <ul className="etf-radar-tt-funds">
+                {hoveredItem.row.contributors.slice(0, 3).map((contributor) => (
+                  <li key={contributor.fundCode}>
+                    <span className="etf-radar-tt-fname">{contributor.fundName}</span>
+                    <span className="etf-num">
+                      {contributor.kind === "added"
+                        ? "편입"
+                        : contributor.kind === "removed"
+                          ? "편출"
+                          : contributor.realChange === null
+                            ? "-"
+                            : formatRealChange(contributor.realChange)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

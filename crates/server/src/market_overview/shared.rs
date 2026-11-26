@@ -23,6 +23,13 @@ pub(super) fn samples(st: &AppState, now: KstTime, market: Market) -> Vec<Sample
     samples
 }
 
+pub(super) fn latest_samples(st: &AppState, market: Market) -> Vec<Sample> {
+    let Some(latest) = st.shared_data.market_samples.current() else { return Vec::new() };
+    let mut samples: Vec<_> = latest.samples.iter().filter(|sample| sample.market == market).cloned().collect();
+    samples.sort_by_key(|sample| sample.at);
+    samples
+}
+
 pub(super) fn broker(st: &AppState) -> Broker {
     st.shared_data.market_overview.current().and_then(|board| broker_of_part(&board.header)).map_or_else(|| super::overview_source(st).broker, to_api_broker)
 }

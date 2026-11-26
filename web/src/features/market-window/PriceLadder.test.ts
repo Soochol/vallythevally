@@ -30,8 +30,8 @@ test("잔량 막대는 가장 큰 잔량 900을 100%로 잡는다", () => {
 
 test("모든 행의 열 정의가 같고 왼쪽·오른쪽 칸은 slot이 있을 때만 고정 폭 열이 생긴다", () => {
   const slotted = render({ slots: { left: (row) => createElement("em", { className: "left" }, row.key), right: (row) => createElement("em", { className: "right" }, row.key) } });
-  expect(render().match(/grid-template-columns:([^"]*)"/g)?.every((style) => style === 'grid-template-columns:minmax(0, 1fr) var(--mw-price-col, var(--size-133)) minmax(0, 1fr)"')).toBe(true);
-  expect(new Set(slotted.match(/grid-template-columns:[^"]*/g))).toEqual(new Set(["grid-template-columns:var(--size-64) minmax(0, 1fr) var(--mw-price-col, var(--size-133)) minmax(0, 1fr) var(--size-64)"]));
+  expect(render().match(/grid-template-columns:([^"]*)"/g)?.every((style) => style === 'grid-template-columns:minmax(0, 1fr) var(--mw-price-col, calc(var(--size-84) + var(--size-48))) minmax(0, 1fr)"')).toBe(true);
+  expect(new Set(slotted.match(/grid-template-columns:[^"]*/g))).toEqual(new Set(["grid-template-columns:var(--size-64) minmax(0, 1fr) var(--mw-price-col, calc(var(--size-84) + var(--size-48))) minmax(0, 1fr) var(--size-64)"]));
   expect(slotted.match(/class="left"/g)).toHaveLength(20);
   expect(slotted.match(/class="right"/g)).toHaveLength(20);
 });
@@ -59,8 +59,8 @@ test("정보 카드는 1~10행 높이의 겹침 층 하나로 그리고, 아래 
   };
   const html = render({ rowSlots });
   expect(tradeBoxStart(rows)).toBe(10);
-  expect(html).toContain("top:calc(var(--s1) + 10 * var(--size-24));height:calc(10 * var(--size-24))");
-  expect(html).toContain("top:var(--s1);height:calc(10 * var(--size-24))");
+  expect(html).toContain("top:calc(var(--s2) + 10 * var(--size-24));height:calc(10 * var(--size-24))");
+  expect(html).toContain("top:var(--s2);height:calc(10 * var(--size-24))");
   expect(html.match(/<em class="top">t\d+<\/em>/g)).toEqual(['<em class="top">t10</em>']);
   expect(html).toContain('class="mw-info-cell" style="grid-column:3"');
   expect(html.match(/<em class="bottom">b\d+<\/em>/g)).toEqual(['<em class="bottom">b10</em>']);
@@ -89,11 +89,11 @@ test("11~20행 가운데 매도 잔량이 있는 행은 상자가 가리지 않�
     rowSlots: { infoCard: (rowCount) => createElement("em", { className: "top" }, `t${rowCount}`), bottomLeft: (rowCount) => createElement("em", { className: "bottom" }, `b${rowCount}`) },
   }));
   expect(html.match(/<em class="top">t\d<\/em>/g)).toEqual(['<em class="top">t1</em>']);
-  expect(html).toContain("top:var(--s1);height:calc(1 * var(--size-24))");
+  expect(html).toContain("top:var(--s2);height:calc(1 * var(--size-24))");
   expect(html.match(/class="bottom"/g)).toHaveLength(1);
   expect(html).toContain('<em class="bottom">b4</em>');
   expect(tradeBoxStart(crossed)).toBe(16);
-  expect(html).toContain("top:calc(var(--s1) + 16 * var(--size-24));height:calc(4 * var(--size-24))");
+  expect(html).toContain("top:calc(var(--s2) + 16 * var(--size-24));height:calc(4 * var(--size-24))");
 });
 
 test("표시 가격 하나에만 가격 숫자 앞에 점이 붙는다", () => {

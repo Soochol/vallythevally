@@ -26,9 +26,9 @@ export function ArrangeMenu() {
       {open && <Menu label="배치" root={root} items={items} onClose={() => setOpen(false)}>
         <div className="layout-mode-control" onKeyDown={(event) => event.stopPropagation()}>
           <span id="layout-mode-label">창 배치 방식</span>
-          <div role="group" aria-labelledby="layout-mode-label" className="layout-mode-segments">
-            <button type="button" aria-pressed={mode === "dock"} onClick={() => setLayoutMode("dock")}>도킹</button>
-            <button type="button" aria-pressed={mode === "canvas"} onClick={() => setLayoutMode("canvas")}>캔버스</button>
+          <div role="group" aria-labelledby="layout-mode-label" className="ui-seg layout-mode-segments" data-size="sm">
+            <button type="button" className="ui-seg-item" aria-pressed={mode === "dock"} onClick={() => setLayoutMode("dock")}>도킹</button>
+            <button type="button" className="ui-seg-item" aria-pressed={mode === "canvas"} onClick={() => setLayoutMode("canvas")}>캔버스</button>
           </div>
         </div>
       </Menu>}

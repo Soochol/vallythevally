@@ -139,8 +139,9 @@ describe("값이 바뀐 토큰", () => {
     expect(tokensCss).toMatch(/\[data-density="compact"\]\s*\{[^}]*--row-h:\s*28px/);
   });
 
-  it("모서리가 4·6·10·14px이고 조작부 높이가 22·26·30·36px이다", () => {
-    expect(["--r-s", "--r-m", "--r-l", "--r-xl"].map(token)).toEqual(["4px", "6px", "10px", "14px"]);
+  it("모서리가 4·6·8·999px이고 간격·조작부 높이가 규격과 일치한다", () => {
+    expect(["--r-s", "--r-m", "--r-l", "--r-pill"].map(token)).toEqual(["4px", "6px", "8px", "999px"]);
+    expect(["--s1", "--s2", "--island-gap"].map(token)).toEqual(["2px", "4px", "6px"]);
     expect(["--ctl-xs", "--ctl-s", "--ctl-m", "--ctl-l"].map(token)).toEqual(["22px", "26px", "30px", "36px"]);
   });
 });

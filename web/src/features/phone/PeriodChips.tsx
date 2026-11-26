@@ -16,7 +16,7 @@ const LONG_PRESS_MS = 450;
 const isMenuPeriod = (p: Period): p is (typeof MENU)[number] => (MENU as readonly Period[]).includes(p);
 
 const CHIP =
-  "h-[36px] min-w-[44px] flex-none rounded-full border border-line px-3 text-text-2 aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-[650] aria-pressed:text-accent-ink";
+  "h-[36px] min-w-[44px] flex-none rounded-full border border-line px-3 text-text-2 aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-[600] aria-pressed:text-accent-ink";
 
 export function PeriodChips({ cell }: { cell: ChartWindowState }) {
   const setPeriod = useLayoutStore((s) => s.setPeriod);

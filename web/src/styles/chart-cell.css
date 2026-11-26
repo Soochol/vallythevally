@@ -9,7 +9,7 @@
 .chart-extreme { position:absolute; left:0; top:0; z-index:3; pointer-events:none; }
 .chart-extreme[hidden] { display:none; }
 .chart-extreme>i { position:absolute; left:calc(-1 * var(--size-2)); top:calc(-1 * var(--size-2)); width:var(--size-4); height:var(--size-4); border-radius:var(--r-pill); box-shadow:0 0 0 var(--size-1) var(--chart-bg); }
-.chart-extreme>span { position:absolute; left:0; transform:translateX(calc(-1 * var(--size-10))); padding:var(--size-2) var(--size-8); border-radius:var(--r-s); background:var(--raised); box-shadow:0 0 0 var(--size-1) var(--line-strong); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.chart-extreme>span { position:absolute; left:0; transform:translateX(calc(-1 * var(--size-10))); padding:var(--size-2) var(--size-8); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); background:var(--raised); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .chart-extreme[data-flip]>span { transform:translateX(calc(-100% + var(--size-10))); }
 .chart-extreme b { font-weight:600; }
 .chart-jump { pointer-events:auto; display:flex; align-items:center; max-width:100%; min-height:var(--size-24); padding:0 var(--size-2) 0 var(--size-8); border:var(--size-1) solid var(--warning); border-radius:var(--r-pill); color:var(--warning); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }

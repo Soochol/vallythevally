@@ -4,7 +4,7 @@ import { cell, chartOf, expect, SEARCH_BUTTON_TITLE, test, windowTabs } from "./
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
-const GAP = 12;
+const GAP = 6;
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const workspace = (page: Page) => page.getByRole("main", { name: "작업 영역" });
 const axisMode = (page: Page) => cell(page).getByRole("combobox", { name: "가격축 방식" });
@@ -16,7 +16,7 @@ async function open(page: Page) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
-test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 12px 띄우며 상태 줄은 화면 바닥의 얇은 줄이다", async ({ page }, info) => {
+test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 6px 띄우며 상태 줄은 화면 바닥의 얇은 줄이다", async ({ page }, info) => {
   await open(page);
   const bar = await boxOf(toolbar(page));
   const area = await boxOf(workspace(page));
@@ -39,7 +39,7 @@ test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 12px
   expect(sideGroup).toMatchObject({ y: area.y, height: area.height });
   expect(sideGroup.x - chartGroup.x - chartGroup.width).toBe(6);
   expect(sideGroup.x + sideGroup.width).toBe(area.x + area.width);
-  expect(chart).toEqual({ x: chartGroup.x, y: chartGroup.y + 34, width: chartGroup.width, height: chartGroup.height - 34 });
+  expect(chart).toEqual({ x: chartGroup.x + 1, y: chartGroup.y + 35, width: chartGroup.width - 2, height: chartGroup.height - 36 });
   const attribution = status.getByRole("link", { name: "Charts by TradingView", exact: true });
   await expect(attribution).toBeVisible();
   await expect(attribution).toHaveAttribute("href", "https://www.tradingview.com/");

@@ -106,7 +106,7 @@ export function DisclosureRadarCard({ scope, enabled }: { scope: MarketOverviewS
     >
       <Loaded query={query} label="핵심 공시 레이더" skeleton={PRO_SKELETON}>
         {(card) => (
-          <PartView part={card.disclosures}>
+          <PartView part={card.disclosures} onRetry={() => void query.refetch()}>
             {(radar) => <DisclosureRadarBody radar={radar} />}
           </PartView>
         )}

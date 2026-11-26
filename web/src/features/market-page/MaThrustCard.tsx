@@ -44,7 +44,7 @@ export function MaThrustCard({ scope, enabled }: { scope: MarketOverviewScope; e
     <CardShell title="시장 추세 체력" card="ma-thrust" note={`${scopeLabel(scope)} 기준 · 이동평균선 상회 종목 비율`}>
       <Loaded query={query} label="시장 추세 체력" skeleton={MA_SKELETON}>
         {(card) => (
-          <PartView part={card.maThrust}>
+          <PartView part={card.maThrust} onRetry={() => void query.refetch()}>
             {(thrust) => {
               const gauges = [
                 { id: "ma5", label: "5일선 위", pct: thrust.above5Pct },
