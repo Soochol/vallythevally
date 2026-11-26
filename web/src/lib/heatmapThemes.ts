@@ -82,6 +82,36 @@ export const removeSymbolFromTheme = (themes: readonly HeatmapTheme[], id: strin
 export const moveSymbol = (themes: readonly HeatmapTheme[], id: string, from: number, to: number): HeatmapTheme[] =>
   editTheme(themes, id, (theme) => ({ ...theme, symbols: moveItem(theme.symbols, from, to) }));
 
+export function transferSymbol(
+  themes: readonly HeatmapTheme[],
+  fromId: string,
+  toId: string,
+  code: SymbolCode,
+  options?: { copy?: boolean; toIndex?: number },
+): { themes: HeatmapTheme[]; outcome: SymbolOutcome } {
+  const unchanged = (outcome: SymbolOutcome) => ({ themes: [...themes], outcome });
+  const source = themes.find((theme) => theme.id === fromId);
+  const target = themes.find((theme) => theme.id === toId);
+  if (!source || !target) return unchanged("missing");
+  if (isIndexCode(code)) return unchanged("index");
+  if (!source.symbols.includes(code)) return unchanged("missing");
+  if (fromId === toId || target.symbols.includes(code)) return unchanged("duplicate");
+  if (target.symbols.length >= MAX_THEME_SYMBOLS) return unchanged("full");
+  const insertAt = options?.toIndex === undefined ? target.symbols.length : Math.max(0, Math.min(options.toIndex, target.symbols.length));
+  const next = themes.map((theme) => {
+    if (theme.id === toId) {
+      const symbols = [...theme.symbols];
+      symbols.splice(insertAt, 0, code);
+      return { ...theme, symbols };
+    }
+    if (theme.id === fromId && !options?.copy) {
+      return { ...theme, symbols: theme.symbols.filter((held) => held !== code) };
+    }
+    return theme;
+  });
+  return { themes: next, outcome: "added" };
+}
+
 export type ThemeCopy =
   | { outcome: "added"; kept: number; total: number }
   | { outcome: "sameName" | "invalidName" | "overThemeLimit" };

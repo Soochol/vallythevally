@@ -88,6 +88,15 @@ export function HeatmapPage() {
     for (const section of sections) for (const member of section.theme.members) names.set(member.symbol, member.name);
     return names;
   }, [infos, sections]);
+  const rateOf = useMemo(() => {
+    const rates = new Map<SymbolCode, number | null>();
+    for (const section of sections) {
+      for (const member of section.theme.members) {
+        rates.set(member.symbol, quoteBook.get(member.symbol).quote?.changeRate ?? member.changeRate);
+      }
+    }
+    return rates;
+  }, [sections]);
   const settled = boardData !== undefined;
   const tradedKnown = useMemo(() => hasTradedValue(sections.flatMap((section) => boardRows(section.theme, nameOf))), [sections, nameOf]);
   const latest = useFreshestTime(boardData?.asOf ?? null, codes);
@@ -131,19 +140,24 @@ export function HeatmapPage() {
   );
   return (
     <PageFrame title="히트맵" fresh={{ receivedAt: latest, failed }} freshness={<>{freshness}{boardData && <DataAgeNote recordedAt={boardData.asOf} cadence="heatmapBoard" />}</>}>
-      {!noThemes && (
-        <HeatmapToolbar
-          settings={settings}
-          onChange={change}
-          tradedKnown={!settled || tradedKnown}
-          onEdit={() => setEditor("browse")}
-          listQuery={listQuery}
-          onListQueryChange={setListQuery}
-        />
+      {editor !== null ? (
+        <ThemeEditor start={editor} names={nameOf} rates={rateOf} onClose={() => setEditor(null)} />
+      ) : (
+        <>
+          {!noThemes && (
+            <HeatmapToolbar
+              settings={settings}
+              onChange={change}
+              tradedKnown={!settled || tradedKnown}
+              onEdit={() => setEditor("browse")}
+              listQuery={listQuery}
+              onListQueryChange={setListQuery}
+            />
+          )}
+          {settled && failed && <Notice tone="warning" action={{ label: "다시 시도", onClick: retry }}>{cause} · 마지막으로 받은 보드를 흐리게 보이고 있습니다. 자동으로 다시 받습니다.</Notice>}
+          <div className="hm-body" data-stale={settled && failed ? "" : undefined}>{body}</div>
+        </>
       )}
-      {settled && failed && <Notice tone="warning" action={{ label: "다시 시도", onClick: retry }}>{cause} · 마지막으로 받은 보드를 흐리게 보이고 있습니다. 자동으로 다시 받습니다.</Notice>}
-      <div className="hm-body" data-stale={settled && failed ? "" : undefined}>{body}</div>
-      {editor !== null && <ThemeEditor start={editor} onClose={() => setEditor(null)} />}
     </PageFrame>
   );
 }

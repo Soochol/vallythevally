@@ -34,6 +34,8 @@ test("리스트 탭에서 테마별 종목과 미니 일봉 캔들이 보이고 
   await expect(row(page, "005930")).toContainText("3,000억");
   await expect(row(page, "005930").locator(".hm-candle-svg")).toBeVisible();
   await expect(row(page, "005930").locator(".hm-candle")).toHaveCount(15);
+  const rowBox = (await row(page, "005930").boundingBox())!;
+  expect(rowBox.height).toBeLessThanOrEqual(26);
 
   const barRequests = scenario.requests
     .map((req) => new URL(req.url()))

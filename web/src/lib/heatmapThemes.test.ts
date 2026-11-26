@@ -19,6 +19,7 @@ import {
   sameThemes,
   themeNameProblem,
   themesProblem,
+  transferSymbol,
 } from "./heatmapThemes";
 
 const theme = (id: string, name: string, symbols: string[] = []): HeatmapTheme => ({ id, name, symbols });
@@ -99,6 +100,22 @@ describe("종목 편집", () => {
     expect(removeSymbolFromTheme(themes, "a", "111111")).toEqual(themes);
     const three = [theme("a", "반도체", ["1", "2", "3"])];
     expect(moveSymbol(three, "a", 2, 0)[0]!.symbols).toEqual(["3", "1", "2"]);
+  });
+  it("다른 테마로 이동하면 원래 테마에서 빠지고 복제하면 양쪽에 남는다", () => {
+    const moved = transferSymbol(themes, "a", "b", "005930", { toIndex: 0 });
+    expect(moved.outcome).toBe("added");
+    expect(moved.themes).toEqual([theme("a", "반도체", []), theme("b", "지주", ["005930", "028260"])]);
+
+    const copied = transferSymbol(themes, "a", "b", "005930", { copy: true });
+    expect(copied.outcome).toBe("added");
+    expect(copied.themes).toEqual([theme("a", "반도체", ["005930"]), theme("b", "지주", ["028260", "005930"])]);
+  });
+  it("대상 테마에 이미 있거나 가득 찼거나 같은 테마면 옮기지 않는다", () => {
+    const dup = [theme("a", "반도체", ["005930"]), theme("b", "지주", ["005930"])];
+    expect(transferSymbol(dup, "a", "b", "005930")).toEqual({ themes: dup, outcome: "duplicate" });
+    expect(transferSymbol(themes, "a", "a", "005930")).toEqual({ themes, outcome: "duplicate" });
+    const full = [theme("a", "반도체", ["005930"]), theme("b", "꽉참", codes(MAX_THEME_SYMBOLS))];
+    expect(transferSymbol(full, "a", "b", "005930")).toEqual({ themes: full, outcome: "full" });
   });
 });
 
