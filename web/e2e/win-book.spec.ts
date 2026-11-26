@@ -629,7 +629,7 @@ test("10호가창의 좁은 상자에서도 수량은 7자리까지 끝까지 �
     expect(part.fontSize).toBe("11px");
     expect(part.scroll, note).toBe(true);
     expect(part.inside, note).toBe(true);
-    expect(part.background, note).toBe("rgb(20, 25, 20)");
+    expect(part.background, note).toBe("rgb(11, 11, 11)");
     if (part.top !== null) expect(part.top, note).toBe("qty");
   }
   expect(new Set(parts.map((part) => part.priceLeft)).size).toBe(1);

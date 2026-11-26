@@ -1048,7 +1048,7 @@ test("470px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 �
     expect(part.qtyRight, note).toBeLessThanOrEqual(part.boxRight);
     expect(part.gapToScrollbar, note).toBeGreaterThanOrEqual(5.99);
     expect(Number(part.qtyZ), note).toBeGreaterThan(Number(part.priceZ === "auto" ? 0 : part.priceZ));
-    expect(part.qtyBackground, note).toBe("rgb(20, 25, 20)");
+    expect(part.qtyBackground, note).toBe("rgb(11, 11, 11)");
     if (part.topAtOverlap !== null && part.topAtOverlap !== "offscreen") expect(part.topAtOverlap, note).toBe("qty");
   }
   expect(parts.filter((part) => part.topAtOverlap === "qty").length).toBeGreaterThan(0);

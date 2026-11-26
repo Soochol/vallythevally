@@ -22,10 +22,13 @@ test("드로잉 도구는 작업 영역 왼쪽의 세로 막대이고 고른 도
   const legend = await boxOf(cell(page).locator(".chart-legend"));
   expect(legend.x).toBeGreaterThanOrEqual(chart.x);
   const pointer = dock(page).getByRole("button", { name: "선택 도구", exact: true });
-  await expect(pointer).toHaveCSS("background-color", "rgb(199, 243, 107)");
+  await expect(pointer).toHaveCSS("background-color", "rgba(243, 241, 236, 0.14)");
+  await expect(pointer).toHaveCSS("box-shadow", /rgb\(243, 241, 236\)/);
   await dock(page).getByRole("button", { name: "추세선", exact: true }).click();
-  await expect(dock(page).getByRole("button", { name: "추세선", exact: true })).toHaveCSS("background-color", "rgb(199, 243, 107)");
-  await expect(pointer).not.toHaveCSS("background-color", "rgb(199, 243, 107)");
+  await expect(dock(page).getByRole("button", { name: "추세선", exact: true })).toHaveCSS("background-color", "rgba(243, 241, 236, 0.14)");
+  await expect(dock(page).getByRole("button", { name: "추세선", exact: true })).toHaveCSS("box-shadow", /rgb\(243, 241, 236\)/);
+  await expect(pointer).not.toHaveCSS("background-color", "rgba(243, 241, 236, 0.14)");
+  await expect(pointer).toHaveCSS("box-shadow", "none");
   await page.keyboard.press("Escape");
 
   await dock(page).getByRole("button", { name: "선 도구 펼치기", exact: true }).click();

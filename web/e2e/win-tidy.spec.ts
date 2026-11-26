@@ -92,7 +92,7 @@ test("체결 행 왼쪽에 매수·매도 세로선이 없고 체결량 글자�
     return { drawn: style.borderLeftWidth !== "0px" && style.borderLeftColor !== "rgba(0, 0, 0, 0)", shadow: style.boxShadow, before: getComputedStyle(element, "::before").content, quantity: getComputedStyle(element.querySelector(".tr-qty")!).color };
   }));
   expect(styles.map(({ drawn, shadow, before }) => ({ drawn, shadow, before }))).toEqual([{ drawn: false, shadow: "none", before: "none" }, { drawn: false, shadow: "none", before: "none" }]);
-  expect(styles.map(({ quantity }) => quantity)).toEqual(["rgb(255, 107, 120)", "rgb(91, 155, 255)"]);
+  expect(styles.map(({ quantity }) => quantity)).toEqual(["rgb(255, 114, 114)", "rgb(111, 171, 255)"]);
 });
 
 test("체결 목록에 마우스를 올려도 새 체결이 바로 맨 위에 붙고 멈춤 배지와 새 체결 단추가 없다", async ({ page, scenario }) => {

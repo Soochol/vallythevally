@@ -167,8 +167,8 @@ test("매수 체결과 매도 체결의 체결량 글자색이 다르다", async
   const colorOf = (side: string) => page.locator(`[data-testid=trade-row][data-side=${side}] .tr-qty`).first().evaluate((element) => getComputedStyle(element).color);
   const buy = await colorOf("buy");
   const sell = await colorOf("sell");
-  expect(buy).toBe("rgb(255, 107, 120)");
-  expect(sell).toBe("rgb(91, 155, 255)");
+  expect(buy).toBe("rgb(255, 114, 114)");
+  expect(sell).toBe("rgb(111, 171, 255)");
 });
 
 test("폭 280px 10호가 창에는 잘린 숫자가 없다", async ({ page, scenario }) => {

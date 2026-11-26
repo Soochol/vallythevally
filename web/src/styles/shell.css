@@ -12,7 +12,7 @@
 .desktop-topbar .book-replay-toggle[aria-pressed=true] { background:transparent; color:var(--text); font-weight:600; box-shadow:inset 0 calc(-1 * var(--size-2)) 0 var(--accent); }
 .desktop-topbar .topbar-zone>.ui-seg { height:var(--ctl-m); padding:0; gap:var(--size-6); overflow:visible; border:0; background:transparent; }
 .desktop-topbar .topbar-zone>.ui-seg>.ui-seg-item { height:var(--ctl-m); min-width:var(--size-26); padding-inline:var(--s2); border-radius:0; margin-bottom:0; }
-.desktop-topbar .tb-sep { margin-inline:var(--size-2); }
+.desktop-topbar .tb-sep { margin-inline:0; }
 .desktop-topbar .topbar-more { display:none; }
 .app-brand { display:flex; align-items:center; gap:var(--size-4); padding-right:var(--size-4); font-size:var(--fs-m); font-weight:700; letter-spacing:0.04em; }
 .app-brand svg { color:var(--accent); }

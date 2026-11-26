@@ -32,23 +32,24 @@ async function open(page: Page) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
-const luminanceOf = (target: Locator) => target.evaluate((element) => {
-  const parse = (color: string) => (color.match(/[\d.]+/g) ?? []).map(Number);
-  const [r = 0, g = 0, b = 0, a = 1] = parse(getComputedStyle(element).backgroundColor);
-  const [br = 0, bg = 0, bb = 0] = parse(getComputedStyle(element.closest(".dock-group")!).backgroundColor);
+const textLuminanceOf = (target: Locator) => target.evaluate((element) => {
+  const [r = 0, g = 0, b = 0] = (getComputedStyle(element).color.match(/[\d.]+/g) ?? []).map(Number);
   const channel = (value: number) => { const unit = value / 255; return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4; };
-  const mixed = [r, g, b].map((value, index) => value * a + [br, bg, bb][index]! * (1 - a));
-  return 0.2126 * channel(mixed[0]!) + 0.7152 * channel(mixed[1]!) + 0.0722 * channel(mixed[2]!);
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 });
 
-test("고른 탭의 배경이 포인터를 올린 다른 탭의 배경보다 밝다", async ({ page }) => {
+test("고른 탭은 아래 강조선과 밝은 글자로 구분되고 포인터를 올린 다른 탭은 글자가 밝아진다", async ({ page }) => {
   await open(page);
   const group = groupWith(page, "스크리너");
   const other = tabGroupOf(group.getByRole("tab", { selected: false }).first());
   const selected = group.locator(".dock-tab-group[data-selected]");
+  const idleOther = await textLuminanceOf(other);
+  expect(await textLuminanceOf(selected)).toBeGreaterThan(idleOther);
+  await expect(selected).toHaveCSS("box-shadow", /rgb\(243, 241, 236\)/);
+  await expect(other).toHaveCSS("box-shadow", "none");
   await other.hover();
-  expect(await luminanceOf(selected)).toBeGreaterThan(await luminanceOf(other));
-  expect(await luminanceOf(other)).toBeGreaterThan(await luminanceOf(group.locator(".dock-tab-viewport")));
+  expect(await textLuminanceOf(other)).toBeGreaterThan(idleOther);
+  await expect(other).toHaveCSS("box-shadow", "none");
 });
 
 test("탭이 넘쳐도 ＋ 버튼이 보이고 탭 목록에서 숨은 탭을 고르면 그 탭이 보인다", async ({ page }) => {
@@ -156,6 +157,14 @@ test("떠 있는 창을 포인터로 조작한 뒤에는 초점 고리가 남지
   await page.mouse.click(box.x + 40, box.y + box.height / 2);
   await expect(header).toBeFocused();
   expect(await header.evaluate((element) => element.matches(":focus-visible"))).toBe(false);
-  await expect(header).toHaveCSS("background-color", await page.locator(".dock-tab-group[data-selected]").first().evaluate((element) => getComputedStyle(element).backgroundColor));
+  const raised = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--raised)";
+    document.body.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  });
+  await expect(header).toHaveCSS("background-color", raised);
   await expect(header.getByRole("button", { name: /붙이기$/ })).toHaveAttribute("title", "붙이기");
 });

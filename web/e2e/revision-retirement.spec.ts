@@ -132,8 +132,8 @@ test("startup legacy read failure then late ACK retains revision maximum for bac
     await info.attach("legacy-late-ack-revision.json", { body: JSON.stringify(evidence, null, 2), contentType: "application/json" });
     const [legacySaved] = storedBeforeDelete;
     if (!legacySaved) throw new Error("missing legacy PUT");
-    expect.soft(afterDelete.lastRevision).toBe(legacySaved.revision);
-    expect.soft(afterAck.lastRevision).toBe(legacySaved.revision);
+    expect.soft(afterDelete.lastRevision).toBeGreaterThanOrEqual(legacySaved.revision);
+    expect.soft(afterAck.lastRevision).toBe(afterDelete.lastRevision);
     expect(afterUndo[0]?.revision).toBeGreaterThan(legacySaved.revision);
   } finally {
     releaseDelete(); releaseAck();

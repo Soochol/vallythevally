@@ -6,7 +6,7 @@ test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } 
 
 const styleOf = (locator: Locator) => locator.evaluate((node) => {
   const style = getComputedStyle(node);
-  return { background: style.backgroundColor, blur: style.backdropFilter, radius: style.borderTopLeftRadius };
+  return { background: style.backgroundColor, blur: style.backdropFilter, radius: style.borderTopLeftRadius, borderBottomColor: style.borderBottomColor };
 });
 
 test("지표·비교 창은 배경 가림막 없이, 종목 검색 창은 가림막 위 불투명 표면으로 뜨며 미리보기 지표가 범례에 보인다", async ({ page, scenario }, info) => {
@@ -19,15 +19,15 @@ test("지표·비교 창은 배경 가림막 없이, 종목 검색 창은 가림
   await page.keyboard.type("이평 20");
   await expect(cell(page).getByText("이동평균 단순 20", { exact: false }).first()).toBeVisible();
   expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(0, 0, 0, 0)", blur: "none" });
-  expect(await styleOf(dialog)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none", radius: "8px" });
+  expect(await styleOf(dialog)).toMatchObject({ background: "rgb(23, 23, 23)", blur: "none", radius: "0px" });
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-indicator-preview.png") });
   await page.keyboard.press("Escape");
 
   await page.keyboard.press("/");
   const search = page.getByRole("dialog", { name: "종목 검색", exact: true });
   await expect(search).toBeVisible();
-  expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(5, 9, 5, 0.7)", blur: "none" });
-  expect(await styleOf(search)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
+  expect(await styleOf(page.locator("[data-command-frame]"))).toMatchObject({ background: "rgba(6, 6, 6, 0.72)", blur: "none" });
+  expect(await styleOf(search)).toMatchObject({ background: "rgb(23, 23, 23)", blur: "none" });
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-search.png") });
 });
 
@@ -35,14 +35,14 @@ test("메뉴와 팝오버는 같은 유리 표면을 쓴다", async ({ page }, i
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const day = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "일", exact: true });
-  expect(await styleOf(day)).toMatchObject({ background: "rgb(35, 43, 35)" });
+  expect(await styleOf(day)).toMatchObject({ background: "rgba(0, 0, 0, 0)", borderBottomColor: "rgb(243, 241, 236)" });
   const minuteButton = page.getByRole("button", { name: "분봉" }).first();
   await minuteButton.click();
   await expect(minuteButton).toHaveAttribute("aria-pressed", "true");
   await minuteButton.click();
   const minutes = page.locator(".minute-menu");
   await expect(minutes).toBeVisible();
-  expect(await styleOf(minutes)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)", radius: "8px" });
+  expect(await styleOf(minutes)).toMatchObject({ background: "rgba(23, 23, 23, 0.88)", blur: "blur(16px)", radius: "0px" });
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-minute-menu.png") });
   await page.keyboard.press("Escape");
 });
@@ -51,28 +51,28 @@ test("틀·알림·툴팁·가림막 위 대화상자는 흐림 없이 불투명
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const toolbar = page.getByRole("toolbar", { name: "차트 도구 막대" });
-  expect(await styleOf(toolbar)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
+  expect(await styleOf(toolbar)).toMatchObject({ background: "rgb(11, 11, 11)", blur: "none" });
 
   await toolbar.getByRole("button", { name: "지표", exact: true }).hover();
   const tip = page.getByRole("tooltip");
   await expect(tip).toBeVisible();
-  expect(await styleOf(tip)).toMatchObject({ background: "rgb(45, 54, 45)", blur: "none" });
+  expect(await styleOf(tip)).toMatchObject({ background: "rgb(48, 48, 48)", blur: "none" });
   await page.mouse.move(700, 450);
 
   await page.getByRole("button", { name: /^레이아웃:/ }).click();
   const layoutMenu = page.getByRole("menu", { name: "레이아웃", exact: true });
-  expect(await styleOf(layoutMenu)).toMatchObject({ background: "rgba(27, 33, 27, 0.74)", blur: "blur(22px) saturate(1.6)" });
+  expect(await styleOf(layoutMenu)).toMatchObject({ background: "rgba(23, 23, 23, 0.88)", blur: "blur(16px)" });
   await layoutMenu.getByRole("menuitem", { name: "새 이름으로 저장…", exact: true }).click();
   const naming = page.getByRole("dialog", { name: "새 이름으로 저장", exact: true });
   await expect(naming).toBeVisible();
-  expect(await styleOf(naming)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
+  expect(await styleOf(naming)).toMatchObject({ background: "rgb(23, 23, 23)", blur: "none" });
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-naming-dialog.png") });
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "스크리너 닫기", exact: true }).click();
   const toast = page.locator(".ui-toast").filter({ hasText: "스크리너 창을 닫았습니다" });
   await expect(toast).toBeVisible();
-  expect(await styleOf(toast)).toMatchObject({ background: "rgb(45, 54, 45)", blur: "none" });
+  expect(await styleOf(toast)).toMatchObject({ background: "rgb(48, 48, 48)", blur: "none" });
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-toast.png") });
 });
 
@@ -87,8 +87,8 @@ test("투명도 줄이기를 켜면 유리 표면은 흐림 없이 불투명하�
   await minuteButton.click();
   const minutes = page.locator(".minute-menu");
   await expect(minutes).toBeVisible();
-  expect(await styleOf(minutes)).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
-  expect(await styleOf(page.getByRole("toolbar", { name: "차트 도구 막대" }))).toMatchObject({ background: "rgb(27, 33, 27)", blur: "none" });
+  expect(await styleOf(minutes)).toMatchObject({ background: "rgb(23, 23, 23)", blur: "none" });
+  expect(await styleOf(page.getByRole("toolbar", { name: "차트 도구 막대" }))).toMatchObject({ background: "rgb(11, 11, 11)", blur: "none" });
 });
 
 test("드로잉 삭제 알림의 되돌리기는 Ctrl+Z 표시를 화면에만 보이고 접근성 이름은 되돌리기 그대로다", async ({ page }) => {
