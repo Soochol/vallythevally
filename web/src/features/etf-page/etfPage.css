@@ -1,13 +1,13 @@
-.etf-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--size-12); flex: 1; min-height: 0; align-items: start; }
-.etf-rail, .etf-detail, .etf-card { border: var(--size-1) solid var(--line); border-radius: var(--r-l); background: var(--surface); }
-.etf-rail { display: flex; flex-direction: column; position: sticky; top: var(--size-4); max-height: calc(100dvh - var(--size-84)); min-height: 320px; overflow: hidden; }
-.etf-rail-top { display: flex; flex-direction: column; gap: var(--size-8); padding: var(--size-10); border-bottom: 1px solid var(--line); }
+.etf-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--size-24); flex: 1; min-height: 0; align-items: start; }
+.etf-rail, .etf-detail, .etf-card { border: 0; border-radius: 0; background: var(--bg); }
+.etf-rail { display: flex; flex-direction: column; position: sticky; top: var(--size-4); max-height: calc(100dvh - var(--size-84)); min-height: 320px; overflow: hidden; border-right: var(--size-1) solid var(--line); padding-right: var(--size-12); }
+.etf-rail-top { display: flex; flex-direction: column; gap: var(--size-8); padding: 0 0 var(--size-10); border-bottom: 1px solid var(--line); }
 .etf-rail-top .ui-field-label { display: none; }
-.etf-search { width: 100%; height: var(--ctl-m); min-height: var(--ctl-m); padding: 0 var(--size-8); background: var(--raised); font-size: var(--fs-s); }
-.etf-search::placeholder { color: var(--text-2); }
+.etf-search { width: 100%; height: var(--ctl-m); min-height: var(--ctl-m); padding: 0 var(--size-4); border: 0; border-bottom: var(--size-1) solid var(--line-strong); border-radius: 0; background: transparent; font-size: var(--fs-s); }
+.etf-search::placeholder { color: var(--text-3); }
 .etf-seg { width: 100%; }
 .etf-seg .ui-seg-item { flex: 1; }
-.etf-seg .ui-seg-item[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.etf-seg .ui-seg-item[aria-pressed="true"] { background: transparent; color: var(--text); border-bottom-color: var(--accent); box-shadow: none; }
 .etf-selects { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--size-8); }
 .etf-selects > span { width: 100%; }
 .etf-select { width: 100%; height: var(--ctl-m); padding: 0 var(--size-8); border-radius: var(--r-m); background: var(--raised); color: var(--text); font-size: var(--fs-s); }
@@ -60,35 +60,35 @@
 
 .etf-main { min-width: 0; }
 .etf-back { display: none; margin-bottom: var(--size-8); }
-.etf-detail { display: flex; flex-direction: column; gap: var(--size-12); padding: var(--size-16); min-width: 0; }
+.etf-detail { display: flex; flex-direction: column; gap: var(--size-16); padding: 0; min-width: 0; }
 
-.etf-scope-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-6); padding: var(--size-4); border: var(--size-1) solid var(--line); border-radius: var(--r-l); background: var(--bg); }
-.etf-scope-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-6); min-width: 0; }
-.etf-scope-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-4); min-width: 0; }
+.etf-scope-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-10); padding: 0; border: 0; border-bottom: var(--size-1) solid var(--line); border-radius: 0; background: var(--bg); }
+.etf-scope-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-12); min-width: 0; }
+.etf-scope-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-10); min-width: 0; }
 .etf-detail-basket-notice { display: none; }
-.etf-scope-divider { width: var(--size-1); height: var(--size-20); margin: 0 var(--size-4); background: var(--line-strong); }
-.etf-scope-tab { display: inline-flex; align-items: center; gap: var(--size-6); height: var(--ctl-m); padding: 0 var(--size-12); border: var(--size-1) solid transparent; border-radius: var(--r-m); color: var(--text-2); font-size: var(--fs-s); font-weight: 600; white-space: nowrap; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
-.etf-scope-tab:hover { background: var(--hover); color: var(--text); }
-.etf-scope-tab[aria-selected="true"] { background: var(--raised); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-.etf-scope-tag { padding: 0 var(--size-6); border-radius: var(--r-pill); background: var(--surface); color: var(--text-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-.etf-scope-tab[aria-selected="true"] .etf-scope-tag { background: var(--accent-soft); color: var(--accent); }
-.etf-scope-fund { max-width: var(--size-220); padding: var(--size-2) var(--size-8); border-radius: var(--r-pill); background: var(--surface); color: var(--text-2); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.etf-scope-divider { width: var(--size-1); height: var(--size-16); margin: 0 var(--size-2); background: var(--line); }
+.etf-scope-tab { display: inline-flex; align-items: center; gap: var(--size-6); height: var(--ctl-l); padding: 0 var(--size-2); border: 0; border-bottom: var(--size-2) solid transparent; margin-bottom: calc(-1 * var(--size-1)); border-radius: 0; color: var(--text-3); font-size: var(--fs-s); font-weight: 500; white-space: nowrap; transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.etf-scope-tab:hover { background: transparent; color: var(--text); }
+.etf-scope-tab[aria-selected="true"] { background: transparent; color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.etf-scope-tag { padding: 0; border-radius: 0; background: transparent; color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.etf-scope-tab[aria-selected="true"] .etf-scope-tag { background: transparent; color: var(--text-2); }
+.etf-scope-fund { max-width: var(--size-220); padding: 0; border-radius: 0; background: transparent; color: var(--text-2); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .etf-hero { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--size-12); }
 .etf-hero-copy { min-width: 0; }
-.etf-hero h2 { margin: 0; font-size: var(--fs-h); font-weight: 700; letter-spacing: -0.03em; }
+.etf-hero h2 { margin: 0; font-size: var(--fs-h); font-weight: 600; letter-spacing: -0.03em; }
 .etf-hero-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-6); }
 .etf-hero-actions button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
-.etf-chips { display: flex; flex-wrap: wrap; gap: var(--size-5); margin-top: var(--size-5); color: var(--text-2); font-size: var(--fs-xs); }
-.etf-chips span { padding: 1px var(--size-8); border-radius: var(--r-pill); background: var(--raised); }
+.etf-chips { display: flex; flex-wrap: wrap; gap: var(--size-10); margin-top: var(--size-5); color: var(--text-3); font-size: var(--fs-xs); }
+.etf-chips span { padding: 0; border-radius: 0; background: transparent; }
 
-.etf-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--size-8); margin: 0; }
-.etf-radar-kpis, .etf-reverse-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--size-8); margin: 0; }
-.etf-summary-cell { padding: var(--size-10) var(--size-12); border-radius: var(--r-m); background: var(--raised); min-width: 0; }
-.etf-summary-cell dt { display: flex; align-items: center; gap: var(--size-4); color: var(--text-2); font-size: var(--fs-xs); }
+.etf-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--size-12); margin: 0; }
+.etf-radar-kpis, .etf-reverse-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--size-12); margin: 0; }
+.etf-summary-cell { padding: var(--size-10) 0; border-top: var(--size-1) solid var(--line); border-radius: 0; background: transparent; min-width: 0; }
+.etf-summary-cell dt { display: flex; align-items: center; gap: var(--size-4); color: var(--text-3); font-size: var(--fs-xs); }
 .etf-summary-cell dd { margin: var(--size-2) 0 0; font-size: var(--fs-l); font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .etf-summary-cell dd.etf-summary-sub { display: flex; flex-direction: column; gap: var(--size-4); margin: var(--size-4) 0 0; color: var(--text-2); font-size: var(--fs-xs); font-weight: 400; overflow: visible; white-space: normal; }
-.etf-summary-bar { display: block; width: 100%; height: var(--size-4); border-radius: var(--r-pill); background: var(--bg); overflow: hidden; }
+.etf-summary-bar { display: block; width: 100%; height: var(--size-3); border-radius: 0; background: var(--line); overflow: hidden; }
 .etf-summary-bar i { display: block; height: 100%; background: var(--accent); }
 
 .etf-help { display: inline-grid; place-items: center; width: var(--size-20); height: var(--size-20); margin-left: var(--size-4); border: var(--size-1) solid var(--line-strong); border-radius: var(--r-pill); color: var(--text-2); font-size: var(--fs-xs); font-weight: 600; line-height: 1; }
@@ -96,8 +96,8 @@
 .etf-help[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .etf-help-popover { max-width: var(--size-260); padding: var(--size-8) var(--size-10); color: var(--text); font-size: var(--fs-xs); line-height: 1.5; }
 .etf-help-text { margin: 0; color: var(--text); font-size: var(--fs-xs); font-weight: 400; }
-.etf-panel { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--size-12); min-width: 0; }
-.etf-card { display: flex; flex-direction: column; gap: var(--size-8); min-width: 0; padding: var(--size-12); background: var(--bg); }
+.etf-panel { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--size-20); min-width: 0; }
+.etf-card { display: flex; flex-direction: column; gap: var(--size-10); min-width: 0; padding: var(--size-14) 0 0; border-top: var(--size-1) solid var(--line); background: var(--bg); }
 .etf-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--size-8); }
 .etf-card h3 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-4); margin: 0; color: var(--text-2); font-size: var(--fs-s); font-weight: 600; }
 .etf-card-wide { grid-column: 1 / -1; }

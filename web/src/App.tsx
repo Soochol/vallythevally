@@ -50,7 +50,9 @@ import { Workspace } from "./features/workspace/Workspace";
 import { DESKTOP_QUERY, useMediaQuery } from "./lib/media";
 import type { WindowId } from "./layout/kinds";
 import { applyStoredDensity } from "./persist/density";
+import { applyStoredTheme } from "./persist/theme";
 
+applyStoredTheme();
 applyStoredDensity();
 
 export function ChartRoute() {

@@ -1,6 +1,6 @@
 import { createPortal } from "react-dom";
 import { VenueFallbackBadge } from "../venue/VenuePicker";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useBookReplayDays } from "../../api/bookReplay";
 import { useBrokerDays } from "../../api/brokers";
 import { useFinancials } from "../../api/financials";
@@ -17,7 +17,8 @@ import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores
 import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
-import { useTheme, useVenue } from "../../stores/ui";
+import { appliedTheme, DEFAULT_THEME, subscribeTheme } from "../../persist/theme";
+import { useVenue } from "../../stores/ui";
 import { chartPointerScheduler, matchesSnapTarget, useChartPointerStore } from "../../stores/chartPointer";
 import { replayPointScheduler } from "../book-replay/pointScheduler";
 import { useBookReplayEnabled } from "../book-replay/useBookReplay";
@@ -76,7 +77,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const compareNames = useMemo(() => Object.fromEntries(compareInfos.map((i) => [i.code, i.name])), [compareKey]);
   const request = financialRequest(cell.period, chartSettings);
   const financial = useFinancials(cell.symbol, request.period, request.enabled);
-  const theme = useTheme();
+  const theme = useSyncExternalStore(subscribeTheme, () => appliedTheme(), () => DEFAULT_THEME);
   const replayEnabled = useBookReplayEnabled();
   const brokerSyncActive = useChartPointerStore((s) => (s.brokerSyncSymbols[cell.symbol] ?? 0) > 0);
   const pointerSnap = useChartPointerStore((s) => s.snap);

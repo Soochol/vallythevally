@@ -14,9 +14,9 @@ export const LIST_ROW_HEIGHT = "h-[var(--row-h)]";
 export const DIRECTION_TEXT: Record<ChangeDirection, string> = { up: "text-up", down: "text-down", flat: "text-text-2" };
 
 const RATE_BADGE: Record<ChangeDirection, string> = {
-  up: "bg-[color-mix(in_srgb,var(--up)_16%,var(--surface))] text-up font-[600] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--up)_22%,transparent)]",
-  down: "bg-[color-mix(in_srgb,var(--down)_16%,var(--surface))] text-down font-[600] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--down)_22%,transparent)]",
-  flat: "bg-[var(--hover)] text-text-3 font-[500]",
+  up: "text-up font-[600]",
+  down: "text-down font-[600]",
+  flat: "text-text-3 font-[500]",
 };
 const RATE_MARK: Record<ChangeDirection, string> = { up: "▲", down: "▼", flat: "" };
 
@@ -32,7 +32,7 @@ interface ListHeadProps {
 
 export function ListHead({ template, className = "", title, indent, children }: ListHeadProps) {
   return (
-    <div className={`grid h-7 flex-none items-center border-b border-line bg-[color-mix(in_srgb,var(--raised)_38%,var(--surface))] px-3 ${LIST_HEAD} ${className}`} style={{ ...template, columnGap: LIST_COLUMN_GAP, paddingLeft: indent }} aria-hidden="true" title={title}>
+    <div className={`grid h-7 flex-none items-center border-b border-line bg-bg px-3 ${LIST_HEAD} ${className}`} style={{ ...template, columnGap: LIST_COLUMN_GAP, paddingLeft: indent }} aria-hidden="true" title={title}>
       {children}
     </div>
   );
