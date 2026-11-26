@@ -82,3 +82,14 @@ export function parseCustomProperties(css: string): Map<string, string> {
   }
   return properties;
 }
+
+export function parseThemeProperties(css: string, theme: "dark" | "light"): Map<string, string> {
+  const rootMatch = /:root\s*\{([^}]*)\}/.exec(css);
+  const properties = parseCustomProperties(rootMatch?.[1] ?? css);
+  if (theme === "light") {
+    const lightMatch = /\[data-theme="light"\]\s*\{([^}]*)\}/.exec(css);
+    if (!lightMatch) throw new Error('[data-theme="light"] 블록이 tokens.css에 없다');
+    for (const [name, value] of parseCustomProperties(lightMatch[1]!)) properties.set(name, value);
+  }
+  return properties;
+}

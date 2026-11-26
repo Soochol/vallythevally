@@ -1,6 +1,6 @@
-.page-frame { display: flex; flex-direction: column; gap: var(--size-12); width: 100%; max-width: 1680px; min-height: 100%; margin-inline: auto; padding: 0 var(--size-4) var(--size-24); }
-.page-frame-bar { display: flex; align-items: center; gap: var(--size-10); padding: var(--size-8) var(--size-4) 0; }
-.page-frame-title { margin: 0 var(--size-5) 0 0; overflow: hidden; font-size: var(--fs-l); font-weight: 700; letter-spacing: -0.02em; text-overflow: ellipsis; white-space: nowrap; }
+.page-frame { display: flex; flex-direction: column; gap: var(--size-16); width: 100%; max-width: 1680px; min-height: 100%; margin-inline: auto; padding: 0 var(--size-12) var(--size-24); }
+.page-frame-bar { display: flex; align-items: center; gap: var(--size-10); padding: var(--size-10) 0 var(--size-8); border-bottom: var(--size-1) solid var(--line); }
+.page-frame-title { margin: 0 var(--size-5) 0 0; overflow: hidden; font-size: var(--fs-h); font-weight: 600; letter-spacing: -0.025em; text-overflow: ellipsis; white-space: nowrap; }
 .page-frame-title-menu { min-width: 0; }
 .page-frame-title-button { display: inline-flex; align-items: center; gap: var(--size-4); max-width: 100%; height: var(--ctl-l); padding: 0 var(--size-8); border-radius: var(--r-m); color: var(--text); font: inherit; letter-spacing: inherit; }
 .page-frame-title-button:hover, .page-frame-title-button[aria-expanded="true"] { background: var(--hover); }

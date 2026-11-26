@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { contrastRatio, over, parseColor, type Rgba } from "../../styles/colorMath";
+import { contrastRatio, over, parseColor, parseThemeProperties, type Rgba } from "../../styles/colorMath";
 import tokensCss from "../../styles/tokens.css?raw";
 import { COLOR_RANGES, legendStops, mixPercent, needsStrongInk, rateFill, rateSide, rateStrength } from "./colors";
 
@@ -45,25 +45,26 @@ test("진한 칸만 밝은 글자를 쓴다", () => {
   expect(needsStrongInk(0, 3)).toBe(false);
 });
 
-const TOKENS = Object.fromEntries([...tokensCss.matchAll(/(--[a-z-]+):\s*(#[0-9a-fA-F]{6})\b/g)].map((match) => [match[1]!, match[2]!] as const));
-const token = (name: string) => parseColor(TOKENS[name] ?? (() => { throw new Error(`토큰이 없다: ${name}`); })());
+const mixOver = (top: Rgba, base: Rgba, share: number): Rgba => over({ ...top, a: share }, base);
 
-function tileColors(rate: number, range: (typeof COLOR_RANGES)[number]): { fill: Rgba; ink: Rgba } {
+function tileColorsFor(theme: "dark" | "light", rate: number, range: (typeof COLOR_RANGES)[number]): { fill: Rgba; ink: Rgba } {
+  const properties = parseThemeProperties(tokensCss, theme);
+  const token = (name: string) => parseColor(properties.get(name) ?? (() => { throw new Error(`토큰이 없다: ${name}`); })());
   const side = rateSide(rate);
   const fill = side === "flat" ? token("--raised") : mixOver(token(`--tile-${side}`), token("--surface"), mixPercent(rate, range) / 100);
   return { fill, ink: needsStrongInk(rate, range) ? token("--tile-ink-strong") : token("--text") };
 }
 
-const mixOver = (top: Rgba, base: Rgba, share: number): Rgba => over({ ...top, a: share }, base);
-
-test("모든 단계에서 타일 글자 대비가 4.5:1 이상이다", () => {
-  for (const range of COLOR_RANGES) {
-    for (let step = -range * 100; step <= range * 100; step += 1) {
-      const { fill, ink } = tileColors(step / 100, range);
-      expect(contrastRatio(ink, fill), `${step / 100}% (범위 ${range})`).toBeGreaterThanOrEqual(4.5);
+for (const theme of ["dark", "light"] as const) {
+  test(`[${theme}] 모든 단계에서 타일 글자 대비가 4.5:1 이상이다`, () => {
+    for (const range of COLOR_RANGES) {
+      for (let step = -range * 100; step <= range * 100; step += 1) {
+        const { fill, ink } = tileColorsFor(theme, step / 100, range);
+        expect(contrastRatio(ink, fill), `${theme} ${step / 100}% (범위 ${range})`).toBeGreaterThanOrEqual(4.5);
+      }
     }
-  }
-});
+  });
+}
 
 test("±0.5% 안팎도 보합과 구분되는 색 비율이다", () => {
   expect(mixPercent(0.5, 8)).toBeGreaterThanOrEqual(24);

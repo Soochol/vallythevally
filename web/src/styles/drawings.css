@@ -1,16 +1,16 @@
-.drawing-toolbar { --rail-w:calc(var(--size-40) + var(--size-4)); display:flex; flex-direction:column; align-items:center; flex:none; gap:var(--size-2); width:var(--rail-w); margin:var(--island-gap) 0 var(--island-gap) var(--island-gap); padding:var(--size-5) 0; border-radius:var(--r-l); color:var(--text-2); overflow-x:hidden; overflow-y:auto; scrollbar-width:none; }
+.drawing-toolbar { --rail-w:calc(var(--size-40) + var(--size-4)); display:flex; flex-direction:column; align-items:center; flex:none; gap:var(--size-2); width:var(--rail-w); margin:var(--island-gap) 0 var(--island-gap) var(--island-gap); padding:var(--size-5) 0; border-right:var(--size-1) solid var(--line); border-radius:0; color:var(--text-3); overflow-x:hidden; overflow-y:auto; scrollbar-width:none; }
 .drawing-toolbar::-webkit-scrollbar { display:none; }
 .drawing-toolbar>* { flex-shrink:0; }
-.drawing-toolbar-hidden { --rail-w:var(--size-12); justify-content:center; padding:0; background:transparent; }
-.draw-rail-handle { display:grid; place-items:center; width:100%; height:var(--size-64); border-radius:var(--r-s); color:var(--text-3); cursor:pointer; background:var(--glass); box-shadow:var(--shadow); }
+.drawing-toolbar-hidden { --rail-w:var(--size-12); justify-content:center; padding:0; border-right:0; background:transparent; }
+.draw-rail-handle { display:grid; place-items:center; width:100%; height:var(--size-64); border-radius:0; color:var(--text-3); cursor:pointer; background:var(--bg); border-right:var(--size-1) solid var(--line); }
 .draw-rail-handle:hover { color:var(--accent); background:var(--hover); }
 .draw-pinned { display:flex; flex:1 1 0; flex-direction:column; align-items:center; gap:var(--size-2); min-height:0; overflow:hidden; }
 .draw-pinned>* { flex-shrink:0; }
 .draw-pinned:not(:empty) { min-height:var(--size-30); }
-.draw-tool { display:grid; place-items:center; width:var(--size-30); height:var(--size-30); border-radius:var(--r-pill); color:var(--text-2); cursor:pointer; }
+.draw-tool { display:grid; place-items:center; width:var(--size-30); height:var(--size-30); border-radius:0; color:var(--text-3); cursor:pointer; }
 .draw-tool:hover { background:var(--hover); color:var(--text); }
-.draw-tool[aria-pressed=true] { color:var(--accent); background:var(--accent-soft); }
-.draw-tool[data-active-tool][aria-pressed=true] { color:var(--accent-ink); background:var(--accent); }
+.draw-tool[aria-pressed=true] { color:var(--text); background:transparent; box-shadow:inset var(--size-2) 0 0 var(--accent); }
+.draw-tool[data-active-tool][aria-pressed=true] { color:var(--text); background:var(--accent-soft); box-shadow:inset var(--size-2) 0 0 var(--accent); }
 .draw-group { display:flex; position:relative; align-items:center; }
 .draw-group-toggle { position:absolute; right:0; bottom:0; }
 .draw-group-dot { display:grid; place-items:center; width:var(--size-12); height:var(--size-16); color:var(--text-2); border-radius:var(--r-s); }

@@ -11,25 +11,9 @@ import { DEFAULT_OPEN_MESSAGE, takeDefaultOpenRequest } from "./defaultOpen";
 import { layoutReceipt } from "./layoutReceipt";
 import { restore } from "./restore";
 import { clearUnsaved, readUnsaved } from "./unsaved";
-import { DEFAULT_UI_PREFS, type Theme } from "./uiState";
+import { DEFAULT_UI_PREFS } from "./uiState";
 
-// index.html의 인라인 스크립트가 첫 그리기 전에 이 키를 읽는다. 원본은 UiState.theme이고 이것은 그림용 사본이다.
-const THEME_STORAGE_KEY = "vv.theme";
 export const OFFLINE_MESSAGE = "서버에 연결하지 못해 기본 화면으로 열었습니다. 바꾼 것은 저장하지 않습니다";
-
-function paintTheme(theme: Theme) {
-  document.documentElement.dataset.theme = theme;
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-  } catch {
-    // 저장소를 못 쓰면 다음 첫 그리기만 기본 테마로 시작한다.
-  }
-}
-
-function followTheme() {
-  paintTheme(useUiStore.getState().prefs.theme);
-  useUiStore.subscribe((s, prev) => s.prefs.theme !== prev.prefs.theme && paintTheme(s.prefs.theme));
-}
 
 let running: Autosave | null = null;
 let suspended = false;
@@ -41,9 +25,7 @@ export function suspendSetup() {
 }
 
 function openWithDefaults(message: string) {
-  const theme: Theme = "dark";
-  useUiStore.getState().load({ ...DEFAULT_UI_PREFS, theme }, {});
-  followTheme();
+  useUiStore.getState().load(DEFAULT_UI_PREFS, {});
   followLastMinute();
   usePersistStore.getState().setPhase({ kind: "offline", message });
 }
@@ -69,7 +51,6 @@ export async function boot() {
     useSelectionStore.setState({ activeCell: chartWindows(restored.layout)[0]!.id });
     useUiStore.getState().load(restored.ui.prefs, restored.ui.extra);
     useWatchlistStore.getState().load(restored.watchlists);
-    followTheme();
     for (const target of SAVE_TARGETS) clearUnsaved(target, restored.serverRevisions[target], target === "layout" ? layoutPath(restored.layout.id) : undefined);
     const autosave = startAutosave({ put: (path, json, o) => sendJson("PUT", path, json, o), toast, revisions: restored.revisions, serverCharts: restored.serverCharts, receipt: layoutReceipt });
     running = autosave;

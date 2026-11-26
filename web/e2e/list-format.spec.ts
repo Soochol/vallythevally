@@ -102,9 +102,9 @@ test("두 목록의 줄은 같은 글자 크기·굵기·배지·높이·열 폭
     expect(watchedWidth).toBe(RATE_WIDTH);
     expect(listedWidth).toBe(RATE_WIDTH + COLUMN_GAP - SCREENER_CELL_PAD_LEFT);
   }
-  expect((await look(watchRates[0]!)).background).not.toBe((await look(watchRates[1]!)).background);
-  expect((await look(watchRates[1]!)).background).not.toBe((await look(watchRates[2]!)).background);
-  expect((await look(watchRates[0]!)).background).not.toBe((await look(watchRates[2]!)).background);
+  expect((await look(watchRates[0]!)).color).not.toBe((await look(watchRates[1]!)).color);
+  expect((await look(watchRates[1]!)).color).not.toBe((await look(watchRates[2]!)).color);
+  expect((await look(watchRates[0]!)).color).not.toBe((await look(watchRates[2]!)).color);
 
   for (const row of [watchRow(page, "005930"), watchRow(page, "000660"), rowOf(page, rows[0]!.symbol), rowOf(page, rows[3]!.symbol), rowOf(page, rows[4]!.symbol), rowOf(page, rows[5]!.symbol)]) {
     expect((await look(row)).height).toBe(34);

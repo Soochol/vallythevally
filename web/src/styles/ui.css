@@ -18,7 +18,7 @@
 .ui-tabs button span { margin-left:var(--size-8); padding:var(--size-4) var(--size-8); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }
 @media (width < 48rem) { .ui-dialog-backdrop { padding:0; align-items:flex-end; } .ui-dialog { max-height:90dvh; } .screen-fields { padding:var(--size-16); gap:var(--size-16); } .screen-part + .screen-part { padding-top:var(--size-16); } .ui-dialog-head { padding:var(--size-16) var(--size-16); } .ui-dialog-foot { padding:var(--size-16) var(--size-16); } .ui-tabs { gap:var(--size-16); padding-inline:var(--size-16); } }
 .ui-popover { pointer-events:auto; position:fixed; inset:auto; margin:0; max-width:calc(100vw - var(--size-16)); max-height:calc(100dvh - var(--size-16)); overflow:auto; border:0; border-radius:var(--r-l); background:var(--glass); -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); color:var(--text); box-shadow:var(--shadow); font:var(--fs-s)/1.5 var(--font-sans); scrollbar-width:thin; outline:none; }
-.ui-island { background:var(--glass-solid); box-shadow:var(--shadow); }
+.ui-island { background:var(--bg); box-shadow:none; }
 .ui-popover[role=menu] { position:fixed; inset:auto; padding:var(--size-4); max-width:min(var(--size-320), calc(100vw - var(--size-16))); }
 .ui-popover[data-solid] { background:var(--overlay); -webkit-backdrop-filter:none; backdrop-filter:none; }
 .ui-popover.ui-tooltip { border-radius:var(--r-m); background:var(--overlay); -webkit-backdrop-filter:none; backdrop-filter:none; box-shadow:var(--shadow-s); }

@@ -3,8 +3,8 @@ import { cell, expect, SEARCH_BUTTON_TITLE, test } from "./harness";
 
 test.use({ clockStart: "20261109100000", viewport: { width: 1440, height: 900 } });
 
-const RAISED = "rgb(35, 43, 35)";
-const ACCENT = "rgb(199, 243, 107)";
+const RAISED = "rgb(36, 36, 36)";
+const ACCENT = "rgb(243, 241, 236)";
 const STATUS_BAR_HEIGHT = 28;
 const TOAST_GAP = 12;
 
@@ -119,7 +119,7 @@ test("위 막대는 흐림 없이 불투명하게 그려진다", async ({ page }
   await open(page);
   await expect(topbar(page)).toHaveClass(/\bui-island\b/);
   await expect(topbar(page)).toHaveCSS("backdrop-filter", "none");
-  await expect(topbar(page)).toHaveCSS("background-color", "rgb(27, 33, 27)");
+  await expect(topbar(page)).toHaveCSS("background-color", "rgb(11, 11, 11)");
 });
 
 test("알림이 떠 있는 채 대화상자 안에서 뜬 알림도 가림막 위에 놓이고 되돌리기를 누를 수 있다", async ({ page }) => {
