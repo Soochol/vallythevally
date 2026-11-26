@@ -84,7 +84,7 @@ async function box(locator: Locator) {
 
 test("피보나치 세부 설정 창은 560px 안이고 위 막대 아래에서 시작하며 고친 드로잉 반대쪽에 뜬다", async ({ page }, testInfo) => {
   const dialog = await placeFibAndOpenDetails(page);
-  await page.screenshot({ path: testInfo.outputPath("details-fib.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("details-fib.png") });
   const frame = await box(dialog);
   expect(frame.height).toBeLessThanOrEqual(560);
   const topbar = await box(page.getByRole("toolbar", { name: "차트 도구 막대", exact: true }));
@@ -205,7 +205,7 @@ test("단축키 도움말은 480px 폭 안에서 도구 표와 묶음 넷으로 
   await drawingDock(page).getByRole("button", { name: "드로잉 단축키 도움말", exact: true }).click();
   const help = page.getByRole("dialog", { name: "드로잉 단축키", exact: true });
   await expect(help).toBeVisible();
-  await page.screenshot({ path: testInfo.outputPath("help.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("help.png") });
   const frame = await box(help);
   expect(frame.width).toBeLessThanOrEqual(480);
   expect(frame.height).toBeLessThanOrEqual(900 * 0.7 + 1);

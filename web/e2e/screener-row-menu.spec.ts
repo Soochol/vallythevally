@@ -106,10 +106,12 @@ test("결과 표 정렬과 키보드 이동, 행에서 Enter로 칸 열기를 �
   await expect.poll(() => rows(page).filter({ has: page.locator('[aria-current="true"]') }).getAttribute("data-code")).toBe(nextCode);
   const next = result.rows.find((r) => r.symbol === nextCode)!;
   await expect(cell(page)).toHaveAttribute("aria-label", `칸 1: ${next.name} 통합 일`);
-  await mkdir(resolve("../target/ux-screens"), { recursive: true });
-  for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
-    await page.setViewportSize(size);
-    await page.screenshot({ path: resolve(`../target/ux-screens/screener-results-${size.width}x${size.height}.png`) });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") {
+    await mkdir(resolve("../target/ux-screens"), { recursive: true });
+    for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+      await page.setViewportSize(size);
+      await page.screenshot({ path: resolve(`../target/ux-screens/screener-results-${size.width}x${size.height}.png`) });
+    }
   }
   const other = result.rows.find((r) => r.symbol !== nextCode)!;
   await rowOf(page, other.symbol).getByRole("button").focus();

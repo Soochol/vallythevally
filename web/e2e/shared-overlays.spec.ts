@@ -101,7 +101,7 @@ test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인�
       expect(box!.x).toBeGreaterThanOrEqual(0); expect(box!.y).toBeGreaterThanOrEqual(0);
       expect(box!.x + box!.width).toBeLessThanOrEqual(size.width); expect(box!.y + box!.height).toBeLessThanOrEqual(size.height);
     }
-    await page.screenshot({ path: path.join(directory, `shared-${size.width}x${size.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.join(directory, `shared-${size.width}x${size.height}.png`) });
     await page.keyboard.press("Escape");
   }
 });

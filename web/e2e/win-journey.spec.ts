@@ -87,6 +87,7 @@ async function detach(page: Page, id: string) {
 }
 
 async function shot(page: Page, testInfo: TestInfo, name: string) {
+  if (process.env.VALLY_E2E_SCREENSHOTS !== "1") return;
   await page.evaluate(() => document.fonts.ready);
   const path = testInfo.outputPath(`${name}.png`);
   await page.screenshot({ path });

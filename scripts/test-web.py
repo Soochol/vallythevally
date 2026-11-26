@@ -233,15 +233,15 @@ class WebWorkflowTest(unittest.TestCase):
         return [arg for arg in arguments if arg.startswith(("--workers", "-j"))]
 
     def test_e2e_workers_above_cap_are_reduced_with_one_notice(self):
-        for form in (["--workers=12"], ["--workers", "12"], ["-j", "12"], ["-j12"], ["--workers=2", "--workers=12"]):
+        for form in (["--workers=16"], ["--workers", "16"], ["-j", "16"], ["-j16"], ["--workers=2", "--workers=16"]):
             with self.subTest(form):
                 arguments, notices = self.playwright_arguments(["e2e/example.spec.ts", *form])
-                self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=6"])
-                self.assertNotIn("12", arguments)
+                self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=12"])
+                self.assertNotIn("16", arguments)
                 self.assertNotIn("-j", arguments)
-                self.assertNotIn("-j12", arguments)
+                self.assertNotIn("-j16", arguments)
                 self.assertEqual(len(notices), 1)
-                self.assertIn("12", notices[0])
+                self.assertIn("16", notices[0])
                 self.assertIn(str(web.MAX_E2E_WORKERS), notices[0])
 
     def test_e2e_workers_within_cap_are_kept_without_notice(self):
@@ -259,7 +259,7 @@ class WebWorkflowTest(unittest.TestCase):
 
     def test_e2e_worker_percent_follows_cpu_count(self):
         arguments, notices = self.playwright_arguments(["--workers=50%"], cpus=32)
-        self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=6"])
+        self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=12"])
         self.assertEqual(len(notices), 1)
         arguments, notices = self.playwright_arguments(["--workers=50%"], cpus=4)
         self.assertEqual([arg for arg in arguments if arg.startswith("--workers")], ["--workers=2"])

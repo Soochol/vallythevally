@@ -46,8 +46,7 @@ test("짧은 검색어의 시장·ETF 조건을 20개 상한 전에 적용하고
     await expect(options.first()).toHaveAttribute("aria-disabled", "false");
     if (label === "코스닥") {
       const directory = path.resolve(import.meta.dirname, "../../target/ux-screens");
-      await mkdir(directory, { recursive: true });
-      await page.screenshot({ path: path.join(directory, "search-filter-1440x900-kosdaq.png") });
+      if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(directory, { recursive: true }); await page.screenshot({ path: path.join(directory, "search-filter-1440x900-kosdaq.png") }); }
     }
   }
   await dialog.getByRole("button", { name: "전체", exact: true }).click();
@@ -65,8 +64,7 @@ test("필터에 맞는 결과가 없으면 안내하고 입력을 지우면 회�
   await expect(dialog.getByText("조건에 맞는 종목이 없습니다", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("option")).toHaveCount(0);
   const directory = path.resolve(import.meta.dirname, "../../target/ux-screens");
-  await mkdir(directory, { recursive: true });
-  await page.screenshot({ path: path.join(directory, "search-filter-1440x900-no-results.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(directory, { recursive: true }); await page.screenshot({ path: path.join(directory, "search-filter-1440x900-no-results.png") }); }
   await dialog.getByRole("button", { name: "입력 지우기", exact: true }).click();
   await expect(dialog.getByRole("combobox")).toBeEmpty();
   await expect(dialog.getByRole("combobox")).toBeFocused();

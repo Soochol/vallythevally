@@ -166,8 +166,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, 
     await row(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
     await expect(page.getByRole("dialog", { name: /이동평균.*설정/ })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
-    await mkdir(resolve("../target/ux-screens"), { recursive: true });
-    await page.screenshot({ path: resolve(`../target/ux-screens/legend-panels-${size.width}x${size.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(resolve("../target/ux-screens"), { recursive: true }); await page.screenshot({ path: resolve(`../target/ux-screens/legend-panels-${size.width}x${size.height}.png`) }); }
   });
 }
 

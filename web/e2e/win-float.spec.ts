@@ -186,8 +186,7 @@ test("띄운 차트는 같은 노드·봉·드로잉·구독을 유지하고 활
   await shiftMove(page, "cell-1", 250 - floated.x, 160 - floated.y);
   const visible = await boxOf(frame(page, "cell-1"));
   expect(visible.y + visible.height).toBeLessThan((await boxOf(area(page))).y + (await boxOf(area(page))).height);
-  await mkdir(path.resolve("../target/ux-screens"), { recursive: true });
-  await page.screenshot({ path: path.resolve("../target/ux-screens/win-float.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(path.resolve("../target/ux-screens"), { recursive: true }); await page.screenshot({ path: path.resolve("../target/ux-screens/win-float.png") }); }
   await frame(page, "cell-1").getByRole("button", { name: "차트 붙이기" }).click();
   expect(await chartOf(cell(page, 2)).evaluate((element, previous) => element === previous, node)).toBe(true);
 });

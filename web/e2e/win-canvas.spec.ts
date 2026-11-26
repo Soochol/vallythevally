@@ -23,6 +23,7 @@ async function boxOf(locator: Locator) {
 }
 
 async function screenshot(page: Page, name: string) {
+  if (process.env.VALLY_E2E_SCREENSHOTS !== "1") return;
   await mkdir(SCREENS, { recursive: true });
   await page.screenshot({ path: path.join(SCREENS, `win-canvas-${name}.png`) });
 }

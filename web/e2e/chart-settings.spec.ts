@@ -317,7 +317,7 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
     return `최저 ${won(price)} (${basis === "last" ? pct(close, price) : pct(price, close)})`;
   };
   await expect(low).toHaveText(lowText(edge.lastShown));
-  await page.screenshot({ path: testInfo.outputPath("historical-visible-close.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("historical-visible-close.png") });
   for (const basis of ["last", "extreme"] as const) {
     await openSettings(page, "표시");
     await basisGroup(page).getByRole("button", { name: basis === "last" ? "현재가 대비" : "고가·저가 대비", exact: true }).click();
@@ -341,7 +341,7 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
       await expect(high).toHaveText(highText(shown[0]!, shown.at(-1)!, basis));
       await expect(low).toHaveText(lowText(shown.at(-1)!, basis));
     }
-    await page.screenshot({ path: testInfo.outputPath(`historical-${basis}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath(`historical-${basis}.png`) });
     await page.evaluate(() => window.chartProbe.chart.timeScale().setVisibleLogicalRange({ from: 240, to: 305.5 }));
     await expect(high).toHaveText(highText(240, 299, basis));
     await expect(low).toHaveText(lowText(299, basis));

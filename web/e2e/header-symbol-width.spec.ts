@@ -25,12 +25,12 @@ test("종목 이름 길이가 달라도 가운데 검색창과 위 막대의 메
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(toolbar(page).getByText("삼성", { exact: true })).toBeVisible();
     const short = await layout(page);
-    await page.screenshot({ path: path.resolve(`../target/ux-screens/header-short-${size.width}.png`), clip: { x: 0, y: 0, width: size.width, height: 72 } });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve(`../target/ux-screens/header-short-${size.width}.png`), clip: { x: 0, y: 0, width: size.width, height: 72 } });
     await page.goto("/?symbol=0000D0");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await expect(toolbar(page).getByText(LONG.name)).toBeVisible();
     const long = await layout(page);
-    await page.screenshot({ path: path.resolve(`../target/ux-screens/header-long-${size.width}.png`), clip: { x: 0, y: 0, width: size.width, height: 72 } });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.resolve(`../target/ux-screens/header-long-${size.width}.png`), clip: { x: 0, y: 0, width: size.width, height: 72 } });
     expect(long).toEqual(short);
     await expect(toolbar(page).getByText(LONG.name)).toHaveAttribute("title", LONG.name);
     expect(await toolbar(page).getByText(LONG.name).evaluate((el) => {

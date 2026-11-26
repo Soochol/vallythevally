@@ -110,7 +110,7 @@ test("frontend journal + saved documents: first publication of an older never-se
     await expect.poll(() => pendingRecords(other)).toEqual([]);
     await expect.poll(async () => Object.keys(await protocolRecords(other))).toEqual([completionKey(original.id)]);
     await info.attach("reserved-first-publication.json", { body: JSON.stringify({ olderRecord, newerRecord, protocolBeforeRelease, transport, final }), contentType: "application/json" });
-    await other.screenshot({ path: info.outputPath("r1-delete-remains.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await other.screenshot({ path: info.outputPath("r1-delete-remains.png") });
   } finally { release(); await editing; }
 });
 

@@ -19,7 +19,7 @@ import e2e_rules
 import evidence
 
 
-MAX_E2E_WORKERS = 6
+MAX_E2E_WORKERS = 12
 DEFAULT_E2E_WORKERS = 2
 WORKER_PERCENT = re.compile(r"(\d+(?:\.\d+)?)%")
 KEPT_PASSED_RUNS = 5

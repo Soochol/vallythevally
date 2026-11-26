@@ -67,8 +67,7 @@ test("스크리너를 차트 아래로 나누고 실제 미리 보기와 같은 
   await page.mouse.move(chart.x + chart.width / 2, chart.y + chart.height - 60, { steps: 12 });
   await expect(preview(page)).toContainText("아래에 나눠 놓기");
   const predicted = await boxOf(preview(page));
-  await mkdir(screens, { recursive: true });
-  await page.screenshot({ path: path.join(screens, "win-dock-preview.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(screens, { recursive: true }); await page.screenshot({ path: path.join(screens, "win-dock-preview.png") }); }
   await page.mouse.up();
   await expect(preview(page)).toHaveCount(0);
   await expect(groups(page)).toHaveCount(3);
@@ -82,7 +81,7 @@ test("스크리너를 차트 아래로 나누고 실제 미리 보기와 같은 
   expect(screener.x + screener.width + 6).toBe(right.x);
   expect(screener.y + screener.height).toBe(room.y + room.height);
   expect(right.x + right.width).toBe(room.x + room.width);
-  await page.screenshot({ path: path.join(screens, "win-dock-placed.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: path.join(screens, "win-dock-placed.png") });
   await pollSaved(() => saved(scenario)?.root.kind).toBe("split");
   await pollSaved(() => JSON.stringify(saved(scenario))).toContain('"id":"g3"');
   await page.reload();

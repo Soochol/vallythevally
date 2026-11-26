@@ -47,7 +47,7 @@ test("위 막대 섬은 창 폭을 쓰고 작업 영역은 그 아래에서 6px 
   await expect(status.getByLabel("장 상태와 서버 시계")).toBeVisible();
   await expect(page.locator("footer")).toHaveCount(1);
   expect(await overflow(page)).toEqual([0, 0]);
-  await page.screenshot({ path: info.outputPath("1440-shell.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-shell.png") });
   for (const name of [/^스크리너/, /^관심종목$/]) {
     await windowTabs(page).getByRole("tab", { name }).click();
     await expect(windowTabs(page).getByRole("tab", { name })).toHaveAttribute("aria-selected", "true");
@@ -95,7 +95,7 @@ test("1024px 창에서도 위 막대가 창 폭을 쓰고 작업 영역이 그 �
   expect((await boxOf(workspace(page))).y).toBe(GAP * 2 + 48);
   expect(await toolbar(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
   expect(await overflow(page)).toEqual([0, 0]);
-  await page.screenshot({ path: info.outputPath("1024-shell.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1024-shell.png") });
 
   await page.setViewportSize({ width: 1280, height: 300 });
   expect(await overflow(page)).toEqual([0, 0]);

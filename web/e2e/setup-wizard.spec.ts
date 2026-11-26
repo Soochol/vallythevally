@@ -34,6 +34,7 @@ const steps = (page: Page) => wizard(page).getByRole("list", { name: "설정 단
 const current = (page: Page) => steps(page).locator("[aria-current=step]");
 
 async function shot(page: Page, name: string) {
+  if (process.env.VALLY_E2E_SCREENSHOTS !== "1") return;
   await mkdir(SCREENS, { recursive: true });
   await page.screenshot({ path: path.join(SCREENS, name) });
 }

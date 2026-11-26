@@ -15,7 +15,7 @@ test("visible hline glyph pixels share the painted text hit and bounds", async (
       const module = await import(modulePath);
       return module.textProbe();
     });
-    await page.screenshot({ path: info.outputPath("hline-text-hit.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("hline-text-hit.png") });
     await info.attach("text-hit.json", { body: JSON.stringify(result), contentType: "application/json" });
     expect(result.ink).toBeGreaterThan(0);
     expect(result.hit).toBe("fill");

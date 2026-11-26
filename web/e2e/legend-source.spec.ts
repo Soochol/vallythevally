@@ -162,7 +162,7 @@ test("all legend owners bound native main and shifted future fields without hove
   await frames(page);
   expect(await page.evaluate(() => window.legendSources.projections.at(-1)?.fields.some((field) => field.key.startsWith("compare/")))).toBe(false);
   await writeFile(testInfo.outputPath("combined-native-fields.json"), JSON.stringify({ pending, before, after, future, samples, compact }, null, 2));
-  await page.screenshot({ path: testInfo.outputPath("combined-native.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("combined-native.png") });
 });
 
 for (const count of [4, 300, 3000]) test(`source ${count} uses bounded projection nodes and narrows immediately on replacement`, async ({ page, scenario }, testInfo) => {

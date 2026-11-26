@@ -38,7 +38,7 @@ test("추세선 작은 막대의 색·굵기·잠금·복제·삭제 되돌리�
   for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
     await page.setViewportSize(size);
     await expect(bar).toBeInViewport();
-    await page.screenshot({ path: resolve(`../target/ux-screens/drawing-toolbar-${size.width}x${size.height}.png`) });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: resolve(`../target/ux-screens/drawing-toolbar-${size.width}x${size.height}.png`) });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await bar.getByRole("button", { name: "잠금", exact: true }).click();
@@ -52,10 +52,12 @@ test("추세선 작은 막대의 색·굵기·잠금·복제·삭제 되돌리�
   await pollSaved(async () => (await drawings(scenario)).map((d) => d.id)).toEqual([original.id]);
   await page.getByRole("button", { name: "되돌리기", exact: true }).click();
   await pollSaved(async () => (await drawings(scenario)).map((d) => d.id).sort()).toEqual([original.id, cloned.id].sort());
-  await mkdir(resolve("../target/ux-screens"), { recursive: true });
-  for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
-    await page.setViewportSize(size);
-    await page.screenshot({ path: resolve(`../target/ux-screens/drawings-${size.width}x${size.height}.png`) });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") {
+    await mkdir(resolve("../target/ux-screens"), { recursive: true });
+    for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }]) {
+      await page.setViewportSize(size);
+      await page.screenshot({ path: resolve(`../target/ux-screens/drawings-${size.width}x${size.height}.png`) });
+    }
   }
 });
 

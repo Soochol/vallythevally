@@ -718,7 +718,7 @@ test("끊기면 사다리를 흐리게 하고 끊김을 보인다", async ({ pag
   scenario.live.emit({ type: "feed_link", sub: bookSub, live: false, at: 2 });
   await expect(page.getByRole("status").filter({ hasText: "끊김" })).toBeVisible();
   await expect(page.locator(".bk-ladder")).toHaveAttribute("data-stale", "");
-  await page.screenshot({ path: "../target/ux-screens/win-book-disconnected.png" });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: "../target/ux-screens/win-book-disconnected.png" });
 });
 
 test("위 막대 거래소를 KRX로 바꾸면 호가·체결을 krx로 다시 구독하고 order-book?venue=krx의 KRX 사다리를 보인다", async ({ page, scenario }) => {
@@ -790,7 +790,7 @@ test("NXT에서 거래되지 않는 종목을 NXT로 보면 통합으로 구독�
   const tabBox = (await bookTab.boundingBox())!;
   const badgeBox = (await bookTab.locator(".mw-integrated").boundingBox())!;
   expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(tabBox.x + tabBox.width);
-  await page.screenshot({ path: "../target/ux-screens/dock-tab-integrated.png" });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: "../target/ux-screens/dock-tab-integrated.png" });
   const sibling = windowTabs(page).filter({ has: page.getByRole("tab", { name: /^10호가/ }) }).getByRole("tab").filter({ hasNotText: /^10호가/ }).first();
   await sibling.click();
   await expect(bookTab).toHaveAttribute("aria-selected", "false");

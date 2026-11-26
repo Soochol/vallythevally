@@ -188,13 +188,35 @@ def prepare_duckdb(cache, pin, host):
         return entry
 
 
+def lld_link_flags(root):
+    try:
+        sysroot = Path(output(["rustc", "--print", "sysroot"], root))
+        host_line = next(line for line in output(["rustc", "-vV"], root).splitlines() if line.startswith("host: "))
+        host = host_line.removeprefix("host: ")
+        gcc_ld = sysroot / "lib/rustlib" / host / "bin/gcc-ld"
+        if (gcc_ld / "ld.lld").is_file():
+            return f"-C link-arg=-B{gcc_ld} -C link-arg=-fuse-ld=lld"
+    except (OSError, StopIteration, subprocess.CalledProcessError):
+        pass
+    return ""
+
+
+def build_jobs_for(environment):
+    cpus = os.cpu_count() or 4
+    limit = 12 if environment.get(COMPILE_LANE_ENV) == "gate" else 8
+    return str(max(4, min(cpus, limit)))
+
+
 def build_environment(root, cache, library):
     environment = os.environ.copy()
     environment["CARGO_TARGET_DIR"] = str(root / "target")
-    environment["CARGO_BUILD_JOBS"] = "4"
+    environment["CARGO_BUILD_JOBS"] = build_jobs_for(environment)
     temporary = root / "target" / "tmp"
     temporary.mkdir(parents=True, exist_ok=True)
     environment["TMPDIR"] = str(temporary.resolve())
+    if lld := lld_link_flags(root):
+        existing = environment.get("RUSTFLAGS", "").strip()
+        environment["RUSTFLAGS"] = f"{existing} {lld}".strip()
     if library is not None:
         environment["DUCKDB_LIB_DIR"] = str(library)
         environment["DUCKDB_DOWNLOAD_LIB"] = "0"

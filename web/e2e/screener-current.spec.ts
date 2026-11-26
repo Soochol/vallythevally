@@ -149,7 +149,7 @@ for (const width of [1440, 1024, 390, 360, 320]) {
     await expect(meta(page)).toContainText("수집 범위 (KST)");
     expect(await panel(page).evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
     await rowOf(page, "110040").scrollIntoViewIfNeeded();
-    await page.screenshot({ path: info.outputPath(`result-${width}.png`), fullPage: true });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath(`result-${width}.png`), fullPage: true });
   });
 }
 

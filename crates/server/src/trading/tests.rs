@@ -715,7 +715,7 @@ async fn enabling_while_a_stale_verification_is_in_flight_does_not_lock_the_new_
 
 #[tokio::test]
 async fn an_off_switch_stops_a_read_that_is_still_queued_behind_the_send_spacing() {
-    let (trading, fake, _feed, clock, _dir) = direct_trading_spaced(Duration::ZERO, Duration::from_millis(300), SwitchStore::memory()).await;
+    let (trading, fake, _feed, clock, _dir) = direct_trading_spaced(Duration::ZERO, Duration::from_millis(150), SwitchStore::memory()).await;
     trading.set_enabled(confirm("01")).await.unwrap();
     clock.jump(120);
     let sent = trading_sends(&fake).len();
@@ -723,11 +723,11 @@ async fn an_off_switch_stops_a_read_that_is_still_queued_behind_the_send_spacing
         let trading = trading.clone();
         async move { trading.balance().await.map(drop) }
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(40)).await;
     trading.set_enabled(OrdersSwitchInput { enabled: false, confirm_account_tail: None, key_id: None }).await.unwrap();
     let outcome = reading.await.unwrap();
     assert!(matches!(outcome, Err(TradingError::Off)), "{outcome:?}");
-    tokio::time::sleep(Duration::from_millis(700)).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
     assert_eq!(trading_sends(&fake)[sent..], Vec::<&str>::new(), "대기열에 있던 요청도 끈 뒤에는 나가지 않는다");
 }
 

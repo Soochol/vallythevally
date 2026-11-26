@@ -75,8 +75,7 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await expect(tabOf(page, "cell-2").locator(".dock-tab-flash")).toHaveCount(0);
   await expect(row(page, "035420")).toHaveAttribute("aria-current", "true");
   await expect(tabOf(page, "cell-0").locator(".dock-tab-flash")).toHaveCount(0);
-  await mkdir(SCREENS, { recursive: true });
-  await page.screenshot({ path: path.join(SCREENS, "win-link-1440x900.png") });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") { await mkdir(SCREENS, { recursive: true }); await page.screenshot({ path: path.join(SCREENS, "win-link-1440x900.png") }); }
 
   await watchDot.press("Space");
   await page.getByRole("menuitemradio", { name: /^B/ }).click();

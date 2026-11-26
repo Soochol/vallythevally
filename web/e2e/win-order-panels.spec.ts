@@ -1054,7 +1054,7 @@ test("470px 호가주문창에서 수량은 쉼표 숫자 그대로 끝까지 �
   expect(parts.filter((part) => part.topAtOverlap === "qty").length).toBeGreaterThan(0);
   expect(new Set(parts.map((part) => Math.round(part.priceLeft * 10))).size).toBe(1);
   expect(new Set(parts.map((part) => Math.round(part.qtyRight * 10))).size).toBe(1);
-  await page.screenshot({ path: "../target/ux-screens/order-470.png" });
+  if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: "../target/ux-screens/order-470.png" });
 });
 
 test("421px 호가주문창에서는 체결 상자가 가격을 빼고 수량만 상자 안에 쉼표 숫자 그대로 보인다", async ({ page, scenario }) => {

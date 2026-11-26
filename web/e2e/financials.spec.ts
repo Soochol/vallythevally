@@ -63,7 +63,7 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await expect(page.locator("[data-indicator-row]")).toHaveCount(7);
     await expect.poll(() => page.evaluate(() => window.frameProbe.snapshot().filter((s) => s.type === "Histogram").flatMap((s) => s.data).some((p) => "value" in p && p.value < 0))).toBe(true);
     await expect.poll(() => page.evaluate(() => window.frameProbe.snapshot().filter((s) => s.type === "Histogram").flatMap((s) => s.data).some((p) => "value" in p && p.value === 0))).toBe(true);
-    await page.screenshot({ path: testInfo.outputPath("financial-panels.png") });
+    if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("financial-panels.png") });
     if (!phone) {
       const separator = cell(page).getByRole("separator", { name: "패널 높이 조절" }).nth(1);
       const box = await separator.boundingBox();
