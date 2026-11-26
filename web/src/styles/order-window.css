@@ -70,7 +70,7 @@
 .od-preset-mode button { white-space:nowrap; }
 .od-preset-mode button[data-mode=buy][aria-pressed=true] { background:transparent; color:var(--up); border-bottom-color:var(--up); }
 .od-preset-mode button[data-mode=sell][aria-pressed=true] { background:transparent; color:var(--down); border-bottom-color:var(--down); }
-.od-presets { display:flex; gap:var(--size-2); padding-left:var(--s3); border-left:var(--size-1) solid var(--line); }
+.od-presets { display:flex; gap:var(--size-2); padding-left:var(--size-3); border-left:var(--size-1) solid var(--line); }
 .od-preset { min-width:var(--size-48); height:var(--size-30); padding:0 var(--size-2); border-bottom:var(--size-2) solid transparent; border-radius:0; background:transparent; color:var(--text-3); font-size:var(--fs-xs); text-align:center; white-space:nowrap; }
 .od-preset:hover:not(:disabled) { background:transparent; color:var(--text); }
 .od-preset:disabled { background:transparent; color:var(--text-3); opacity:.5; cursor:not-allowed; }
