@@ -12,6 +12,7 @@ import type { Draft } from "../indicator-dialog/indicatorForm";
 import { KiwoomAccountList } from "../system-settings/KiwoomAccountList";
 import { MOCK_KEY_NOTICE } from "../system-settings/KiwoomKeyForm";
 import { MockBadge } from "../topbar/MockBadge";
+import { BookWindow } from "../book/BookWindow";
 import { OrderWindow } from "./OrderWindow";
 import { DEFAULT_ORDER_SETTINGS } from "./orderSettings";
 import { MOCK_KRX_ONLY_TEXT } from "./statusText";
@@ -167,5 +168,32 @@ test("미체결 패널 취소, 계좌번호 가리기 토글·실패 타이틀, 
   const picker = await screen.findByTestId("account-menu");
   fireEvent.click(within(picker).getByRole("radio", { name: /34/ }));
   await waitFor(() => expect(env.api.calls.some((c) => c.url.searchParams.get("account") === SECOND)).toBe(true));
+  client.clear();
+});
+
+test("10호가창과 호가주문창 설정에서 호가 간격 밀도를 바꾸면 양쪽 창에 함께 반영된다", async () => {
+  setupOrderEnv();
+  const { client } = renderWithProviders(
+    <>
+      <BookWindow id={windowId("book")} />
+      <OrderWindow id={windowId("order")} />
+    </>,
+  );
+  await waitFor(() => expect(screen.getAllByTestId("price-ladder")).toHaveLength(2));
+  expect(screen.getByTestId("book-window").getAttribute("data-ladder-density")).toBe("normal");
+  expect(screen.getByTestId("order-window").getAttribute("data-ladder-density")).toBe("normal");
+
+  fireEvent.click(screen.getByTestId("book-settings-button"));
+  const bookPop = await screen.findByTestId("book-settings");
+  fireEvent.click(within(bookPop).getByRole("button", { name: "촘촘" }));
+  expect(screen.getByTestId("book-window").getAttribute("data-ladder-density")).toBe("compact");
+  expect(screen.getByTestId("order-window").getAttribute("data-ladder-density")).toBe("compact");
+  fireEvent.keyDown(window, { key: "Escape" });
+
+  fireEvent.click(screen.getByTestId("order-settings-button"));
+  const orderPop = await screen.findByTestId("order-settings");
+  fireEvent.click(within(orderPop).getByRole("button", { name: "여유" }));
+  expect(screen.getByTestId("book-window").getAttribute("data-ladder-density")).toBe("spacious");
+  expect(screen.getByTestId("order-window").getAttribute("data-ladder-density")).toBe("spacious");
   client.clear();
 });

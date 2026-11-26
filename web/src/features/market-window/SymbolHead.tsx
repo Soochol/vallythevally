@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { formatPrice } from "../../lib/format";
 import { Badge } from "../ui/Badge";
 import { priceTone } from "./PriceLadder";
@@ -12,11 +12,12 @@ interface Props {
   readonly nxtLabel?: string;
   readonly mock: boolean;
   readonly testIdPrefix?: string;
+  readonly trailing?: ReactNode;
 }
 
 const ARROW = { up: "▲", down: "▼", flat: "" } as const;
 
-export const SymbolHead = memo(function SymbolHead({ code, name, lastPrice, previousClose, nxtTraded, nxtLabel = "NXT", mock, testIdPrefix = "order-symbol" }: Props) {
+export const SymbolHead = memo(function SymbolHead({ code, name, lastPrice, previousClose, nxtTraded, nxtLabel = "NXT", mock, testIdPrefix = "order-symbol", trailing }: Props) {
   const tone = lastPrice === null ? "flat" : priceTone(lastPrice, previousClose);
   const rate = lastPrice !== null && previousClose !== null && previousClose > 0 ? ((lastPrice - previousClose) / previousClose) * 100 : null;
   return (
@@ -25,6 +26,7 @@ export const SymbolHead = memo(function SymbolHead({ code, name, lastPrice, prev
       {nxtTraded && <span className="od-head-nxt" data-testid={`${testIdPrefix}-nxt`}><Badge>{nxtLabel}</Badge></span>}
       <span className="od-head-price" data-testid={`${testIdPrefix}-price`} data-tone={tone}>{lastPrice === null ? "-" : formatPrice(lastPrice, false)}</span>
       {rate !== null && <span className="od-head-rate" data-tone={tone}>{ARROW[tone]}{Math.abs(rate).toFixed(2)}%</span>}
+      {trailing}
     </div>
   );
 });

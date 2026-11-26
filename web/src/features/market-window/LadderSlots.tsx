@@ -53,7 +53,7 @@ const InfoTabs = memo(function InfoTabs({ page, select }: { page: InfoPage; sele
 
 const InfoCard = memo(function InfoCard({ lines, rows, page, select, toggle }: { lines: readonly InfoLine[]; rows: number; page: InfoPage; select: InfoPager["select"]; toggle: InfoPager["toggle"] }) {
   return (
-    <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${rows} * var(--size-24))` }}>
+    <div className="mw-card" data-testid="ladder-info-card" style={{ height: `calc(${rows} * var(--mw-row-h, var(--size-24)))` }}>
       {lines.map((line, index) => <InfoRow key={index} line={line} onToggle={toggle} />)}
       <InfoTabs page={page} select={select} />
     </div>

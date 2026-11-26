@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ORDER_SETTINGS, MAX_PRESET_AMOUNT_MAN, parseOrderSettings, withAmountPreset } from "./orderSettings";
+import { DEFAULT_ORDER_SETTINGS, ladderRowHeightPx, MAX_PRESET_AMOUNT_MAN, parseOrderSettings, withAmountPreset } from "./orderSettings";
 
 describe("호가주문 설정", () => {
   it("없거나 깨진 값은 기본값이다", () => {
@@ -9,7 +9,20 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" });
+    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], presetMode: "sell", ladderDensity: "compact", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], presetMode: "sell", ladderDensity: "compact", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" });
+  });
+
+  it("호가 간격 밀도는 기본이 보통이고 없거나 모르는 값이면 보통이며 촘촘·보통·여유를 그대로 읽는다", () => {
+    expect(DEFAULT_ORDER_SETTINGS.ladderDensity).toBe("normal");
+    expect(parseOrderSettings({}).ladderDensity).toBe("normal");
+    expect(parseOrderSettings({ ladderDensity: "wide" }).ladderDensity).toBe("normal");
+    expect(parseOrderSettings({ ladderDensity: 2 }).ladderDensity).toBe("normal");
+    expect(parseOrderSettings({ ladderDensity: "compact" }).ladderDensity).toBe("compact");
+    expect(parseOrderSettings({ ladderDensity: "normal" }).ladderDensity).toBe("normal");
+    expect(parseOrderSettings({ ladderDensity: "spacious" }).ladderDensity).toBe("spacious");
+    expect(ladderRowHeightPx("compact")).toBe(20);
+    expect(ladderRowHeightPx("normal")).toBe(24);
+    expect(ladderRowHeightPx("spacious")).toBe(30);
   });
 
   it("프리셋 기준은 기본이 금액이고 모르는 값이면 금액이며 금액·매수·매도는 그대로 읽는다", () => {

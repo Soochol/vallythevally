@@ -15,6 +15,14 @@ describe("rowsPerSideFor", () => {
     expect(rowsPerSideFor(107)).toBe(2);
     expect(rowsPerSideFor(1)).toBe(2);
   });
+  it("촘촘(20px)이면 412px에 10단이 다 들어가고 여유(30px)면 612px에 10단이 들어간다", () => {
+    expect(rowsPerSideFor(412, 24)).toBe(8);
+    expect(rowsPerSideFor(412, 20)).toBe(10);
+    expect(rowsPerSideFor(411, 20)).toBe(9);
+    expect(rowsPerSideFor(612, 30)).toBe(10);
+    expect(rowsPerSideFor(611, 30)).toBe(9);
+    expect(rowsPerSideFor(492, 30)).toBe(8);
+  });
 });
 
 describe("visibleLadderRows", () => {
