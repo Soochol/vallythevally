@@ -12,7 +12,7 @@ use server::kis::auth::{Halt as KisHalt, KisAuth, TokenGen as KisTokenGen};
 use server::kis::rest::KisRest;
 use server::kis::transport::{ReqwestTransport as KisReqwestTransport, Transport as KisTransport};
 use server::kiwoom::auth::KiwoomAuth;
-use server::kiwoom::rest::KiwoomRest;
+use server::kiwoom::rest::{KiwoomError, KiwoomRest};
 use server::kiwoom::transport::{ReqwestTransport, Transport};
 use server::kiwoom::wire::TokenResponse;
 use server::shared_data::Broker;
@@ -97,7 +97,6 @@ pub async fn run_shared(parts: SharedParts) {
     let mut running = Running { tasks: Vec::new(), stats: Vec::new() };
     let mut supplied_generation: Option<u64> = None;
     let mut reported_invalid: Option<u64> = None;
-    let mut reported_halt = false;
     loop {
         tokio::select! {
             _ = shutdown.wait_for(|stop| *stop) => break,
@@ -124,7 +123,6 @@ pub async fn run_shared(parts: SharedParts) {
                                     Ok(()) => {
                                         supplied_generation = Some(generation);
                                         reported_invalid = None;
-                                        reported_halt = false;
                                     }
                                     Err(error) => tracing::error!(%key, %error, "받은 한투 토큰을 쓰지 못했습니다"),
                                 }
@@ -167,12 +165,14 @@ pub async fn run_shared(parts: SharedParts) {
                 }
             }
             _ = watch_tick.tick() => {
-                if let Some(halt) = kis_rest.as_ref().filter(|_| broker == Broker::Kis).and_then(|kis_rest| kis_rest.auth().halted()) {
-                    if !reported_halt {
-                        reported_halt = true;
-                        events.halted(&kis_halt_reason(&halt), "한투 키와 인증 상태를 확인한 뒤 다시 시작하세요");
-                    }
-                    continue;
+                let halted = match broker {
+                    Broker::Kiwoom => rest.auth().halted().map(|halt| (KiwoomError::from(halt).to_string(), "키움 키와 인증 상태를 확인한 뒤 다시 시작하세요")),
+                    Broker::Kis => kis_rest.as_ref().and_then(|kis_rest| kis_rest.auth().halted()).map(|halt| (kis_halt_reason(&halt), "한투 키와 인증 상태를 확인한 뒤 다시 시작하세요")),
+                };
+                if let Some((reason, action)) = halted {
+                    running.stop();
+                    events.halted(&reason, action);
+                    break;
                 }
                 let needs_issue = match broker {
                     Broker::Kiwoom => rest.auth().needs_issue(clock.now()),
