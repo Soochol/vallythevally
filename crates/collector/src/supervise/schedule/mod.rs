@@ -18,7 +18,7 @@ use super::status::{AlertKind, DaemonStatus, DayPhase};
 use super::tokens::IssueLane;
 use super::telegram::AlertTelegram;
 use crate::calendar::{Calendar, HolidayTransport, Judgment};
-use crate::finalize::{COMPLETE_FILE_NAME, store_dir};
+use crate::finalize::{COMPLETE_FILE_NAME, recover_all_interrupted_quote_swaps, recover_all_interrupted_swaps, store_dir};
 use crate::keys::{ActiveKey, KeyRole};
 use crate::shared::AssignmentStore;
 use report::Reporter;
@@ -191,6 +191,12 @@ impl Daemon {
     }
 
     pub async fn run(mut self, mut shutdown: watch::Receiver<bool>) {
+        if let Err(error) = recover_all_interrupted_swaps(&self.data_dir) {
+            tracing::warn!(%error, data_dir = %self.data_dir.display(), "시작 시 끊긴 저장소 교체를 복구하지 못했습니다");
+        }
+        if let Err(error) = recover_all_interrupted_quote_swaps(&self.shared_dir) {
+            tracing::warn!(%error, shared_dir = %self.shared_dir.display(), "시작 시 끊긴 분 호가 교체를 복구하지 못했습니다");
+        }
         let (api_stop, api_shutdown) = watch::channel(false);
         let api = self.socket.take().map(|socket| {
             let api = StatusApi { status: self.reporter.subscribe(), data_dir: self.data_dir.clone(), clock: self.clock.clone(), watch_every: self.supervisor.watch_every };

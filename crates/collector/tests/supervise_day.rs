@@ -884,6 +884,30 @@ async fn a_daemon_restarted_after_close_skips_completed_after_close_work_and_onl
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_daemon_recovers_interrupted_store_and_quote_swaps_on_startup() {
+    let harness = Harness::start_with(Config { start: at(21, 0, 0), ..Config::default() }, |data| {
+        write(&data.join("store").join(DATE.to_string()).join("complete.json"), &complete_json(DATE, json!([])));
+        write(
+            &data.join("store").join("20261116.old-100").join("complete.json"),
+            &complete_json(20261116, json!([])),
+        );
+        write(
+            &data.join("shared").join("quote-minutes").join("20261116.old-100").join("005930.json.gz"),
+            "recovered",
+        );
+    });
+    harness.until(at(21, 1, 0)).await;
+    assert!(harness.data().join("store").join("20261116").join("complete.json").is_file());
+    assert!(!harness.data().join("store").join("20261116.old-100").exists());
+    assert_eq!(
+        std::fs::read_to_string(harness.data().join("shared").join("quote-minutes").join("20261116").join("005930.json.gz")).unwrap(),
+        "recovered",
+    );
+    assert!(!harness.data().join("shared").join("quote-minutes").join("20261116.old-100").exists());
+    harness.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_daemon_started_after_the_close_with_a_complete_file_does_nothing() {
     let harness = Harness::start_with(Config { start: at(21, 0, 0), ..Config::default() }, |data| {
         write(&data.join("store").join(DATE.to_string()).join("complete.json"), &complete_json(DATE, json!([])));
