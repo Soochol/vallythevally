@@ -11,6 +11,7 @@ Type=simple
 Environment=RUST_LOG=info
 WorkingDirectory=%h
 ExecStart=%h/.local/bin/collector financials run --db %h/vally-data/server/financials.db --dart-key %h/.config/vally/opendart-key --data %h/vally-data/hoga
+ExecStopPost=/bin/sh -c 'test "$SERVICE_RESULT" = success || exec %h/.local/bin/vally-collector-alert-telegram "[P1 장애] vally-financials 비정상 종료 | 재무자료 수집이 중단됐습니다 | 조치: journalctl --user -u vally-financials -n 50"'
 Restart=on-failure
 RestartSec=30
 RestartPreventExitStatus=2
