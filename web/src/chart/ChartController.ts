@@ -418,6 +418,14 @@ export class ChartController {
       if (prev && scale === "percent") this.indicators.refreshPriceOverlays();
     }
     if (prev?.period !== next.period) this.chart.applyOptions({ timeScale: { timeVisible: isIntraday(next.period) } });
+    if (!prev || prev.settings.showHorzGrid !== next.settings.showHorzGrid || prev.settings.showVertGrid !== next.settings.showVertGrid) {
+      this.chart.applyOptions({
+        grid: {
+          vertLines: { visible: next.settings.showVertGrid },
+          horzLines: { visible: next.settings.showHorzGrid },
+        },
+      });
+    }
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
       if (prev && isIndexCode(prev.symbol) !== isIndex) {
         this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, this.priceAxisGeometry()) });
@@ -724,7 +732,10 @@ export class ChartController {
         attributionLogo: false,
         panes: { enableResize: false, separatorColor: t.line, separatorHoverColor: t.raised },
       },
-      grid: { vertLines: { color: t.grid }, horzLines: { color: t.gridH } },
+      grid: {
+        vertLines: { visible: this.view?.settings.showVertGrid ?? true, color: t.grid },
+        horzLines: { visible: this.view?.settings.showHorzGrid ?? true, color: t.gridH },
+      },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
       rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: this.priceTopMargin, bottom: PRICE_BOTTOM_MARGIN } },
       timeScale: {

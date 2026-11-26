@@ -112,12 +112,47 @@ test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async (
   await expect(bars.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
   await expect(bars.getByRole("switch")).toHaveCount(0);
   const display = section(page, "표시");
-  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "날짜 구분선"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "가로 격자선", "세로 격자선", "날짜 구분선"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
   await expect(display.getByRole("group", { name: "최고·최저 등락률" })).toBeVisible();
   await expect(display.getByRole("group", { name: "봉 모양" })).toHaveCount(0);
   await expect(section(page, "지표 창").getByRole("group", { name: "지표 창" })).toBeVisible();
   await expect(dialog.getByText("모든 차트", { exact: true })).toHaveCount(1);
   await expect(section(page, "지표 창").getByRole("group", { name: "가격 축" })).toHaveCount(0);
+});
+
+test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자선을 켜고 끄며 저장·복원 및 Esc 되돌리기가 동작한다", async ({ page, scenario }) => {
+  await open(page);
+  const gridVisible = () => page.evaluate(() => {
+    const { horzLines, vertLines } = window.chartProbe.chart.options().grid;
+    return { horz: horzLines.visible, vert: vertLines.visible };
+  });
+  await expect.poll(gridVisible).toEqual({ horz: true, vert: true });
+
+  const settings = await openSettings(page);
+  const horzSwitch = settings.getByRole("switch", { name: /^가로 격자선/ });
+  const vertSwitch = settings.getByRole("switch", { name: /^세로 격자선/ });
+  await expect(horzSwitch).toHaveAttribute("aria-checked", "true");
+  await expect(vertSwitch).toHaveAttribute("aria-checked", "true");
+
+  await horzSwitch.click();
+  await expect(horzSwitch).toHaveAttribute("aria-checked", "false");
+  await expect(vertSwitch).toHaveAttribute("aria-checked", "true");
+  await expect.poll(gridVisible).toEqual({ horz: false, vert: true });
+  await pollSaved(() => saved(scenario).showHorzGrid).toBe(false);
+  expect(saved(scenario).showVertGrid).toBe(true);
+
+  await closeSettings(page);
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(gridVisible).toEqual({ horz: false, vert: true });
+
+  await openSettings(page);
+  await vertSwitch.click();
+  await expect.poll(gridVisible).toEqual({ horz: false, vert: false });
+  await page.keyboard.press("Escape");
+  await expect(popover(page)).toBeHidden();
+  await expect.poll(gridVisible).toEqual({ horz: false, vert: true });
+  await pollSaved(() => saved(scenario).showVertGrid).toBe(true);
 });
 
 test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유지하며, 새로고침 뒤 복원한다", async ({ page, scenario }) => {

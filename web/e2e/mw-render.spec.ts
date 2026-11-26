@@ -145,6 +145,7 @@ test("잔량 막대와 비율 막대는 폭을 전환하지 않는다", async ({
   const quantityBar = await properties(".mw-qty-bar");
   expect(quantityBar).not.toContain("width");
   expect(quantityBar).not.toContain("all");
+  await openTradesWindow(page, scenario);
   const ratioBar = await properties(".mw-ratio i");
   expect(ratioBar).not.toContain("width");
   expect(ratioBar).not.toContain("all");

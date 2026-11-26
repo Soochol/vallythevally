@@ -464,8 +464,9 @@ test("첫 실시간 호가가 스냅샷을 대신하고 체결이 현재가 행�
   });
   expect(glowAlpha).toBeLessThanOrEqual(0.2);
   await expect(page.locator(".mw-qty-delta")).toHaveCount(0);
-  const ratio = page.getByRole("img", { name: /^매도 110 · 매수 90$/ });
-  await expect(ratio).toBeVisible();
+  await expect(page.getByTestId("book-total-ask")).toHaveText("110");
+  await expect(page.getByTestId("book-total-bid")).toHaveText("90");
+  await expect(book(page).locator(".mw-ratio")).toHaveCount(0);
 });
 
 async function emitTrades(scenario: Scenario, seq: number, trades: [price: number, qty: number][]) {
@@ -1160,7 +1161,8 @@ test.describe("시간외 종가 잔량", () => {
       await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "after-hours");
       await expect(page.getByTestId("book-total-ask")).toContainText("13,770");
       await expect(page.getByTestId("book-total-ask")).toHaveAttribute("title", /정규 총잔량 매도 90 · 매수 140/);
-      await expect(page.getByRole("img", { name: /정규 총잔량 매도 90 · 매수 140/ })).toHaveCount(1);
+      await expect(book(page).locator(".mw-ratio")).toHaveCount(0);
+      await expect(book(page).getByTestId("book-total-ratio")).toHaveCount(0);
       const after = (await strip(page).boundingBox())!;
       expect(after.height).toBe(before.height);
     });
