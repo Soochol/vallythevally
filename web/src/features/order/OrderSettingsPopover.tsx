@@ -24,7 +24,7 @@ const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider"
   { key: "averageDot", label: "평단가 점" },
   { key: "divider", label: "구분선" },
   { key: "rate", label: "등락률 표시" },
-  { key: "skipSpreadGap", label: "호가 사이 빈 가격 건너뛰기", title: "매도·매수 1호가 사이가 벌어지면 빈 가격 행을 건너뛰어 매도 10단·매수 10단을 채웁니다. 10호가창에도 적용" },
+  { key: "skipSpreadGap", label: "호가 사이 빈 가격 건너뛰기", title: "호가 사이에 빈 가격이 있으면 건너뛰어 매도 10단·매수 10단을 채웁니다. 10호가창에도 적용" },
   { key: "maskAccount", label: "계좌번호 가리기" },
   { key: "sound", label: ORDER_SOUND_LABEL, title: "매수 주문 접수, 매도 주문 접수, 주문 체결 시 소리로 알립니다" },
   { key: "microCues", label: MICRO_CUES_LABEL, title: "호가 사다리 가격 행에 최근 허수 취소·아이스버그 흡수 신호를 점으로 표시합니다" },

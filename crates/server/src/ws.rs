@@ -60,7 +60,7 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => collector_notices = None,
             },
             changed = trading_changes.recv() => match changed {
-                Ok(changed) => hub.send_to(conn, ServerMessage::TradingAccountChanged { account_ref: changed.account_ref }),
+                Ok(changed) => hub.send_to(conn, ServerMessage::TradingAccountChanged { account_ref: changed.account_ref, fill: changed.fill }),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },

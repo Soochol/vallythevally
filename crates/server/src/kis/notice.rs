@@ -21,6 +21,7 @@ const IV_BYTES: usize = 16;
 const NOTICE_BUFFER: usize = 64;
 const ACCOUNT_COLUMN: usize = 1;
 const ORDER_COLUMN: usize = 2;
+const QUANTITY_COLUMN: usize = 9;
 const FILLED_COLUMN: usize = 13;
 const EXCHANGE_COLUMN: usize = 19;
 const FILLED: &str = "2";
@@ -56,6 +57,7 @@ pub struct FillNotice {
     pub account: Secret<String>,
     pub order_no: String,
     pub filled: bool,
+    pub quantity: Option<u64>,
     pub venue: Option<Venue>,
 }
 
@@ -77,7 +79,9 @@ pub fn read_notices(plain: &str, count: u32) -> Vec<FillNotice> {
         .chunks(fields.len() / count)
         .filter_map(|record| {
             let text = |index: usize| record.get(index).map(|field| field.trim()).filter(|field| !field.is_empty());
-            Some(FillNotice { account: Secret::new(text(ACCOUNT_COLUMN)?.to_owned()), order_no: text(ORDER_COLUMN)?.to_owned(), filled: text(FILLED_COLUMN) == Some(FILLED), venue: text(EXCHANGE_COLUMN).and_then(exchange_venue) })
+            let filled = text(FILLED_COLUMN) == Some(FILLED);
+            let quantity = filled.then(|| text(QUANTITY_COLUMN).and_then(|value| value.parse::<u64>().ok()).filter(|&qty| qty > 0)).flatten();
+            Some(FillNotice { account: Secret::new(text(ACCOUNT_COLUMN)?.to_owned()), order_no: text(ORDER_COLUMN)?.to_owned(), filled, quantity, venue: text(EXCHANGE_COLUMN).and_then(exchange_venue) })
         })
         .collect()
 }
@@ -249,7 +253,7 @@ mod tests {
 
         let notices = read_notices(plain, 1);
         assert_eq!(notices.len(), 1);
-        assert_eq!((notices[0].account.expose().as_str(), notices[0].order_no.as_str(), notices[0].filled, notices[0].venue), ("5001235601", "0000117057", true, Some(Venue::Nxt)));
+        assert_eq!((notices[0].account.expose().as_str(), notices[0].order_no.as_str(), notices[0].filled, notices[0].quantity, notices[0].venue), ("5001235601", "0000117057", true, Some(1), Some(Venue::Nxt)));
     }
 
     #[test]

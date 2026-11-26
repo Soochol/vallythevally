@@ -8,7 +8,9 @@ import {
   createExecutionTracker,
   createOrderSoundPlayer,
   executionTotalsOf,
+  installOrderSoundPrimer,
   observeOrderExecutions,
+  observeOrderFill,
   ORDER_SOUND_TONES,
   playOrderSound,
   primeOrderSound,
@@ -192,6 +194,28 @@ describe("체결 증가 추적", () => {
     expect(tracker.observe(snapshot([fill("10", 2)], "acct-a", "2026-11-19"))).toBe(false);
     expect(tracker.observe(snapshot([fill("10", 2), fill("11", 1)], "acct-a", "2026-11-19"))).toBe(true);
   });
+
+  it("실시간 체결 통보로 즉시 울리고 뒤이어 오는 같은 체결 조회에는 중복으로 울리지 않는다", () => {
+    const tracker = createExecutionTracker();
+    expect(tracker.observe(snapshot([fill("1", 5)]))).toBe(false);
+
+    expect(tracker.observeFill("acct-a", { orderNo: "2", quantity: 3, cumulativeQuantity: 3 })).toBe(true);
+    expect(tracker.observeFill("acct-a", { orderNo: "2", quantity: 3, cumulativeQuantity: 3 })).toBe(false);
+    expect(tracker.observe(snapshot([fill("1", 5)]))).toBe(false);
+    expect(tracker.observe(snapshot([fill("1", 5), fill("2", 3)]))).toBe(false);
+
+    expect(tracker.observeFill("acct-a", { orderNo: "2", quantity: 4, cumulativeQuantity: 7 })).toBe(true);
+    expect(tracker.observe(snapshot([fill("1", 5), fill("2", 3), fill("2", 4)]))).toBe(false);
+  });
+
+  it("한투 방식(누적 없이 체결량만)과 초기 조회 전 실시간 체결도 중복 없이 추적한다", () => {
+    const tracker = createExecutionTracker();
+    expect(tracker.observeFill("acct-a", { orderNo: "10", quantity: 2, cumulativeQuantity: null })).toBe(true);
+    expect(tracker.observe(snapshot([fill("10", 2)]))).toBe(false);
+    expect(tracker.observeFill("acct-a", { orderNo: "10", quantity: 5, cumulativeQuantity: null })).toBe(true);
+    expect(tracker.observe(snapshot([fill("10", 7)]))).toBe(false);
+    expect(tracker.observe(snapshot([fill("10", 9)]))).toBe(true);
+  });
 });
 
 describe("주문 소리 재생기", () => {
@@ -319,5 +343,44 @@ describe("주문 소리 앱 설정 연동", () => {
 
     observeOrderExecutions(client, snapshot([fill("1", 5), fill("2", 3), fill("3", 2)]));
     expect(env.oscillators.map((o) => o.frequencies[0]?.value)).toEqual(ORDER_SOUND_TONES.filled.map((s) => s.frequency));
+  });
+
+  it("실시간 체결 통보는 조회 전에도 즉시 울리고 음소거 중 통보는 다시 켜도 되감아 울리지 않는다", () => {
+    const env = stubAudio("running");
+    const client = new QueryClient();
+    useUiStore.getState().load({ ...DEFAULT_UI_PREFS, orderSettings: { ...DEFAULT_UI_PREFS.orderSettings, sound: true } }, {});
+
+    observeOrderExecutions(client, snapshot([fill("1", 5)]));
+    observeOrderFill(client, "acct-a", { orderNo: "2", quantity: 3, cumulativeQuantity: 3 });
+    expect(env.oscillators.map((o) => o.frequencies[0]?.value)).toEqual(ORDER_SOUND_TONES.filled.map((s) => s.frequency));
+
+    env.oscillators.length = 0;
+    observeOrderExecutions(client, snapshot([fill("1", 5), fill("2", 3)]));
+    expect(env.oscillators).toHaveLength(0);
+
+    useUiStore.getState().setOrderSettings({ ...DEFAULT_UI_PREFS.orderSettings, sound: false });
+    observeOrderFill(client, "acct-a", { orderNo: "3", quantity: 4, cumulativeQuantity: 4 });
+    expect(env.oscillators).toHaveLength(0);
+
+    useUiStore.getState().setOrderSettings({ ...DEFAULT_UI_PREFS.orderSettings, sound: true });
+    observeOrderExecutions(client, snapshot([fill("1", 5), fill("2", 3), fill("3", 4)]));
+    expect(env.oscillators).toHaveLength(0);
+  });
+
+  it("사용자 첫 입력에서 AudioContext를 미리 깨우고 정리 뒤에는 반응하지 않는다", () => {
+    const env = stubAudio("suspended");
+    const target = new EventTarget();
+    useUiStore.getState().load({ ...DEFAULT_UI_PREFS, orderSettings: { ...DEFAULT_UI_PREFS.orderSettings, sound: true } }, {});
+
+    const stop = installOrderSoundPrimer(target);
+    target.dispatchEvent(new Event("pointerdown"));
+    expect(env.resumeCalls).toBe(1);
+    target.dispatchEvent(new Event("keydown"));
+    expect(env.resumeCalls).toBe(1);
+
+    env.state = "suspended";
+    stop();
+    target.dispatchEvent(new Event("pointerdown"));
+    expect(env.resumeCalls).toBe(1);
   });
 });

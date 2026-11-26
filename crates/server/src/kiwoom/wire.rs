@@ -2282,9 +2282,17 @@ impl AccountKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountFill {
+    pub order_no: Option<String>,
+    pub quantity: Option<u64>,
+    pub cumulative_quantity: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountEvent {
     pub kind: AccountKind,
     pub account: Secret<String>,
+    pub fill: Option<AccountFill>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2394,10 +2402,23 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
         VI_REAL_TYPE => parse_vi(item, values),
         "00" | "04" => {
             let kind = if kind == "00" { AccountKind::OrderFill } else { AccountKind::Balance };
-            Ok(RealItem::Account(AccountEvent { kind, account: Secret::new(field("9201")?.trim().to_owned()) }))
+            let fill = (kind == AccountKind::OrderFill).then(|| parse_account_fill(values)).flatten();
+            Ok(RealItem::Account(AccountEvent { kind, account: Secret::new(field("9201")?.trim().to_owned()), fill }))
         }
         other => Ok(RealItem::OtherType(other.to_owned())),
     }
+}
+
+fn parse_account_fill(values: &Value) -> Option<AccountFill> {
+    let status = values.get("913").and_then(Value::as_str).map(str::trim);
+    let positive_fid = |fid: u32| fid_or(values, fid, unsigned).ok().filter(|&qty| qty > 0);
+    let quantity = positive_fid(915);
+    let cumulative_quantity = positive_fid(911);
+    if status != Some("체결") && quantity.is_none() {
+        return None;
+    }
+    let order_no = values.get("9203").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_owned);
+    Some(AccountFill { order_no, quantity, cumulative_quantity })
 }
 
 fn combined_stock(kind: &str, item: &str) -> Result<Symbol, WireError> {

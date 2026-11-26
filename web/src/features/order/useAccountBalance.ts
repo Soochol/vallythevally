@@ -4,6 +4,7 @@ import type { TradingBalance } from "../../api/generated/TradingBalance";
 import { EXECUTION_FORENSICS_QUERY_KEY } from "../../api/trading";
 import { marketSocket, quoteBook } from "../../stores/realtime";
 import { fetchBalance } from "./orderApi";
+import { installOrderSoundPrimer, observeOrderFill } from "./orderSound";
 import { ORDER_QUERY_KEY } from "./useOrderWrites";
 
 export const BALANCE_POLL_MS = 15_000;
@@ -44,8 +45,10 @@ class BalanceHub {
         }
       }
     });
+    const stopPrimer = installOrderSoundPrimer();
     const stopAccount = marketSocket.watchTradingAccount((changed) => {
-      if (this.accounts.has(changed)) {
+      if (this.accounts.has(changed.accountRef)) {
+        if (changed.fill) observeOrderFill(this.client, changed.accountRef, changed.fill);
         void this.client.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
         void this.client.invalidateQueries({ queryKey: EXECUTION_FORENSICS_QUERY_KEY });
       }
@@ -53,6 +56,7 @@ class BalanceHub {
     this.stop = () => {
       stopWatch();
       stopAccount();
+      stopPrimer();
     };
   }
 

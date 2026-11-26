@@ -193,6 +193,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   }, [exploring]);
 
   const hasCurrent = rows.some((row) => row.current);
+  const hasPricedRows = rows.some((row) => row.price !== null);
   const placed = useRef<number | null>(null);
   const wasExploring = useRef(exploring);
   const centerCurrentRow = useCallback((fallbackToBid: boolean) => {
@@ -209,9 +210,9 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
 
   useLayoutEffect(() => {
     const element = ladder.current;
-    if (exploring || !element || !hasCurrent || placed.current !== null || element.scrollHeight <= element.clientHeight) return;
-    centerCurrentRow(false);
-  }, [exploring, hasCurrent, centerCurrentRow, ladder]);
+    if (exploring || !element || !hasPricedRows || placed.current !== null || element.scrollHeight <= element.clientHeight) return;
+    centerCurrentRow(!hasCurrent);
+  }, [exploring, hasCurrent, hasPricedRows, centerCurrentRow, ladder]);
 
   useLayoutEffect(() => {
     const turnedOff = wasExploring.current && !exploring;

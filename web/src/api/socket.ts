@@ -26,6 +26,8 @@ export type FeedEvent =
 
 export type ViEvent = Extract<ServerMessage, { type: "vi_snapshot" | "vi_update" }>;
 
+export type TradingAccountChange = Extract<ServerMessage, { type: "trading_account_changed" }>;
+
 export interface FeedRequest {
   symbol: SymbolCode;
   kind: FeedKind;
@@ -109,7 +111,7 @@ export class MarketSocket implements MarketSocketLike {
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
   private readonly viHandlers = new Set<(e: ViEvent) => void>();
   private readonly feedTaps = new Set<(request: FeedRequest, event: FeedEvent, sub: string) => void>();
-  private readonly tradingAccountHandlers = new Set<(accountRef: string) => void>();
+  private readonly tradingAccountHandlers = new Set<(change: TradingAccountChange) => void>();
 
   constructor(private readonly opts: { url: () => string; connect?: Connect; onKiwoomLink?: (status: KiwoomLinkStatus) => void; onMarketSource?: (status: MarketSourceStatus) => void; onAccount?: (status: AccountStatus) => void; onSetupChanged?: (kinds: readonly DocumentKind[]) => void; onCollectorDaemon?: (judgment: DaemonJudgment, at: UnixSeconds) => void }) {}
 
@@ -178,7 +180,7 @@ export class MarketSocket implements MarketSocketLike {
     return this.feeds.has(sub);
   }
 
-  watchTradingAccount(handler: (accountRef: string) => void): () => void {
+  watchTradingAccount(handler: (change: TradingAccountChange) => void): () => void {
     this.tradingAccountHandlers.add(handler);
     return () => this.tradingAccountHandlers.delete(handler);
   }
@@ -259,7 +261,7 @@ export class MarketSocket implements MarketSocketLike {
       case "collector_daemon":
         return this.opts.onCollectorDaemon?.(m.judgment, m.at);
       case "trading_account_changed":
-        for (const handler of this.tradingAccountHandlers) handler(m.accountRef);
+        for (const handler of this.tradingAccountHandlers) handler(m);
         return;
       default:
         return;
