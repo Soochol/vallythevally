@@ -90,6 +90,22 @@ export const hlineSettings: SettingsTabs<HLineStyle> = {
   ],
 };
 
+export function hlineGapShapes(price: number, y: number, style: HLineStyle, text: string | null, right: number, lastPrice: number | null | undefined): Shape[] {
+  if (!(style.gapLabel ?? true) || lastPrice === undefined || lastPrice === null || lastPrice === 0) return [];
+  const pct = ((price - lastPrice) / Math.abs(lastPrice)) * 100;
+  const offsetY = text !== null && text !== "" && style.label.align === "right" && style.label.vAlign === "top" ? TEXT_GAP + 2 : -TEXT_GAP;
+  const baseline = offsetY > 0 ? "top" : "bottom";
+  return [{
+    kind: "text",
+    at: { x: right - TEXT_GAP, y: y + offsetY },
+    text: formatPercent(pct),
+    style: { ...style.label, size: 11, color: style.line.color },
+    align: "right",
+    baseline,
+    box: labelBox(style.line.color),
+  }];
+}
+
 export const hline = defineTool<HLineStyle>({
   tool: "hline",
   group: "line",
@@ -106,23 +122,11 @@ export const hline = defineTool<HLineStyle>({
     const p = points[0];
     const y = p === undefined ? null : ctx.yOf(p.price);
     if (p === undefined || y === null) return [];
-    const shapes: Shape[] = [{ kind: "segment", a: { x: 0, y }, b: { x: ctx.paneWidth, y }, stroke: style.line }, ...lineText(style, text, y, 0, ctx.paneWidth)];
-    const last = ctx.lastPrice;
-    if ((style.gapLabel ?? true) && last !== undefined && last !== null && last !== 0) {
-      const pct = ((p.price - last) / Math.abs(last)) * 100;
-      const offsetY = text !== null && text !== "" && style.label.align === "right" && style.label.vAlign === "top" ? TEXT_GAP + 2 : -TEXT_GAP;
-      const baseline = offsetY > 0 ? "top" : "bottom";
-      shapes.push({
-        kind: "text",
-        at: { x: ctx.paneWidth - TEXT_GAP, y: y + offsetY },
-        text: formatPercent(pct),
-        style: { ...style.label, size: 11, color: style.line.color },
-        align: "right",
-        baseline,
-        box: labelBox(style.line.color),
-      });
-    }
-    return shapes;
+    return [
+      { kind: "segment", a: { x: 0, y }, b: { x: ctx.paneWidth, y }, stroke: style.line },
+      ...lineText(style, text, y, 0, ctx.paneWidth),
+      ...hlineGapShapes(p.price, y, style, text, ctx.paneWidth, ctx.lastPrice),
+    ];
   },
   handles({ points }, ctx) {
     const p = points[0];

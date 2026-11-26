@@ -1,4 +1,3 @@
-import { formatVolume } from "../../../lib/format";
 import type { Shape, ToolContext } from "../toolSpec";
 import { UP, DOWN } from "../styleKit";
 import { dateRangeText } from "../tools/daterange";
@@ -19,10 +18,8 @@ export function measureShapes(start: DrawingPoint, end: DrawingPoint, ctx: ToolC
   const mx = (a.x + b.x) / 2;
   const my = (a.y + b.y) / 2;
   const above = b.y <= a.y;
-  const between = ctx.barsBetween(start.t, end.t);
   const dateLine = dateRangeText(start, end, ctx);
-  const volLine = between && between.volume > 0 ? `거래량 ${formatVolume(between.volume)}` : null;
-  const text = [priceRangeText(start, end, ctx), dateLine, volLine].filter((part): part is string => part !== null && part !== "").join("\n");
+  const text = [priceRangeText(start, end, ctx), dateLine].filter((part) => part !== "").join("\n");
   return [
     { kind: "rect", a, b, fill, stroke: { color, width: 1, dash: "dashed" } },
     { kind: "segment", a: { x: mx, y: a.y }, b: { x: mx, y: b.y }, stroke: line, ends: { left: "plain", right: "arrow" } },

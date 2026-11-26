@@ -43,13 +43,14 @@ describe("빠른 측정 모드", () => {
     expect(measure.finish([], false, { ctx, items: [], lockAll: false, panesBottom: 500, scope: { kind: "symbol" }, newId: () => "id" }).ops).toEqual([]);
   });
 
-  test("가격차·등락률·봉수·거래량을 포함한 측정 도형을 만든다", () => {
+  test("가격차·등락률·봉수·거래량을 중복 없이 포함한 측정 도형을 만든다", () => {
     const shapes = measureShapes({ t: 1000, price: 100 }, { t: 2000, price: 120 }, ctx);
     expect(shapes.map((s) => s.kind)).toEqual(["rect", "segment", "segment", "text"]);
     const label = shapes.find((s) => s.kind === "text");
-    expect(label?.kind === "text" && label.text).toContain("+20 (+20.00%)");
-    expect(label?.kind === "text" && label.text).toContain("5봉");
-    expect(label?.kind === "text" && label.text).toContain("12만");
+    const text = label?.kind === "text" ? label.text : "";
+    expect(text).toContain("+20 (+20.00%)");
+    expect(text).toContain("5봉");
+    expect(text.match(/거래량/g)).toHaveLength(1);
   });
 
   test("클릭-클릭과 끌기-놓기 모두 측정 결과 상태로 전이하고 Esc로 해제한다", () => {

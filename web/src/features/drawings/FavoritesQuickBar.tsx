@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
 import { toolOf } from "../../chart/drawings/tools";
 import type { WindowId } from "../../layout/kinds";
@@ -15,19 +15,41 @@ export function FavoritesQuickBar({ cellId }: { cellId: WindowId }) {
   const keys = useActionKeys();
   const barRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [clamped, setClamped] = useState<{ left: number; top: number } | null>(null);
   const drag = useRef<{ x: number; y: number; baseX: number; baseY: number } | null>(null);
   const pinnedTools = prefs.pinnedTools.flatMap((id) => toolOf(id) ?? []);
-  if (cellId !== activeCell || !prefs.favoritesBar || prefs.toolbarHidden || pinnedTools.length === 0) return null;
+  const shown = cellId === activeCell && prefs.favoritesBar && !prefs.toolbarHidden && pinnedTools.length > 0;
+
+  useLayoutEffect(() => {
+    if (!shown) return;
+    const el = barRef.current;
+    const host = el?.offsetParent;
+    if (!el || !(host instanceof HTMLElement)) return;
+    const clampNow = () => {
+      const target = prefs.favoritesBarAt;
+      if (!target) {
+        setClamped(null);
+        return;
+      }
+      const maxX = Math.max(8, host.clientWidth - el.offsetWidth - 8);
+      const maxY = Math.max(8, host.clientHeight - el.offsetHeight - 8);
+      const next = { left: Math.max(8, Math.min(target.x, maxX)), top: Math.max(8, Math.min(target.y, maxY)) };
+      setClamped((prev) => (prev && prev.left === next.left && prev.top === next.top ? prev : next));
+    };
+    clampNow();
+    const observer = new ResizeObserver(clampNow);
+    observer.observe(el);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [shown, prefs.favoritesBarAt, prefs.favoritesBarVertical, pinnedTools.length]);
+
+  if (!shown) return null;
 
   const surface = surfaceFor(cellId);
-  const pane = surface?.frame().pane;
   const setPrefs = useUiStore.getState().setDrawingPrefs;
-  const posStyle = prefs.favoritesBarAt && pane
-    ? {
-        left: Math.max(8, Math.min(prefs.favoritesBarAt.x, Math.max(8, pane.width - (barRef.current?.offsetWidth ?? 220) - 8))),
-        top: Math.max(8, Math.min(prefs.favoritesBarAt.y, Math.max(8, pane.height - (barRef.current?.offsetHeight ?? 36) - 8))),
-      }
-    : { right: 14, bottom: 14 };
+  const posStyle = prefs.favoritesBarAt
+    ? { left: clamped?.left ?? prefs.favoritesBarAt.x, top: clamped?.top ?? prefs.favoritesBarAt.y }
+    : { right: 76, bottom: 38 };
 
   return (
     <div

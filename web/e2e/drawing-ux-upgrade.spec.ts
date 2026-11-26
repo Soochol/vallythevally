@@ -27,6 +27,12 @@ test("즐겨찾기 퀵 바, 1클릭 연장·템플릿 프리셋, 개체 트리�
 
   const favBar = page.getByRole("toolbar", { name: "즐겨찾기 빠른 도구", exact: true });
   await expect(favBar).toBeVisible();
+  const favBox = (await favBar.boundingBox())!;
+  const axisBox = await page.getByRole("combobox", { name: "가격축 방식" }).boundingBox();
+  if (axisBox) {
+    const overlaps = favBox.x < axisBox.x + axisBox.width && axisBox.x < favBox.x + favBox.width && favBox.y < axisBox.y + axisBox.height && axisBox.y < favBox.y + favBox.height;
+    expect(overlaps).toBe(false);
+  }
   await favBar.getByRole("button", { name: "추세선 빠른 도구", exact: true }).click();
 
   const a = await chartPoint(page, 0.25, 0.6);
@@ -38,6 +44,12 @@ test("즐겨찾기 퀵 바, 1클릭 연장·템플릿 프리셋, 개체 트리�
   await pollSaved(async () => (await drawings(scenario)).length).toBe(1);
 
   const bar = page.getByRole("toolbar", { name: "드로잉 스타일", exact: true });
+  await bar.getByRole("button", { name: "선 색 선택", exact: true }).click();
+  const picker = page.getByRole("dialog", { name: "선 색", exact: true });
+  await picker.getByRole("group", { name: "기본 색상", exact: true }).getByRole("button").first().click();
+  await picker.getByRole("button", { name: "취소", exact: true }).click();
+  await pollSaved(async () => ((await drawings(scenario))[0]?.style as { line?: { color?: string } } | undefined)?.line?.color).toBe("$draw");
+
   await bar.getByRole("button", { name: "오른쪽 연장", exact: true }).click();
   await pollSaved(async () => (await drawings(scenario))[0]?.style).toMatchObject({ extend: "right" });
 
@@ -54,8 +66,13 @@ test("즐겨찾기 퀵 바, 1클릭 연장·템플릿 프리셋, 개체 트리�
   await expect(tree.getByRole("listitem")).toHaveCount(1);
   await tree.getByRole("button", { name: "숨기기", exact: true }).click();
   await expect.poll(async () => (await mirror(page)).length).toBe(0);
+  await expect(bar).toBeHidden();
   await tree.getByRole("button", { name: "보이기", exact: true }).click();
   await expect.poll(async () => (await mirror(page)).length).toBe(1);
+
+  await rail.getByRole("button", { name: "모든 드로잉 숨기기", exact: true }).click();
+  await expect(tree.getByRole("listitem").first()).toHaveAttribute("data-hidden", "true");
+  await rail.getByRole("button", { name: "모든 드로잉 숨기기", exact: true }).click();
 
   await rail.getByRole("button", { name: "모든 드로잉 잠그기", exact: true }).click();
   await expect(drawingDock(page).getByRole("button", { name: "모든 드로잉 잠그기", exact: true })).toHaveAttribute("aria-pressed", "true");

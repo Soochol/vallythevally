@@ -51,8 +51,15 @@ export function ObjectTree({ cellId }: { cellId: WindowId }) {
 
   const setCell = (patch: Partial<typeof cell>) => useDrawingSession.getState().patchCell(cellId, patch);
   const toggleHidden = (id: string) => {
-    const next = cell.hiddenIds.includes(id) ? cell.hiddenIds.filter((x) => x !== id) : [...cell.hiddenIds, id];
-    setCell({ hiddenIds: next });
+    if (prefs.hideAll) {
+      useUiStore.getState().setDrawingPrefs({ hideAll: false });
+      setCell({ hiddenIds: cell.hiddenIds.filter((x) => x !== id) });
+      return;
+    }
+    const hiding = !cell.hiddenIds.includes(id);
+    const nextHidden = hiding ? [...cell.hiddenIds, id] : cell.hiddenIds.filter((x) => x !== id);
+    const nextSelected = hiding ? cell.selected.filter((x) => x !== id) : cell.selected;
+    setCell({ hiddenIds: nextHidden, selected: nextSelected });
   };
   const unlocked = all.filter((d) => !d.locked && !prefs.lockAll);
 
@@ -82,7 +89,7 @@ export function ObjectTree({ cellId }: { cellId: WindowId }) {
           filtered.map((d) => {
             const tool = toolOf(d.tool);
             const selected = cell.selected.includes(d.id);
-            const isHidden = cell.hiddenIds.includes(d.id);
+            const isHidden = prefs.hideAll || cell.hiddenIds.includes(d.id);
             const firstPoint = d.points[0];
             const meta = [firstPoint ? formatPrice(firstPoint.price, isIndex) : null, periodSummary(d)].filter(Boolean).join(" · ");
             return (

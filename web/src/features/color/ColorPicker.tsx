@@ -41,15 +41,17 @@ export interface ColorToggleControl {
   onChange(checked: boolean): void;
 }
 
-export function ColorPicker({ label, value, width = 1, compact = false, live = false, opacity, toggle, onChange }: {
+export function ColorPicker({ label, value, rawValue, width = 1, compact = false, live = false, opacity, toggle, onChange, onRevert }: {
   label: string;
   value: string;
+  rawValue?: string;
   width?: number;
   compact?: boolean;
   live?: boolean;
   opacity?: ColorOpacityControl;
   toggle?: ColorToggleControl;
   onChange(color: HexColor): void;
+  onRevert?(raw: string): void;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -64,14 +66,15 @@ export function ColorPicker({ label, value, width = 1, compact = false, live = f
         <ChevronIcon />
       </button>
       <span className="color-line-sample" role="img" aria-label={`${label} · 굵기 ${width} 선 샘플`}><i style={{ background: value, height: width, opacity: swatchOpacity }} /></span>
-      {open && <ColorDialog label={label} initial={resolvedColor(value)} width={width} live={live} opacity={opacity} toggle={toggle} trigger={trigger} onCancel={() => setOpen(false)} onApply={(color) => { onChange(color); setOpen(false); }} onLiveChange={live ? onChange : undefined} />}
+      {open && <ColorDialog label={label} initial={resolvedColor(value)} initialRaw={rawValue ?? value} width={width} live={live} opacity={opacity} toggle={toggle} trigger={trigger} onCancel={() => setOpen(false)} onApply={(color) => { onChange(color); setOpen(false); }} onLiveChange={live ? onChange : undefined} onRevert={onRevert} />}
     </div>
   );
 }
 
-export function ColorDialog({ label, initial, width, trigger, startCustom = false, live = false, opacity, toggle, onCancel, onApply, onLiveChange }: {
+export function ColorDialog({ label, initial, initialRaw, width, trigger, startCustom = false, live = false, opacity, toggle, onCancel, onApply, onLiveChange, onRevert }: {
   label: string;
   initial: HexColor;
+  initialRaw?: string;
   width: number;
   startCustom?: boolean;
   live?: boolean;
@@ -81,8 +84,10 @@ export function ColorDialog({ label, initial, width, trigger, startCustom = fals
   onCancel(): void;
   onApply(color: HexColor): void;
   onLiveChange?(color: HexColor): void;
+  onRevert?(raw: string): void;
 }) {
   const id = useId();
+  const snapshot = useRef({ color: initial, raw: initialRaw ?? initial, opacity: opacity?.value, checked: toggle?.checked });
   const [custom, setCustom] = useState(startCustom);
   const [hsv, setHsv] = useState(() => hexToHsv(initial));
   const [text, setText] = useState<string>(initial);
@@ -111,7 +116,15 @@ export function ColorDialog({ label, initial, width, trigger, startCustom = fals
   };
 
   const cancel = () => {
-    if (live && onLiveChange && color !== initial) onLiveChange(initial);
+    const start = snapshot.current;
+    if (live) {
+      if (color !== start.color) {
+        if (onRevert) onRevert(start.raw);
+        else onLiveChange?.(start.color);
+      }
+      if (opacity && start.opacity !== undefined && opacity.value !== start.opacity) opacity.onChange(start.opacity);
+      if (toggle && start.checked !== undefined && toggle.checked !== start.checked) toggle.onChange(start.checked);
+    }
     onCancel();
   };
 
@@ -127,7 +140,7 @@ export function ColorDialog({ label, initial, width, trigger, startCustom = fals
   const opacityPct = opacity ? Math.round(opacity.value * 100) : 100;
 
   return (
-    <Popover data-chart-control="" anchor={trigger} solid minTop={belowTopbar} onClose={onCancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
+    <Popover data-chart-control="" anchor={trigger} solid minTop={belowTopbar} onClose={cancel} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`} className="color-popover"
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); }
         if (e.key === "Enter" && e.target instanceof HTMLInputElement) { e.preventDefault(); e.stopPropagation(); apply(); }

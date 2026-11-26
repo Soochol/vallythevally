@@ -133,9 +133,10 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       unsubscribeSession();
     };
   }, [surface, cellId]);
-  if (!selected.length || hideAll) return null;
-  const first = selected[0]!; const tool = toolOf(first.tool); if (!tool) return null;
-  const common = (field: keyof typeof tool.bar) => selected.every((d) => toolOf(d.tool)?.bar[field] !== undefined);
+  const visibleSelected = selected.filter((d) => !cell.hiddenIds.includes(d.id));
+  if (!visibleSelected.length || hideAll) return null;
+  const first = visibleSelected[0]!; const tool = toolOf(first.tool); if (!tool) return null;
+  const common = (field: keyof typeof tool.bar) => visibleSelected.every((d) => toolOf(d.tool)?.bar[field] !== undefined);
   const change = (update: (d: DrawingBody) => DrawingBody) => {
     surface.updateSelected(update);
   };
@@ -147,14 +148,18 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
     <button type="button" className="draw-grip" aria-label="스타일 막대 옮기기" title="끌어서 막대 옮기기" onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); drag.current = { x: e.clientX, y: e.clientY, baseX: position?.x ?? 0, baseY: position?.y ?? 0 }; }}
       onPointerMove={(e) => { const d = drag.current; if (d) useDrawingSession.getState().patchCell(cellId, { toolbarAt: { x: d.baseX + e.clientX - d.x, y: d.baseY + e.clientY - d.y } }); }} onPointerUp={() => { drag.current = null; }}><Icon path={DRAWING_ICONS.grip} /></button>
     {(common("lineColor") || common("width") || common("dash")) && <TemplatePicker first={first} change={change} />}
-    {common("lineColor") && tool.bar.lineColor && <ColorPicker compact live label="선 색" value={drawingColor(tool.bar.lineColor.get(first.style))} width={tool.bar.width?.get(first.style)}
+    {common("lineColor") && tool.bar.lineColor && <ColorPicker compact live label="선 색" value={drawingColor(tool.bar.lineColor.get(first.style))} rawValue={tool.bar.lineColor.get(first.style)} width={tool.bar.width?.get(first.style)}
       opacity={lineOpacityVal === undefined ? undefined : { value: lineOpacityVal, min: 0.1, max: 1, onChange: (v) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineOpacity?.set(d.style, v) ?? d.style })) }}
+      onRevert={(raw) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineColor?.set(d.style, raw) ?? d.style }))}
       onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.lineColor?.set(d.style, color) ?? d.style }))} />}
-    {fillVal && tool.bar.fill && <ColorPicker compact live label="채움 색" value={drawingColor(fillVal.color)}
+    {fillVal && tool.bar.fill && <ColorPicker compact live label="채움 색" value={drawingColor(fillVal.color)} rawValue={fillVal.color}
       toggle={{ label: "채움 켜기", checked: fillVal.on, onChange: (on) => change((d) => { const lens = toolOf(d.tool)?.bar.fill; return lens ? { ...d, style: lens.set(d.style, { ...lens.get(d.style), on }) } : d; }) }}
       opacity={{ value: fillVal.opacity, min: 0, max: 0.85, onChange: (opacity) => change((d) => { const lens = toolOf(d.tool)?.bar.fill; return lens ? { ...d, style: lens.set(d.style, { ...lens.get(d.style), on: opacity > 0, opacity }) } : d; }) }}
+      onRevert={(raw) => change((d) => { const lens = toolOf(d.tool)?.bar.fill; return lens ? { ...d, style: lens.set(d.style, { ...lens.get(d.style), color: raw }) } : d; })}
       onChange={(color) => change((d) => { const lens = toolOf(d.tool)?.bar.fill; return lens ? { ...d, style: lens.set(d.style, { ...lens.get(d.style), on: true, color }) } : d; })} />}
-    {common("textColor") && tool.bar.textColor && <ColorPicker compact live label="글자 색" value={drawingColor(tool.bar.textColor.get(first.style))} onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.textColor?.set(d.style, color) ?? d.style }))} />}
+    {common("textColor") && tool.bar.textColor && <ColorPicker compact live label="글자 색" value={drawingColor(tool.bar.textColor.get(first.style))} rawValue={tool.bar.textColor.get(first.style)}
+      onRevert={(raw) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.textColor?.set(d.style, raw) ?? d.style }))}
+      onChange={(color) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.textColor?.set(d.style, color) ?? d.style }))} />}
     {common("width") && tool.bar.width && <WidthInput label="선 굵기" value={tool.bar.width.get(first.style)} onChange={(v) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.width?.set(d.style, v) ?? d.style }))} />}
     {common("dash") && tool.bar.dash && <DashInput label="선 모양" value={tool.bar.dash.get(first.style)} onChange={(v) => change((d) => ({ ...d, style: toolOf(d.tool)?.bar.dash?.set(d.style, v) ?? d.style }))} />}
     {extendVal !== null && <>
@@ -163,13 +168,13 @@ function FloatingBar({ cellId }: { cellId: WindowId }) {
       <button type="button" className="icon-btn" aria-label="오른쪽 연장" title="오른쪽 연장 1클릭" aria-pressed={extendVal === "right" || extendVal === "both"} onClick={() => change((d) => { const lens = toolOf(d.tool)?.bar.extend; return lens ? { ...d, style: lens.set(d.style, toggleExtendSide(lens.get(d.style), "right")) } : d; })}><Icon path={DRAWING_ICONS.extendRight} /></button>
     </>}
     {statsVal !== null && <button type="button" className="icon-btn draw-bar-chip" aria-label="통계 늘 보이기" title="가격차·등락률·봉수 통계 늘 보이기" aria-pressed={statsVal} onClick={() => change((d) => { const lens = toolOf(d.tool)?.bar.statsAlways; return lens ? { ...d, style: lens.set(d.style, !statsVal) } : d; })}>Δ%</button>}
-    {selected.length === 1 && tool.bar.levels && <QuickFibButton first={first} change={change} />}
-    {selected.length === 1 && tool.bar.riskBudget && <QuickRiskButton first={first} change={change} />}
+    {visibleSelected.length === 1 && tool.bar.levels && <QuickFibButton first={first} change={change} />}
+    {visibleSelected.length === 1 && tool.bar.riskBudget && <QuickRiskButton first={first} change={change} />}
     <span className="draw-bar-sep" />
     <ZOrderButton onReorder={(dir) => surface.reorder(first.id, dir)} />
     <button ref={detailsButton} className="icon-btn" aria-label="드로잉 세부 설정" title="좌표·글자·보이기 설정" aria-haspopup="dialog" aria-expanded={cell.editor?.kind === "settings"} onClick={() => { if (cell.editor) useDrawingSession.getState().patchCell(cellId, { editor: null }); else surface.openEditor(first.id); }}><Icon path={DRAWING_ICONS.settings} /></button>
     <button className="icon-btn" aria-label="드로잉 복제" title="복제" onClick={() => surface.clone()}><CopyIcon /></button>
-    <button className="icon-btn" aria-label={selected.every((d) => d.locked) ? "잠금 풀기" : "잠금"} title="잠금" onClick={() => surface.updateSelected((d) => ({ ...d, locked: !selected.every((item) => item.locked) }))}><Icon path={selected.every((d) => d.locked) ? DRAWING_ICONS.lockAll : DRAWING_ICONS.unlocked} /></button>
+    <button className="icon-btn" aria-label={visibleSelected.every((d) => d.locked) ? "잠금 풀기" : "잠금"} title="잠금" onClick={() => surface.updateSelected((d) => ({ ...d, locked: !visibleSelected.every((item) => item.locked) }))}><Icon path={visibleSelected.every((d) => d.locked) ? DRAWING_ICONS.lockAll : DRAWING_ICONS.unlocked} /></button>
     <button className="icon-btn" aria-label="드로잉 지우기" title="지우기 (Delete)" onClick={() => surface.remove(true)}><Icon path={DRAWING_ICONS.trash} /></button>
     <button className="icon-btn" aria-label="드로잉 더 보기" title="더 보기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); useDrawingSession.getState().patchCell(cellId, { popup: { id: first.id, x: r.left, y: r.bottom + 5 } }); }}><MoreIcon /></button>
     <span className="sr-only">{cell.selected.length}개 선택됨</span>

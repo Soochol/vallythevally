@@ -49,6 +49,7 @@ export class DrawingSurface implements ChartExtension {
   private paneLayers: (() => void)[] = [];
   private transient: (TransientShapes & { createdAt: number }) | null = null;
   private snapIndicator: SnapIndicator | null = null;
+  private autoExitingMeasure = false;
   private readonly edits: DrawingEdits;
   private readonly frameListeners = new Set<() => void>();
 
@@ -93,8 +94,11 @@ export class DrawingSurface implements ChartExtension {
     this.cleanup.push(host.fineBars.subscribe(() => this.refresh()));
     this.cleanup.push(useDrawingSession.subscribe((s, old) => {
       if (this.isActive() && (s.tool !== old.tool || s.mode !== old.mode)) {
-        const keepMeasured = this.state.kind === "measured" && s.tool === null && s.mode === null && old.mode === "measure";
-        if (!keepMeasured) this.reset();
+        if (this.autoExitingMeasure) {
+          this.autoExitingMeasure = false;
+        } else {
+          this.reset();
+        }
       }
       this.refresh();
     }));
@@ -190,7 +194,8 @@ export class DrawingSurface implements ChartExtension {
   }
   private previewSnap(at: ScreenPoint, mods: Mods) {
     const live = this.liveTool();
-    const wantsSnap = live.tool !== null || live.mode === "measure";
+    const liveToolSpec = live.tool === null ? null : toolOf(live.tool) ?? null;
+    const wantsSnap = (liveToolSpec !== null && liveToolSpec.placement.kind !== "freehand") || live.mode === "measure";
     if (!wantsSnap) {
       if (this.snapIndicator !== null) {
         this.snapIndicator = null;
@@ -295,7 +300,10 @@ export class DrawingSurface implements ChartExtension {
     this.input(kind === "down" ? { kind, at, mods: modsOf(e), hit } : { kind, at, mods: modsOf(e) });
     if (wasCaptured || capturedHere || captures(this.state) || this.pointer !== null) { e.preventDefault(); e.stopImmediatePropagation(); }
     if (kind === "up") {
-      if (this.state.kind === "idle" || this.state.kind === "measured") this.snapIndicator = null;
+      if ((this.state.kind === "idle" || this.state.kind === "measured") && this.snapIndicator !== null) {
+        this.snapIndicator = null;
+        this.refresh();
+      }
       this.release();
     }
     if (kind === "move") {
@@ -344,7 +352,10 @@ export class DrawingSurface implements ChartExtension {
       case "box": { const f = this.frame(); session.select(this.cellId, idsInBox(f.items, effect.start, effect.end, f.pane)); break; }
       case "mode": {
         if (effect.mode === "measure") {
-          if (!useUiStore.getState().prefs.drawing.keepDrawing) useDrawingSession.setState({ mode: null });
+          if (!useUiStore.getState().prefs.drawing.keepDrawing) {
+            this.autoExitingMeasure = true;
+            useDrawingSession.setState({ mode: null });
+          }
           break;
         }
         const frame = this.frame();
