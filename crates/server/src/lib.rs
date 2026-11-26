@@ -2,6 +2,7 @@
 
 pub mod account;
 pub mod account_routes;
+pub mod alert;
 pub mod api;
 pub mod app;
 pub mod bars;

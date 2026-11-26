@@ -106,9 +106,24 @@ fn wait_from(header: Option<&str>, body: &[u8]) -> Duration {
     }
 }
 
-fn payload(chat_id: &str, text: &str) -> String {
+fn payload_with(chat_id: &str, text: &str, parse_mode: Option<&str>, disable_notification: bool) -> String {
     let text: String = text.chars().take(TEXT_LIMIT).collect();
-    serde_json::json!({ "chat_id": chat_id, "text": text, "link_preview_options": { "is_disabled": true } }).to_string()
+    let mut object = serde_json::Map::new();
+    object.insert("chat_id".to_owned(), serde_json::Value::String(chat_id.to_owned()));
+    object.insert("text".to_owned(), serde_json::Value::String(text));
+    object.insert("link_preview_options".to_owned(), serde_json::json!({ "is_disabled": true }));
+    if let Some(mode) = parse_mode {
+        object.insert("parse_mode".to_owned(), serde_json::Value::String(mode.to_owned()));
+    }
+    if disable_notification {
+        object.insert("disable_notification".to_owned(), serde_json::Value::Bool(true));
+    }
+    serde_json::Value::Object(object).to_string()
+}
+
+#[cfg(test)]
+fn payload(chat_id: &str, text: &str) -> String {
+    payload_with(chat_id, text, None, false)
 }
 
 fn is_bot_token(value: &str) -> bool {
@@ -186,7 +201,11 @@ impl Telegram {
     }
 
     pub async fn send(&self, text: &str) -> Result<(), SendFailure> {
-        let body = payload(&self.chat_id, text);
+        self.send_formatted(text, None, false).await
+    }
+
+    pub async fn send_formatted(&self, text: &str, parse_mode: Option<&str>, disable_notification: bool) -> Result<(), SendFailure> {
+        let body = payload_with(&self.chat_id, text, parse_mode, disable_notification);
         for attempt in 1..=MAX_ATTEMPTS {
             let response = self.client.post(self.send_message_url.expose()).header(CONTENT_TYPE, "application/json").body(body.clone()).send().await.map_err(transport_failure)?;
             let status = response.status();
@@ -237,6 +256,11 @@ mod tests {
         assert_eq!(value["chat_id"], "-100123");
         assert_eq!(value["link_preview_options"]["is_disabled"], true);
         assert!(value.get("parse_mode").is_none());
+        assert!(value.get("disable_notification").is_none());
+
+        let html: serde_json::Value = serde_json::from_str(&payload_with("-100123", "<b>알림</b>", Some("HTML"), true)).unwrap();
+        assert_eq!(html["parse_mode"], "HTML");
+        assert_eq!(html["disable_notification"], true);
     }
 
     const SETTINGS: &str = "bot_token=123456:SECRET-TOKEN\nchat_id=-100777\n";
