@@ -4,12 +4,11 @@ import type { WindowId } from "../../layout/kinds";
 import { useOrderSettings } from "../../stores/ui";
 import { ReplayStrip } from "../book-replay/ReplayStrip";
 import { FeedStrip } from "../market-window/FeedStrip";
-import { formatQuantity } from "../market-window/format";
-import { buildDefaultLadder, ratioSplit, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
+import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { MarketHead } from "../market-window/MarketHead";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
+import { Strip, TotalFigure } from "../market-window/parts";
 import { ladderColumns, PriceLadder } from "../market-window/PriceLadder";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { SymbolHead } from "../market-window/SymbolHead";
@@ -61,12 +60,14 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
       {view !== null && <BookColumnHead />}
       <div ref={ladderBox} className="bk-ladder" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-state={view === null ? "" : undefined}>{ladder}</div>
       <Strip divided>
-        <span className="mw-strip-name">매도</span>
-        <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />
-        <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? `매도 ${formatQuantity(totals.ask ?? 0)} · 매수 ${formatQuantity(totals.bid ?? 0)}`} />
-        <TotalFigure testId="book-total-bid" tone="up" value={totals.bid} afterHours={afterHours} description={totals.description} />
-        <span className="mw-strip-name">매수</span>
-        <RatioFigures ask={totals.ask} bid={totals.bid} />
+        <span className="mw-strip-group">
+          <span className="mw-strip-name">매도</span>
+          <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />
+        </span>
+        <span className="mw-strip-group">
+          <TotalFigure testId="book-total-bid" tone="up" value={totals.bid} afterHours={afterHours} description={totals.description} />
+          <span className="mw-strip-name">매수</span>
+        </span>
       </Strip>
     </div>
   );
@@ -82,12 +83,6 @@ function BookColumnHead() {
       <span role="columnheader">매수잔량</span>
     </div>
   );
-}
-
-function RatioFigures({ ask, bid }: { ask: number | null; bid: number | null }) {
-  if (ask === null || bid === null) return null;
-  const split = ratioSplit(bid, ask);
-  return <span className="mw-ratio-figures" data-testid="book-total-ratio"><span className="mw-down">{Math.round(split.sell)}%</span> : <span className="mw-up">{Math.round(split.buy)}%</span></span>;
 }
 
 export function BookWindow({ id }: { id: WindowId }) {

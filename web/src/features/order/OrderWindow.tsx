@@ -14,7 +14,7 @@ import { FeedStrip } from "../market-window/FeedStrip";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
-import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
+import { Strip, TotalFigure } from "../market-window/parts";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { SymbolHead } from "../market-window/SymbolHead";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
@@ -36,7 +36,6 @@ import { OrderTotals } from "./OrderTotals";
 import { fullRangePrices } from "./priceRange";
 import { QuantityRow } from "./QuantityRow";
 import { useAccountBalance } from "./useAccountBalance";
-import { useMicroFeed } from "./useMicroFeed";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderCommands } from "./useOrderCommands";
 import { type OrderAccess, useOrderAccess, useOrderData } from "./useOrderData";
@@ -193,11 +192,6 @@ function OrderBody({
   const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
   const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", !explorerOn && shownLadder);
-  const ofi = useMicroFeed(code, market.venue, replay.kind === "live");
-  const ofiBuyPct = ofi?.buyPressurePct ?? 50;
-  const ofiQty = ofi?.ofiQty ?? 0;
-  const ofiSpeed = ofi ? (ofi.tapeSpeedRatioBps / 10_000).toFixed(1) : "1.0";
-  const ofiTitle = `10초 OFI 매수압력 ${ofiBuyPct}% · 순흐름 ${ofiQty >= 0 ? "+" : ""}${ofiQty.toLocaleString("ko-KR")}주 · 체결속도 ${ofiSpeed}x`;
 
   return (
     <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
@@ -259,12 +253,6 @@ function OrderBody({
       <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
       <Strip>
         <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-        <div className="od-strip-bars">
-          <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
-          <div className="od-ofi-bar" data-testid="order-ofi-bar" data-buy-pct={ofiBuyPct} data-ofi-qty={ofiQty} data-tape-speed={ofi?.tapeSpeedRatioBps ?? 10_000} role="img" aria-label={ofiTitle} title={ofiTitle}>
-            <i className="od-ofi-buy" style={{ transform: `scaleX(${ofiBuyPct / 100})` }} />
-          </div>
-        </div>
         <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
       </Strip>
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} replay={market.replayEnabled ? replay : null} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />

@@ -47,6 +47,8 @@ export interface ChartSettings {
   showOhlcChange: boolean;
   extremeBasis: ExtremeBasis;
   showDaySeparators: boolean;
+  showHorzGrid: boolean;
+  showVertGrid: boolean;
 }
 
 export const VISIBLE_BARS_MIN = 10;
@@ -86,6 +88,8 @@ export const DEFAULT_CHART_SETTINGS: ChartSettings = {
   showOhlcChange: false,
   extremeBasis: "last",
   showDaySeparators: false,
+  showHorzGrid: true,
+  showVertGrid: true,
 };
 
 export const CHART_STYLE_LABEL: Record<ChartStyle, string> = {
@@ -130,13 +134,15 @@ function readChartSettings(raw: unknown): ChartSettings | null {
     showOhlcChange = DEFAULT_CHART_SETTINGS.showOhlcChange,
     extremeBasis = DEFAULT_CHART_SETTINGS.extremeBasis,
     showDaySeparators = DEFAULT_CHART_SETTINGS.showDaySeparators,
+    showHorzGrid = DEFAULT_CHART_SETTINGS.showHorzGrid,
+    showVertGrid = DEFAULT_CHART_SETTINGS.showVertGrid,
   } = raw;
   if (!isOneOf(CHART_STYLES, style) || !isOneOf(PRICE_SCALES, scale)) return null;
   if (!isCompareList(compare)) return null;
   if (!(visibleBars === null || isVisibleBars(visibleBars)) || typeof showExtremes !== "boolean") return null;
   if (typeof showLegend !== "boolean" || typeof showOhlcChange !== "boolean" || !isOneOf(EXTREME_BASES, extremeBasis)) return null;
-  if (typeof showDaySeparators !== "boolean") return null;
-  const display = { showExtremes, showLegend, showOhlcChange, extremeBasis, showDaySeparators };
+  if (typeof showDaySeparators !== "boolean" || typeof showHorzGrid !== "boolean" || typeof showVertGrid !== "boolean") return null;
+  const display = { showExtremes, showLegend, showOhlcChange, extremeBasis, showDaySeparators, showHorzGrid, showVertGrid };
   if (v === 1) return migrateV1({ style, scale, compare, visibleBars, ...display, indicators, panels });
   if (v !== 2 || !Array.isArray(indicators) || !Array.isArray(panels)) return null;
   const readPanels = panels.map(readPanel);
@@ -146,7 +152,7 @@ function readChartSettings(raw: unknown): ChartSettings | null {
   return panelsMatch(settings) ? settings : null;
 }
 
-type V1Kept = Pick<ChartSettings, "style" | "scale" | "compare" | "visibleBars" | "showExtremes" | "showLegend" | "showOhlcChange" | "extremeBasis" | "showDaySeparators">;
+type V1Kept = Pick<ChartSettings, "style" | "scale" | "compare" | "visibleBars" | "showExtremes" | "showLegend" | "showOhlcChange" | "extremeBasis" | "showDaySeparators" | "showHorzGrid" | "showVertGrid">;
 
 function migrateV1({ indicators, panels, ...kept }: V1Kept & { indicators: unknown; panels: unknown }): ChartSettings | null {
   if (!isEmptyArray(indicators) || !isEmptyArray(panels)) return null;

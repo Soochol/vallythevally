@@ -37,7 +37,7 @@ export function ChartSettingsDialog({ cellId, onClose }: { cellId: WindowId; onC
   const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
   const cellName = `${name} · ${PERIOD_LABEL[cell.period]}`;
   const indicatorWindow = useShownIndicatorWindow();
-  const { setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setStyle, setScale } = useLayoutStore.getState();
+  const { setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setShowHorzGrid, setShowVertGrid, setStyle, setScale } = useLayoutStore.getState();
   const [initialSettings] = useState(() => chartWindow(useLayoutStore.getState().layout, cellId).chartSettings);
   const [initialIndicatorWindow] = useState(() => useUiStore.getState().prefs.indicatorWindow);
   const [draft, setDraft] = useState<string | null>(null);
@@ -114,6 +114,8 @@ export function ChartSettingsDialog({ cellId, onClose }: { cellId: WindowId; onC
             <span className="cs-name">최고·최저 등락률</span>
             <Segmented mode="pressed" label="최고·최저 등락률" options={EXTREME_BASES.map((option): SegmentedOption<ExtremeBasis> => ({ ...option, disabled: !settings.showExtremes }))} value={settings.extremeBasis} onChange={(basis) => setExtremeBasis(cellId, basis)} />
           </div>
+          <SettingSwitch label="가로 격자선" detail="가격 축 눈금에 맞춰 가로선을 표시" checked={settings.showHorzGrid} onChange={(on) => setShowHorzGrid(cellId, on)} />
+          <SettingSwitch label="세로 격자선" detail="시간 축 눈금에 맞춰 세로선을 표시" checked={settings.showVertGrid} onChange={(on) => setShowVertGrid(cellId, on)} />
           <SettingSwitch label="날짜 구분선" detail="분봉에서 날짜가 바뀌는 자리에 세로선" checked={settings.showDaySeparators} onChange={(on) => setShowDaySeparators(cellId, on)} />
         </>)}
         {section("windows", (

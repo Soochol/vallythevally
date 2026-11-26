@@ -1,61 +1,23 @@
-import type { FeedBook } from "../src/api/generated/FeedBook";
-import { type Scenario, cell, expect, pollSaved, test } from "./harness";
+import { cell, expect, test } from "./harness";
 import { useCenterIndicatorWindow } from "./indicator-window";
-import { BASE, CODE, openOrderWindow, ordersOn, snapshot, tradingApi, win } from "./order-window";
+import { openOrderWindow, ordersOn, tradingApi, win } from "./order-window";
 
-const nowOf = (scenario: Scenario) => Math.floor(scenario.now / 1000);
-
-function feedSub(scenario: Scenario, kind: "book" | "trades"): string {
-  const message = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === kind && m.symbol === CODE);
-  return message?.type === "subscribe_feed" ? message.sub : "";
-}
-
-function feedSubs(scenario: Scenario, kind: "book" | "trades"): string[] {
-  return scenario.live.messages
-    .filter((m) => m.type === "subscribe_feed" && m.kind === kind && m.symbol === CODE)
-    .map((m) => (m.type === "subscribe_feed" ? m.sub : ""))
-    .filter((sub) => sub !== "");
-}
-
-function makeBook(t: number, ask0Qty: number, bid0Qty: number): FeedBook {
-  const base = snapshot(BASE);
-  return {
-    t,
-    asks: base.asks.map((level, index) => ({ price: level.price, qty: index === 0 ? ask0Qty : level.quantity })),
-    bids: base.bids.map((level, index) => ({ price: level.price, qty: index === 0 ? bid0Qty : level.quantity })),
-    totalAskQty: base.totalAskQuantity - base.asks[0]!.quantity + ask0Qty,
-    totalBidQty: base.totalBidQuantity - base.bids[0]!.quantity + bid0Qty,
-    expected: null,
-  };
-}
-
-test.describe("허수 취소·아이스버그·OFI 미시 신호", () => {
+test.describe("허수 취소·아이스버그 미시 신호", () => {
   test.use({ clockStart: "20261109100000" });
 
   test.beforeEach(async ({ page, scenario }) => {
     await page.clock.setFixedTime(new Date(scenario.now));
   });
 
-  test("호가주문창 OFI 매수압력 막대가 실시간 0D 변화에 따라 갱신된다", async ({ page, scenario }) => {
+  test("호가주문창 하단 총잔량 띠에는 비율 막대와 OFI 막대가 보이지 않는다", async ({ page, scenario }) => {
     ordersOn(scenario);
     tradingApi(scenario);
     await openOrderWindow(page, scenario);
 
-    await pollSaved(() => feedSub(scenario, "book")).not.toBe("");
-    const bookSub = feedSub(scenario, "book");
-    const now = nowOf(scenario);
-    const ofiBar = win(page).getByTestId("order-ofi-bar");
-
-    await expect(ofiBar).toBeVisible();
-    await expect(ofiBar).toHaveAttribute("data-buy-pct", "50");
-
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now, 2_000, 2_000) });
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now + 1, 2_000, 3_500) });
-    await expect(ofiBar).toHaveAttribute("data-buy-pct", "100");
-    await expect(ofiBar).toHaveAttribute("data-ofi-qty", "1500");
-
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now + 2, 2_000, 1_500) });
-    await expect(ofiBar).toHaveAttribute("data-ofi-qty", "-500");
+    await expect(win(page).getByTestId("order-total-ask")).toBeVisible();
+    await expect(win(page).getByTestId("order-total-bid")).toBeVisible();
+    await expect(win(page).locator(".mw-ratio")).toHaveCount(0);
+    await expect(win(page).getByTestId("order-ofi-bar")).toHaveCount(0);
   });
 
   test("차트 호가 잔량 히트맵 설정에 허수·아이스버그 토글과 미시 표기 방식이 보인다", async ({ page, scenario }) => {
@@ -95,74 +57,5 @@ test.describe("허수 취소·아이스버그·OFI 미시 신호", () => {
 
     await dialog.getByRole("button", { name: "설정 닫기", exact: true }).click();
     await expect(dialog).toHaveCount(0);
-  });
-
-  test("체결창이 함께 열려도 호가주문창 fallback 미시 감지가 체결을 이중 집계하지 않는다", async ({ page, scenario }) => {
-    ordersOn(scenario);
-    tradingApi(scenario);
-    await openOrderWindow(
-      page,
-      scenario,
-      false,
-      "krx",
-      { upper: 91_000, lower: 49_000 },
-      false,
-      snapshot(BASE),
-      (windows) => [
-        ...windows.filter((w) => w.kind === "chart" || w.kind === "order"),
-        { id: "trades-co", link: null, kind: "trades", symbol: CODE },
-      ],
-    );
-
-    await pollSaved(() => feedSubs(scenario, "book").length).toBeGreaterThanOrEqual(1);
-    await pollSaved(() => feedSubs(scenario, "trades").length).toBeGreaterThanOrEqual(2);
-    const bookSub = feedSubs(scenario, "book")[0]!;
-    const tradeSubs = feedSubs(scenario, "trades");
-    const now = nowOf(scenario);
-    const ask0Price = BASE + 100;
-
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now, 1_000, 2_000) });
-    for (const sub of tradeSubs) {
-      scenario.live.emit({
-        type: "feed_trades",
-        sub,
-        seq: 1,
-        trades: [{ t: now + 1, price: ask0Price, qty: 800, venue: "krx", strength: 120 }],
-      });
-    }
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now + 2, 600, 2_000) });
-
-    await expect(win(page).getByTestId("order-ofi-bar")).toHaveAttribute("data-ofi-qty", "400");
-  });
-
-  test("호가창이 함께 열려도 호가주문창 fallback 미시 감지가 호가를 중복 처리하지 않는다", async ({ page, scenario }) => {
-    ordersOn(scenario);
-    tradingApi(scenario);
-    await openOrderWindow(
-      page,
-      scenario,
-      false,
-      "krx",
-      { upper: 91_000, lower: 49_000 },
-      false,
-      snapshot(BASE),
-      (windows) => [
-        ...windows.filter((w) => w.kind === "chart" || w.kind === "order"),
-        { id: "book-co", link: null, kind: "book", symbol: CODE },
-      ],
-    );
-
-    await pollSaved(() => feedSubs(scenario, "book").length).toBeGreaterThanOrEqual(2);
-    const bookSubs = feedSubs(scenario, "book");
-    const now = nowOf(scenario);
-
-    for (const sub of bookSubs) {
-      scenario.live.emit({ type: "feed_book", sub, book: makeBook(now, 5_000, 2_000) });
-    }
-    for (const sub of bookSubs) {
-      scenario.live.emit({ type: "feed_book", sub, book: makeBook(now + 1, 100, 2_000) });
-    }
-
-    await expect(win(page).getByTestId("order-ofi-bar")).toHaveAttribute("data-ofi-qty", "4900");
   });
 });
