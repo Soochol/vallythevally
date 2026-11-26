@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { THEMES, type Theme } from "../../persist/theme";
 import { contrastRatio, over, parseColor, parseThemeProperties, type Rgba } from "../../styles/colorMath";
 import tokensCss from "../../styles/tokens.css?raw";
 import { COLOR_RANGES, legendStops, mixPercent, needsStrongInk, rateFill, rateSide, rateStrength } from "./colors";
@@ -47,7 +48,7 @@ test("진한 칸만 밝은 글자를 쓴다", () => {
 
 const mixOver = (top: Rgba, base: Rgba, share: number): Rgba => over({ ...top, a: share }, base);
 
-function tileColorsFor(theme: "dark" | "light", rate: number, range: (typeof COLOR_RANGES)[number]): { fill: Rgba; ink: Rgba } {
+function tileColorsFor(theme: Theme, rate: number, range: (typeof COLOR_RANGES)[number]): { fill: Rgba; ink: Rgba } {
   const properties = parseThemeProperties(tokensCss, theme);
   const token = (name: string) => parseColor(properties.get(name) ?? (() => { throw new Error(`토큰이 없다: ${name}`); })());
   const side = rateSide(rate);
@@ -55,7 +56,7 @@ function tileColorsFor(theme: "dark" | "light", rate: number, range: (typeof COL
   return { fill, ink: needsStrongInk(rate, range) ? token("--tile-ink-strong") : token("--text") };
 }
 
-for (const theme of ["dark", "light"] as const) {
+for (const theme of THEMES) {
   test(`[${theme}] 모든 단계에서 타일 글자 대비가 4.5:1 이상이다`, () => {
     for (const range of COLOR_RANGES) {
       for (let step = -range * 100; step <= range * 100; step += 1) {

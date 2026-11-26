@@ -49,7 +49,7 @@ export function PriceText({ children, direction, id }: { children: ReactNode; di
 export function RateBadge({ direction, children: signed, id, cell }: { direction: ChangeDirection; children: string; id?: string; cell?: string }) {
   const magnitude = signed.replace(/^[+−]/, "");
   return (
-    <span id={id} data-cell={cell} className={`inline-flex h-[22px] w-full items-center justify-end gap-0.5 whitespace-nowrap rounded-s px-1.5 text-right text-xs leading-none ${RATE_BADGE[direction]}`}>
+    <span id={id} data-cell={cell} data-direction={direction} className={`rate-badge inline-flex h-[22px] w-full items-center justify-end gap-0.5 whitespace-nowrap rounded-s px-1.5 text-right text-xs leading-none ${RATE_BADGE[direction]}`}>
       <span aria-hidden="true" className="inline-flex items-center gap-0.5">
         {RATE_MARK[direction] && <span className="scale-75 leading-none">{RATE_MARK[direction]}</span>}
         <span>{magnitude}</span>

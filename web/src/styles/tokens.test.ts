@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { THEMES } from "../persist/theme";
 import tokensCss from "./tokens.css?raw";
 import { contrastRatio, deltaE2000, over, parseColor, parseThemeProperties, type Rgba } from "./colorMath";
 
-const THEMES = ["dark", "light"] as const;
 const MIN_TEXT_CONTRAST = 4.5;
 const MIN_SERIES_DISTANCE = 14;
 
@@ -150,5 +150,12 @@ describe("공통 치수 토큰", () => {
     expect(["--r-s", "--r-m", "--r-l", "--r-pill"].map(token)).toEqual(["2px", "2px", "0px", "2px"]);
     expect(["--s1", "--s2", "--island-gap"].map(token)).toEqual(["2px", "4px", "6px"]);
     expect(["--ctl-xs", "--ctl-s", "--ctl-m", "--ctl-l"].map(token)).toEqual(["22px", "26px", "30px", "36px"]);
+  });
+
+  it("소프트 벤토와 플로팅 글래스 조형·강조 토큰이 규격과 일치한다", () => {
+    const bento = parseThemeProperties(tokensCss, "bento");
+    expect(["--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => bento.get(name))).toEqual(["16px", "999px", "10px", "#42E3A8"]);
+    const glass = parseThemeProperties(tokensCss, "glass");
+    expect(["--r-l", "--r-pill", "--glass-blur", "--accent"].map((name) => glass.get(name))).toEqual(["12px", "999px", "blur(22px)", "#B49BFF"]);
   });
 });

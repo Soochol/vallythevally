@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { appliedTheme, applyTheme, parseTheme, readTheme, subscribeTheme, THEME_STORAGE_KEY, writeTheme } from "./theme";
+import { appliedTheme, applyTheme, parseTheme, readTheme, subscribeTheme, THEME_OPTIONS, THEME_STORAGE_KEY, THEMES, writeTheme } from "./theme";
 
 const memory = (initial: Record<string, string> = {}) => {
   const values = new Map(Object.entries(initial));
@@ -24,16 +24,17 @@ describe("화면 테마 저장", () => {
   test("저장소를 쓸 수 없으면 다크 테마로 동작한다", () => {
     expect(readTheme(blocked)).toBe("dark");
     expect(readTheme(() => ({ getItem: blocked, setItem: blocked }))).toBe("dark");
-    expect(() => writeTheme("light", blocked)).not.toThrow();
-    expect(() => writeTheme("light", () => ({ getItem: blocked, setItem: blocked }))).not.toThrow();
+    expect(() => writeTheme("bento", blocked)).not.toThrow();
+    expect(() => writeTheme("glass", () => ({ getItem: blocked, setItem: blocked }))).not.toThrow();
   });
 
-  test("고른 화이트 테마를 저장하고 다시 읽는다", () => {
+  test("네 가지 테마를 모두 저장하고 다시 읽는다", () => {
     const storage = memory();
-    writeTheme("light", () => storage);
-    expect(readTheme(() => storage)).toBe("light");
-    writeTheme("dark", () => storage);
-    expect(readTheme(() => storage)).toBe("dark");
+    for (const theme of THEMES) {
+      writeTheme(theme, () => storage);
+      expect(readTheme(() => storage)).toBe(theme);
+    }
+    expect(THEME_OPTIONS.map((option) => option.value)).toEqual([...THEMES]);
   });
 
   test("문서 뿌리 속성으로 반영하고 구독자에게 알린다", () => {
@@ -42,10 +43,12 @@ describe("화면 테마 저장", () => {
     const seen: string[] = [];
     const unsubscribe = subscribeTheme(() => seen.push(appliedTheme(root)));
     applyTheme("light", root);
-    expect(root.dataset.theme).toBe("light");
-    expect(seen).toEqual(["light"]);
+    applyTheme("bento", root);
+    applyTheme("glass", root);
+    expect(root.dataset.theme).toBe("glass");
+    expect(seen).toEqual(["light", "bento", "glass"]);
     unsubscribe();
     applyTheme("dark", root);
-    expect(seen).toEqual(["light"]);
+    expect(seen).toEqual(["light", "bento", "glass"]);
   });
 });

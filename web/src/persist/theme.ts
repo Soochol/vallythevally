@@ -1,15 +1,21 @@
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "bento" | "glass";
+
+export const THEMES = ["dark", "light", "bento", "glass"] as const satisfies readonly Theme[];
 
 export const THEME_STORAGE_KEY = "vally.theme";
 
 export const DEFAULT_THEME: Theme = "dark";
 
 export const THEME_OPTIONS = [
-  { value: "dark", label: "다크" },
-  { value: "light", label: "화이트" },
+  { value: "dark", label: "다크 (Editorial)" },
+  { value: "light", label: "화이트 (Editorial)" },
+  { value: "bento", label: "소프트 벤토" },
+  { value: "glass", label: "플로팅 글래스" },
 ] as const satisfies readonly { value: Theme; label: string }[];
 
-export const parseTheme = (raw: unknown): Theme => (raw === "dark" || raw === "light" ? raw : DEFAULT_THEME);
+const isTheme = (raw: unknown): raw is Theme => typeof raw === "string" && (THEMES as readonly string[]).includes(raw);
+
+export const parseTheme = (raw: unknown): Theme => (isTheme(raw) ? raw : DEFAULT_THEME);
 
 type ThemeStorage = Pick<Storage, "getItem" | "setItem">;
 

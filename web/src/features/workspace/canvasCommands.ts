@@ -7,12 +7,12 @@ import type { DockPlacement } from "../../layout/placement";
 import { useLayoutStore, windowRefs } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
-import { CANVAS_DOCK_HEIGHT, DOCK_GAP } from "./size";
+import { CANVAS_DOCK_HEIGHT, currentDockGap } from "./size";
 
 export function workspacePlacementRoom(): PlacementRoom | null {
   const area = useLayoutStore.getState().workspaceArea;
   const canvas = area && workArea(area.w, area.h - CANVAS_DOCK_HEIGHT);
-  return area && canvas ? { dock: { area, gap: DOCK_GAP }, canvas } : null;
+  return area && canvas ? { dock: { area, gap: currentDockGap() }, canvas } : null;
 }
 
 export function setLayoutMode(mode: LayoutMode) {

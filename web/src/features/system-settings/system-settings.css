@@ -1,4 +1,5 @@
 .sys-dialog { font-size: var(--fs-m); }
+.sys-theme-seg { flex-wrap: wrap; row-gap: var(--size-6); }
 .sys-dialog :is(.btn, .btn-ghost, .btn-primary, .btn-danger) { font-size: var(--fs-m); }
 .sys-dialog .ui-field-help, .sys-dialog .ui-field-error { font-size: var(--fs-s); }
 .sys-dialog .sys-picker > div > span:last-child { display: flex; width: 100%; flex: 1; }
