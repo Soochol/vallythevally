@@ -27,6 +27,7 @@ const descending = (pick: (row: SnapshotRow) => number | null) => (a: SnapshotRo
 };
 
 export function sortRows(rows: readonly SnapshotRow[], sort: SortMode): SnapshotRow[] {
+  if (sort === "custom") return [...rows];
   const compare = sort === "name" ? byName : descending(sort === "rate" ? (row) => row.changeRate : (row) => row.tradedMillionWon);
   return [...rows].sort(compare);
 }

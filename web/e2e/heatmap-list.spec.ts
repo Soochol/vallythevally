@@ -11,47 +11,58 @@ const row = (page: Page, code: string) => main(page).locator(`.hm-list-row[data-
 const table = (): HeatmapTable => structuredClone(HEATMAP_TABLE);
 const watched = (scenario: Scenario, code: string) => scenario.live.messages.some((m) => m.type === "watch" && m.symbols.includes(code));
 
-test("키움 테마 출처 탭은 없고 보기 탭이 히트맵·리스트·흐름 비교로 보인다", async ({ page, scenario }) => {
+test("보기 탭은 리스트·히트맵 순서이고 리스트가 기본이며 흐름 비교와 테마 편집 버튼은 없다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, table());
   await page.goto("/heatmap?source=kiwoom");
   const tabs = main(page).getByRole("tablist", { name: "보기" }).getByRole("tab");
-  await expect(tabs).toHaveText(["히트맵", "리스트", "흐름 비교"]);
+  await expect(tabs).toHaveText(["리스트", "히트맵"]);
+  await expect(main(page).getByRole("tab", { name: "리스트" })).toHaveAttribute("aria-selected", "true");
+  await expect(main(page).getByRole("tab", { name: "흐름 비교" })).toHaveCount(0);
+  await expect(main(page).getByRole("button", { name: "테마 편집" })).toHaveCount(0);
   await expect(main(page).getByRole("tablist", { name: "테마 출처" })).toHaveCount(0);
-  await expect(main(page).getByRole("tab", { name: "키움 테마" })).toHaveCount(0);
-  await expect(main(page).getByRole("region", { name: "반도체 지도" })).toBeVisible();
+  await expect(listGroup(page, "반도체")).toBeVisible();
 });
 
-test("리스트 탭에서 테마별 종목과 미니 일봉 캔들이 보이고 새로 고침해도 유지된다", async ({ page, scenario }) => {
-  seedHeatmapThemes(scenario, table());
+test("리스트 탭은 미니 일봉 캔들 없이 24px 행과 등락 강도 헤더를 보이고 히트맵 전환이 유지된다", async ({ page, scenario }) => {
+  const rows: HeatmapTable = {
+    "005930": { rate: 4.2, traded: 300_000 },
+    "000660": { rate: 3.1, traded: 200_000 },
+    "028260": { rate: -0.1, traded: 250_000 },
+    "086520": { rate: -0.2, traded: 150_000 },
+  };
+  seedHeatmapThemes(scenario, rows);
   await page.goto("/heatmap");
-  await main(page).getByRole("tab", { name: "리스트" }).click();
-  await expect(page).toHaveURL(/[?&]view=list(&|$)/);
-  await expect(main(page).getByRole("tab", { name: "리스트" })).toHaveAttribute("aria-selected", "true");
   await expect(listGroup(page, "반도체").locator(".hm-list-row")).toHaveCount(2);
   await expect(listGroup(page, "지주").locator(".hm-list-row")).toHaveCount(2);
   await expect(row(page, "005930")).toContainText("삼성전자");
-  await expect(row(page, "005930")).toContainText("+2.00%");
+  await expect(row(page, "005930")).toContainText("+4.20%");
   await expect(row(page, "005930")).toContainText("3,000억");
-  await expect(row(page, "005930").locator(".hm-candle-svg")).toBeVisible();
-  await expect(row(page, "005930").locator(".hm-candle")).toHaveCount(15);
+  await expect(main(page).locator(".hm-candle-svg")).toHaveCount(0);
   const rowBox = (await row(page, "005930").boundingBox())!;
-  expect(rowBox.height).toBeLessThanOrEqual(26);
+  expect(rowBox.height).toBeLessThanOrEqual(25);
+
+  await expect(listGroup(page, "반도체").locator(".hm-list-head")).toHaveAttribute("data-side", "up");
+  await expect(listGroup(page, "반도체").locator(".hm-list-head")).toHaveAttribute("data-level", "3");
+  await expect(listGroup(page, "지주").locator(".hm-list-head")).toHaveAttribute("data-level", "0");
 
   const barRequests = scenario.requests
     .map((req) => new URL(req.url()))
-    .filter((url) => url.pathname === "/api/bars" && url.searchParams.get("period") === "D");
-  expect(barRequests.some((url) => url.searchParams.get("symbol") === "005930" && url.searchParams.get("limit") === "15")).toBe(true);
+    .filter((url) => url.pathname === "/api/bars" && url.searchParams.get("period") === "D" && url.searchParams.get("limit") === "15");
+  expect(barRequests).toHaveLength(0);
 
+  await main(page).getByRole("tab", { name: "히트맵" }).click();
+  await expect(page).toHaveURL(/[?&]view=board(&|$)/);
+  await expect(main(page).getByRole("region", { name: "반도체 지도" })).toBeVisible();
   await page.reload();
-  await expect(main(page).getByRole("tab", { name: "리스트" })).toHaveAttribute("aria-selected", "true");
-  await expect(row(page, "005930").locator(".hm-candle-svg")).toBeVisible();
+  await expect(main(page).getByRole("tab", { name: "히트맵" })).toHaveAttribute("aria-selected", "true");
+  await expect(main(page).getByRole("region", { name: "반도체 지도" })).toBeVisible();
 });
 
 test("리스트 뷰에서 검색·정렬·접기 펼치기와 실시간 시세 갱신이 동작한다", async ({ page, scenario }) => {
   const rows = table();
   rows["000660"] = { rate: -1, traded: 500_000 };
   seedHeatmapThemes(scenario, rows);
-  await page.goto("/heatmap?view=list");
+  await page.goto("/heatmap");
   await expect(row(page, "005930")).toBeVisible();
   await pollSaved(() => watched(scenario, "000660")).toBe(true);
 
@@ -64,6 +75,10 @@ test("리스트 뷰에서 검색·정렬·접기 펼치기와 실시간 시세 �
 
   await main(page).getByRole("group", { name: "종목 정렬" }).getByRole("button", { name: "이름" }).click();
   await expect(page).toHaveURL(/[?&]sort=name(&|$)/);
+  await expect.poll(orderOf).toEqual(["005930", "000660"]);
+
+  await main(page).getByRole("group", { name: "종목 정렬" }).getByRole("button", { name: "내 순서" }).click();
+  await expect(page).toHaveURL(/[?&]sort=custom(&|$)/);
   await expect.poll(orderOf).toEqual(["005930", "000660"]);
 
   scenario.live.emit({ type: "quotes", venue: "combined", quotes: [{ ...heatmapQuote("000660", { rate: 6.5, traded: 500_000 }, "realtime"), price: 215_000 }] });
@@ -97,7 +112,7 @@ test("리스트 행을 누르면 고른 연동 색 차트에 종목이 열리고
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: [...withFirstChart(layout, { link: "a", symbol: "005930", venue: "combined" }), second] });
   const ui = scenario.documents.uiState();
   scenario.documents.saveUiState({ ...ui, pageLink: "b", revision: ui.revision + 1 });
-  await page.goto("/heatmap?view=list");
+  await page.goto("/heatmap");
   await row(page, "028260").click();
   await expect(page).toHaveURL(/\/$/);
   await expect(cell(page, 2)).toHaveAttribute("aria-label", /^칸 2: 삼성물산/);

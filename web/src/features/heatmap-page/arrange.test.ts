@@ -14,6 +14,7 @@ const rows = (members: HeatmapBoardMember[]) => {
 
 test("정렬 기준마다 순서가 정해진다", () => {
   const data = rows([quote("A", 1, 30), quote("B", 5, 10), quote("C", -2, 20)]);
+  expect(arrange(data, "equal", "custom", 160, 90).rows.map((r) => r.code)).toEqual(["A", "B", "C"]);
   expect(arrange(data, "equal", "rate", 160, 90).rows.map((r) => r.code)).toEqual(["B", "A", "C"]);
   expect(arrange(data, "equal", "traded", 160, 90).rows.map((r) => r.code)).toEqual(["A", "C", "B"]);
   expect(arrange(data, "equal", "name", 160, 90).rows.map((r) => r.code)).toEqual(["A", "B", "C"]);
