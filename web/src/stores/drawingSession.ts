@@ -13,9 +13,12 @@ export interface CellDrawing {
   editor: DrawingEditor | null;
   popup: Popup | null;
   toolbarAt: { x: number; y: number } | null;
+  objectTreeOpen: boolean;
+  hoveredId: string | null;
+  hiddenIds: readonly string[];
 }
 
-const EMPTY_CELL: CellDrawing = { selected: [], editor: null, popup: null, toolbarAt: null };
+const EMPTY_CELL: CellDrawing = { selected: [], editor: null, popup: null, toolbarAt: null, objectTreeOpen: false, hoveredId: null, hiddenIds: [] };
 
 interface DrawingSession {
   tool: DrawingTool | null;

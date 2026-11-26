@@ -12,6 +12,7 @@ import {
   readTextStyle,
   select,
   strokeFields,
+  strokeOpacity,
 } from "../styleKit";
 import { type AxisLabel, defineTool, type HandleSpec, type Shape, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, Extend, Fill, ScreenPoint, Stroke, TextStyle } from "../types";
@@ -129,7 +130,7 @@ export const rect = defineTool<RectStyle>({
   text: { editOnPlace: false },
   defaultStyle: rectDefaults,
   parseStyle: parseRectStyle,
-  bar: { lineColor: L("border", "color"), fill: L("fill"), width: L("border", "width"), dash: L("border", "dash") },
+  bar: { lineColor: L("border", "color"), lineOpacity: strokeOpacity(L("border")), fill: L("fill"), width: L("border", "width"), dash: L("border", "dash"), extend: L("extend") },
   settings: {
     style: [...strokeFields("테두리", L("border")), { kind: "fill", label: "채움", lens: L("fill") }, select("연장", EXTEND_OPTIONS, L("extend"))],
     text: [

@@ -351,5 +351,6 @@ export function toolContext(f: Frame, format: { price(p: number): string; time(t
     formatPrice: format.price,
     formatTime: format.time,
     logScale: f.logScale,
+    lastPrice: f.bars.at(-1)?.c ?? null,
   };
 }

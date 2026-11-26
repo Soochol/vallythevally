@@ -14,7 +14,7 @@ const drawing: DrawingBody = { id: "line", symbol: "005930", tool: "hline", poin
 
 const GROUP_LABEL: Record<Tool["group"], string> = { line: "선", fib: "피보나치·갠", shape: "도형", note: "주석", measure: "측정", pattern: "패턴" };
 
-test("드로잉 막대는 도구가 둘 이상인 그룹에만 펼침 버튼을 두고 전체 개체 조작은 없다", () => {
+test("드로잉 막대는 도구가 둘 이상인 그룹에 펼침 버튼을 두고 하단 유틸리티를 바로 제공한다", () => {
   const html = renderToStaticMarkup(createElement(DrawingToolbar));
   expect(html).toContain("data-chart-control");
   for (const [group, label] of Object.entries(GROUP_LABEL) as [Tool["group"], string][]) {
@@ -22,9 +22,11 @@ test("드로잉 막대는 도구가 둘 이상인 그룹에만 펼침 버튼을 
     if ((toolsByGroup().get(group)?.length ?? 0) > 1) expect(html).toContain(toggle);
     else expect(html).not.toContain(toggle);
   }
-  expect(html).not.toContain("모든 드로잉 잠그기");
-  expect(html).not.toContain("모든 드로잉 숨기기");
-  expect(html).not.toContain("이 종목 드로잉 모두 지우기");
+  expect(html).toContain("빠른 측정");
+  expect(html).toContain("모든 드로잉 잠그기");
+  expect(html).toContain("모든 드로잉 숨기기");
+  expect(html).toContain("개체 트리");
+  expect(html).toContain("드로잉 지우기 메뉴");
 });
 
 test("작은 막대의 팝오버는 모달 없이 기존 글자·좌표·주기와 전체 스타일을 제공한다", () => {

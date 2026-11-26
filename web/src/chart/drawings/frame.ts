@@ -8,15 +8,26 @@ import type { AxisLabel, HandleSpec, Shape, ToolContext } from "./toolSpec";
 import { toolOf } from "./tools";
 import type { DrawingBody, DrawingScope, ScreenPoint } from "./types";
 
+import type { MagnetStrength } from "./magnet";
+
+export interface SnapIndicator {
+  at: ScreenPoint;
+  tag: string;
+  priceText: string;
+  strength: MagnetStrength;
+}
+
 export interface RenderItem extends HitItem {
   drawing: DrawingBody;
   handleSpecs: readonly HandleSpec[];
   labels: readonly AxisLabel[];
+  hovered?: boolean;
 }
 export interface RenderFrame {
   items: RenderItem[];
   preview: readonly Shape[];
   transient?: { shapes: readonly Shape[]; opacity: number };
+  snapIndicator?: SnapIndicator | null;
   box: { start: ScreenPoint; end: ScreenPoint } | null;
   pane: Pane;
   ctx: ToolContext | null;
@@ -26,8 +37,8 @@ export interface RenderFrame {
 export function inScope(scope: DrawingScope, layoutId: string, cellId: WindowId): boolean {
   return scope.kind === "symbol" || (scope.layoutId === layoutId && (scope.kind === "layout" || scope.windowId === cellId));
 }
-export function visible(d: DrawingBody, where: { layoutId: string; cellId: WindowId; period: Period; hideAll: boolean }) {
-  return !where.hideAll && inScope(d.scope, where.layoutId, where.cellId) && (d.periods === null || d.periods.includes(where.period));
+export function visible(d: DrawingBody, where: { layoutId: string; cellId: WindowId; period: Period; hideAll: boolean; hiddenIds?: readonly string[] }) {
+  return !where.hideAll && !(where.hiddenIds?.includes(d.id) ?? false) && inScope(d.scope, where.layoutId, where.cellId) && (d.periods === null || d.periods.includes(where.period));
 }
 export function renderItem(drawing: DrawingBody, selected: boolean, ctx: ToolContext): RenderItem | null {
   const tool = toolOf(drawing.tool);

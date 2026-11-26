@@ -207,6 +207,13 @@
   box-shadow: none;
 }
 
+:is([data-style="bento"], [data-style="carbon"]) .draw-tool[data-tone="warn"][aria-pressed="true"] {
+  border-radius: var(--r-m);
+  background: var(--warning-soft);
+  color: var(--warning);
+  box-shadow: none;
+}
+
 :is([data-style="bento"], [data-style="carbon"]) .page-rail-item {
   width: calc(100% - var(--size-10));
   border-radius: var(--r-m);

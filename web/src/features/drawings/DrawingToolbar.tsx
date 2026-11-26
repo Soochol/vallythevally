@@ -3,8 +3,9 @@ import { Menu } from "../menu/Menu";
 import { Icon, DRAWING_ICONS, CloseIcon, StarIcon } from "../icons";
 import { type PointerEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
+import { inScope } from "../../chart/drawings/frame";
 import { gestureSections } from "../../chart/drawings/gestures";
-import { toolsByGroup } from "../../chart/drawings/tools";
+import { toolsByGroup, toolOf } from "../../chart/drawings/tools";
 import type { Tool } from "../../chart/drawings/toolSpec";
 import { MODES, registeredModes } from "../../chart/drawings/modes";
 import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
@@ -14,8 +15,8 @@ import { useSelectionStore } from "../../stores/selection";
 import { useActionKeys, useUiStore } from "../../stores/ui";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { menuIndex } from "../overlay/position";
-import { toolOf } from "../../chart/drawings/tools";
 import { isTypingTarget } from "../../lib/typingTarget";
+import { isMinutePeriod } from "../../lib/symbol";
 import { allShortcutsOf, keyTitle, shortcutOf, toolActionId, type ActionKeys } from "../../lib/hotkeys";
 
 export function toolTitle(tool: Tool, keys: ActionKeys, note?: string) {
@@ -80,8 +81,12 @@ export function DrawingToolbar() {
 interface RailHelp { help: boolean; setHelp(open: boolean): void; helpAnchor: React.RefObject<HTMLButtonElement | null>; helpDialog: React.ReactNode }
 
 function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
-  const active = useDrawingSession((s) => s.tool); const mode = useDrawingSession((s) => s.mode); const pinned = useDrawingSession((s) => s.pinnedTool);
-  const prefs = useUiStore((s) => s.prefs.drawing); const cellId = useSelectionStore((s) => s.activeCell);
+  const active = useDrawingSession((s) => s.tool);
+  const mode = useDrawingSession((s) => s.mode);
+  const pinned = useDrawingSession((s) => s.pinnedTool);
+  const cellId = useSelectionStore((s) => s.activeCell);
+  const treeOpen = useDrawingSession((s) => cellDrawing(s, cellId).objectTreeOpen);
+  const prefs = useUiStore((s) => s.prefs.drawing);
   const keys = useActionKeys();
   const pinnedRun = useRef<HTMLDivElement>(null);
   const pinnedTools = prefs.pinnedTools.flatMap((id) => toolOf(id) ?? []);
@@ -95,9 +100,10 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
   const folded = pinnedTools.slice(shownPins);
   return <nav data-chart-control aria-label="드로잉 도구" className="drawing-toolbar ui-island max-md:hidden">
     <button className="draw-tool" data-active-tool aria-label="선택 도구" title={keyTitle("선택", keys, "select")} aria-pressed={active === null && mode === null} onClick={() => action(() => useDrawingSession.getState().setTool(cellId, null))}><Icon path={DRAWING_ICONS.pointer} /></button>
+    <div className="draw-separator" />
     {[...toolsByGroup()].map(([group, tools]) => {
       const t = tools.find((tool) => tool.tool === active) ?? lastTools[group] ?? tools[0]!;
-      const groupButton = (press?: GroupPress) => <button className="draw-tool" data-active-tool title={toolTitle(t, keys, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, t.tool, true))} {...press}><Icon path={t.icon} /></button>;
+      const groupButton = (press?: GroupPress) => <button className="draw-tool" data-active-tool data-pinned-run={pinned === t.tool || undefined} title={toolTitle(t, keys, pinned === t.tool ? "연속" : undefined)} aria-label={t.label} aria-pressed={active === t.tool} onClick={() => setTool(t)} onDoubleClick={() => action(() => useDrawingSession.getState().setTool(cellId, t.tool, true))} {...press}><Icon path={t.icon} /></button>;
       return tools.length > 1
         ? <ToolGroup key={group} label={`${GROUP_LABEL[group]} 도구`} tools={tools} keys={keys} onChoose={setTool}>{groupButton}</ToolGroup>
         : <div className="draw-group" key={group}>{groupButton()}</div>;
@@ -112,6 +118,11 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
     {MODES.filter((m) => m.id !== "demo").map((m) => <button key={m.id} className="draw-tool" data-active-tool aria-label={m.label} title={m.label} aria-pressed={mode === m.id} onClick={() => action(() => useDrawingSession.setState({ tool: null, mode: mode === m.id ? null : m.id }))}><Icon path={m.icon} /></button>)}
     <MagnetButton action={action} keys={keys} />
     <button className="draw-tool" aria-label="연속 그리기" title="연속 그리기" aria-pressed={prefs.keepDrawing} onClick={() => action(() => setPrefs({ keepDrawing: !prefs.keepDrawing }))}><Icon path={DRAWING_ICONS.keepDrawing} /></button>
+    <div className="draw-separator" />
+    <button className="draw-tool" data-tone={prefs.lockAll ? "warn" : undefined} aria-label="모든 드로잉 잠그기" title={prefs.lockAll ? "모든 드로잉 잠금 풀기" : "모든 드로잉 잠그기"} aria-pressed={prefs.lockAll} onClick={() => action(() => setPrefs({ lockAll: !prefs.lockAll }))}><Icon path={prefs.lockAll ? DRAWING_ICONS.lockAll : DRAWING_ICONS.unlocked} /></button>
+    <button className="draw-tool" data-tone={prefs.hideAll ? "warn" : undefined} aria-label="모든 드로잉 숨기기" title={keyTitle(prefs.hideAll ? "모든 드로잉 보이기" : "모든 드로잉 숨기기", keys, "hideAll")} aria-pressed={prefs.hideAll} onClick={() => action(() => setPrefs({ hideAll: !prefs.hideAll }))}><Icon path={prefs.hideAll ? DRAWING_ICONS.eyeOff : DRAWING_ICONS.eye} /></button>
+    <button className="draw-tool" aria-label="개체 트리" title="개체 트리 열기/닫기" aria-pressed={treeOpen} onClick={() => action(() => useDrawingSession.getState().patchCell(cellId, { objectTreeOpen: !treeOpen }))}><Icon path={DRAWING_ICONS.tree} /></button>
+    <RemoveAllButton cellId={cellId} action={action} />
     <div className="draw-toolbar-end">
       <button ref={helpAnchor} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button>
       <button className="draw-tool" aria-label="드로잉 도구 막대 숨기기" title="드로잉 도구 막대 숨기기" onClick={() => action(() => setToolbarHidden(true))}><span aria-hidden="true">«</span></button>
@@ -159,7 +170,7 @@ function ToolGroup({ label, tools, keys, onChoose, pinnable = true, children }: 
     onKeyDown: (e) => { if (e.key === "ArrowRight" && !e.nativeEvent.isComposing) { e.preventDefault(); setOpen(true); } },
     onClickCapture: (e) => { const swallow = held.current && pointerClick(e); held.current = false; if (swallow) { e.preventDefault(); e.stopPropagation(); } },
   };
-  return <div className="draw-group" ref={wrapper}>{children(press)}<div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="currentColor" /></svg></button>
+  return <div className="draw-group" data-open={open || undefined} ref={wrapper}>{children(press)}<div className="draw-group-toggle"><button ref={trigger} type="button" aria-label={`${label} 펼치기`} title={label} aria-haspopup="menu" aria-expanded={open} className="draw-group-dot" onClick={() => setOpen(!open)}><svg viewBox="0 0 8 8" width="7" height="7" aria-hidden="true"><path d="M2 1.5 L6.5 4 L2 6.5 Z" fill="currentColor" /></svg></button>
     {open && <Popover data-chart-control anchor={trigger} anchorRect={besideRail} follow placement="right" role="menu" aria-label={label} className="draw-tool-menu" onClose={() => setOpen(false)} onKeyDown={(e) => {
       e.stopPropagation();
       if (e.nativeEvent.isComposing) return;
@@ -172,9 +183,13 @@ function ToolGroup({ label, tools, keys, onChoose, pinnable = true, children }: 
       const index = buttons.findIndex((b) => b === document.activeElement);
       buttons[menuIndex(buttons.map((b) => b.getAttribute("aria-label") ?? b.textContent ?? ""), index, e.key, letters ? typed.current.text : "")]?.focus();
     }}>
+      <div className="draw-tool-menu-head" role="presentation"><span>{label}</span><span>{tools.length}종</span></div>
       {tools.map((tool) => <div className="draw-tool-choice" key={tool.tool}>
         <button type="button" role="menuitem" onClick={() => { onChoose(tool); setOpen(false); }}><Icon path={tool.icon} size={16} /><span>{tool.label}</span>{shortcutOf(keys, toolActionId(tool.tool)) && <kbd>{shortcutOf(keys, toolActionId(tool.tool))}</kbd>}</button>
-        {pinnable && <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="막대에 고정" onClick={() => useUiStore.getState().setDrawingPrefs({ pinnedTools: pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool] })}><StarIcon size={16} /></button>}
+        {pinnable && <button type="button" role="menuitemcheckbox" aria-label={`${tool.label} 막대에 고정`} aria-checked={pinned.includes(tool.tool)} title="즐겨찾기 고정" onClick={() => {
+          const next = pinned.includes(tool.tool) ? pinned.filter((id) => id !== tool.tool) : [...pinned, tool.tool];
+          useUiStore.getState().setDrawingPrefs({ pinnedTools: next, ...(next.length > pinned.length ? { favoritesBar: true } : {}) });
+        }}><StarIcon size={15} /></button>}
       </div>)}
     </Popover>}
   </div></div>;
@@ -189,6 +204,7 @@ function DrawingHelp({ anchor, close }: { anchor: React.RefObject<HTMLButtonElem
     <div className="draw-help-sections">{gestureSections(registeredModes()).map((section) => <section key={section.title} aria-label={section.title}><h3>{section.title}</h3>{section.rows.map((h) => <p key={h.keys}><kbd>{h.keys}</kbd><span>{h.label}</span></p>)}</section>)}</div>
   </Popover>;
 }
+
 function MagnetButton({ action, keys }: { action(f: () => void): void; keys: ActionKeys }) {
   const prefs = useUiStore((s) => s.prefs.drawing);
   const [open, setOpen] = useState(false);
@@ -197,15 +213,58 @@ function MagnetButton({ action, keys }: { action(f: () => void): void; keys: Act
   const held = useRef(false);
   const clear = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
   useEffect(() => clear, []);
-  return <div ref={root}>
-    <button className="draw-tool" aria-label="자석" title={`${keyTitle("자석 켜기/끄기", keys, "magnet")}, ${keyTitle("세기 바꾸기", keys, "magnetStrength")} · 우클릭 또는 길게 누르기`} aria-pressed={prefs.magnet} aria-haspopup="menu" aria-expanded={open}
+  return <div className="draw-group" data-open={open || undefined} ref={root}>
+    <button className="draw-tool" data-tone={prefs.magnet && prefs.magnetStrength === "strong" ? "warn" : undefined} aria-label="자석" title={`${keyTitle("자석 켜기/끄기", keys, "magnet")}, ${keyTitle("세기 바꾸기", keys, "magnetStrength")}`} aria-pressed={prefs.magnet} aria-haspopup="menu" aria-expanded={open}
       onContextMenu={(e) => { e.preventDefault(); held.current = true; setOpen(true); }}
       onPointerDown={(e) => { if (e.button !== 0) return; held.current = false; timer.current = setTimeout(() => { held.current = true; setOpen(true); }, 500); }}
       onPointerUp={clear} onPointerCancel={clear} onPointerLeave={clear}
-      onClick={(e) => { const swallow = held.current && pointerClick(e); held.current = false; if (!swallow) action(() => useUiStore.getState().setDrawingPrefs({ magnet: !prefs.magnet })); }}><Icon path={DRAWING_ICONS.magnet} /></button>
+      onClick={(e) => { const swallow = held.current && pointerClick(e); held.current = false; if (!swallow) action(() => useUiStore.getState().setDrawingPrefs({ magnet: !prefs.magnet })); }}>
+      <Icon path={DRAWING_ICONS.magnet} />
+      {prefs.magnet && <span className="draw-util-badge" data-strength={prefs.magnetStrength} aria-hidden="true">{prefs.magnetStrength === "strong" ? "강" : "약"}</span>}
+    </button>
+    <div className="draw-group-toggle">
+      <button type="button" className="draw-group-dot" aria-label="자석 세기 펼치기" title="자석 세기 선택" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <svg viewBox="0 0 8 8" width="7" height="7" aria-hidden="true"><path d="M2 1.5 L6.5 4 L2 6.5 Z" fill="currentColor" /></svg>
+      </button>
+    </div>
     {open && <Menu label="자석 세기" root={root} placement="right" onClose={() => setOpen(false)} items={[
-      { kind: "radio", label: "약", checked: prefs.magnetStrength === "weak", onSelect: () => useUiStore.getState().setDrawingPrefs({ magnetStrength: "weak" }) },
-      { kind: "radio", label: "강", checked: prefs.magnetStrength === "strong", onSelect: () => useUiStore.getState().setDrawingPrefs({ magnetStrength: "strong" }) },
+      { kind: "radio", label: "약", shortcut: "16px", checked: prefs.magnet && prefs.magnetStrength === "weak", onSelect: () => useUiStore.getState().setDrawingPrefs({ magnet: true, magnetStrength: "weak" }) },
+      { kind: "radio", label: "강", shortcut: "항상", checked: prefs.magnet && prefs.magnetStrength === "strong", onSelect: () => useUiStore.getState().setDrawingPrefs({ magnet: true, magnetStrength: "strong" }) },
+      { kind: "separator" },
+      { kind: "radio", label: "자석 끄기", checked: !prefs.magnet, onSelect: () => useUiStore.getState().setDrawingPrefs({ magnet: false }) },
+    ]} />}
+  </div>;
+}
+
+function RemoveAllButton({ cellId, action }: { cellId: ReturnType<typeof useSelectionStore.getState>["activeCell"]; action(f: () => void): void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const prefs = useUiStore((s) => s.prefs.drawing);
+  const layoutId = useLayoutStore((s) => s.layout.id);
+  const surface = surfaceFor(cellId);
+  const view = surface?.host.view();
+  const all = view && surface ? surface.sync.drawings(view.symbol) : [];
+  const here = view ? all.filter((d) => inScope(d.scope, layoutId, cellId) && (d.periods === null || d.periods.includes(view.period))) : [];
+  const unlocked = here.filter((d) => !d.locked && !prefs.lockAll);
+  const group = view && isMinutePeriod(view.period) ? "분봉" : "일 이상";
+  return <div className="draw-group" data-open={open || undefined} ref={root}>
+    <button type="button" className="draw-tool draw-tool-danger" aria-label="드로잉 지우기 메뉴" title="드로잉 전체 삭제 옵션" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Icon path={DRAWING_ICONS.trash} />
+    </button>
+    {open && <Menu label="드로잉 전체 삭제" root={root} placement="right" onClose={() => setOpen(false)} items={[
+      { kind: "heading", label: `${group} 드로잉 ${here.length}개` },
+      { kind: "action", label: `잠금 제외 모두 지우기 (${unlocked.length}개)`, icon: <Icon path={DRAWING_ICONS.trash} size={14} />, danger: true, disabled: unlocked.length === 0, onSelect: () => action(() => {
+        if (!surface || unlocked.length === 0) return;
+        surface.sync.commitWithUndo(cellId, unlocked.map((before) => ({ kind: "delete", before })), `드로잉 ${unlocked.length}개를 지웠습니다`);
+        useDrawingSession.getState().select(cellId, []);
+      }) },
+      { kind: "action", label: `잠금 포함 모두 지우기 (${here.length}개)`, icon: <Icon path={DRAWING_ICONS.trash} size={14} />, danger: true, disabled: here.length === 0, onSelect: () => action(() => {
+        if (!surface || here.length === 0) return;
+        surface.sync.commitWithUndo(cellId, here.map((before) => ({ kind: "delete", before })), `드로잉 ${here.length}개를 지웠습니다`);
+        useDrawingSession.getState().select(cellId, []);
+      }) },
+      { kind: "separator" },
+      { kind: "check", label: "즐겨찾기 퀵 바 보이기", checked: prefs.favoritesBar, onSelect: () => useUiStore.getState().setDrawingPrefs({ favoritesBar: !prefs.favoritesBar }) },
     ]} />}
   </div>;
 }

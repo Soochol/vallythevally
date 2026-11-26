@@ -43,8 +43,8 @@ const mode = (drawings: DrawingBody[], lockAll = false): ModeContext => ({ ctx, 
 const deleted = (ops: readonly DrawingOp[]) => ops.map((op) => op.kind === "delete" ? op.before.id : `${op.kind}?`);
 
 describe("지우개", () => {
-  test("도구 막대에 지우개, 엔진에 시연 커서가 등록된다", () => {
-    expect(MODES.map((m) => m.id)).toEqual(["eraser", "demo"]);
+  test("도구 막대에 빠른 측정·지우개, 엔진에 시연 커서가 등록된다", () => {
+    expect(MODES.map((m) => m.id)).toEqual(["measure", "eraser", "demo"]);
     expect(modeOf("eraser")).toBe(eraser);
   });
 

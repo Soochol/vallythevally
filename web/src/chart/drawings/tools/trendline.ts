@@ -12,6 +12,7 @@ import {
   readTextStyle,
   select,
   strokeFields,
+  strokeOpacity,
 } from "../styleKit";
 import { type AxisLabel, defineTool, type Shape, type StyleField, type Tool, type ToolContext } from "../toolSpec";
 import type { DrawingPoint, DrawingTool, Extend, LineEnd, ScreenPoint, Stroke, TextStyle } from "../types";
@@ -122,6 +123,7 @@ export interface StraightLine<S extends RayStyle> {
   parseStyle(raw: unknown): S;
   extend(style: S, a: ScreenPoint, b: ScreenPoint): Extend;
   extendFields: readonly StyleField<S>[];
+  extendLens?: import("../toolSpec").Lens<S, Extend>;
 }
 
 const END_OPTIONS: readonly { value: LineEnd; label: string }[] = [
@@ -144,7 +146,7 @@ export function straightLine<S extends RayStyle>(line: StraightLine<S>): Tool {
     text: { editOnPlace: false },
     defaultStyle: line.defaultStyle,
     parseStyle: line.parseStyle,
-    bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash") },
+    bar: { lineColor: L("line", "color"), lineOpacity: strokeOpacity(L("line")), width: L("line", "width"), dash: L("line", "dash"), extend: line.extendLens, statsAlways: L("stats", "always") },
     settings: {
       style: [
         ...strokeFields("선", L("line")),
@@ -215,4 +217,5 @@ export const trendline = straightLine<TrendStyle>({
   parseStyle: parseTrendStyle,
   extend: (style) => style.extend,
   extendFields: [select("연장", EXTEND_OPTIONS, at<TrendStyle>()("extend"))],
+  extendLens: at<TrendStyle>()("extend"),
 });

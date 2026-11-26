@@ -47,7 +47,15 @@ const borderStroke: Lens<TextNoteStyle, Stroke> = {
   set: (s, v) => ({ ...s, border: { ...s.border, ...v } }),
 };
 export function shownOnPick<S>(fill: Lens<S, Fill>): Lens<S, Fill> {
-  return { get: fill.get, set: (s, v) => fill.set(s, { ...v, on: true }) };
+  return {
+    get: fill.get,
+    set: (s, v) => {
+      const current = fill.get(s);
+      const turnedOff = current.on && !v.on;
+      const zeroOpacity = v.opacity === 0 && !v.on;
+      return fill.set(s, { ...v, on: turnedOff || zeroOpacity ? false : true });
+    },
+  };
 }
 const WRAP_OPTIONS = WRAP_WIDTHS.map((w) => ({ value: String(w), label: `${w}px` }));
 const wrapWidthText: Lens<TextNoteStyle, string> = {

@@ -1,6 +1,6 @@
-import { at } from "../styleKit";
+import { at, strokeOpacity } from "../styleKit";
 import { type AxisLabel, defineTool } from "../toolSpec";
-import { type HLineStyle, hlineDefaults, hlineSettings, lineText, parseHLineStyle } from "./hline";
+import { type HLineStyle, hlineDefaults, hlineGapShapes, hlineSettings, lineText, parseHLineStyle } from "./hline";
 
 const L = at<HLineStyle>();
 
@@ -14,14 +14,18 @@ export const hray = defineTool<HLineStyle>({
   text: { editOnPlace: false },
   defaultStyle: hlineDefaults,
   parseStyle: parseHLineStyle,
-  bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash") },
+  bar: { lineColor: L("line", "color"), lineOpacity: strokeOpacity(L("line")), width: L("line", "width"), dash: L("line", "dash") },
   settings: hlineSettings,
   shapes({ points, style, text }, ctx) {
     const p = points[0];
     const a = p === undefined ? null : ctx.toScreen(p);
-    if (a === null) return [];
+    if (p === undefined || a === null) return [];
     const right = Math.max(a.x, ctx.paneWidth);
-    return [{ kind: "segment", a, b: { x: right, y: a.y }, stroke: style.line }, ...lineText(style, text, a.y, Math.max(a.x, 0), right)];
+    return [
+      { kind: "segment", a, b: { x: right, y: a.y }, stroke: style.line },
+      ...lineText(style, text, a.y, Math.max(a.x, 0), right),
+      ...hlineGapShapes(p.price, a.y, style, text, right, ctx.lastPrice),
+    ];
   },
   handles({ points }, ctx) {
     const p = points[0];

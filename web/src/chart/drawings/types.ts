@@ -84,6 +84,7 @@ export interface Stroke {
   color: Color;
   width: Width;
   dash: Dash;
+  opacity?: number;
 }
 
 export interface Fill {

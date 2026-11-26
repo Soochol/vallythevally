@@ -36,6 +36,17 @@ export interface Snapped {
   onCandidate: boolean;
 }
 
+export type OhlcTag = "시가" | "고가" | "저가" | "종가";
+
+export function ohlcTag(bar: Bar | undefined, price: number): OhlcTag | null {
+  if (bar === undefined) return null;
+  if (price === bar.h) return "고가";
+  if (price === bar.l) return "저가";
+  if (price === bar.c) return "종가";
+  if (price === bar.o) return "시가";
+  return null;
+}
+
 export function snap(raw: MagnetInput, mode: MagnetMode, sources: readonly MagnetSource[], price: Pick<PriceAxis, "toY">): Snapped {
   if (mode === "off") return { logical: raw.logical, price: raw.price, onCandidate: false };
   const logical = Math.max(0, Math.round(raw.logical));

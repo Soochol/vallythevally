@@ -18,7 +18,7 @@ const none: Mods = { ctrl: false, alt: false, shift: false };
 const ctrl: Mods = { ...none, ctrl: true };
 const alt: Mods = { ...none, alt: true };
 const shift: Mods = { ...none, shift: true };
-const all = new Set<ModeId>(["demo", "eraser"]);
+const all = new Set<ModeId>(["demo", "eraser", "measure"]);
 const nothing = new Set<ModeId>();
 
 describe("복제 수정키(Q1)는 한 줄이다", () => {

@@ -1,11 +1,17 @@
 .color-control { display:flex; align-items:center; flex-wrap:wrap; gap:var(--size-12); }
 .color-trigger { display:flex; align-items:center; gap:var(--size-8); height:var(--size-36); padding:0 var(--size-8); border:var(--size-1) solid var(--line); border-radius:var(--r-m); background:var(--chart-bg); font-size:var(--fs-s); }
-.color-trigger>i { width:var(--size-18); height:var(--size-18); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); }
+.color-trigger>i { position:relative; width:var(--size-18); height:var(--size-18); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); overflow:hidden; }
+.color-swatch-alpha { background-image:linear-gradient(45deg,var(--raised) 25%,transparent 25%),linear-gradient(-45deg,var(--raised) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--raised) 75%),linear-gradient(-45deg,transparent 75%,var(--raised) 75%); background-size:var(--size-8) var(--size-8); background-position:0 0,0 var(--size-4),var(--size-4) calc(var(--size-4) * -1),calc(var(--size-4) * -1) 0; }
+.color-swatch-alpha>span { position:absolute; inset:0; display:block; }
 .color-trigger>svg { width:var(--size-14); height:var(--size-14); color:var(--text-3); }
 .color-line-sample { display:flex; align-items:center; width:var(--size-72); height:var(--size-30); padding:0 var(--size-12); background:var(--chart-bg); border:var(--size-1) solid var(--line); border-radius:var(--r-m); }
 .color-line-sample>i { width:100%; border-radius:var(--r-s); }
 .color-popover { width:var(--size-320); padding:var(--size-16); }
 .color-picker-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:var(--size-12); }
+.color-picker-head-actions { display:flex; align-items:center; gap:var(--size-8); }
+.color-opacity-row { display:flex; align-items:center; gap:var(--size-8); margin-top:var(--size-12); font-size:var(--fs-xs); color:var(--text-2); }
+.color-opacity-row input[type=range] { flex:1; }
+.color-opacity-row output { width:var(--size-36); text-align:right; font-family:var(--font-mono); font-variant-numeric:tabular-nums; }
 .color-picker-head h3 { font-size:var(--fs-b); font-weight:600; }
 .color-picker-head .icon-btn { width:var(--size-24); height:var(--size-24); }
 .color-picker-tabs { display:flex; align-items:center; gap:var(--size-4); padding:var(--size-4); margin-bottom:var(--size-16); border-radius:var(--r-m); background:var(--chart-bg); }

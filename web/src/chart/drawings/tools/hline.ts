@@ -1,4 +1,5 @@
-import { at, defaultStroke, defaultText, readBool, readOneOf, readRecord, readStroke, readTextStyle, select, strokeFields } from "../styleKit";
+import { formatPercent } from "../../../lib/format";
+import { at, defaultStroke, defaultText, labelBox, readBool, readOneOf, readRecord, readStroke, readTextStyle, select, strokeFields, strokeOpacity } from "../styleKit";
 import { defineTool, type SettingsTabs, type Shape } from "../toolSpec";
 import type { Stroke, TextStyle } from "../types";
 
@@ -9,6 +10,7 @@ export interface HLineStyle {
   v: 1;
   line: Stroke;
   priceLabel: boolean;
+  gapLabel?: boolean;
   label: TextStyle & { align: Align; vAlign: VAlign };
 }
 
@@ -26,11 +28,13 @@ export function parseHLineStyle(raw: unknown): HLineStyle {
   const d = hlineDefaults();
   const o = readRecord(raw);
   const label = readRecord(o.label);
+  const gapLabel = typeof o.gapLabel === "boolean" ? o.gapLabel : undefined;
   return {
     ...o,
     v: 1,
     line: readStroke(o.line, d.line),
     priceLabel: readBool(o.priceLabel, d.priceLabel),
+    ...(gapLabel === undefined ? {} : { gapLabel }),
     label: {
       ...readTextStyle(o.label, d.label),
       align: readOneOf(label.align, ALIGNS, d.label.align),
@@ -53,7 +57,11 @@ export function lineText(style: HLineStyle, text: string | null, y: number, x1: 
 const L = at<HLineStyle>();
 
 export const hlineSettings: SettingsTabs<HLineStyle> = {
-  style: [...strokeFields("선", L("line")), { kind: "toggle", label: "가격 라벨", lens: L("priceLabel") }],
+  style: [
+    ...strokeFields("선", L("line")),
+    { kind: "toggle", label: "가격 라벨", lens: L("priceLabel") },
+    { kind: "toggle", label: "현재가 괴리율", lens: { get: (s) => s.gapLabel ?? true, set: (s, v) => ({ ...s, gapLabel: v }) } },
+  ],
   text: [
     { kind: "text", label: "글자", multiline: false },
     {
@@ -82,6 +90,22 @@ export const hlineSettings: SettingsTabs<HLineStyle> = {
   ],
 };
 
+export function hlineGapShapes(price: number, y: number, style: HLineStyle, text: string | null, right: number, lastPrice: number | null | undefined): Shape[] {
+  if (!(style.gapLabel ?? true) || lastPrice === undefined || lastPrice === null || lastPrice === 0) return [];
+  const pct = ((price - lastPrice) / Math.abs(lastPrice)) * 100;
+  const offsetY = text !== null && text !== "" && style.label.align === "right" && style.label.vAlign === "top" ? TEXT_GAP + 2 : -TEXT_GAP;
+  const baseline = offsetY > 0 ? "top" : "bottom";
+  return [{
+    kind: "text",
+    at: { x: right - TEXT_GAP, y: y + offsetY },
+    text: formatPercent(pct),
+    style: { ...style.label, size: 11, color: style.line.color },
+    align: "right",
+    baseline,
+    box: labelBox(style.line.color),
+  }];
+}
+
 export const hline = defineTool<HLineStyle>({
   tool: "hline",
   group: "line",
@@ -92,13 +116,17 @@ export const hline = defineTool<HLineStyle>({
   text: { editOnPlace: false },
   defaultStyle: hlineDefaults,
   parseStyle: parseHLineStyle,
-  bar: { lineColor: L("line", "color"), width: L("line", "width"), dash: L("line", "dash") },
+  bar: { lineColor: L("line", "color"), lineOpacity: strokeOpacity(L("line")), width: L("line", "width"), dash: L("line", "dash") },
   settings: hlineSettings,
   shapes({ points, style, text }, ctx) {
     const p = points[0];
     const y = p === undefined ? null : ctx.yOf(p.price);
-    if (y === null) return [];
-    return [{ kind: "segment", a: { x: 0, y }, b: { x: ctx.paneWidth, y }, stroke: style.line }, ...lineText(style, text, y, 0, ctx.paneWidth)];
+    if (p === undefined || y === null) return [];
+    return [
+      { kind: "segment", a: { x: 0, y }, b: { x: ctx.paneWidth, y }, stroke: style.line },
+      ...lineText(style, text, y, 0, ctx.paneWidth),
+      ...hlineGapShapes(p.price, y, style, text, ctx.paneWidth, ctx.lastPrice),
+    ];
   },
   handles({ points }, ctx) {
     const p = points[0];
