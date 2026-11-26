@@ -162,7 +162,9 @@ test("연결되면 코드로 남았던 관심종목 줄이 종목 이름을 다�
   const names = refuseNamesBeforeConnect(scenario);
   const lists = scenario.documents.watchlists();
   scenario.documents.saveWatchlists({ lists: lists.lists.map((list, i) => (i === 0 ? { ...list, symbols: ["005930"] } : list)), revision: lists.revision + 1 });
+  const refused = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/symbols/005930" && response.status() === 503);
   await open(page);
+  await (await refused).finished();
   const row = page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="005930"]');
   await expect(row.locator("[data-main]")).toHaveAccessibleName("005930");
   names.connected = true;

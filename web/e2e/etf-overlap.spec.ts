@@ -1,7 +1,8 @@
 import type { Page } from "@playwright/test";
+import type { EtfFundDetail } from "../src/api/generated/EtfFundDetail";
 import { ETF_DETAILS, etfDetailOf, etfHoldersOf } from "./fixtures/etf-data";
 import { contrastOf, inkAndFill } from "./contrast";
-import { cell, expect, test } from "./harness";
+import { cell, expect, type Scenario, test } from "./harness";
 
 const MEGA = etfDetailOf("444200");
 const SEMI = etfDetailOf("091160");
@@ -176,5 +177,48 @@ test.describe("390px", () => {
     );
     expect(trackWidths.length).toBeGreaterThan(0);
     for (const width of trackWidths) expect(width).toBeGreaterThanOrEqual(20);
+  });
+});
+
+test.describe("390px/320px 좁은 폭", () => {
+  const LONG_NAME_SUFFIX = " 글로벌 반도체 소부장 액티브 커버드콜 합성";
+  const longNamedEtfs = (): EtfFundDetail[] => [
+    ...ETF_DETAILS,
+    { ...ETF_DETAILS[0]!, fund: { ...ETF_DETAILS[0]!.fund, code: "069500", name: "KODEX 200" } },
+  ].map((detail) => ({ ...detail, fund: { ...detail.fund, name: `${detail.fund.name}${LONG_NAME_SUFFIX}` } }));
+
+  const serveLongNamedEtfs = (scenario: Scenario) => {
+    const details = longNamedEtfs();
+    scenario.reply((url) => url.pathname === "/api/etf/funds", { body: { funds: details.map((detail) => detail.fund) } });
+    for (const detail of details) scenario.reply((url) => url.pathname === `/api/etf/funds/${detail.fund.code}`, { body: detail });
+    return details.map((detail) => detail.fund.code);
+  };
+
+  const overflowOf = (page: Page, selector: string) =>
+    page.locator(selector).first().evaluate((element) => {
+      const container = element.parentElement!;
+      const right = container.getBoundingClientRect().right;
+      const farthest = Math.max(...[element, ...element.querySelectorAll("*")].map((node) => node.getBoundingClientRect().right));
+      return { scrollWidth: element.scrollWidth, parentClientWidth: container.clientWidth, spill: farthest - right };
+    });
+
+  test("ETF 좁은 화면에서 겹침 행렬과 목록 칩이 가로로 넘치지 않는다", async ({ page, scenario }) => {
+    const basket = serveLongNamedEtfs(scenario).join(",");
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`/etf?tab=overlap&basket=${basket}`);
+      await expect(page.getByRole("table", { name: "겹침 행렬" }).locator(".etf-matrix-cell")).toHaveCount(16);
+      const matrixBox = await overflowOf(page, ".etf-matrix");
+      expect(matrixBox.scrollWidth, `${width}px 행렬 ${JSON.stringify(matrixBox)}`).toBeLessThanOrEqual(matrixBox.parentClientWidth);
+      expect(matrixBox.spill, `${width}px 행렬 ${JSON.stringify(matrixBox)}`).toBeLessThanOrEqual(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${width}px 문서`).toBeLessThanOrEqual(0);
+
+      await page.goto(`/etf?basket=${basket}`);
+      await expect(page.getByRole("list", { name: "비교 바구니" }).getByRole("listitem")).toHaveCount(4);
+      const chips = await overflowOf(page, ".etf-basket-chips");
+      expect(chips.scrollWidth, `${width}px 칩 ${JSON.stringify(chips)}`).toBeLessThanOrEqual(chips.parentClientWidth);
+      expect(chips.spill, `${width}px 칩 ${JSON.stringify(chips)}`).toBeLessThanOrEqual(1);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${width}px 문서`).toBeLessThanOrEqual(0);
+    }
   });
 });

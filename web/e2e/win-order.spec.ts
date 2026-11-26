@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { FeedBook } from "../src/api/generated/FeedBook";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 import { DEFAULT_ORDER_SETTINGS } from "../src/features/order/orderSettings";
-import { BASE, CODE, HELD, cellAt, center, chipAt, commandOf, dragChip, feedSubscriptions, nxtTraded, openOrder, openOrderWindow, ordersOn, requestedVenues, snapshot, status, tradingApi, venueScene, win, writesTo } from "./order-window";
+import { ACCOUNT, accountData, BASE, CODE, HELD, cellAt, center, chipAt, commandOf, dragChip, feedSubscriptions, nxtTraded, openOrder, openOrderWindow, ordersOn, otherAccount, requestedVenues, SECOND_ACCOUNT, snapshot, status, tradingApi, venueScene, win, writesTo } from "./order-window";
 
 test("더블클릭이 그 가격에 지정가 신규를 내고 실시간 호가를 따른다", async ({ page, scenario }) => {
   ordersOn(scenario);
@@ -875,4 +875,99 @@ test("주문 목록에서 글자 키로 항목을 찾아 이동한다", async ({
   await menu.getByRole("menuitem", { name: "5 취소" }).focus();
   await page.keyboard.press("7");
   await expect(menu.getByRole("menuitem", { name: "7 취소" })).toBeFocused();
+});
+
+test.describe("주문 후속", () => {
+  const CLOCK_START = new Date("2026-11-18T10:00:00+09:00");
+  const PAUSED_AT = new Date("2026-11-18T10:05:00+09:00");
+  const OUTSIDE = { x: 5, y: 5 };
+  const placeRequests = (scenario: Scenario) => scenario.requests.filter((r) => new URL(r.url()).pathname === "/api/trading/commands/place" && r.method() === "POST");
+
+  async function arriveAtSamePrice(page: Page, scenario: Scenario, push: () => void): Promise<void> {
+    push();
+    const listed = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/trading/open-orders");
+    scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
+    await listed;
+    await page.clock.fastForward(50);
+  }
+
+  async function pressTotal(page: Page): Promise<void> {
+    const box = (await page.getByTestId("order-total-buy").boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 20, box.y - 10, { steps: 3 });
+    await page.mouse.move(OUTSIDE.x, OUTSIDE.y, { steps: 8 });
+  }
+
+  test("한 건이던 칩을 끄는 동안 같은 가격에 새 주문이 들어오면 놓는 순간 그 가격 일괄 취소가 바로 나간다", async ({ page, scenario }) => {
+    await page.clock.install({ time: CLOCK_START });
+    ordersOn(scenario);
+    const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5)]);
+    await openOrderWindow(page, scenario);
+    await page.clock.pauseAt(PAUSED_AT);
+    await dragChip(page, chipAt(page, "buy", 70_000), OUTSIDE, false);
+    await arriveAtSamePrice(page, scenario, () => api.open.push(openOrder("0000002", "buy", 70_000, 7)));
+    await expect(page.getByTestId("order-total-buy")).toContainText("(2)");
+    await page.mouse.up();
+    await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(1);
+    expect(writesTo(api, "cancel-batch")[0]!.body).toMatchObject({ side: "buy", price: 70_000 });
+    expect(api.writes).toHaveLength(1);
+  });
+
+  test("합계 칸을 끄는 동안 같은 가격에 새 주문이 들어오면 놓는 순간 가격마다 일괄 취소가 바로 나간다", async ({ page, scenario }) => {
+    await page.clock.install({ time: CLOCK_START });
+    ordersOn(scenario);
+    const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 3)]);
+    await openOrderWindow(page, scenario);
+    await page.clock.pauseAt(PAUSED_AT);
+    await pressTotal(page);
+    await arriveAtSamePrice(page, scenario, () => api.open.push(openOrder("0000003", "buy", 70_000, 9)));
+    await expect(page.getByTestId("order-total-buy")).toContainText("(3)");
+    await page.mouse.up();
+    await pollSaved(() => writesTo(api, "cancel-batch")).toHaveLength(2);
+    expect(writesTo(api, "cancel-batch").map((w) => `${w.body.side}:${w.body.price}`).sort()).toEqual(["buy:69900", "buy:70000"]);
+  });
+
+  test("같은 가격에 새 주문이 전송 중이면 합계 칸을 밖에 놓아도 취소가 나가지 않고 전송이 끝나도 나가지 않는다", async ({ page, scenario }) => {
+    ordersOn(scenario);
+    const api = tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000002", "buy", 69_900, 7)]);
+    const sending = scenario.hold((url, request) => url.pathname === "/api/trading/commands/place" && request.method() === "POST");
+    await openOrderWindow(page, scenario);
+    await cellAt(page, "buy", 70_000).dblclick();
+    await sending.received;
+    await pressTotal(page);
+    await page.mouse.up();
+    await expect(status(page)).toContainText("보내는 중인 주문");
+    expect(writesTo(api, "cancel-batch")).toHaveLength(0);
+    sending.reply({ body: commandOf("buy", { orderNo: "0000003", quantity: 1, price: 70_000 }) });
+    await expect(status(page)).toContainText("접수");
+    expect(writesTo(api, "cancel-batch")).toHaveLength(0);
+  });
+
+  test("답 없음 막대는 계좌를 바꿔도 처음 계좌를 보인다", async ({ page, scenario }) => {
+    ordersOn(scenario, [otherAccount()]);
+    const api = tradingApi(scenario);
+    api.accounts[SECOND_ACCOUNT] = accountData();
+    await openOrderWindow(page, scenario);
+    let failures = 1;
+    await page.route("**/api/trading/commands/place", (route) => {
+      if (failures <= 0) return route.fallback();
+      failures -= 1;
+      return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "internal", message: "서버가 응답하지 못했습니다", reason: null, retryAt: null, manualActionRequired: false } }) });
+    });
+    await cellAt(page, "buy", 70_000).dblclick();
+    await expect(status(page)).toContainText("서버의 답을 받지 못했습니다");
+    await page.locator('button[data-testid="account-label"]').click();
+    await page.getByTestId("account-option").nth(1).click();
+    await expect(page.locator('button[data-testid="account-label"]')).toHaveText("위탁 2 · 키움 ****-**05");
+    await expect(status(page)).toContainText("서버의 답을 받지 못했습니다");
+    await expect(status(page)).toContainText("****-**01");
+    const resend = status(page).getByRole("button", { name: /다시 보내기/ });
+    await expect(resend).toHaveAccessibleName(/\*\*\*\*-\*\*01/);
+    await resend.click();
+    await pollSaved(() => placeRequests(scenario)).toHaveLength(2);
+    const [first, second] = placeRequests(scenario).map((request) => request.postDataJSON() as Record<string, unknown>);
+    expect(second!.commandId).toBe(first!.commandId);
+    expect(second!.account ?? ACCOUNT).toBe(ACCOUNT);
+  });
 });

@@ -2,9 +2,9 @@
   "waitForTimeout": {
     "account-login.spec.ts": 0,
     "chart-settings.spec.ts": 0,
-    "drawing-tools-all.spec.ts": 1,
-    "drawing-tools-measure.spec.ts": 1,
-    "drawing-tools-shape.spec.ts": 1,
+    "drawing-tools-all.spec.ts": 0,
+    "drawing-tools-measure.spec.ts": 0,
+    "drawing-tools-shape.spec.ts": 0,
     "pending-frame-series.spec.ts": 1,
     "setup-wizard.spec.ts": 1,
     "system-settings-kiwoom.spec.ts": 0,

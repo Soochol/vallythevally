@@ -139,13 +139,14 @@ test("1440px 한 칸에 지표 일곱 개를 띄워도 봉이 범례 아래 끝 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await ready(page);
+  await expect(page.locator("[data-legend-tier]").first()).toHaveAttribute("data-legend-tier", "full");
+  await expect(cell(page).getByRole("button", { name: /^지표 7/ })).toBeVisible();
   const measured = await stable(page);
   expect(measured.tier).toBe("full");
   const legendBottom = measured.legend.bottom - measured.chart.y;
   expect(measured.topMargin * measured.paneHeight).toBeGreaterThanOrEqual(legendBottom);
   expect(measured.topBarY).not.toBeNull();
   expect(measured.topBarY!).toBeGreaterThanOrEqual(legendBottom - 0.5);
-  await expect(cell(page).getByRole("button", { name: /^지표 7/ })).toBeVisible();
 });
 
 test("여덟 칸에서는 범례가 가격 패널의 30%를 넘지 않고 날짜 글자가 가격축 위로 넘치지 않는다", async ({ page, scenario }) => {
@@ -155,6 +156,7 @@ test("여덟 칸에서는 범례가 가격 패널의 30%를 넘지 않고 날짜
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   for (let n = 1; n <= 8; n++) await ready(page, n);
+  await expect(page.locator("[data-legend-tier]").first()).toHaveAttribute("data-legend-tier", "minimal");
   const measured = await stable(page, 1);
   expect(measured.chart.width).toBeLessThan(340);
   expect(measured.tier).toBe("minimal");
@@ -170,13 +172,14 @@ test("폭 280px 칸의 범례는 한 줄과 지표 알약이고 알약을 누르
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await ready(page);
+  const pill = cell(page).getByRole("button", { name: /^지표 4/ });
+  await expect(page.locator("[data-legend-tier]").first()).toHaveAttribute("data-legend-tier", "minimal");
+  await expect(pill).toBeVisible();
   const measured = await stable(page);
   expect(measured.chart.width).toBeGreaterThan(265);
   expect(measured.chart.width).toBeLessThan(295);
   expect(measured.tier).toBe("minimal");
-  const pill = cell(page).getByRole("button", { name: /^지표 4/ });
   const rows = cell(page).locator(".chart-legend [data-indicator-row]:visible");
-  await expect(pill).toBeVisible();
   await expect(pill).toHaveAttribute("aria-expanded", "false");
   await expect(rows).toHaveCount(0);
   await expect(cell(page).locator("[data-legend-head] [role=heading]")).toBeVisible();
