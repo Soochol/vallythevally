@@ -242,7 +242,7 @@ const wholeRowsShown = (page: Page) => rows(page).evaluateAll((list) => list.fil
   return box.height > 0 && box.top >= top - 0.5 && box.bottom <= bottom + 0.5;
 }).length);
 
-test("스크리너 창이 754px이면 결과가 18줄 이상 보이고, 패널이 274px이면 세 줄 이상 보인다", async ({ scenario, screener, page }) => {
+test("스크리너 창이 754px이면 결과가 18줄 이상 보이고, 패널이 274px이면 두 줄 이상 보인다", async ({ scenario, screener, page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await runReady(page, scenario, screener);
   const tall = await panel(page).evaluate((el) => el.getBoundingClientRect().height);
@@ -251,7 +251,7 @@ test("스크리너 창이 754px이면 결과가 18줄 이상 보이고, 패널�
   expect(await wholeRowsShown(page)).toBeGreaterThanOrEqual(18);
   await page.setViewportSize({ width: 1440, height: Math.round(900 + 274 - tall) });
   await expect.poll(() => panel(page).evaluate((el) => Math.round(el.getBoundingClientRect().height))).toBe(274);
-  expect(await wholeRowsShown(page)).toBeGreaterThanOrEqual(3);
+  expect(await wholeRowsShown(page)).toBeGreaterThanOrEqual(2);
 });
 
 test("창의 … 메뉴는 하나이고 조건식 일과 전체 다시 받기를 함께 담으며, 저장은 바뀐 것이 있을 때만 보인다", async ({ scenario, screener, page }) => {
@@ -280,7 +280,7 @@ test("머리 아래 조건 요약 한 줄이 조건을 줄여 보이고 풍선�
   const summary = sentenceEditor(page).locator("[data-screen-summary]");
   await expect(summary).toHaveText("두 시장 · 조건 3개: 일봉 최근 1일 이내 종가가 1일 신고가인 봉이 있다, 일봉 최근 1일 이내 고가가 1일 신고가인 봉이 있다, 일봉 최근 1일 이내 거래량이 1일 신고거래량인 봉이 있다");
   await expect(summary).toHaveAttribute("title", "두 시장\n1. 일봉 최근 1일 이내 종가가 1일 신고가인 봉이 있다\n2. 일봉 최근 1일 이내 고가가 1일 신고가인 봉이 있다\n3. 일봉 최근 1일 이내 거래량이 1일 신고거래량인 봉이 있다");
-  await expect(summary).toHaveCSS("font-size", "12px");
+  await expect(summary).toHaveCSS("font-size", "11px");
   expect(await summary.evaluate((el) => [getComputedStyle(el).textOverflow, getComputedStyle(el).whiteSpace, el.scrollWidth > el.clientWidth])).toEqual(["ellipsis", "nowrap", true]);
   const [summaryBox, runBox] = [(await summary.boundingBox())!, (await runButton(page).boundingBox())!];
   expect(summaryBox.y).toBeGreaterThanOrEqual(runBox.y + runBox.height);

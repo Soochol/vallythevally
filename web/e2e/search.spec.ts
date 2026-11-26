@@ -77,7 +77,7 @@ test("초성 결과의 현재가·등락률·강조와 고른 한 종목의 추�
   await expect(samsung.getByLabel("현재가")).toHaveText(quotes[0]!.price.toLocaleString("ko-KR"));
   const rate = quotes[0]!.changeRate;
   const magnitude = `${Math.abs(rate).toFixed(2)}%`;
-  await expect(samsung.getByLabel("등락률").locator('[aria-hidden="true"]')).toHaveText(`${rate > 0 ? "▲ " : rate < 0 ? "▼ " : ""}${magnitude}`);
+  await expect(samsung.getByLabel("등락률").locator('[aria-hidden="true"]')).toHaveText(`${rate > 0 ? "▲" : rate < 0 ? "▼" : ""}${magnitude}`);
   await expect(samsung.getByLabel("등락률").locator(".sr-only")).toHaveText(`${rate > 0 ? "+" : rate < 0 ? "\u2212" : ""}${magnitude}`);
   await expect(samsung.locator("mark")).toHaveText(["삼성"]);
   await samsung.hover();
