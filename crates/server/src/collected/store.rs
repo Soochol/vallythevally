@@ -37,12 +37,18 @@ pub(super) fn read_day<K: CollectedKind>(
     let day_start_ms = kst(date, 0, 0, 0).unix() * 1000;
     let day_end_ms = day_start_ms + 86_400_000;
     let fids = K::fids();
-    let sql = build_query(fids, K::plus_sign_fids());
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패: {e}"))?;
+    let plus_fids = K::plus_sign_fids();
     let mut ordered: Vec<(i64, i64, K::View)> = Vec::new();
     let mut skipped: u64 = 0;
     for (symbol, path) in &targets {
         let path_text = path_str(path)?;
+        let active_plus: Vec<u32> = plus_fids
+            .iter()
+            .copied()
+            .filter(|fid| parquet_has_column(&conn, path_text, &format!("f{fid}_plus")))
+            .collect();
+        let sql = build_query(fids, &active_plus);
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패: {e}"))?;
         let mut raw_rows = stmt
             .query(params![path_text, symbol, day_start_ms, day_end_ms])
             .map_err(|e| format!("수집 저장소 조회 실행 실패({path_text}): {e}"))?;
@@ -70,6 +76,12 @@ pub(super) fn read_day<K: CollectedKind>(
     }
     let snapshots = ordered.into_iter().map(|(_, _, view)| view).collect();
     Ok(StoreDay { snapshots, gaps })
+}
+
+fn parquet_has_column(conn: &duckdb::Connection, path_text: &str, column: &str) -> bool {
+    conn.prepare("SELECT 1 FROM parquet_schema($1) WHERE name = $2 LIMIT 1")
+        .and_then(|mut s| s.exists(params![path_text, column]))
+        .unwrap_or(false)
 }
 
 fn build_query(fids: &[u32], plus_sign_fids: &[u32]) -> String {
