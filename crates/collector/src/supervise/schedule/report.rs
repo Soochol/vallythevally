@@ -1,8 +1,11 @@
+use std::path::PathBuf;
+
+use server::alert::MarketContext;
 use server::clock::Clock;
 use tokio::sync::watch;
 
 use crate::supervise::journal::kst_stamp;
-use crate::supervise::telegram::AlertTelegram;
+use crate::supervise::telegram::{AlertTelegram, market_observation, market_phase};
 use crate::supervise::shared::SharedReport;
 use crate::supervise::status::{Alert, AlertKind, DaemonStatus, DayPhase, ObservationDay};
 use crate::universe::Diff;
@@ -12,6 +15,7 @@ const ALERT_LIMIT: usize = 200;
 pub(super) struct Reporter {
     sender: watch::Sender<DaemonStatus>,
     clock: Clock,
+    data_dir: PathBuf,
     date: u32,
     phase: DayPhase,
     universe_changes: Option<Diff>,
@@ -26,18 +30,25 @@ pub(super) struct Reporter {
 }
 
 impl Reporter {
-    pub(super) fn new(clock: Clock, date: u32) -> Reporter {
+    pub(super) fn new(clock: Clock, data_dir: PathBuf, date: u32) -> Reporter {
         let sender = watch::channel(DaemonStatus { date, phase: DayPhase::OffHours, ..DaemonStatus::default() }).0;
-        Reporter { sender, clock, date, phase: DayPhase::OffHours, universe_changes: None, observation_day: None, own_alerts: Vec::new(), supervised: None, shared: SharedReport::default(), announced_shared: Vec::new(), telegram: None, announced_supervised: Vec::new(), notes_flushed: false }
+        Reporter { sender, clock, data_dir, date, phase: DayPhase::OffHours, universe_changes: None, observation_day: None, own_alerts: Vec::new(), supervised: None, shared: SharedReport::default(), announced_shared: Vec::new(), telegram: None, announced_supervised: Vec::new(), notes_flushed: false }
     }
 
     pub(super) fn use_telegram(&mut self, telegram: Option<AlertTelegram>) {
         self.telegram = telegram;
     }
 
+    fn market_context(&self) -> MarketContext {
+        MarketContext::new(self.date, market_phase(self.phase), market_observation(self.observation_day.as_ref()))
+    }
+
     pub(super) fn close_day(&self) {
         if let Some(telegram) = &self.telegram {
-            telegram.close_day(self.date);
+            let ctx = self.market_context();
+            let status = self.sender.borrow().clone();
+            telegram.check_disk(&self.data_dir, ctx);
+            telegram.close_day(ctx, &status, &self.data_dir);
         }
     }
 
@@ -57,6 +68,12 @@ impl Reporter {
         self.announced_supervised.clear();
         self.notes_flushed = false;
         self.publish();
+        if let Some(telegram) = &self.telegram {
+            let ctx = self.market_context();
+            telegram.resolve_pending_crash(ctx);
+            telegram.check_disk(&self.data_dir, ctx);
+            telegram.tick(ctx);
+        }
     }
 
     pub(super) fn current_phase(&self) -> DayPhase {
@@ -66,6 +83,11 @@ impl Reporter {
     pub(super) fn phase(&mut self, phase: DayPhase) {
         self.phase = phase;
         self.publish();
+        if let Some(telegram) = &self.telegram {
+            let ctx = self.market_context();
+            telegram.check_disk(&self.data_dir, ctx);
+            telegram.tick(ctx);
+        }
     }
 
     pub(super) fn observation_day(&mut self, observation_day: ObservationDay) {
@@ -79,26 +101,33 @@ impl Reporter {
     }
 
     pub(super) fn supervised(&mut self, status: DaemonStatus) {
+        let ctx = self.market_context();
         if let Some(telegram) = &self.telegram {
             let fresh: Vec<Alert> = status.alerts.iter().filter(|alert| !self.announced_supervised.contains(alert)).cloned().collect();
             for alert in fresh {
-                telegram.alert(self.date, &alert);
+                telegram.alert(ctx, &alert);
                 self.announced_supervised.push(alert);
             }
-            if !self.notes_flushed {
-                telegram.flush_notes(self.date);
-                self.notes_flushed = true;
-            }
+            telegram.observe_status(ctx, &status);
+            telegram.tick(ctx);
         }
         self.supervised = Some(status);
         self.publish();
+        if let Some(telegram) = &self.telegram
+            && !self.notes_flushed
+        {
+            let current = self.sender.borrow().clone();
+            telegram.morning_brief(ctx, &current, &self.data_dir);
+            self.notes_flushed = true;
+        }
     }
 
     pub(super) fn shared(&mut self, report: SharedReport) {
+        let ctx = self.market_context();
         if let Some(telegram) = &self.telegram {
             let fresh: Vec<Alert> = report.alerts.iter().filter(|alert| !self.announced_shared.contains(alert)).cloned().collect();
             for alert in fresh {
-                telegram.alert(self.date, &alert);
+                telegram.alert(ctx, &alert);
                 self.announced_shared.push(alert);
             }
         }
@@ -110,7 +139,7 @@ impl Reporter {
         tracing::warn!(?kind, %message, "데몬 경보");
         let alert = Alert { at: kst_stamp(self.clock.now()), kind, message };
         if let Some(telegram) = &self.telegram {
-            telegram.alert(self.date, &alert);
+            telegram.alert(self.market_context(), &alert);
         }
         self.own_alerts.push(alert);
         self.publish();

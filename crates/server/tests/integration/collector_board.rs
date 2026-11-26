@@ -967,35 +967,41 @@ async fn a_saved_login_stays_without_access_while_the_account_server_still_sends
 }
 
 #[tokio::test]
-async fn down_and_no_response_go_to_telegram_and_a_recovery_does_not() {
+async fn down_waits_for_hysteresis_sends_recovery_and_unresponsive_alerts_immediately() {
     let hook = FakeTelegram::start(200).await;
     let folder = tempfile::tempdir().unwrap();
     let mut fixture = Fixture::start(Options { telegram: Some(hook.telegram(folder.path())), ..Options::allowed_board() }).await;
     fixture.sign_in_as(Some("1234")).await;
     fixture.go();
     fixture.reached(DaemonJudgment::Down).await;
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert!(hook.texts().is_empty(), "45초 히스테리시스 이전에는 보내지 않는다");
+
+    tokio::time::sleep(Duration::from_secs(20)).await;
     hook.wait_for_calls(1).await;
     tokio::time::sleep(Duration::from_secs(60)).await;
-    assert_eq!(hook.texts().len(), 1, "꺼짐이 이어지는 동안 다시 보내지 않는다");
+    assert_eq!(hook.texts().len(), 1, "꺼짐이 이어지는 동안 바로 다시 보내지 않는다");
 
     let mut daemon = Daemon::start(&fixture.socket, Mode::Beating);
     fixture.reached(DaemonJudgment::Healthy).await;
-    tokio::time::sleep(Duration::from_secs(60)).await;
-    assert_eq!(hook.texts().len(), 1, "정상 복귀는 보내지 않는다");
+    hook.wait_for_calls(2).await;
     daemon.stop().await;
     fixture.reached(DaemonJudgment::Down).await;
-    hook.wait_for_calls(2).await;
+    tokio::time::sleep(Duration::from_secs(50)).await;
+    hook.wait_for_calls(3).await;
 
     let _mute = Daemon::start(&fixture.socket, Mode::Mute);
     fixture.reached(DaemonJudgment::Unresponsive).await;
-    hook.wait_for_calls(3).await;
+    hook.wait_for_calls(4).await;
     let texts = hook.texts();
-    assert_eq!(texts.len(), 3, "{texts:?}");
-    assert!(texts[0].starts_with("[수집 경보] 2026-11-18 09:") && texts[0].ends_with(" KST · 감독 데몬이 꺼져 있습니다"), "{texts:?}");
-    assert!(texts[1].ends_with("감독 데몬이 꺼져 있습니다") && texts[2].ends_with("감독 데몬이 응답하지 않습니다"), "{texts:?}");
+    assert_eq!(texts.len(), 4, "{texts:?}");
+    assert!(texts[0].contains("P1 장애") && texts[0].contains("감독 데몬이 꺼져 있습니다"), "{texts:?}");
+    assert!(texts[1].contains("복구 완료") && texts[1].contains("지속시간:"), "{texts:?}");
+    assert!(texts[2].contains("감독 데몬이 꺼져 있습니다"), "{texts:?}");
+    assert!(texts[3].contains("감독 데몬이 응답하지 않습니다"), "{texts:?}");
     assert!(texts.iter().all(|text| !text.contains(TELEGRAM_SECRET)));
     let routes = hook.routes.lock().unwrap().clone();
-    assert_eq!(routes.len(), 3);
+    assert_eq!(routes.len(), 4);
     assert!(routes.iter().all(|(path, chat_id)| path == &format!("/bot123456:{TELEGRAM_SECRET}/sendMessage") && chat_id == TELEGRAM_CHAT_ID), "{routes:?}");
 }
 
@@ -1010,6 +1016,7 @@ async fn a_telegram_that_fails_leaves_the_judgment_alone_and_its_token_out_of_th
     fixture.sign_in_as(Some("1234")).await;
     fixture.go();
     fixture.reached(DaemonJudgment::Down).await;
+    tokio::time::sleep(Duration::from_secs(50)).await;
     hook.wait_for_calls(1).await;
     tokio::time::sleep(Duration::from_secs(1)).await;
     assert_eq!(fixture.judgment(), DaemonJudgment::Down);

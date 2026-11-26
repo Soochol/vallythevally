@@ -402,7 +402,8 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
                 return Err(StartFailure);
             }
         };
-        collector = Some(board.with_telegram(telegram));
+        let alert_state_dir = config.collector_socket.as_deref().and_then(std::path::Path::parent).map(std::path::Path::to_path_buf);
+        collector = Some(board.with_telegram(telegram).with_alert_state_dir(alert_state_dir));
     }
     let factory = LaneFactory { transport: lane_transport, clock: clock.clone(), environment: config.kiwoom_environment, spacing: kiwoom_spacing, ws_url: lane_ws_url, bases };
     let key_setup = KeySetup { store: key_file, keys: startup.keys, market: startup.market, factory };

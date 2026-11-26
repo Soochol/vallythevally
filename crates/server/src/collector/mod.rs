@@ -20,7 +20,9 @@ use self::watch::{Answer, AskFailure, Question, Watcher};
 use self::telegram::Telegram;
 use self::wire::{CollectorCoverage, CollectorDisk, CollectorStatus};
 use crate::account::ProviderSubject;
+use crate::alert::{AlertCode, AlertEvent, AlertPipeline, AlertRouter, AlertSource, MarketContext, MarketObservation, MarketPhase, StateStore, TelegramSink};
 use crate::api::{ApiErrorCode, UnixSeconds};
+use crate::clock::Clock;
 use crate::http::{ApiFailure, AppState};
 
 pub const SUBJECT_RETRY: Duration = Duration::from_secs(30);
@@ -30,6 +32,7 @@ pub struct CollectorBoard {
     socket: PathBuf,
     watcher: Watcher,
     telegram: Option<Arc<Telegram>>,
+    alert_state_dir: Option<PathBuf>,
 }
 
 impl CollectorBoard {
@@ -37,11 +40,16 @@ impl CollectorBoard {
         if admins.is_empty() || !account_linked {
             return None;
         }
-        Some(CollectorBoard { admins, socket: socket?, watcher: Watcher::new(), telegram: None })
+        Some(CollectorBoard { admins, socket: socket?, watcher: Watcher::new(), telegram: None, alert_state_dir: None })
     }
 
     pub fn with_telegram(mut self, telegram: Option<Telegram>) -> CollectorBoard {
         self.telegram = telegram.map(Arc::new);
+        self
+    }
+
+    pub fn with_alert_state_dir(mut self, dir: Option<PathBuf>) -> CollectorBoard {
+        self.alert_state_dir = dir;
         self
     }
 
@@ -163,29 +171,73 @@ async fn disk(State(st): State<Arc<AppState>>, session: Option<Extension<Session
 
 pub async fn run(st: Arc<AppState>) {
     let Some(board) = st.system.collector() else { return };
-    let announced = board.telegram.clone().map(|telegram| (telegram, board.subscribe_notices()));
-    tokio::join!(watch::watch_forever(&board.socket, &board.watcher, &st.clock), fill_missing_subject(st.system.account()), announce_to_telegram(announced));
+    let announced = board.telegram.clone().map(|telegram| (telegram, board.subscribe_judgment(), board.alert_state_dir.clone()));
+    tokio::join!(watch::watch_forever(&board.socket, &board.watcher, &st.clock), fill_missing_subject(st.system.account()), announce_to_telegram(announced, st.clock.clone()));
 }
 
-fn telegram_text(notice: &DaemonNotice) -> String {
-    let what = match notice.judgment {
-        DaemonJudgment::Down => "감독 데몬이 꺼져 있습니다",
-        _ => "감독 데몬이 응답하지 않습니다",
+fn server_market_context(clock: &Clock) -> MarketContext {
+    let now = clock.now();
+    let date: u32 = now.kst_date().yyyymmdd().parse().unwrap_or(0);
+    let secs = now.kst_time_of_day().secs();
+    let phase = if secs < 7 * 3600 + 20 * 60 {
+        MarketPhase::OffHours
+    } else if secs < 7 * 3600 + 55 * 60 {
+        MarketPhase::MorningPrep
+    } else if secs < 20 * 3600 + 5 * 60 {
+        MarketPhase::Collecting
+    } else if secs < 21 * 3600 + 30 * 60 {
+        MarketPhase::AfterClose
+    } else {
+        MarketPhase::OffHours
     };
-    format!("[수집 경보] {} · {what}", domain::KstTime::from_unix(notice.at.0))
+    MarketContext::new(date, phase, MarketObservation::Observed)
 }
 
-async fn announce_to_telegram(announced: Option<(Arc<Telegram>, tokio::sync::broadcast::Receiver<DaemonNotice>)>) {
-    let Some((telegram, mut notices)) = announced else { return };
+fn apply_judgment(pipeline: &AlertPipeline, judgment: DaemonJudgment, ctx: MarketContext) {
+    match judgment {
+        DaemonJudgment::Down => {
+            let event = AlertEvent::active(AlertSource::ServerWatch, AlertCode::DaemonDown, "supervise", "감독 데몬이 꺼져 있습니다", "상태 소켓(supervise.sock) 연결이 45초 이상 실패했습니다")
+                .with_impact("실시간 수집 및 마감 정리가 중단됐을 수 있습니다")
+                .with_action("systemctl --user status vally-collector && journalctl --user -u vally-collector -n 50");
+            pipeline.emit(event, ctx);
+        }
+        DaemonJudgment::Unresponsive => {
+            let event = AlertEvent::active(AlertSource::ServerWatch, AlertCode::DaemonUnresponsive, "supervise", "감독 데몬이 응답하지 않습니다", "소켓 연결은 열려 있으나 하트비트가 15초 이상 끊겼습니다")
+                .with_impact("감독 데몬이 멈췄거나 과부하 상태일 수 있습니다")
+                .with_action("collector status --state ~/.local/state/vallythevally/collector");
+            pipeline.emit(event, ctx);
+        }
+        DaemonJudgment::Healthy => {
+            let down_ok = AlertEvent::resolved(AlertSource::ServerWatch, AlertCode::DaemonDown, "supervise", "감독 데몬 연결 복구", "상태 소켓 하트비트가 정상 수신되고 있습니다");
+            let silent_ok = AlertEvent::resolved(AlertSource::ServerWatch, AlertCode::DaemonUnresponsive, "supervise", "감독 데몬 응답 복구", "상태 소켓 하트비트가 정상 수신되고 있습니다");
+            pipeline.emit(down_ok, ctx);
+            pipeline.emit(silent_ok, ctx);
+        }
+        DaemonJudgment::Checking | DaemonJudgment::VersionMismatch => {}
+    }
+}
+
+async fn announce_to_telegram(announced: Option<(Arc<Telegram>, tokio::sync::watch::Receiver<DaemonJudgment>, Option<PathBuf>)>, clock: Clock) {
+    let Some((telegram, mut judgments, state_dir)) = announced else { return };
+    let router = AlertRouter::single(Arc::new(TelegramSink::from_arc(telegram)));
+    let store = state_dir.as_deref().map(|dir| StateStore::in_folder(dir, "server"));
+    let pipeline = AlertPipeline::spawn(router, store, clock.clone());
+    let mut tick = tokio::time::interval(Duration::from_secs(5));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let initial = *judgments.borrow_and_update();
+    apply_judgment(&pipeline, initial, server_market_context(&clock));
     loop {
-        match notices.recv().await {
-            Ok(notice) => {
-                if let Err(failure) = telegram.send(&telegram_text(&notice)).await {
-                    tracing::warn!(%failure, "수집 경보를 텔레그램으로 보내지 못했습니다");
+        tokio::select! {
+            changed = judgments.changed() => {
+                if changed.is_err() {
+                    return;
                 }
+                let current = *judgments.borrow_and_update();
+                apply_judgment(&pipeline, current, server_market_context(&clock));
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => tracing::warn!(skipped, "수집 경보 알림을 건너뛰었습니다"),
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+            _ = tick.tick() => {
+                pipeline.tick(server_market_context(&clock));
+            }
         }
     }
 }
@@ -208,45 +260,37 @@ async fn fill_missing_subject(account: &crate::account::AccountState) {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
-    use std::sync::Mutex;
-
-    use super::watch::{DaemonJudgment, DaemonNotice};
+    use super::watch::DaemonJudgment;
     use super::*;
+    use crate::alert::MemorySink;
+    use crate::clock::kst;
 
-    #[derive(Clone, Default)]
-    struct LogCapture(Arc<Mutex<Vec<u8>>>);
+    #[tokio::test(start_paused = true)]
+    async fn brief_down_under_hysteresis_sends_nothing_and_sustained_down_recovers_with_duration() {
+        let sink = Arc::new(MemorySink::new());
+        let clock = Clock::fake(kst(domain::KstDate::new(2026, 11, 26).unwrap(), 9, 0, 0));
+        let pipeline = AlertPipeline::spawn(AlertRouter::single(sink.clone()), None, clock.clone());
+        let ctx = server_market_context(&clock);
 
-    impl Write for LogCapture {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
+        apply_judgment(&pipeline, DaemonJudgment::Down, ctx);
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        pipeline.tick(server_market_context(&clock));
+        apply_judgment(&pipeline, DaemonJudgment::Healthy, server_market_context(&clock));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(sink.messages().is_empty());
 
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
+        apply_judgment(&pipeline, DaemonJudgment::Down, server_market_context(&clock));
+        tokio::time::sleep(Duration::from_secs(45)).await;
+        pipeline.tick(server_market_context(&clock));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(sink.messages().len(), 1);
+        assert!(sink.messages()[0].html.contains("감독 데몬이 꺼져 있습니다"));
 
-    #[tokio::test]
-    async fn notices_the_queue_dropped_are_counted_in_a_warning() {
-        let capture = LogCapture::default();
-        let writer = capture.clone();
-        let subscriber = tracing_subscriber::fmt().with_writer(move || writer.clone()).with_ansi(false).finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
-        let folder = tempfile::tempdir().unwrap();
-        let path = folder.path().join("telegram");
-        std::fs::write(&path, "bot_token=1:token\nchat_id=1\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let telegram = Arc::new(Telegram::load(&path).unwrap().unwrap());
-        let (sender, receiver) = tokio::sync::broadcast::channel(2);
-        for second in 0..5 {
-            sender.send(DaemonNotice { judgment: DaemonJudgment::Down, at: UnixSeconds(second) }).unwrap();
-        }
-        drop(sender);
-        announce_to_telegram(Some((telegram, receiver))).await;
-        let logs = String::from_utf8_lossy(&capture.0.lock().unwrap()).into_owned();
-        assert!(logs.contains("수집 경보 알림을 건너뛰었습니다") && logs.contains("skipped=3"), "{logs}");
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        apply_judgment(&pipeline, DaemonJudgment::Healthy, server_market_context(&clock));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent = sink.messages();
+        assert_eq!(sent.len(), 2);
+        assert!(sent[1].html.contains("복구 완료") && sent[1].silent);
     }
 }

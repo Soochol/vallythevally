@@ -151,6 +151,7 @@ impl Daemon {
         };
         let shared_dir = data_dir.join("shared");
         let today = date_number(injected.clock.now().kst_date());
+        let reporter = Reporter::new(injected.clock.clone(), data_dir.clone(), today);
         Ok(Daemon {
             keys,
             rest_keys,
@@ -165,7 +166,7 @@ impl Daemon {
             holidays: injected.holidays,
             finalizer: injected.finalizer,
             lane: IssueLane::new(std::time::Duration::ZERO),
-            reporter: Reporter::new(injected.clock.clone(), today),
+            reporter,
             clock: injected.clock,
             socket,
         })

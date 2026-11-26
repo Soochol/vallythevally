@@ -82,7 +82,7 @@ fail_promotion() {
     roll_back "$@"
     release_lock
     echo "vally-deploy collector-restart: $reason. 옮긴 파일을 되돌려 옛 판 그대로 두었습니다" >&2
-    alert_failure "[수집 경보] 수집 데몬 새 판 적용이 멈췄다: $reason. 옛 판 그대로 돌고 있다. 마감 뒤 collector-restart를 다시 돌려라."
+    alert_failure "[P2 경고] 수집 데몬 새 판 적용 실패 | 원인: $reason | 영향: 옛 판 그대로 유지 중 | 조치: 마감 뒤 collector-restart 재실행"
     return 1
 }
 

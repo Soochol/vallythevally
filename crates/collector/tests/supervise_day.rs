@@ -1526,7 +1526,13 @@ impl FakeTelegram {
     }
 
     fn telegram_at(folder: &Path, port: u16) -> AlertTelegram {
-        AlertTelegram::spawn(Telegram::load_at(&FakeTelegram::settings_file(folder), &format!("http://127.0.0.1:{port}")).unwrap().unwrap(), folder)
+        AlertTelegram::spawn(Telegram::load_at(&FakeTelegram::settings_file(folder), &format!("http://127.0.0.1:{port}")).unwrap().unwrap(), folder).with_disk_probe(|_| {
+            collector::supervise::DiskUsage {
+                filesystem: Some(collector::supervise::Filesystem { free_bytes: 300 * 1024 * 1024 * 1024, total_bytes: 500 * 1024 * 1024 * 1024 }),
+                raw: Vec::new(),
+                store: Vec::new(),
+            }
+        })
     }
 
     fn telegram(&self, folder: &Path) -> AlertTelegram {
@@ -1583,19 +1589,20 @@ impl LogCapture {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_daemon_alert_goes_to_telegram_and_a_second_of_the_same_kind_waits_for_the_closing_message() {
+async fn distinct_daemon_alerts_and_daily_digests_go_to_telegram_without_swallowing() {
     let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
     let harness = Harness::start(Config { holidays: Holidays::Down, candles: Candles::Failing, forced_exit: Some(1), telegram: Some(hook.telegram(folder.path())), ..Config::default() });
     harness.until_finalize_finished(1).await;
-    hook.wait_for_requests(3).await;
+    hook.wait_for_requests(4).await;
     harness.until(at(23, 0, 0)).await;
     let texts = hook.texts();
-    assert_eq!(texts.len(), 3, "{texts:?}");
-    assert!(texts[0].contains("· 관측일 판단 모름 ·"), "{texts:?}");
-    assert!(texts[1].contains("· 단계 실패 ·"), "{texts:?}");
-    assert!(texts[2].starts_with("[수집 경보] 20261118일 마감") && texts[2].contains("단계 실패 1건"), "{texts:?}");
-    assert_eq!(texts.iter().filter(|text| text.contains("· 단계 실패 ·")).count(), 1, "같은 종류는 그날 한 번만 보낸다");
+    assert_eq!(texts.len(), 4, "{texts:?}");
+    assert!(texts.iter().any(|text| text.contains("관측일 판단 불가")), "{texts:?}");
+    assert!(texts.iter().any(|text| text.contains("장전 수집 준비 점검")), "{texts:?}");
+    assert!(texts.iter().any(|text| text.contains("코스피 지수 일봉 대조 실패")), "{texts:?}");
+    assert!(texts.iter().any(|text| text.contains("P1 장애") && text.contains("마감 정리 실패")), "{texts:?}");
+    assert!(texts.iter().any(|text| text.contains("일일 수집 완결 리포트")), "{texts:?}");
     let alerts = harness.status_now().alerts.iter().filter(|alert| serde_json::to_value(alert.kind).unwrap() == "stage_failed").count();
     assert_eq!(alerts, 2, "현황에는 두 번 다 남는다");
     for text in &texts {
@@ -1614,7 +1621,7 @@ async fn a_rate_limited_alert_waits_for_retry_after_and_is_sent_again() {
     hook.wait_for_requests(2).await;
     {
         let requests = hook.requests.lock().unwrap();
-        assert_eq!(requests.len(), 2);
+        assert!(requests.len() >= 2, "{}", requests.len());
         assert_eq!(requests[0].text, requests[1].text);
         assert!(!requests[0].accepted && requests[1].accepted);
         assert!(requests[1].at - requests[0].at >= Duration::from_secs(1), "{:?}", requests[1].at - requests[0].at);
@@ -1656,7 +1663,7 @@ async fn a_telegram_nobody_listens_on_does_not_stop_the_day_and_its_token_stays_
 }
 
 #[tokio::test(start_paused = true)]
-async fn plan_notes_go_out_once_as_one_batch_when_collection_starts() {
+async fn plan_notes_go_out_once_in_the_morning_brief_when_collection_starts() {
     let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
     let harness = Harness::start_with(Config { start: at(11, 0, 0), telegram: Some(hook.telegram(folder.path())), ..Config::default() }, |data| {
@@ -1668,8 +1675,9 @@ async fn plan_notes_go_out_once_as_one_batch_when_collection_starts() {
     hook.wait_for_requests(1).await;
     harness.until_finalize_finished(1).await;
     harness.until(at(23, 0, 0)).await;
-    let batches: Vec<String> = hook.texts().into_iter().filter(|text| text.starts_with("[수집 계획]")).collect();
-    assert_eq!(batches, ["[수집 계획] 알릴 내용 2건\n- 예비 키 용량이 빠듯합니다\n- 인계할 몫이 큽니다"]);
+    let briefs: Vec<String> = hook.texts().into_iter().filter(|text| text.contains("장전 수집 준비 점검")).collect();
+    assert_eq!(briefs.len(), 1, "{briefs:?}");
+    assert!(briefs[0].contains("예비 키 용량이 빠듯합니다") && briefs[0].contains("인계할 몫이 큽니다"), "{}", briefs[0]);
     harness.finish().await;
 }
 
@@ -1691,32 +1699,34 @@ fn count_containing(texts: &[String], needle: &str) -> usize {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_daemon_restarted_the_same_day_does_not_send_the_same_alert_kind_or_plan_notes_again() {
+async fn a_daemon_restarted_the_same_day_does_not_send_the_same_incident_or_digests_again() {
     let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
     run_the_failing_day_with_notes(hook.telegram(folder.path())).await;
     let first = hook.texts();
-    assert_eq!(count_containing(&first, "· 단계 실패 ·"), 1, "{first:?}");
-    assert_eq!(count_containing(&first, "[수집 계획]"), 1, "{first:?}");
+    assert_eq!(count_containing(&first, "코스피 지수 일봉 대조 실패"), 1, "{first:?}");
+    assert_eq!(count_containing(&first, "장전 수집 준비 점검"), 1, "{first:?}");
+    assert_eq!(count_containing(&first, "일일 수집 완결 리포트"), 1, "{first:?}");
     run_the_failing_day_with_notes(hook.telegram(folder.path())).await;
     let all = hook.texts();
-    assert_eq!(count_containing(&all, "· 단계 실패 ·"), 1, "{all:?}");
-    assert_eq!(count_containing(&all, "[수집 계획]"), 1, "{all:?}");
-    assert!(folder.path().join("telegram-ledger.json").exists());
+    assert_eq!(count_containing(&all, "코스피 지수 일봉 대조 실패"), 1, "{all:?}");
+    assert_eq!(count_containing(&all, "장전 수집 준비 점검"), 1, "{all:?}");
+    assert_eq!(count_containing(&all, "일일 수집 완결 리포트"), 1, "{all:?}");
+    assert!(folder.path().join("alert-state-supervise.json").exists());
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_broken_ledger_file_does_not_stop_the_daemon_and_the_alerts_are_sent() {
+async fn a_broken_state_file_does_not_stop_the_daemon_and_the_alerts_are_sent() {
     let hook = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     let folder = tempfile::tempdir().unwrap();
-    std::fs::write(folder.path().join("telegram-ledger.json"), "{깨진 기록").unwrap();
+    std::fs::write(folder.path().join("alert-state-supervise.json"), "{깨진 기록").unwrap();
     let (logs, _guard) = LogCapture::capture();
     run_the_failing_day_with_notes(hook.telegram(folder.path())).await;
     let texts = hook.texts();
-    assert_eq!(count_containing(&texts, "· 단계 실패 ·"), 1, "{texts:?}");
-    assert_eq!(count_containing(&texts, "[수집 계획]"), 1, "{texts:?}");
+    assert_eq!(count_containing(&texts, "코스피 지수 일봉 대조 실패"), 1, "{texts:?}");
+    assert_eq!(count_containing(&texts, "장전 수집 준비 점검"), 1, "{texts:?}");
     let log = logs.text();
-    assert!(log.contains("텔레그램 전송 기록이 깨져 있어"), "{log}");
+    assert!(log.contains("알림 상태 파일이 깨져 있어"), "{log}");
     assert!(!log.contains(TELEGRAM_SECRET), "{log}");
 }
 
@@ -1729,6 +1739,6 @@ async fn an_alert_that_never_reached_telegram_is_sent_again_after_a_restart() {
     let accepting = FakeTelegram::start(Vec::new(), Answer::Accept).await;
     run_the_failing_day_with_notes(accepting.telegram(folder.path())).await;
     let texts = accepting.texts();
-    assert_eq!(count_containing(&texts, "· 단계 실패 ·"), 1, "{texts:?}");
-    assert_eq!(count_containing(&texts, "[수집 계획]"), 1, "{texts:?}");
+    assert_eq!(count_containing(&texts, "코스피 지수 일봉 대조 실패"), 1, "{texts:?}");
+    assert_eq!(count_containing(&texts, "장전 수집 준비 점검"), 1, "{texts:?}");
 }
