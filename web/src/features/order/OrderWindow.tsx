@@ -14,7 +14,6 @@ import { FeedStrip } from "../market-window/FeedStrip";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
-import { type LadderMicroCue } from "../market-window/PriceLadder";
 import { RatioBar, Strip, TotalFigure } from "../market-window/parts";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { SymbolHead } from "../market-window/SymbolHead";
@@ -194,18 +193,10 @@ function OrderBody({
   const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
   const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", !explorerOn && shownLadder);
-  const micro = useMicroFeed(code, market.venue, replay.kind === "live");
-  const ladderMicroCues = useMemo<ReadonlyMap<number, LadderMicroCue> | undefined>(() => {
-    if (!settings.microCues || replay.kind !== "live" || micro.cuesByPrice.size === 0) return undefined;
-    const out = new Map<number, LadderMicroCue>();
-    for (const [price, cue] of micro.cuesByPrice) {
-      out.set(price, { kind: cue.event.kind, side: cue.event.side, title: cue.title });
-    }
-    return out;
-  }, [settings.microCues, replay.kind, micro.cuesByPrice]);
-  const ofiBuyPct = micro.ofi?.buyPressurePct ?? 50;
-  const ofiQty = micro.ofi?.ofiQty ?? 0;
-  const ofiSpeed = micro.ofi ? (micro.ofi.tapeSpeedRatioBps / 10_000).toFixed(1) : "1.0";
+  const ofi = useMicroFeed(code, market.venue, replay.kind === "live");
+  const ofiBuyPct = ofi?.buyPressurePct ?? 50;
+  const ofiQty = ofi?.ofiQty ?? 0;
+  const ofiSpeed = ofi ? (ofi.tapeSpeedRatioBps / 10_000).toFixed(1) : "1.0";
   const ofiTitle = `10초 OFI 매수압력 ${ofiBuyPct}% · 순흐름 ${ofiQty >= 0 ? "+" : ""}${ofiQty.toLocaleString("ko-KR")}주 · 체결속도 ${ofiSpeed}x`;
 
   return (
@@ -257,7 +248,7 @@ function OrderBody({
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} microCues={ladderMicroCues} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (
@@ -270,7 +261,7 @@ function OrderBody({
         <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
         <div className="od-strip-bars">
           <RatioBar buy={totals.bid ?? 0} sell={totals.ask ?? 0} sellFirst label={totals.description ?? "총잔량 매도·매수 비율"} />
-          <div className="od-ofi-bar" data-testid="order-ofi-bar" data-buy-pct={ofiBuyPct} data-ofi-qty={ofiQty} data-tape-speed={micro.ofi?.tapeSpeedRatioBps ?? 10_000} role="img" aria-label={ofiTitle} title={ofiTitle}>
+          <div className="od-ofi-bar" data-testid="order-ofi-bar" data-buy-pct={ofiBuyPct} data-ofi-qty={ofiQty} data-tape-speed={ofi?.tapeSpeedRatioBps ?? 10_000} role="img" aria-label={ofiTitle} title={ofiTitle}>
             <i className="od-ofi-buy" style={{ transform: `scaleX(${ofiBuyPct / 100})` }} />
           </div>
         </div>

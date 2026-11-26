@@ -11,7 +11,6 @@ export type PresetMode = (typeof PRESET_MODES)[number]["value"];
 const isPresetMode = (value: unknown): value is PresetMode => value === "amount" || value === "buy" || value === "sell";
 export const KEEP_LAST_ENTRY_LABEL = "마지막 주문 수량 유지";
 export const ORDER_SOUND_LABEL = "주문 소리";
-export const MICRO_CUES_LABEL = "허수·아이스버그 표시";
 
 export interface OrderSettings {
   readonly amountPresets: readonly number[];
@@ -23,18 +22,17 @@ export interface OrderSettings {
   readonly maskAccount: boolean;
   readonly keepLastEntry: boolean;
   readonly sound: boolean;
-  readonly microCues: boolean;
   readonly venue: Venue;
   readonly account: string | null;
 }
 
-export const DEFAULT_ORDER_SETTINGS: OrderSettings = { amountPresets: [100, 500, 1_000, 5_000], presetMode: "amount", averageDot: true, divider: true, rate: true, skipSpreadGap: false, maskAccount: true, keepLastEntry: true, sound: true, microCues: true, venue: "combined", account: null };
+export const DEFAULT_ORDER_SETTINGS: OrderSettings = { amountPresets: [100, 500, 1_000, 5_000], presetMode: "amount", averageDot: true, divider: true, rate: true, skipSpreadGap: false, maskAccount: true, keepLastEntry: true, sound: true, venue: "combined", account: null };
 
 const isPreset = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x > 0 && x <= MAX_PRESET_AMOUNT_MAN;
 
 export function parseOrderSettings(raw: unknown): OrderSettings {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return DEFAULT_ORDER_SETTINGS;
-  const { amountPresets, presetMode, averageDot, divider, rate, skipSpreadGap, maskAccount, keepLastEntry, sound, microCues, venue, account } = raw as Record<string, unknown>;
+  const { amountPresets, presetMode, averageDot, divider, rate, skipSpreadGap, maskAccount, keepLastEntry, sound, venue, account } = raw as Record<string, unknown>;
   const flag = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
   return {
     amountPresets: Array.isArray(amountPresets) && amountPresets.length === AMOUNT_PRESET_COUNT && amountPresets.every(isPreset) ? amountPresets : DEFAULT_ORDER_SETTINGS.amountPresets,
@@ -46,7 +44,6 @@ export function parseOrderSettings(raw: unknown): OrderSettings {
     maskAccount: flag(maskAccount, DEFAULT_ORDER_SETTINGS.maskAccount),
     keepLastEntry: flag(keepLastEntry, DEFAULT_ORDER_SETTINGS.keepLastEntry),
     sound: flag(sound, DEFAULT_ORDER_SETTINGS.sound),
-    microCues: flag(microCues, DEFAULT_ORDER_SETTINGS.microCues),
     venue: typeof venue === "string" && isVenue(venue) ? venue : DEFAULT_ORDER_SETTINGS.venue,
     account: typeof account === "string" && account !== "" ? account : null,
   };

@@ -333,9 +333,6 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-vi-pop-mrow [data-tone=down] { color:var(--down); }
 .od-vi-pop-date { display:inline-flex; align-items:center; gap:var(--size-4); white-space:nowrap; color:var(--text); }
 .od-vi-pop-trap { padding:0 var(--size-4); border-radius:var(--r-s); background:var(--danger-soft); color:var(--danger); font-style:normal; font-weight:700; }
-.od-micro-cue { flex:none; width:var(--size-6); height:var(--size-6); border-radius:var(--r-pill); }
-.od-micro-cue[data-kind=spoof_cancel] { background:var(--warning); box-shadow:0 0 0 var(--size-2) var(--warning-soft); }
-.od-micro-cue[data-kind=iceberg_absorb] { background:var(--accent); box-shadow:0 0 0 var(--size-2) var(--accent-soft); }
 .od-strip-bars { display:flex; flex:1; flex-direction:column; gap:var(--size-2); min-width:var(--size-60); }
 .od-strip-bars .mw-ratio { flex:none; }
 .od-ofi-bar { position:relative; flex:none; height:var(--size-4); overflow:hidden; border-radius:var(--r-pill); background:var(--down-vol); }

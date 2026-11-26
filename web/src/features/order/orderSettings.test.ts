@@ -9,15 +9,7 @@ describe("호가주문 설정", () => {
   });
 
   it("저장된 값을 읽는다", () => {
-    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, microCues: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, microCues: false, venue: "nxt", account: "ref-b" });
-  });
-
-  it("허수·아이스버그 표시는 기본이 켜짐이고 옛 저장값에 없거나 깨졌으면 켜짐이며 있으면 그 값이다", () => {
-    expect(DEFAULT_ORDER_SETTINGS.microCues).toBe(true);
-    expect(parseOrderSettings({ amountPresets: [1, 2, 3, 4] }).microCues).toBe(true);
-    expect(parseOrderSettings({ microCues: "no" }).microCues).toBe(true);
-    expect(parseOrderSettings({ microCues: false }).microCues).toBe(false);
-    expect(parseOrderSettings({ microCues: true }).microCues).toBe(true);
+    expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], presetMode: "sell", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" });
   });
 
   it("프리셋 기준은 기본이 금액이고 모르는 값이면 금액이며 금액·매수·매도는 그대로 읽는다", () => {

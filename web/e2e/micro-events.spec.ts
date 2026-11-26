@@ -36,57 +36,6 @@ test.describe("허수 취소·아이스버그·OFI 미시 신호", () => {
     await page.clock.setFixedTime(new Date(scenario.now));
   });
 
-  test("체결 없는 0D 잔량 급감 시 호가 사다리에 허수 취소 큐가 뜨고 설정으로 숨길 수 있다", async ({ page, scenario }) => {
-    ordersOn(scenario);
-    tradingApi(scenario);
-    await openOrderWindow(page, scenario);
-
-    await pollSaved(() => feedSub(scenario, "book")).not.toBe("");
-    const bookSub = feedSub(scenario, "book");
-    const now = nowOf(scenario);
-    const ask0Price = BASE + 100;
-
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now, 5_000, 2_000) });
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now + 1, 100, 2_000) });
-
-    const cue = win(page).getByTestId("order-micro-cue");
-    await expect(cue).toHaveCount(1);
-    await expect(cue).toHaveAttribute("data-kind", "spoof_cancel");
-    await expect(cue).toHaveAttribute("data-price", String(ask0Price));
-    await expect(cue).toHaveAttribute("title", /취소율 100%/);
-
-    await win(page).getByTestId("order-settings-button").click();
-    const popover = page.getByTestId("order-settings");
-    await expect(popover).toBeVisible();
-    await popover.getByLabel("허수·아이스버그 표시").uncheck();
-    await expect(win(page).getByTestId("order-micro-cue")).toHaveCount(0);
-  });
-
-  test("동일 수량 0B 체결이 동반된 0D 감소에서는 허수 취소 큐가 뜨지 않는다", async ({ page, scenario }) => {
-    ordersOn(scenario);
-    tradingApi(scenario);
-    await openOrderWindow(page, scenario);
-
-    await pollSaved(() => feedSub(scenario, "book")).not.toBe("");
-    await pollSaved(() => feedSub(scenario, "trades")).not.toBe("");
-    const bookSub = feedSub(scenario, "book");
-    const tradeSub = feedSub(scenario, "trades");
-    const now = nowOf(scenario);
-    const ask0Price = BASE + 100;
-
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now, 5_000, 2_000) });
-    scenario.live.emit({
-      type: "feed_trades",
-      sub: tradeSub,
-      seq: 1,
-      trades: [{ t: now + 1, price: ask0Price, qty: 4_900, venue: "krx", strength: 120 }],
-    });
-    scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now + 2, 100, 2_000) });
-
-    await expect(win(page).getByTestId("order-ofi-bar")).toHaveAttribute("data-ofi-qty", "4900");
-    await expect(win(page).getByTestId("order-micro-cue")).toHaveCount(0);
-  });
-
   test("호가주문창 OFI 매수압력 막대가 실시간 0D 변화에 따라 갱신된다", async ({ page, scenario }) => {
     ordersOn(scenario);
     tradingApi(scenario);
@@ -184,7 +133,6 @@ test.describe("허수 취소·아이스버그·OFI 미시 신호", () => {
     scenario.live.emit({ type: "feed_book", sub: bookSub, book: makeBook(now + 2, 600, 2_000) });
 
     await expect(win(page).getByTestId("order-ofi-bar")).toHaveAttribute("data-ofi-qty", "400");
-    await expect(win(page).getByTestId("order-micro-cue")).toHaveCount(0);
   });
 
   test("호가창이 함께 열려도 호가주문창 fallback 미시 감지가 호가를 중복 처리하지 않는다", async ({ page, scenario }) => {
@@ -216,6 +164,5 @@ test.describe("허수 취소·아이스버그·OFI 미시 신호", () => {
     }
 
     await expect(win(page).getByTestId("order-ofi-bar")).toHaveAttribute("data-ofi-qty", "4900");
-    await expect(win(page).getByTestId("order-micro-cue")).toHaveCount(1);
   });
 });
