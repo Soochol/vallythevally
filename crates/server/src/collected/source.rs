@@ -14,6 +14,8 @@ use super::kind::{
 };
 use super::store::{StoreDay, read_day};
 
+const MAX_FALLBACK_DAYS: usize = 5;
+
 struct LoadedStoreDay<V> {
     stamp: FileStamp,
     day: Arc<StoreDay<V>>,
@@ -108,6 +110,18 @@ impl Collected {
         self.read_day::<Brokers>(|c| &c.brokers, paths, DayQuery { stock, date, date_str, after, now }).await
     }
 
+    pub(super) async fn broker_day_or_latest(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        after: Option<&str>,
+        now: KstTime,
+    ) -> Result<(String, DaySlice<api::FeedBrokers>), String> {
+        self.read_day_or_latest::<Brokers>(|c| &c.brokers, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
     pub(super) async fn broker_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
         self.days_for::<Brokers>(paths, stock, now).await
     }
@@ -122,6 +136,17 @@ impl Collected {
         now: KstTime,
     ) -> Result<DaySlice<CollectedProgramRow>, String> {
         self.read_day::<ProgramFlow>(|c| &c.program, paths, DayQuery { stock, date, date_str, after, now }).await
+    }
+
+    pub async fn program_day_or_latest(
+        self: &Arc<Self>,
+        paths: CollectorPaths,
+        stock: StockCode,
+        date: KstDate,
+        date_str: &str,
+        now: KstTime,
+    ) -> Result<(String, DaySlice<CollectedProgramRow>), String> {
+        self.read_day_or_latest::<ProgramFlow>(|c| &c.program, paths, DayQuery { stock, date, date_str, after: None, now }).await
     }
 
     pub async fn program_days(self: &Arc<Self>, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<Vec<String>, String> {
@@ -286,6 +311,36 @@ impl Collected {
             cursor: format!("f:{}:{}", flow.generation, flow.total),
             reset: flow.reset,
         })
+    }
+
+    async fn read_day_or_latest<K: CollectedKind>(
+        self: &Arc<Self>,
+        select: fn(&Self) -> &KindSource<K>,
+        paths: CollectorPaths,
+        query: DayQuery<'_>,
+    ) -> Result<(String, DaySlice<K::View>), String> {
+        let DayQuery { stock, date, date_str, after, now } = query;
+        let primary = self.read_day::<K>(select, paths.clone(), DayQuery { stock, date, date_str, after, now }).await?;
+        if after.is_some() || (primary.source != api::BrokerDaySource::None && !primary.snapshots.is_empty()) {
+            return Ok((date_str.to_owned(), primary));
+        }
+        let days = self.days_for::<K>(paths.clone(), stock, now).await?;
+        for candidate in days.iter().rev().filter(|day| day.as_str() < date_str).take(MAX_FALLBACK_DAYS) {
+            let Some(candidate_date) = KstDate::parse_yyyymmdd(candidate) else {
+                continue;
+            };
+            let fallback = self
+                .read_day::<K>(
+                    select,
+                    paths.clone(),
+                    DayQuery { stock, date: candidate_date, date_str: candidate, after: None, now },
+                )
+                .await?;
+            if fallback.source != api::BrokerDaySource::None && !fallback.snapshots.is_empty() {
+                return Ok((candidate.clone(), fallback));
+            }
+        }
+        Ok((date_str.to_owned(), primary))
     }
 }
 

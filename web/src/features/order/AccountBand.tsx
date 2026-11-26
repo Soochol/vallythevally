@@ -1,12 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ExecutionForensic } from "../../api/generated/ExecutionForensic";
-import type { MarginPolicy } from "../../api/generated/MarginPolicy";
+import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { TradingHolding } from "../../api/generated/TradingHolding";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
-import type { Venue } from "../../api/generated/Venue";
 import { EXECUTION_FORENSICS_QUERY_KEY, useExecutionForensics } from "../../api/trading";
 import type { WindowId } from "../../layout/kinds";
 import { formatPrice } from "../../lib/format";
@@ -20,25 +19,26 @@ import { Badge } from "../ui/Badge";
 import { fillIdentityKey, keyNewestFirstFills, newestFirst } from "./accountLists";
 import { AccountLabel } from "./AccountPicker";
 import { DIAGNOSIS_LABEL, ExecutionForensicCard } from "./ExecutionForensicCard";
-import { POLICY_LABEL } from "./funds";
 import { formatFillTime } from "./holdingSummary";
 import { HoldingRow } from "./HoldingRow";
 import { listAnchorRect, listWidthIn, listWindowOf } from "./listPopover";
 import type { OrderAccountChoice } from "./orderAccount";
 import { SIDE_LABEL } from "./orderRules";
-import { routeLabel } from "./orderSettings";
 import { type GoToSymbol, SymbolName } from "./SymbolName";
 
 export type AccountPanelKind = "open" | "holdings" | "fills";
 
-const TABS: readonly { readonly kind: AccountPanelKind; readonly label: string; readonly shortLabel?: string }[] = [
-  { kind: "open", label: "미체결 주문", shortLabel: "미체결" },
-  { kind: "holdings", label: "보유종목" },
-  { kind: "fills", label: "내 체결", shortLabel: "체결" },
+const TABS: readonly { readonly kind: AccountPanelKind; readonly label: string; readonly shortLabel: string; readonly miniLabel: string }[] = [
+  { kind: "open", label: "미체결 주문", shortLabel: "미체결", miniLabel: "미" },
+  { kind: "holdings", label: "보유종목", shortLabel: "보유", miniLabel: "보" },
+  { kind: "fills", label: "내 체결", shortLabel: "체결", miniLabel: "체" },
 ];
 
 interface Props {
   readonly windowId: WindowId;
+  readonly symbolCode: SymbolCode;
+  readonly symbolName: string | null;
+  readonly nxtTraded: boolean;
   readonly choice: OrderAccountChoice;
   readonly onPick: (accountRef: string) => void;
   readonly maskAccount: boolean;
@@ -49,13 +49,12 @@ interface Props {
   readonly ordersOpen: boolean;
   readonly writable: boolean;
   readonly mock: boolean;
-  readonly venue: Venue;
-  readonly policy: MarginPolicy | null;
   readonly onCancel: (orderNo: string) => void;
   readonly panel?: AccountPanelKind | null;
   readonly onPanelChange?: (next: AccountPanelKind | null) => void;
   readonly selectedFillKey?: string | null;
   readonly onSelectFillKey?: (next: string | null) => void;
+  readonly trailing?: ReactNode;
 }
 
 type RowsKind = "open" | "holdings" | "fills";
@@ -200,6 +199,9 @@ function FillsPanel({
 const isTab = (target: Node) => target instanceof Element && target.closest(".od-tab") !== null;
 export const AccountBand = memo(function AccountBand({
   windowId,
+  symbolCode,
+  symbolName,
+  nxtTraded,
   choice,
   onPick,
   maskAccount,
@@ -210,13 +212,12 @@ export const AccountBand = memo(function AccountBand({
   ordersOpen,
   writable,
   mock,
-  venue,
-  policy,
   onCancel,
   panel: controlledPanel,
   onPanelChange,
   selectedFillKey: controlledSelectedFillKey,
   onSelectFillKey,
+  trailing,
 }: Props) {
   const [localPanel, setLocalPanel] = useState<AccountPanelKind | null>(null);
   const [localSelectedFillKey, setLocalSelectedFillKey] = useState<string | null>(null);
@@ -289,22 +290,24 @@ export const AccountBand = memo(function AccountBand({
   const hasOpenForensic = panel === "fills" && selectedFillKey !== null && forensicItems.length > 0;
 
   return (
-    <div className="od-account" data-testid="order-account" data-anchor-ready={anchorReady}>
+    <div className="od-account" data-testid="order-account" data-mock={mock ? "" : undefined} data-anchor-ready={anchorReady}>
       <div className="od-account-bar">
-        <div className="od-account-head">
-          <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
-          {mock && <Badge tone="accent" className="od-env"><span data-testid="account-mock">모의투자</span></Badge>}
-          <span className="od-route" data-testid="account-route" title="주문 경로">{routeLabel(venue)}</span>
-          {policy !== null && <Badge tone={policy === "allow_margin" ? "warning" : "success"} className="od-policy"><span data-testid="margin-policy" data-policy={policy}>{POLICY_LABEL[policy]}</span></Badge>}
-        </div>
+        <span className="od-head-inline" data-testid="order-symbol-head">
+          <b className="od-head-name" data-testid="order-symbol-name" title={symbolName ?? undefined}>{symbolName ?? symbolCode}</b>
+          {nxtTraded && <span className="od-head-nxt" data-testid="order-symbol-nxt"><Badge>NXT</Badge></span>}
+        </span>
+        <AccountLabel choice={choice} maskAccount={maskAccount} onPick={onPick} />
+        {mock && <Badge tone="accent" className="od-env"><span data-testid="account-mock">모의투자</span></Badge>}
         <div className="od-account-tabs">
-          {TABS.map(({ kind, label, shortLabel }) => (
+          {TABS.map(({ kind, label, shortLabel, miniLabel }) => (
             <button
               key={kind}
               ref={(el) => { tabButtons.current[kind] = el; }}
               type="button"
               className="od-tab"
               data-testid={`account-tab-${kind}`}
+              aria-label={`${label} ${counts[kind]}`}
+              title={`${label} ${counts[kind]}`}
               aria-expanded={panel === kind}
               onClick={(e) => {
                 opener.current = e.currentTarget;
@@ -317,17 +320,15 @@ export const AccountBand = memo(function AccountBand({
                 }
               }}
             >
-              {shortLabel === undefined ? label : (
-                <>
-                  <span className="od-tab-full">{label}</span>
-                  <span className="od-tab-short">{shortLabel}</span>
-                </>
-              )}
+              <span className="od-tab-full">{label}</span>
+              <span className="od-tab-short">{shortLabel}</span>
+              <span className="od-tab-mini">{miniLabel}</span>
               {" "}
               <b>{counts[kind]}</b>
             </button>
           ))}
         </div>
+        {trailing}
       </div>
       {panel !== null && activeAnchor !== null && (
         <Popover

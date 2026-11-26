@@ -16,7 +16,6 @@ import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlo
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { Strip, TotalFigure } from "../market-window/parts";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
-import { SymbolHead } from "../market-window/SymbolHead";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
 import { EmptyState, ErrorState } from "../overlay/State";
 import { openSystemSettings } from "../system-settings/open";
@@ -201,9 +200,11 @@ function OrderBody({
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      <SymbolHead code={code} name={symbolInfo?.name ?? null} lastPrice={market.headPrice} previousClose={market.headPreviousClose} nxtTraded={symbolInfo?.nxtEnabled === true} nxtLabel="NXT지원" mock={mock} />
       <AccountBand
         windowId={id}
+        symbolCode={code}
+        symbolName={symbolInfo?.name ?? null}
+        nxtTraded={symbolInfo?.nxtEnabled === true}
         choice={choice}
         onPick={pickAccount}
         maskAccount={settings.maskAccount}
@@ -214,13 +215,12 @@ function OrderBody({
         ordersOpen={access.open}
         writable={writable}
         mock={mock}
-        venue={orderVenue}
-        policy={data.orderable?.policy ?? null}
         onCancel={commands.cancelOne}
         panel={accountPanel}
         onPanelChange={onAccountPanelChange}
         selectedFillKey={selectedFillKey}
         onSelectFillKey={onSelectFillKey}
+        trailing={settingsPopover}
       />
       <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} unit={profitUnit} onUnit={toggleProfitUnit} onFill={changeInput} />
       <QuantityRow
@@ -234,7 +234,6 @@ function OrderBody({
         onMode={changePresetMode}
         onInput={changeInput}
         onPreset={applyInput}
-        trailing={settingsPopover}
       />
       {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>

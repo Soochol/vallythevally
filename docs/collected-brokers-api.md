@@ -11,16 +11,16 @@
 
 ## 경로
 
-### `GET /api/symbols/{code}/brokers?date=YYYYMMDD[&after=<cursor>]`
+### `GET /api/symbols/{code}/brokers?date=YYYYMMDD[&after=<cursor>][&fallback=latest]`
 
-지정한 종목(`{code}`, 6자리 주식 코드)과 날짜(`date`, KST `YYYYMMDD`)의 거래원 스냅샷을 돌려준다. 지수 코드나 잘못된 `date`는 `400 bad_request`다.
+지정한 종목(`{code}`, 6자리 주식 코드)과 날짜(`date`, KST `YYYYMMDD`)의 거래원 스냅샷을 돌려준다. 지수 코드나 잘못된 `date`·`fallback`은 `400 bad_request`다. `fallback=latest`를 주고 `after`가 없을 때 요청일에 저장소·흐름 스냅샷이 비어 있으면, 그 종목의 `date` 이전 마감 저장소 가운데 스냅샷이 있는 가장 최근 날을 찾아 응답의 `date`에 그 날짜를 담아 돌려준다.
 
 응답 `BrokerDay` (camelCase):
 
 | 필드 | 형 | 뜻 |
 |---|---|---|
 | `symbol` | `string` | 종목 코드(예: `"005930"`) |
-| `date` | `string` | 요청 날짜(`YYYYMMDD`) |
+| `date` | `string` | 실제 반환한 날짜(`YYYYMMDD`, `fallback=latest`로 이전 날을 읽었으면 그 날짜) |
 | `source` | `"store" \| "flow" \| "none"` | 읽은 원천 |
 | `snapshots` | `FeedBrokers[]` | 시각 순 거래원 스냅샷(같은 초의 행도 받은 순서대로 모두 전송, 이름은 앞뒤 공백 제거, 빈 자리는 제외) |
 | `gaps` | `[number, number][]` | 수집이 끊긴 구간 `[fromSec, toSec]`(Unix 초) |

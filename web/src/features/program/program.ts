@@ -63,9 +63,23 @@ export function historyRows(points: readonly ProgramTradePoint[]): ProgramRow[] 
   });
 }
 
-export function joinHistoryAndLive(history: readonly ProgramRow[], live: readonly ProgramLine[]): ProgramLine[] {
+export function keepProgramHistory(
+  history: readonly ProgramRow[],
+  firstLiveTime: string | null,
+  isFallbackHistory: boolean,
+): readonly ProgramRow[] {
+  if (firstLiveTime === null) return history;
+  if (isFallbackHistory) return [];
+  return history.filter((row) => row.time < firstLiveTime);
+}
+
+export function joinHistoryAndLive(
+  history: readonly ProgramRow[],
+  live: readonly ProgramLine[],
+  isFallbackHistory = false,
+): ProgramLine[] {
   const firstLive = live.find((line) => line.kind === "row");
-  const kept = firstLive ? history.filter((row) => row.time < firstLive.row.time) : history;
+  const kept = keepProgramHistory(history, firstLive?.row.time ?? null, isFallbackHistory);
   return [...kept.map((row): ProgramLine => ({ kind: "row", row })), ...live];
 }
 

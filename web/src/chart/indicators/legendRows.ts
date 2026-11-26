@@ -504,7 +504,6 @@ export class IndicatorLegend {
       r.lastName = row.name;
       r.name.textContent = row.name;
       r.name.title = row.name;
-      r.root.title = row.name;
       r.labelsDirty = true;
     }
 

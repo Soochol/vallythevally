@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, memo, type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { type ChangeEvent, type FocusEvent, type KeyboardEvent, memo, type MouseEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { ALL_SELLING_TEXT } from "./holdingSummary";
 import { type BuyingPower, maxBuyQuantity, quantityForAmount, quantityForRatio, RATIO_PRESETS } from "./orderRules";
 import { AMOUNT_UNIT_WON, PRESET_MODES, type PresetMode } from "./orderSettings";
@@ -120,9 +120,16 @@ export const QuantityRow = memo(function QuantityRow({ input, mode, amountPreset
     setPicked({ mode, key: button.key, value: nextValue });
     onPreset(nextValue, button.key === "buy:100");
   };
+  const selectAllOnFocus = (event: FocusEvent<HTMLInputElement>) => {
+    event.currentTarget.select();
+  };
+  const selectAllOnClick = (event: MouseEvent<HTMLInputElement>) => {
+    const target = event.currentTarget;
+    if (target.selectionStart === target.selectionEnd) target.select();
+  };
   return (
     <div className="od-qty" data-testid="order-quantity-row" data-preset-mode={mode}>
-      <input ref={field} className="od-qty-input" aria-label="수량" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} />
+      <input ref={field} className="od-qty-input" aria-label="수량" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} onFocus={selectAllOnFocus} onClick={selectAllOnClick} />
       <div className="ui-seg od-preset-mode" data-size="sm" role="group" aria-label="프리셋 기준">
         {PRESET_MODES.map((option) => (
           <button

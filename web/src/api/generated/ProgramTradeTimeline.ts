@@ -10,4 +10,4 @@ export type ProgramTradeTimeline = { symbol: SymbolCode, points: Array<ProgramTr
 /**
  * 읽지 못해 뺀 행 수.
  */
-skippedRows: number, };
+skippedRows: number, date?: string, };

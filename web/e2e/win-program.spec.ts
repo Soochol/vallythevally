@@ -86,3 +86,30 @@ test("프로그램매매 자료가 없는 종목은 빈 상태를 보인다", as
   await expect(page.getByText("이 종목은 프로그램 매매 자료가 없습니다")).toBeVisible();
   await expect(rowsOf(page)).toHaveCount(0);
 });
+
+test("장 종료 후 직전 마감일 폴백을 배지와 함께 보이고 실시간이 오면 전일 행을 지우고 전환한다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [{ id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS }, ...layout.windows.filter((w) => w.kind !== "chart")];
+  scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+  let calls = 0;
+  scenario.on((url) => url.pathname === "/api/symbols/005930/program-trades", () => {
+    calls += 1;
+    if (calls === 1) {
+      return { body: { symbol: "005930", date: "20261106", points: [point("09:00:00", 10), point("15:20:00", 80)], skippedRows: 0 } };
+    }
+    return { body: { symbol: "005930", points: [], skippedRows: 0 } };
+  });
+
+  await openProgramWindow(page);
+  await expect(rowsOf(page)).toHaveCount(2);
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+80");
+  await expect(page.getByTestId("program-fallback-date")).toHaveText("11-06 마감");
+  const headHeight = await page.locator(".pg-head").evaluate((el) => el.getBoundingClientRect().height);
+  expect(headHeight).toBeLessThanOrEqual(52);
+
+  await emitLive(scenario, (sub) => ({ type: "feed_program", sub, row: liveRow("09:01:00", 15, 15, 105) }));
+  await expect(page.getByTestId("program-fallback-date")).toHaveCount(0);
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+15");
+  await expect(rowsOf(page)).toHaveCount(1);
+  await expect(rowsOf(page).first()).toHaveAttribute("data-source", "live");
+});

@@ -38,7 +38,7 @@ const EMPTY_RUNS: ReadonlyMap<string, readonly TrackRun[]> = new Map();
 const CLOCK_TICK_MS = 60_000;
 
 interface SyncStripView {
-  readonly kind: "live" | "past" | "none";
+  readonly kind: "past" | "none";
   readonly text: string;
 }
 
@@ -50,10 +50,7 @@ function buildSyncStrip(
   activeGap: readonly [UnixSeconds, UnixSeconds] | null,
   fetching: boolean,
 ): SyncStripView | null {
-  if (target.kind === "off") return null;
-  if (target.kind === "waiting") {
-    return { kind: "live", text: "차트 동기화 · 차트를 가리키면 그 날짜·시각 거래원" };
-  }
+  if (target.kind === "off" || target.kind === "waiting") return null;
   if (target.kind === "unsupported") {
     return { kind: "none", text: "분봉 또는 일봉 차트에서 날짜·시각이 동기화됩니다" };
   }
@@ -107,12 +104,16 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
 
   const activeDate = syncTarget.kind === "synced" ? syncTarget.date : today;
   const isToday = syncTarget.kind === "synced" ? syncTarget.isToday : true;
+  const allowFallback = syncTarget.kind !== "synced";
   const syncedCursor = syncTarget.kind === "synced" ? syncTarget.cursor : null;
   const effectiveCursor = localCursor ?? syncedCursor;
 
-  const day = useBrokerDay(code, activeDate, isToday, onWorkspace);
+  const day = useBrokerDay(code, activeDate, isToday, onWorkspace, allowFallback);
+  const isFallback = day.mode === "fallback" && day.date !== null;
+  const displayDate = isFallback ? day.date : activeDate;
+  const displayIsToday = isToday && !isFallback;
   const minuteBarsEnabled = !chartSync || selected !== null || localCursor !== null;
-  const bars = useBrokerMinuteBars(code, activeDate, isToday, onWorkspace && day.source !== "store", minuteBarsEnabled);
+  const bars = useBrokerMinuteBars(code, displayDate, displayIsToday, onWorkspace && day.source !== "store", minuteBarsEnabled);
 
   const view = useLayoutStore((s) => {
     const win = s.layout.windows.find((w) => w.id === id);
@@ -188,9 +189,11 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
         </button>
         {view === "board" && <Segmented label="카드 모양" options={CARD_OPTIONS} value={cards} onChange={changeCards} />}
         <span className="br-now">
-          {syncTarget.kind === "synced" && (
+          {syncTarget.kind === "synced" ? (
             <span className="br-sync-date" data-testid="brokers-sync-date">{formatMonthDay(activeDate)}</span>
-          )}
+          ) : isFallback ? (
+            <span className="br-sync-date" data-testid="brokers-fallback-date">{formatMonthDay(day.date)} 마감</span>
+          ) : null}
           <span className="br-time" data-testid="brokers-time">{shownTime === null ? "" : formatClock(shownTime).slice(0, 5)}</span>
           <span className="br-price" data-testid="brokers-price">{shownPrice === null ? "-" : formatPrice(shownPrice, false)}</span>
         </span>
