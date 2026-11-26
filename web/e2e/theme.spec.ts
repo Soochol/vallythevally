@@ -3,7 +3,7 @@ import { cell, expect, test } from "./harness";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-type StyleLabel = "에디토리얼" | "소프트 벤토" | "플로팅 글래스" | "포레스트";
+type StyleLabel = "에디토리얼" | "소프트 벤토" | "카본 벤토" | "플로팅 글래스" | "포레스트";
 type ModeLabel = "다크" | "화이트";
 
 const dialog = (page: Page) => page.getByRole("dialog", { name: "시스템 설정", exact: true });
@@ -28,7 +28,7 @@ const cssToken = (page: Page, name: string) =>
     return /^#[0-9a-f]{3}$/.test(value) ? `#${value[1]}${value[1]}${value[2]}${value[2]}${value[3]}${value[3]}` : value;
   }, name);
 
-test("처음에는 에디토리얼 다크이고 4 스타일 × 2 모드 8개 조합을 바꾸면 즉시 반영된다", async ({ page }) => {
+test("처음에는 에디토리얼 다크이고 5 스타일 × 2 모드 10개 조합을 바꾸면 즉시 반영된다", async ({ page }) => {
   await open(page);
   await expect(root(page)).toHaveAttribute("data-style", "editorial");
   await expect(root(page)).toHaveAttribute("data-theme", "dark");
@@ -37,6 +37,7 @@ test("처음에는 에디토리얼 다크이고 4 스타일 × 2 모드 8개 조
   await openGeneralSettings(page);
   await expect(styleOption(page, "에디토리얼")).toBeChecked();
   await expect(styleOption(page, "소프트 벤토")).not.toBeChecked();
+  await expect(styleOption(page, "카본 벤토")).not.toBeChecked();
   await expect(styleOption(page, "플로팅 글래스")).not.toBeChecked();
   await expect(styleOption(page, "포레스트")).not.toBeChecked();
   await expect(modeOption(page, "다크")).toBeChecked();
@@ -62,9 +63,30 @@ test("처음에는 에디토리얼 다크이고 4 스타일 × 2 모드 8개 조
   await modeOption(page, "다크").click();
   await expect(root(page)).toHaveAttribute("data-style", "bento");
   await expect(root(page)).toHaveAttribute("data-theme", "dark");
-  await expect.poll(() => cssToken(page, "--bg")).toBe("#0b1018");
+  await expect.poll(() => cssToken(page, "--bg")).toBe("#06080b");
+  await expect.poll(() => cssToken(page, "--chart-bg")).toBe("#0b0e14");
+  await expect.poll(() => cssToken(page, "--surface")).toBe("#0f1319");
   await expect.poll(() => cssToken(page, "--accent")).toBe("#42e3a8");
 
+  await styleOption(page, "카본 벤토").click();
+  await expect(root(page)).toHaveAttribute("data-style", "carbon");
+  await expect(root(page)).toHaveAttribute("data-theme", "dark");
+  await expect.poll(() => cssToken(page, "--bg")).toBe("#000000");
+  await expect.poll(() => cssToken(page, "--chart-bg")).toBe("#060708");
+  await expect.poll(() => cssToken(page, "--surface")).toBe("#0b0c0e");
+  await expect.poll(() => cssToken(page, "--accent")).toBe("#42e3a8");
+  await expect.poll(() => cssToken(page, "--r-l")).toBe("16px");
+  await expect(page.locator(".dock-group").first()).toHaveCSS("border-radius", "16px");
+  await expect(page.locator(".desktop-topbar .shell-search")).toHaveCSS("border-radius", "999px");
+
+  await modeOption(page, "화이트").click();
+  await expect(root(page)).toHaveAttribute("data-style", "carbon");
+  await expect(root(page)).toHaveAttribute("data-theme", "light");
+  await expect.poll(() => cssToken(page, "--bg")).toBe("#f3f4f5");
+  await expect.poll(() => cssToken(page, "--surface")).toBe("#ffffff");
+  await expect.poll(() => cssToken(page, "--accent")).toBe("#006953");
+
+  await modeOption(page, "다크").click();
   await styleOption(page, "플로팅 글래스").click();
   await expect(root(page)).toHaveAttribute("data-style", "glass");
   await expect(root(page)).toHaveAttribute("data-theme", "dark");
@@ -106,7 +128,10 @@ test("처음에는 에디토리얼 다크이고 4 스타일 × 2 모드 8개 조
 
 const PERSIST_CASES = [
   { styleLabel: "에디토리얼" as const, modeLabel: "화이트" as const, style: "editorial", mode: "light", key: "editorial-light", bg: "#f8f7f4", chartBg: "#f8f7f4", accent: "#141412", radius: "0px" },
+  { styleLabel: "소프트 벤토" as const, modeLabel: "다크" as const, style: "bento", mode: "dark", key: "bento-dark", bg: "#06080b", chartBg: "#0b0e14", accent: "#42e3a8", radius: "16px" },
   { styleLabel: "소프트 벤토" as const, modeLabel: "화이트" as const, style: "bento", mode: "light", key: "bento-light", bg: "#f2f4f6", chartBg: "#ffffff", accent: "#006953", radius: "16px" },
+  { styleLabel: "카본 벤토" as const, modeLabel: "다크" as const, style: "carbon", mode: "dark", key: "carbon-dark", bg: "#000000", chartBg: "#060708", accent: "#42e3a8", radius: "16px" },
+  { styleLabel: "카본 벤토" as const, modeLabel: "화이트" as const, style: "carbon", mode: "light", key: "carbon-light", bg: "#f3f4f5", chartBg: "#ffffff", accent: "#006953", radius: "16px" },
   { styleLabel: "플로팅 글래스" as const, modeLabel: "화이트" as const, style: "glass", mode: "light", key: "glass-light", bg: "#eceff8", chartBg: "#f8f9fe", accent: "#5a38c8", radius: "12px" },
   { styleLabel: "포레스트" as const, modeLabel: "다크" as const, style: "forest", mode: "dark", key: "forest-dark", bg: "#080b09", chartBg: "#080b09", accent: "#c7f36b", radius: "8px" },
   { styleLabel: "포레스트" as const, modeLabel: "화이트" as const, style: "forest", mode: "light", key: "forest-light", bg: "#eef2eb", chartBg: "#fafbf8", accent: "#226630", radius: "8px" },

@@ -43,6 +43,7 @@ describe("화면 테마 저장", () => {
     expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "dark" }))).toEqual({ style: "editorial", mode: "dark" });
     expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "light" }))).toEqual({ style: "editorial", mode: "light" });
     expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "bento" }))).toEqual({ style: "bento", mode: "dark" });
+    expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "carbon" }))).toEqual({ style: "carbon", mode: "dark" });
     expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "glass" }))).toEqual({ style: "glass", mode: "dark" });
   });
 
@@ -53,9 +54,9 @@ describe("화면 테마 저장", () => {
     expect(() => writeTheme({ style: "glass", mode: "light" }, () => ({ getItem: blocked, setItem: blocked }))).not.toThrow();
   });
 
-  test("여덟 가지 스타일·모드 조합을 모두 저장하고 다시 읽는다", () => {
+  test("열 가지 스타일·모드 조합을 모두 저장하고 다시 읽는다", () => {
     const storage = memory();
-    expect(THEME_KEYS).toHaveLength(8);
+    expect(THEME_KEYS).toHaveLength(10);
     for (const key of THEME_KEYS) {
       const theme = themeFromKey(key);
       writeTheme(theme, () => storage);

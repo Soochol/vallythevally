@@ -5,7 +5,7 @@ import { appliedThemeStyle, type ThemeStyle } from "../../persist/theme";
 export const DOCK_GAP = 6;
 export const CANVAS_DOCK_HEIGHT = 48;
 
-export const dockGapForStyle = (style: ThemeStyle): number => (style === "bento" ? 10 : style === "glass" ? 8 : DOCK_GAP);
+export const dockGapForStyle = (style: ThemeStyle): number => (style === "bento" || style === "carbon" ? 10 : style === "glass" ? 8 : DOCK_GAP);
 export const currentDockGap = (): number => (typeof document === "undefined" ? DOCK_GAP : dockGapForStyle(appliedThemeStyle()));
 
 export function useElementSize(ref: RefObject<HTMLElement | null>): Size | null {
