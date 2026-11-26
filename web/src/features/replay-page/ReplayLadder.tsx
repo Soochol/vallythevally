@@ -12,10 +12,11 @@ import {
 import { formatPercent, formatPrice } from "../../lib/format";
 import { replayGlow } from "../market-window/flash";
 import { PRESET_MODES, type PresetMode } from "../order/orderSettings";
-import { maxBuyQuantity, quantityForAmount, quantityForRatio, RATIO_PRESETS } from "../order/orderRules";
+import { quantityForAmount, quantityForRatio, RATIO_PRESETS } from "../order/orderRules";
 import type { ReplayEngine, ReplayEngineFrame } from "./replayEngine";
-import { type DeltaMode, formatSignedQty, formatWonCompact } from "./replayModel";
+import { type DeltaMode, formatReplayClock, formatSignedQty } from "./replayModel";
 import {
+  affordableMaxBuyQuantity,
   DEFAULT_PAPER_INITIAL_CASH,
   PAPER_AMOUNT_PRESETS_MAN,
   PAPER_CASH_PRESETS_MAN,
@@ -23,6 +24,7 @@ import {
   type PaperOrderSide,
   type PaperSummary,
   type ReplayPaperEngine,
+  resolvePaperBuyQuantity,
 } from "./replayPaperEngine";
 
 type OrderClickMode = "single" | "double";
@@ -145,6 +147,7 @@ export function ReplayLadder({
   const [qtyInput, setQtyInput] = useState(String(DEFAULT_SIM_QTY));
   const [presetMode, setPresetMode] = useState<PresetMode>("amount");
   const [pickedPreset, setPickedPreset] = useState<string | null>(null);
+  const [buyRatioPercent, setBuyRatioPercent] = useState<number | null>(null);
   const [paperTick, setPaperTick] = useState(0);
   const [refPrice, setRefPrice] = useState<number | null>(() => referencePriceOf(engine.getFrame()));
   const [dragView, setDragView] = useState<DragView | null>(null);
@@ -158,6 +161,7 @@ export function ReplayLadder({
   const totalBidRef = useRef<HTMLElement>(null);
   const totalAskDeltaRef = useRef<HTMLSpanElement>(null);
   const totalBidDeltaRef = useRef<HTMLSpanElement>(null);
+  const ladderClockRef = useRef<HTMLSpanElement>(null);
   const ratioAskBarRef = useRef<HTMLSpanElement>(null);
   const ratioBidBarRef = useRef<HTMLSpanElement>(null);
   const ratioAskPctRef = useRef<HTMLSpanElement>(null);
@@ -178,6 +182,7 @@ export function ReplayLadder({
   const rowPricesRef = useRef<(number | null)[]>(ROW_INDICES.map(() => null));
   const prevRowQtyRef = useRef<Map<string, number>>(new Map());
   const qtyNumRef = useRef<number>(DEFAULT_SIM_QTY);
+  const buyRatioPercentRef = useRef<number | null>(null);
   const dragOriginRef = useRef<{
     readonly side: PaperOrderSide;
     readonly fromPrice: number;
@@ -221,6 +226,10 @@ export function ReplayLadder({
   useEffect(() => {
     qtyNumRef.current = parsedQty;
   }, [parsedQty]);
+
+  useEffect(() => {
+    buyRatioPercentRef.current = buyRatioPercent;
+  }, [buyRatioPercent]);
 
   useEffect(() => {
     return paper.subscribe(() => setPaperTick((t) => t + 1));
@@ -272,7 +281,7 @@ export function ReplayLadder({
 
       const eqTone = s.totalReturn > 0 ? "up" : s.totalReturn < 0 ? "down" : null;
       setAttr(pnlEquityCellRef.current, "data-tone", eqTone);
-      setText(pnlEquityRef.current, `${formatWonCompact(s.totalEquity)} (${formatPercent(s.totalReturnPct)})`);
+      setText(pnlEquityRef.current, `${formatPrice(Math.round(s.totalEquity), false)}원 (${formatPercent(s.totalReturnPct)})`);
     },
     [paper],
   );
@@ -302,8 +311,10 @@ export function ReplayLadder({
         ? Math.round(holding.avgPrice / step) * step
         : null;
       const availCash = paper.getAvailableCash();
+      const feeEnabled = paper.isFeeEnabled();
       const sellable = paper.getSellableQuantity();
       const previewQty = qtyNumRef.current;
+      const activeBuyRatio = buyRatioPercentRef.current;
       const perfNow = typeof performance !== "undefined" ? performance.now() : Date.now();
       const nextBookMap = new Map<string, number>();
 
@@ -327,11 +338,26 @@ export function ReplayLadder({
         setAttr(refs.buyCell, "data-price", row.price !== null ? String(row.price) : null);
         setAttr(refs.buyCell, "data-empty", row.price === null || snapshot.inGap ? "" : null);
 
-        if (row.price !== null && !snapshot.inGap && previewQty > 0) {
-          setText(refs.sellPreview, `매도 ${formatPrice(previewQty, false)}`);
-          setAttr(refs.sellPreview, "data-over", previewQty > sellable ? "" : null);
-          setText(refs.buyPreview, `매수 ${formatPrice(previewQty, false)}`);
-          setAttr(refs.buyPreview, "data-over", row.price * previewQty > availCash ? "" : null);
+        if (row.price !== null && !snapshot.inGap) {
+          if (previewQty > 0) {
+            setText(refs.sellPreview, `매도 ${formatPrice(previewQty, false)}`);
+            setAttr(refs.sellPreview, "data-over", previewQty > sellable ? "" : null);
+          } else {
+            setText(refs.sellPreview, "");
+            setAttr(refs.sellPreview, "data-over", null);
+          }
+          const rowBuyQty = resolvePaperBuyQuantity(row.price, availCash, feeEnabled, activeBuyRatio, previewQty);
+          const rowBuyMax = affordableMaxBuyQuantity(row.price, availCash, feeEnabled);
+          if (rowBuyQty > 0) {
+            setText(refs.buyPreview, `매수 ${formatPrice(rowBuyQty, false)}`);
+            setAttr(refs.buyPreview, "data-over", rowBuyQty > rowBuyMax ? "" : null);
+          } else if (activeBuyRatio !== null) {
+            setText(refs.buyPreview, "매수 0");
+            setAttr(refs.buyPreview, "data-over", "");
+          } else {
+            setText(refs.buyPreview, "");
+            setAttr(refs.buyPreview, "data-over", null);
+          }
         } else {
           setText(refs.sellPreview, "");
           setAttr(refs.sellPreview, "data-over", null);
@@ -417,6 +443,7 @@ export function ReplayLadder({
 
       setText(totalAskRef.current, formatPrice(snapshot.totalAsk, false));
       setText(totalBidRef.current, formatPrice(snapshot.totalBid, false));
+      setText(ladderClockRef.current, formatReplayClock(frame.cursorMs / 1000, false));
 
       if (totalAskDeltaRef.current) {
         if (snapshot.totalAskDelta !== 0) {
@@ -453,7 +480,7 @@ export function ReplayLadder({
       unsubFrame();
       unsubPaper();
     };
-  }, [engine, paper, previousClose, tickStepOf, applyPnlDom, parsedQty]);
+  }, [engine, paper, previousClose, tickStepOf, applyPnlDom, parsedQty, buyRatioPercent]);
 
   useEffect(() => {
     const onPointerMove = (e: globalThis.PointerEvent) => {
@@ -535,7 +562,10 @@ export function ReplayLadder({
     const price = rowPricesRef.current[rowIndex] ?? null;
     const frame = engine.getFrame();
     if (price === null || frame.inGap) return;
-    paper.placeOrder(side, price, parsedQty, marketContextOf(frame));
+    const orderQty = side === "buy"
+      ? resolvePaperBuyQuantity(price, paper.getAvailableCash(), paper.isFeeEnabled(), buyRatioPercent, parsedQty)
+      : parsedQty;
+    paper.placeOrder(side, price, orderQty, marketContextOf(frame));
   };
 
   const startChipDrag = (side: PaperOrderSide, price: number, quantity: number, e: ReactPointerEvent<HTMLButtonElement>) => {
@@ -577,6 +607,7 @@ export function ReplayLadder({
   const handleQtyChange = (e: ChangeEvent<HTMLInputElement>) => {
     setQtyInput(e.target.value.replace(/[^0-9]/g, ""));
     setPickedPreset(null);
+    setBuyRatioPercent(null);
   };
 
   const handleQtyKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -584,6 +615,7 @@ export function ReplayLadder({
     e.preventDefault();
     const step = (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1);
     setPickedPreset(null);
+    setBuyRatioPercent(null);
     setQtyInput(String(Math.max(1, (Number(qtyInput) || 0) + step)));
   };
 
@@ -595,23 +627,26 @@ export function ReplayLadder({
           key: `amount:${man}`,
           label: man >= 1_000 ? `${man / 1_000}천만` : `${man}만`,
           qty,
+          buyRatio: null as number | null,
           disabled: qty <= 0,
         };
       });
     }
     if (presetMode === "buy") {
-      const maxQ = refPrice !== null && refPrice > 0 ? maxBuyQuantity(refPrice, summary.availableCash) : 0;
+      const maxQ = refPrice !== null && refPrice > 0
+        ? affordableMaxBuyQuantity(refPrice, summary.availableCash, summary.feeEnabled)
+        : 0;
       return RATIO_PRESETS.map(({ percent, label }) => {
         const qty = quantityForRatio(maxQ, percent);
-        return { key: `buy:${percent}`, label, qty, disabled: qty <= 0 };
+        return { key: `buy:${percent}`, label, qty, buyRatio: percent as number | null, disabled: qty <= 0 };
       });
     }
     const sellable = summary.sellableQuantity;
     return RATIO_PRESETS.map(({ percent, label }) => {
       const qty = quantityForRatio(sellable, percent);
-      return { key: `sell:${percent}`, label, qty, disabled: qty <= 0 };
+      return { key: `sell:${percent}`, label, qty, buyRatio: null as number | null, disabled: qty <= 0 };
     });
-  }, [presetMode, refPrice, summary.availableCash, summary.sellableQuantity]);
+  }, [presetMode, refPrice, summary.availableCash, summary.feeEnabled, summary.sellableQuantity]);
 
   const ctxOrders = ctxMenu && ctxMenu.side !== null && ctxMenu.price !== null
     ? summary.openOrders.filter((o) => o.side === ctxMenu.side && o.price === ctxMenu.price)
@@ -701,6 +736,7 @@ export function ReplayLadder({
             if (summary.sellableQuantity > 0) {
               setQtyInput(String(summary.sellableQuantity));
               setPickedPreset(null);
+              setBuyRatioPercent(null);
             }
           }}
         >
@@ -728,7 +764,7 @@ export function ReplayLadder({
         </div>
         <div ref={pnlEquityCellRef} className="od-cellbtn">
           <small>총 자산 (수익률)</small>
-          <b ref={pnlEquityRef} data-testid="replay-sim-equity">{`${formatWonCompact(summary.totalEquity)} (0.00%)`}</b>
+          <b ref={pnlEquityRef} data-testid="replay-sim-equity">{`${formatPrice(Math.round(summary.totalEquity), false)}원 (0.00%)`}</b>
         </div>
       </div>
 
@@ -754,6 +790,7 @@ export function ReplayLadder({
               onClick={() => {
                 setPresetMode(option.value);
                 setPickedPreset(null);
+                setBuyRatioPercent(null);
               }}
             >
               {option.label}
@@ -772,6 +809,7 @@ export function ReplayLadder({
               title={`${formatPrice(btn.qty, false)}주`}
               onClick={() => {
                 setPickedPreset(btn.key);
+                setBuyRatioPercent(btn.buyRatio);
                 setQtyInput(String(btn.qty));
               }}
             >
@@ -1059,15 +1097,14 @@ export function ReplayLadder({
 
       <div className="rp-ladder-foot rp-mono">
         <div className="rp-ratio-nums">
-          <div className="rp-ratio-side">
-            <span className="rp-muted">매도 총잔량</span>
-            <b ref={totalAskRef} className="rp-down" data-testid="replay-total-ask">0</b>
+          <div className="rp-ratio-side" title="매도 총잔량">
+            <b ref={totalAskRef} className="rp-down" data-testid="replay-total-ask" aria-label="매도 총잔량">0</b>
             <span ref={totalAskDeltaRef} className="rp-ratio-delta" hidden />
           </div>
-          <div className="rp-ratio-side">
+          <span ref={ladderClockRef} className="rp-ratio-clock rp-mono" data-testid="replay-ladder-clock" aria-label="복기 당시 시각">09:00:00</span>
+          <div className="rp-ratio-side rp-ratio-side-bid" title="매수 총잔량">
             <span ref={totalBidDeltaRef} className="rp-ratio-delta" hidden />
-            <b ref={totalBidRef} className="rp-up" data-testid="replay-total-bid">0</b>
-            <span className="rp-muted">매수 총잔량</span>
+            <b ref={totalBidRef} className="rp-up" data-testid="replay-total-bid" aria-label="매수 총잔량">0</b>
           </div>
         </div>
         <div className="rp-ratio-bar" aria-label="매도 대 매수 잔량 비율">

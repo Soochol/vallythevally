@@ -352,9 +352,22 @@
 :is([data-style="bento"], [data-style="carbon"]) .rp-sim-cap-input,
 :is([data-style="bento"], [data-style="carbon"]) .rp-sim-mini-btn,
 :is([data-style="bento"], [data-style="carbon"]) .rp-flat-btn,
-:is([data-style="bento"], [data-style="carbon"]) .rp-tbtn {
+:is([data-style="bento"], [data-style="carbon"]) .rp-tbtn:not(.rp-play-btn) {
   border-color: transparent;
   background: var(--raised);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-tbtn.rp-play-btn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-tbtn.rp-play-btn[data-playing="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 var(--size-1) var(--accent);
 }
 
 :is([data-style="bento"], [data-style="carbon"]) .rp-sim-mini-btn,

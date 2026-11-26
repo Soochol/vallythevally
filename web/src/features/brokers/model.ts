@@ -18,6 +18,7 @@ export interface BrokerGrid {
   readonly times: readonly UnixSeconds[];
   readonly gapBefore: readonly boolean[];
   readonly rows: readonly BrokerRow[];
+  readonly snapshots: readonly FeedBrokers[];
 }
 
 export interface BrokerState {
@@ -30,7 +31,7 @@ export type BrokerEvent =
   | { readonly type: "link"; readonly live: boolean }
   | { readonly type: "resync" };
 
-export const EMPTY_BROKER_STATE: BrokerState = { grid: { times: [], gapBefore: [], rows: [] }, gapPending: false };
+export const EMPTY_BROKER_STATE: BrokerState = { grid: { times: [], gapBefore: [], rows: [], snapshots: [] }, gapPending: false };
 
 const ABSENT: BrokerCell = { present: false, cumulative: null, net: null, first: false };
 
@@ -91,14 +92,18 @@ export function appendSnapshots(
 
   const times = new Array<UnixSeconds>(totalCols);
   const gapBefore = new Array<boolean>(totalCols);
+  const nextSnapshots = new Array<FeedBrokers>(totalCols);
   for (let i = 0; i < baseCols; i++) {
     times[i] = grid.times[i]!;
     gapBefore[i] = grid.gapBefore[i]!;
+    nextSnapshots[i] = grid.snapshots[i]!;
   }
   for (let k = 0; k < effective.length; k++) {
     const col = baseCols + k;
-    const currTime = effective[k]!.t;
+    const snap = effective[k]!;
+    const currTime = snap.t;
     times[col] = currTime;
+    nextSnapshots[col] = snap;
     if (col === 0) {
       gapBefore[col] = false;
     } else if (replaceLast && k === 0) {
@@ -148,7 +153,7 @@ export function appendSnapshots(
   for (const entry of mutableRows.values()) {
     if (entry.hasPresent) rows.push({ code: entry.code, name: entry.name, cells: entry.cells });
   }
-  return { grid: { times, gapBefore, rows }, gapPending: false };
+  return { grid: { times, gapBefore, rows, snapshots: nextSnapshots }, gapPending: false };
 }
 
 export const MAX_LIVE_BROKER_COLUMNS = 720;
@@ -169,6 +174,7 @@ export function compactBrokerGrid(grid: BrokerGrid): BrokerGrid {
   if (groups.length === n) return grid;
   const times = groups.map((group) => grid.times[group.end]!);
   const gapBefore = groups.map((group) => grid.gapBefore[group.start]!);
+  const snapshots = groups.map((group) => grid.snapshots[group.end]!);
   const rows: BrokerRow[] = grid.rows.map((row) => {
     const cells = new Array<BrokerCell>(groups.length);
     let previousCumulative: number | null = null;
@@ -192,7 +198,7 @@ export function compactBrokerGrid(grid: BrokerGrid): BrokerGrid {
     }
     return { code: row.code, name: row.name, cells };
   });
-  return { times, gapBefore, rows };
+  return { times, gapBefore, rows, snapshots };
 }
 
 export function reduceBrokerEvents(state: BrokerState, events: readonly BrokerEvent[]): BrokerState {
@@ -267,6 +273,24 @@ export function lineSegments(row: BrokerRow): readonly LineSegment[] {
 
 export function startedAt(grid: BrokerGrid): UnixSeconds | null {
   return grid.times[0] ?? null;
+}
+
+export function snapshotAtOrBefore(snapshots: readonly FeedBrokers[], t: UnixSeconds | null): FeedBrokers | null {
+  if (snapshots.length === 0) return null;
+  if (t === null) return snapshots[snapshots.length - 1] ?? null;
+  let lo = 0;
+  let hi = snapshots.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (snapshots[mid]!.t <= t) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return found < 0 ? null : (snapshots[found] ?? null);
 }
 
 export interface TimeTick {
