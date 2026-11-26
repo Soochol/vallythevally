@@ -298,6 +298,83 @@
   background: var(--surface);
 }
 
+:is([data-style="bento"], [data-style="carbon"]) .rp-root {
+  gap: var(--island-gap);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  --strip-bg: var(--surface);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-stage {
+  gap: var(--island-gap);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-workspace {
+  gap: var(--island-gap);
+  background: transparent;
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-context-bar,
+:is([data-style="bento"], [data-style="carbon"]) .rp-col,
+:is([data-style="bento"], [data-style="carbon"]) .rp-deck {
+  border: 0;
+  border-radius: var(--r-l);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-br-section {
+  background: var(--surface);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-seg {
+  gap: var(--size-2);
+  padding: var(--size-2);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--raised);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-seg button {
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(3, 7, 14, 0.34);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-clock-box,
+:is([data-style="bento"], [data-style="carbon"]) .rp-date-pills,
+:is([data-style="bento"], [data-style="carbon"]) .rp-sim-cap-input,
+:is([data-style="bento"], [data-style="carbon"]) .rp-sim-mini-btn,
+:is([data-style="bento"], [data-style="carbon"]) .rp-flat-btn,
+:is([data-style="bento"], [data-style="carbon"]) .rp-tbtn {
+  border-color: transparent;
+  background: var(--raised);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-sim-mini-btn,
+:is([data-style="bento"], [data-style="carbon"]) .rp-flat-btn,
+:is([data-style="bento"], [data-style="carbon"]) .rp-sim-flatten,
+:is([data-style="bento"], [data-style="carbon"]) .rp-tbtn {
+  border-radius: var(--r-pill);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-dt-pill {
+  border-color: transparent;
+  background: var(--surface);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-order-row[data-current="true"] .mw-px {
+  border-radius: var(--r-s);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
 :is([data-style="bento"], [data-style="carbon"]) .etf-scope-tab {
   height: var(--ctl-m);
   margin-bottom: 0;
@@ -344,7 +421,10 @@
 :is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .hm-group,
 :is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .etf-card,
 :is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .etf-rail,
-:is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .etf-scope-bar {
+:is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .etf-scope-bar,
+:is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .rp-context-bar,
+:is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .rp-col,
+:is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .rp-deck {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
 }
 
@@ -391,13 +471,62 @@
 [data-style="glass"] .hm-group,
 [data-style="glass"] .etf-card,
 [data-style="glass"] .etf-rail,
-[data-style="glass"] .etf-scope-bar {
+[data-style="glass"] .etf-scope-bar,
+[data-style="glass"] .rp-context-bar,
+[data-style="glass"] .rp-col,
+[data-style="glass"] .rp-deck {
   border: var(--size-1) solid var(--line);
   border-radius: var(--r-l);
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-s);
+}
+
+[data-style="glass"] .rp-root {
+  gap: var(--island-gap);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  --strip-bg: transparent;
+}
+
+[data-style="glass"] .rp-stage,
+[data-style="glass"] .rp-workspace {
+  gap: var(--island-gap);
+  background: transparent;
+}
+
+[data-style="glass"] .rp-col {
+  overflow: hidden;
+}
+
+[data-style="glass"] .rp-pane-head,
+[data-style="glass"] .rp-ladder-foot,
+[data-style="glass"] .rp-strength-bar,
+[data-style="glass"] .rp-bottom-switch,
+[data-style="glass"] .rp-br-section,
+[data-style="glass"] .rp-br-section > .br-bar {
+  background: transparent;
+}
+
+[data-style="glass"] .rp-seg {
+  gap: var(--size-2);
+  padding: var(--size-2);
+  border: var(--size-1) solid var(--line);
+  border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+[data-style="glass"] .rp-seg button {
+  border-radius: var(--r-pill);
+  color: var(--text-2);
+}
+
+[data-style="glass"] .rp-seg button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
 }
 
 [data-style="glass"] .draw-rail-handle {
@@ -667,6 +796,9 @@
   [data-style="glass"] .etf-card,
   [data-style="glass"] .etf-rail,
   [data-style="glass"] .etf-scope-bar,
+  [data-style="glass"] .rp-context-bar,
+  [data-style="glass"] .rp-col,
+  [data-style="glass"] .rp-deck,
   [data-style="glass"] .ui-dialog[data-solid] {
     background: var(--glass-solid);
   }
@@ -687,6 +819,9 @@
   [data-style="glass"] .etf-card,
   [data-style="glass"] .etf-rail,
   [data-style="glass"] .etf-scope-bar,
+  [data-style="glass"] .rp-context-bar,
+  [data-style="glass"] .rp-col,
+  [data-style="glass"] .rp-deck,
   [data-style="glass"] .ui-dialog[data-solid] {
     background: var(--glass-solid);
     -webkit-backdrop-filter: none;
@@ -706,10 +841,54 @@
 [data-style="forest"] .hm-group,
 [data-style="forest"] .etf-card,
 [data-style="forest"] .etf-rail,
-[data-style="forest"] .etf-scope-bar {
+[data-style="forest"] .etf-scope-bar,
+[data-style="forest"] .rp-context-bar,
+[data-style="forest"] .rp-col,
+[data-style="forest"] .rp-deck {
   border: var(--size-1) solid var(--line);
   border-radius: var(--r-l);
   background: var(--surface);
+}
+
+[data-style="forest"] .rp-root {
+  gap: var(--island-gap);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  --strip-bg: var(--surface);
+}
+
+[data-style="forest"] .rp-stage,
+[data-style="forest"] .rp-workspace {
+  gap: var(--island-gap);
+  background: transparent;
+}
+
+[data-style="forest"] .rp-col {
+  overflow: hidden;
+}
+
+[data-style="forest"] .rp-br-section {
+  background: var(--surface);
+}
+
+[data-style="forest"] .rp-seg {
+  gap: var(--size-2);
+  padding: var(--size-2);
+  border: var(--size-1) solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--raised);
+}
+
+[data-style="forest"] .rp-seg button {
+  border-radius: var(--r-s);
+  color: var(--text-2);
+}
+
+[data-style="forest"] .rp-seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 
 [data-style="forest"] .draw-rail-handle {
@@ -943,7 +1122,10 @@
 [data-style="forest"][data-theme="light"] .hm-group,
 [data-style="forest"][data-theme="light"] .etf-card,
 [data-style="forest"][data-theme="light"] .etf-rail,
-[data-style="forest"][data-theme="light"] .etf-scope-bar {
+[data-style="forest"][data-theme="light"] .etf-scope-bar,
+[data-style="forest"][data-theme="light"] .rp-context-bar,
+[data-style="forest"][data-theme="light"] .rp-col,
+[data-style="forest"][data-theme="light"] .rp-deck {
   box-shadow: 0 1px 2px rgba(22, 36, 22, 0.04);
 }
 

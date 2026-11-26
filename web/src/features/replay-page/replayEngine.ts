@@ -106,6 +106,19 @@ export interface ReplayEngineControlState {
   readonly loadedSpanCount: number;
 }
 
+export interface ReplayMarketStepEvent {
+  readonly ms: number;
+  readonly tradePrice: number | null;
+  readonly bestAsk: number | null;
+  readonly bestBid: number | null;
+}
+
+export interface ReplaySeekEvent {
+  readonly previousMs: number;
+  readonly targetMs: number;
+  readonly fromLoop: boolean;
+}
+
 const MS_PER_MINUTE = 60_000;
 const SPAN_MINUTES = 5;
 const SPAN_MS = SPAN_MINUTES * MS_PER_MINUTE;
@@ -338,6 +351,8 @@ export class ReplayEngine {
   private readonly availableSpans: readonly number[];
   private readonly frameListeners = new Set<(frame: ReplayEngineFrame) => void>();
   private readonly controlListeners = new Set<(state: ReplayEngineControlState) => void>();
+  private readonly marketStepListeners = new Set<(step: ReplayMarketStepEvent) => void>();
+  private readonly seekListeners = new Set<(event: ReplaySeekEvent) => void>();
 
   private mode: PlaybackMode = { kind: "time", speed: 1, skipIdleMs: null };
   private deltaMode: DeltaMode = "tick";
@@ -453,6 +468,20 @@ export class ReplayEngine {
     };
   }
 
+  subscribeMarketStep(listener: (step: ReplayMarketStepEvent) => void): () => void {
+    this.marketStepListeners.add(listener);
+    return () => {
+      this.marketStepListeners.delete(listener);
+    };
+  }
+
+  subscribeSeek(listener: (event: ReplaySeekEvent) => void): () => void {
+    this.seekListeners.add(listener);
+    return () => {
+      this.seekListeners.delete(listener);
+    };
+  }
+
   setMode(next: PlaybackMode): void {
     this.mode = next;
     this.tickBudget = 0;
@@ -501,10 +530,12 @@ export class ReplayEngine {
     this.seekMs(sec * 1000);
   }
 
-  seekMs(targetMs: number): void {
+  seekMs(targetMs: number, options?: { readonly fromLoop?: boolean }): void {
     const startMs = this.session.sessionStartSec * 1000;
     const endMs = Math.max(startMs, this.session.sessionEndSec * 1000 - 100);
     const clamped = Math.max(startMs, Math.min(endMs, targetMs));
+    const previousMs = this.cursorMs;
+    const fromLoop = options?.fromLoop === true;
     this.cursorMs = clamped;
     this.tickBudget = 0;
     this.cellFlashes.clear();
@@ -513,6 +544,11 @@ export class ReplayEngine {
     if (this.resolution === "minute_only") {
       this.buffering = false;
       this.activeSecond = Math.floor(clamped / 1000);
+      if (clamped < previousMs) {
+        this.emitSeek({ previousMs, targetMs: clamped, fromLoop });
+      } else if (clamped > previousMs) {
+        this.scanMinuteOnlyForward(previousMs, clamped);
+      }
       this.emitFrame();
       this.emitControl();
       return;
@@ -531,13 +567,24 @@ export class ReplayEngine {
         this.buffering = true;
         this.activeSpanStart = spanStart;
       }
+      if (clamped < previousMs) {
+        this.emitSeek({ previousMs, targetMs: clamped, fromLoop });
+      }
       this.emitControl();
       this.emitFrame();
       return;
     }
 
     this.buffering = false;
-    this.reconstructFromSpan(spanStart, span, clamped);
+    if (clamped < previousMs) {
+      this.reconstructFromSpan(spanStart, span, clamped);
+      this.emitSeek({ previousMs, targetMs: clamped, fromLoop });
+    } else if (clamped > previousMs) {
+      this.scanTickForward(previousMs, clamped);
+      this.reconstructFromSpan(spanStart, span, clamped);
+    } else {
+      this.reconstructFromSpan(spanStart, span, clamped);
+    }
     this.emitControl();
     this.emitFrame();
   }
@@ -598,6 +645,8 @@ export class ReplayEngine {
     this.loader.dispose();
     this.frameListeners.clear();
     this.controlListeners.clear();
+    this.marketStepListeners.clear();
+    this.seekListeners.clear();
   }
 
   private spanStartOfMs(ms: number): number {
@@ -691,15 +740,21 @@ export class ReplayEngine {
     const endMs = this.session.sessionEndSec * 1000 - 100;
 
     if (this.resolution === "minute_only") {
+      const prevMs = this.cursorMs;
       const speed = this.mode.kind === "time" ? this.mode.speed : Math.max(1, this.mode.rateHz / 2);
       let next = this.cursorMs + dtMs * speed;
-      if (this.loop && next >= this.loop.bMs) next = this.loop.aMs;
+      if (this.loop && next >= this.loop.bMs) {
+        this.seekMs(this.loop.aMs, { fromLoop: true });
+        return;
+      }
       if (next >= endMs) {
         this.cursorMs = endMs;
+        this.scanMinuteOnlyForward(prevMs, endMs);
         this.setPlaying(false);
         return;
       }
       this.cursorMs = next;
+      this.scanMinuteOnlyForward(prevMs, next);
       const nextSec = Math.floor(next / 1000);
       if (nextSec !== this.activeSecond) {
         this.activeSecond = nextSec;
@@ -753,7 +808,7 @@ export class ReplayEngine {
 
     const nextMs = this.cursorMs + dtMs * this.mode.speed;
     if (this.loop && nextMs >= this.loop.bMs) {
-      this.seekMs(this.loop.aMs);
+      this.seekMs(this.loop.aMs, { fromLoop: true });
       return;
     }
     if (nextMs >= endMs) {
@@ -814,7 +869,7 @@ export class ReplayEngine {
       steps += 1;
       if (!progressed) break;
       if (this.loop && this.cursorMs >= this.loop.bMs) {
-        this.seekMs(this.loop.aMs);
+        this.seekMs(this.loop.aMs, { fromLoop: true });
         return;
       }
       if (this.cursorMs >= endMs) {
@@ -941,6 +996,12 @@ export class ReplayEngine {
       if (liveFlash) {
         this.recordBookFlashes(prev, next, perfNow);
       }
+      this.emitMarketStep({
+        ms: evMs,
+        tradePrice: null,
+        bestAsk: next.asks[0]?.price ?? null,
+        bestBid: next.bids[0]?.price ?? null,
+      });
     } else if (evKind === EVENT_KIND_TRADE) {
       const tr = extractTradeRow(span, spanStart, evRow, liveFlash ? perfNow + FLASH_DURATION_MS : 0);
       if (!tr) return;
@@ -987,6 +1048,12 @@ export class ReplayEngine {
       if (liveFlash && tr.side !== "none") {
         this.hitRow = { price: tr.price, side: tr.side, untilMs: perfNow + HIT_DURATION_MS };
       }
+      this.emitMarketStep({
+        ms: evMs,
+        tradePrice: tr.price,
+        bestAsk: this.currentBook.asks[0]?.price ?? null,
+        bestBid: this.currentBook.bids[0]?.price ?? null,
+      });
     } else if (evKind === EVENT_KIND_PROGRAM) {
       const prog = extractProgramRow(span, evRow);
       if (prog) {
@@ -1338,6 +1405,75 @@ export class ReplayEngine {
     const state = this.getControlState();
     for (const listener of this.controlListeners) {
       listener(state);
+    }
+  }
+
+  private emitMarketStep(step: ReplayMarketStepEvent): void {
+    for (const listener of this.marketStepListeners) {
+      listener(step);
+    }
+  }
+
+  private emitSeek(event: ReplaySeekEvent): void {
+    for (const listener of this.seekListeners) {
+      listener(event);
+    }
+  }
+
+  private scanMinuteOnlyForward(fromMs: number, toMs: number): void {
+    if (this.marketStepListeners.size === 0 || this.session.frames.length === 0) return;
+    const startIdx = Math.max(0, frameIndexAt(this.session.frames, fromMs / 1000) + 1);
+    const endIdx = frameIndexAt(this.session.frames, toMs / 1000);
+    for (let i = startIdx; i <= endIdx; i++) {
+      const f = this.session.frames[i];
+      if (!f || f.inGap) continue;
+      this.emitMarketStep({
+        ms: f.t * 1000,
+        tradePrice: f.trade?.price ?? f.price,
+        bestAsk: f.asks[0]?.price ?? null,
+        bestBid: f.bids[0]?.price ?? null,
+      });
+    }
+  }
+
+  private scanTickForward(fromMs: number, toMs: number): void {
+    if (this.marketStepListeners.size === 0) return;
+    const fromSpan = this.spanStartOfMs(fromMs);
+    const toSpan = this.spanStartOfMs(toMs);
+    for (let s = fromSpan; s <= toSpan; s += SPAN_MINUTES) {
+      const span = this.loader.peek(this.spanKey(s));
+      if (span) {
+        const startRow = firstRowAtOrAfter(span.eventRecvMs, fromMs + 1);
+        const endRow = lastRowAtOrBefore(span.eventRecvMs, toMs);
+        let bestAsk = this.currentBook.asks[0]?.price ?? null;
+        let bestBid = this.currentBook.bids[0]?.price ?? null;
+        for (let i = startRow; i <= endRow; i++) {
+          const evMs = span.eventRecvMs[i]!;
+          const evKind = span.eventKind[i]!;
+          const evRow = span.eventRow[i]!;
+          if (evKind === EVENT_KIND_BOOK) {
+            const book = extractBookRow(span, evRow);
+            bestAsk = book.asks[0]?.price ?? null;
+            bestBid = book.bids[0]?.price ?? null;
+            this.emitMarketStep({ ms: evMs, tradePrice: null, bestAsk, bestBid });
+          } else if (evKind === EVENT_KIND_TRADE) {
+            const tr = extractTradeRow(span, s, evRow, 0);
+            if (tr) {
+              this.emitMarketStep({ ms: evMs, tradePrice: tr.price, bestAsk, bestBid });
+            }
+          }
+        }
+      } else {
+        const startMin = Math.max(s, Math.floor(fromMs / MS_PER_MINUTE));
+        const endMin = Math.min(s + SPAN_MINUTES - 1, Math.floor(toMs / MS_PER_MINUTE));
+        for (let m = startMin; m <= endMin; m++) {
+          const ck = this.checkpointByMin.get(m);
+          if (!ck) continue;
+          const mMs = Math.min(toMs, m * MS_PER_MINUTE + 30_000);
+          if (ck.low !== null) this.emitMarketStep({ ms: mMs, tradePrice: ck.low, bestAsk: null, bestBid: null });
+          if (ck.high !== null) this.emitMarketStep({ ms: mMs, tradePrice: ck.high, bestAsk: null, bestBid: null });
+        }
+      }
     }
   }
 }

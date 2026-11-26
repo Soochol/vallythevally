@@ -28,6 +28,7 @@ import {
   formatSignedQty,
   formatWonCompact,
 } from "./replayModel";
+import { ReplayPaperEngine } from "./replayPaperEngine";
 import { ReplaySymbolDialog } from "./ReplaySymbolDialog";
 import { ReplayTapeAndBrokers } from "./ReplayTapeAndBrokers";
 import { useReplayData } from "./useReplayData";
@@ -76,6 +77,7 @@ export function ReplayPage() {
   const headPriceRef = useRef<HTMLSpanElement>(null);
   const headDiffRef = useRef<HTMLSpanElement>(null);
   const headValRef = useRef<HTMLElement>(null);
+  const skipSeekSyncRef = useRef(false);
 
   const palette = useCanvasPalette();
   const showToast = useSelectionStore((s) => s.showToast);
@@ -88,6 +90,11 @@ export function ReplayPage() {
     return new ReplayEngine({ code, session, meta: replayMeta });
   }, [code, session, replayMeta]);
 
+  const paper = useMemo(() => {
+    if (!session) return null;
+    return new ReplayPaperEngine();
+  }, [code, session]);
+
   useEffect(() => {
     if (!engine) return;
     setBookmarks([]);
@@ -96,6 +103,27 @@ export function ReplayPage() {
       engine.dispose();
     };
   }, [engine]);
+
+  useEffect(() => {
+    if (!engine || !paper) return;
+    paper.seedAnchor(engine.getFrame().cursorMs);
+    const unsubStep = engine.subscribeMarketStep((step) => {
+      paper.onMarketStep(step);
+    });
+    const unsubSeek = engine.subscribeSeek((event) => {
+      if (skipSeekSyncRef.current) return;
+      if (event.targetMs < event.previousMs) {
+        const undo = paper.onRewind(event.targetMs, event.previousMs, event.fromLoop);
+        if (undo !== null) {
+          showToast(`${formatReplayClock(event.targetMs / 1000, false)}로 되감아 가상 주문·체결을 시점 복원했습니다`);
+        }
+      }
+    });
+    return () => {
+      unsubStep();
+      unsubSeek();
+    };
+  }, [engine, paper, showToast]);
 
   useEffect(() => {
     if (!engine) return;
@@ -191,15 +219,29 @@ export function ReplayPage() {
     const cursorSec = engine.getFrame().cursorMs / 1000;
     setLoop((prev) => {
       if (prev !== null) {
+        paper?.clearLoopAnchor();
         showToast("A-B 구간 반복을 해제했습니다");
         return null;
       }
+      paper?.setLoopAnchor();
       const a = Math.max(session.sessionStartSec, cursorSec - 15);
       const b = Math.min(session.sessionEndSec, cursorSec + 25);
       showToast(`A-B 루프 (${formatReplayClock(a, false)} ~ ${formatReplayClock(b, false)})`);
       return { a, b };
     });
-  }, [engine, session, showToast]);
+  }, [engine, session, paper, showToast]);
+
+  const handleUndoRewind = useCallback(() => {
+    if (!engine || !paper) return;
+    const undone = paper.undoRewind();
+    if (!undone) return;
+    skipSeekSyncRef.current = true;
+    try {
+      engine.seekMs(undone.previousCursorMs);
+    } finally {
+      skipSeekSyncRef.current = false;
+    }
+  }, [engine, paper]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -302,7 +344,7 @@ export function ReplayPage() {
     if (coverage === "symbol_not_collected") {
       return <EmptyState title="이 종목은 수집 대상이 아닙니다" />;
     }
-    if (coverage === "day_not_collected" || !session || !engine) {
+    if (coverage === "day_not_collected" || !session || !engine || !paper) {
       return <EmptyState title="이 날의 수집 호가 자료가 없습니다" />;
     }
 
@@ -312,6 +354,7 @@ export function ReplayPage() {
           <ReplayCharts
             session={session}
             engine={engine}
+            paper={paper}
             blindMode={blindMode}
             bookmarks={bookmarks}
             palette={palette}
@@ -319,12 +362,16 @@ export function ReplayPage() {
           />
           <ReplayLadder
             engine={engine}
+            paper={paper}
             previousClose={session.previousClose}
+            tickStepOf={session.tickStepOf}
             deltaMode={deltaMode}
             onDeltaMode={setDeltaMode}
+            onUndoRewind={handleUndoRewind}
           />
           <ReplayTapeAndBrokers
             engine={engine}
+            paper={paper}
             previousClose={session.previousClose}
             dayStartUnix={session.dayStartUnix}
             activeSecond={control.activeSecond}
@@ -342,6 +389,7 @@ export function ReplayPage() {
         <ReplayDeck
           session={session}
           engine={engine}
+          paper={paper}
           playing={control.playing}
           buffering={control.buffering}
           mode={control.mode}
