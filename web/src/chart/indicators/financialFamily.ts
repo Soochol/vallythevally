@@ -84,7 +84,7 @@ export class FinancialIndicatorStore {
     time: UnixSeconds | null,
     period: Period,
     tokens: ThemeTokens,
-    panel: { index: number; count: number; collapsed?: boolean },
+    panel: NonNullable<IndicatorRow["panel"]>,
     showFiscalMonth: boolean,
   ): IndicatorRow {
     if (!isFinancial(config.spec)) {

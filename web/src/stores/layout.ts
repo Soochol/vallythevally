@@ -10,7 +10,7 @@ import type { IndicatorSpec, Placement as IndicatorPlacement } from "../chart/in
 import type { SymbolInfo } from "../api/generated/SymbolInfo";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import * as edit from "../chart/settings";
-import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
+import { type ChartSettings, type ChartStyle, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type IndicatorAxis, type IndicatorConfig, type Panel, type PriceScale } from "../chart/settings";
 import { bringToFront, fitCanvas } from "../layout/canvas/arrange";
 import type { Area } from "../layout/canvas/geometry";
 import { attachFloat, closeDockWindow, frontFloat, reconcileOrigins, type DockOrigins } from "../layout/dock/floats";
@@ -228,6 +228,10 @@ interface LayoutState {
   setIndicatorPlacement(cellId: WindowId, id: string, placement: IndicatorPlacement, panel?: Panel, at?: number): void;
   removeIndicator(cellId: WindowId, id: string): void;
   movePanel(cellId: WindowId, panelId: string, step: -1 | 1): void;
+  reorderPanel(cellId: WindowId, panelId: string, insertAt: number): void;
+  mergeIndicatorIntoPanel(cellId: WindowId, indicatorId: string, targetPanelId: "price" | Panel["id"]): void;
+  splitIndicatorToNewPanel(cellId: WindowId, indicatorId: string, insertAt: number): void;
+  setIndicatorAxis(cellId: WindowId, indicatorId: string, axis: IndicatorAxis): void;
   togglePanel(cellId: WindowId, panelId: string): void;
   setPanelStretches(cellId: WindowId, stretches: readonly Panel["stretch"][]): void;
   addCompare(cellId: WindowId, code: SymbolCode): void;
@@ -530,6 +534,10 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     setIndicatorPlacement: (cellId, id, placement, panel, at) => patchSettings(cellId, (s) => edit.setIndicatorPlacement(s, id, placement, panel, at)),
     removeIndicator: (cellId, id) => patchSettings(cellId, (s) => edit.removeIndicator(s, id)),
     movePanel: (cellId, panelId, step) => patchSettings(cellId, (s) => edit.movePanel(s, panelId, step)),
+    reorderPanel: (cellId, panelId, insertAt) => patchSettings(cellId, (s) => edit.reorderPanel(s, panelId, insertAt)),
+    mergeIndicatorIntoPanel: (cellId, indicatorId, targetPanelId) => patchSettings(cellId, (s) => edit.mergeIndicatorIntoPanel(s, indicatorId, targetPanelId)),
+    splitIndicatorToNewPanel: (cellId, indicatorId, insertAt) => patchSettings(cellId, (s) => edit.splitIndicatorToNewPanel(s, indicatorId, insertAt)),
+    setIndicatorAxis: (cellId, indicatorId, axis) => patchSettings(cellId, (s) => edit.setIndicatorAxis(s, indicatorId, axis)),
     togglePanel: (cellId, panelId) => patchSettings(cellId, (s) => edit.togglePanel(s, panelId)),
     setPanelStretches: (cellId, stretches) => patchSettings(cellId, (s) => edit.setPanelStretches(s, stretches)),
     addCompare: (cellId, code) => patchCell(cellId, (c) => {

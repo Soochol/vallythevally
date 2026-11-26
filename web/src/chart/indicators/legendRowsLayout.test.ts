@@ -87,14 +87,29 @@ test("값만 바뀌는 패널 지표 갱신은 레이아웃을 다시 읽지 않
   const legend = new IndicatorLegend(overlay as unknown as HTMLElement, () => {});
   const rows = (value: string) => [0, 1, 2].map((index) => panelRow(index, value));
   legend.render(rows("1"), PANES);
-  const firstValueNodes = overlay.children.map((row) => row.children[3]!.children[0]);
+  const firstValueNodes = overlay.children.map((row) => row.children.find((child) => "indicatorValues" in child.dataset)!.children[0]);
   operations = [];
   legend.render(rows("2"), PANES);
   expect(operations).not.toContain("read");
-  expect(overlay.children.map((row) => row.children[3]!.children[0])).toEqual(firstValueNodes);
+  expect(overlay.children.map((row) => row.children.find((child) => "indicatorValues" in child.dataset)!.children[0])).toEqual(firstValueNodes);
   expect(firstValueNodes.map((node) => node?.textContent)).toEqual(["2", "2", "2"]);
   operations = [];
   legend.render(rows("3"), null);
   expect(operations).not.toContain("read");
   expect(firstValueNodes.map((node) => node?.textContent)).toEqual(["3", "3", "3"]);
+});
+
+test("합쳐진 패널의 지표 줄은 서로 겹치지 않게 세로로 쌓고 좌측 축 폭만큼 오른쪽으로 밀어 둔다", () => {
+  const overlay = new FakeElement("div");
+  const legend = new IndicatorLegend(overlay as unknown as HTMLElement, () => {});
+  const mergedRows: IndicatorRow[] = [
+    { id: "vol", name: "거래량", color: "#000", values: [{ text: "100", color: "#000" }], state: "ok", draggable: true, panel: { index: 0, count: 1, panelId: "p1", slotIndex: 0, memberCount: 2, axisSlot: "right", axisExplicit: false } },
+    { id: "rsi", name: "RSI 14", color: "#000", values: [{ text: "55", color: "#000" }], state: "ok", draggable: true, panel: { index: 0, count: 1, panelId: "p1", slotIndex: 1, memberCount: 2, axisSlot: "left", axisExplicit: false } },
+  ];
+  legend.render(mergedRows, [{ top: 0, height: 300 }, { top: 300, height: 140 }], 72, 60);
+  const [first, second] = overlay.children;
+  expect(first?.style.top).toBe("304px");
+  expect(second?.style.top).toBe("326px");
+  expect(first?.style.left).toBe("68px");
+  expect(second?.style.left).toBe("68px");
 });

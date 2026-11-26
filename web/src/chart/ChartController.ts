@@ -51,6 +51,7 @@ import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { isProgramFlow, isTickCvd } from "./indicators/kinds";
 import { IndicatorLayer } from "./indicators/layer";
 import { PanelControls } from "./panelControls";
+import { PanelDnd } from "./panelDnd";
 import { type IndicatorCommand, IndicatorLegend, type PaneBounds } from "./indicators/legendRows";
 import { chartIndicators, chartPanels } from "./indicators/shown";
 import { isTailChange } from "./indicators/sync";
@@ -159,6 +160,8 @@ export interface ControllerDeps {
   socket?: MarketSocketLike;
   indicators?: OpenPort;
   onIndicatorCommand?: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void;
+  onIndicatorMerge?: (indicatorId: string, targetPanelId: "price" | Panel["id"]) => void;
+  onIndicatorSplit?: (indicatorId: string, insertAt: number) => void;
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
   onCompareRemove?: (code: SymbolCode) => void;
   onCorner?: (corner: { width: number; height: number }) => void;
@@ -173,6 +176,7 @@ export class ChartController {
   private financialHoverTime: number | null = null;
   private readonly indicators: IndicatorLayer;
   private readonly panelControls: PanelControls;
+  private readonly panelDnd: PanelDnd;
   private readonly indicatorLegend: IndicatorLegend;
   private readonly compare: CompareLayer;
   private readonly compareLegend: CompareLegend;
@@ -185,9 +189,11 @@ export class ChartController {
   private readonly pointedListeners = new Set<(bar: PointedBar, close: number | null) => void>();
   private pointerOwnsCrosshair = false;
   private elVisible = false;
-  private pendingPaneLayout: { panes: PaneBounds[]; axisWidth: number } | null = null;
+  private pendingPaneLayout: { panes: PaneBounds[]; axisWidth: number; leftAxisWidth: number } | null = null;
   private indicatorRowsDirty = true;
   private lastIndicatorRowTime: UnixSeconds | null = null;
+  private leftAxisVisible = false;
+  private lastLeftAxisWidth = 0;
   get venueAnchor(): HTMLElement { return this.legend.venueAnchor; }
   private readonly feed: JumpableFeed;
   private readonly badge: JumpBadge;
@@ -267,7 +273,10 @@ export class ChartController {
     el.addEventListener("pointerleave", this.clearPointedBar);
     this.legend = new Legend(el, {
       projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection()],
-      readViewport: () => ({ pricePane: this.paneBounds()[0] ?? null, axisWidth: this.chart.priceScale("right").width() }),
+      readViewport: () => ({
+        pricePane: this.paneBounds()[0] ?? null,
+        axisWidth: this.chart.priceScale("right").width() + this.leftAxisWidth(),
+      }),
       applyTier: (tier) => this.indicatorLegend.setTier(tier),
       reserveTop: (legendBottom, paneHeight) => this.reservePriceTop(legendBottom, paneHeight),
     });
@@ -293,9 +302,9 @@ export class ChartController {
         period: () => this.period(),
         requestFrame: () => this.requestLegendSources("indicators"),
         guard: (draw) => this.withDataGuard(draw),
-        axisFormatted: (pane) => this.axisLabels.record(pane),
-        axisCoordinates: (pane) => this.axisLabels.lastCoordinates(pane),
-        axisFailed: (pane, error) => this.axisLabels.failed(pane, error),
+        axisFormatted: (pane, side) => this.axisLabels.record(pane, side),
+        axisCoordinates: (pane, side) => this.axisLabels.lastCoordinates(pane, side),
+        axisFailed: (pane, error, side) => this.axisLabels.failed(pane, error, side),
       },
       deps.indicators ?? openIndicatorPort,
       { fetchQuoteTotals: deps.fetchQuoteTotals, fetchQuoteDepth: deps.fetchQuoteDepth, now: nowSeconds },
@@ -327,6 +336,14 @@ export class ChartController {
       const now = (this.view?.settings.panels ?? []).map((p) => drawn.some((d) => d.id === p.id) ? shown[n++] ?? p.stretch : p.stretch);
       deps.onPanelStretch?.(now);
       this.scheduleFrame();
+    });
+    this.panelDnd = new PanelDnd(el, {
+      panes: () => this.paneBounds(),
+      panels: () => this.view ? chartPanels(this.view.settings, this.period(), !isIndexCode(this.view.symbol)) : [],
+      configs: () => this.view ? chartIndicators(this.view.settings, this.period(), !isIndexCode(this.view.symbol)) : [],
+      tokens: () => this.tokens,
+      onMerge: (indicatorId, targetPanelId) => deps.onIndicatorMerge?.(indicatorId, targetPanelId),
+      onSplit: (indicatorId, insertAt) => deps.onIndicatorSplit?.(indicatorId, insertAt),
     });
     this.feed = new JumpableFeed(
       deps.fetchPage ?? fetchBarsPage,
@@ -455,6 +472,7 @@ export class ChartController {
       const configs = chartIndicators(next.settings, next.period, !isIndex);
       const panels = chartPanels(next.settings, next.period, !isIndex);
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, this.pendingScroll, () => this.indicators.setConfigs(configs, panels)));
+      this.syncLeftPriceScale();
     }
     if (targetChanged || configsChanged) this.syncMicroFeeds();
     if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
@@ -625,6 +643,7 @@ export class ChartController {
     this.indicators.dispose();
     this.indicatorLegend.dispose();
     this.panelControls.dispose();
+    this.panelDnd.dispose();
     this.compareLegend.dispose();
     this.extremeTags.dispose();
     this.legend.dispose();
@@ -711,12 +730,40 @@ export class ChartController {
     this.chart.priceScale("right").applyOptions({ scaleMargins: { top: margin, bottom: PRICE_BOTTOM_MARGIN } });
   }
 
+  private leftAxisWidth(): number {
+    if (!this.leftAxisVisible) return 0;
+    try {
+      return this.chart.priceScale("left").width();
+    } catch {
+      this.paneLayoutDirty = true;
+      this.scheduleFrame();
+      return this.axisWidth();
+    }
+  }
+
   private applyAxisWidth(): void {
     const width = this.axisWidth();
     if (this.chart.options().rightPriceScale.minimumWidth !== width) {
       this.paneLayoutDirty = true;
       this.chart.priceScale("right").applyOptions({ minimumWidth: width });
+      if (this.leftAxisVisible) this.syncLeftPriceScale();
     }
+  }
+
+  private syncLeftPriceScale(): void {
+    const visible = this.indicators.usesLeftAxis();
+    const changed = visible !== this.leftAxisVisible;
+    this.leftAxisVisible = visible;
+    const options = {
+      visible,
+      minimumWidth: this.axisWidth(),
+      alignLabels: true,
+      entireTextOnly: true,
+      borderColor: this.tokens.line,
+    };
+    this.chart.applyOptions({ leftPriceScale: options });
+    for (const pane of this.chart.panes()) pane.priceScale("left").applyOptions(options);
+    if (changed) this.paneLayoutDirty = true;
   }
 
   private chartOptions(): DeepPartial<ChartOptions> {
@@ -737,6 +784,7 @@ export class ChartController {
         horzLines: { visible: this.view?.settings.showHorzGrid ?? true, color: t.gridH },
       },
       crosshair: { mode: CrosshairMode.Normal, vertLine: crossLine, horzLine: crossLine },
+      leftPriceScale: { visible: this.leftAxisVisible, minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line },
       rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: this.priceTopMargin, bottom: PRICE_BOTTOM_MARGIN } },
       timeScale: {
         borderColor: t.line,
@@ -1281,16 +1329,19 @@ export class ChartController {
 
   private syncPaneLayout(): boolean {
     const axisWidth = this.chart.priceScale("right").width();
+    const leftAxisWidth = this.leftAxisWidth();
     const chartPanes = this.chart.panes();
-    if (!this.paneLayoutDirty && axisWidth === this.lastAxisWidth && !this.paneHeightsChanged(chartPanes)) return false;
+    if (!this.paneLayoutDirty && axisWidth === this.lastAxisWidth && leftAxisWidth === this.lastLeftAxisWidth && !this.paneHeightsChanged(chartPanes)) return false;
     this.paneLayoutDirty = false;
     this.lastAxisWidth = axisWidth;
+    this.lastLeftAxisWidth = leftAxisWidth;
     this.lastPaneHeights = chartPanes.map((pane) => pane.getHeight());
     const panes = this.paneBounds();
     const view = this.view;
     const panels = view ? chartPanels(view.settings, this.period(), !isIndexCode(view.symbol)) : [];
     this.panelControls.render(panels, panes.map((pane) => pane.top));
-    this.pendingPaneLayout = { panes, axisWidth };
+    this.legend.setLeftAxisWidth(leftAxisWidth);
+    this.pendingPaneLayout = { panes, axisWidth, leftAxisWidth };
     return true;
   }
 
@@ -1315,11 +1366,11 @@ export class ChartController {
     if (paneLayout) {
       this.indicatorRowsDirty = false;
       this.lastIndicatorRowTime = rowTime;
-      this.indicatorLegend.render(this.indicators.rows(rowTime), paneLayout.panes, paneLayout.axisWidth);
+      this.indicatorLegend.render(this.indicators.rows(rowTime), paneLayout.panes, paneLayout.axisWidth, paneLayout.leftAxisWidth);
     } else if (this.indicatorRowsDirty || rowTime !== this.lastIndicatorRowTime) {
       this.indicatorRowsDirty = false;
       this.lastIndicatorRowTime = rowTime;
-      this.indicatorLegend.render(this.indicators.rows(rowTime), null);
+      this.indicatorLegend.render(this.indicators.rows(rowTime), null, undefined, this.lastLeftAxisWidth);
     }
     const compareLeft = view?.settings.compare.length ? this.leftT() : null;
     this.compareLegend.render(this.compare.rows(compareLeft, bar?.t ?? null));

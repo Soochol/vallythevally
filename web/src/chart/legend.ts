@@ -314,6 +314,13 @@ export class Legend {
     void document.fonts.ready.then(this.fontsChanged);
   }
 
+  setLeftAxisWidth(width: number): void {
+    const nextLeft = width > 0 ? `${width + 16}px` : "";
+    const nextMaxWidth = width > 0 ? `calc(100% - ${width + 90}px)` : "";
+    if (this.root.style.left !== nextLeft) this.root.style.left = nextLeft;
+    if (this.root.style.maxWidth !== nextMaxWidth) this.root.style.maxWidth = nextMaxWidth;
+  }
+
   setHead(h: { name: string; sub: string; period: string }): void {
     if (this.name.textContent === h.name && this.sub.textContent === h.sub && this.period.textContent === h.period) return;
     this.name.textContent = h.name;
