@@ -93,6 +93,6 @@ test("히트맵 페이지는 정책 위반 없이 돈다", async ({ page, scenar
   scenario.publicMode.enable(SESSION);
   seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
   await page.goto("/heatmap");
-  await expect(page.getByRole("main", { name: "히트맵", exact: true }).locator('.hm-tile[data-code="005930"]')).toBeVisible();
+  await expect(page.getByRole("main", { name: "히트맵", exact: true }).locator('.hm-list-row[data-code="005930"]')).toBeVisible();
   await csp.expectNoViolations();
 });

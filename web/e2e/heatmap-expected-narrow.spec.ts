@@ -28,7 +28,7 @@ async function verifyExpectedTiles(
 ) {
   await page.setViewportSize(viewport);
   seedHeatmapThemes(scenario, initialTable(), narrowThemes());
-  await page.goto("/heatmap?order=custom");
+  await page.goto("/heatmap?view=board&order=custom");
   const tiles = main(page).locator(".hm-tile");
   await expect(tiles).toHaveCount(CODES.length);
   await pollSaved(() => watched(scenario, CODES[CODES.length - 1]!)).toBe(true);

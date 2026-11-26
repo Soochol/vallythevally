@@ -4,12 +4,12 @@ import { COLOR_RANGES, type ColorRange, DEFAULT_COLOR_RANGE } from "../../lib/he
 export const SIZE_MODES = ["traded", "equal"] as const;
 export type SizeMode = (typeof SIZE_MODES)[number];
 
-export const SORT_MODES = ["rate", "traded", "name"] as const;
+export const SORT_MODES = ["custom", "rate", "traded", "name"] as const;
 export type SortMode = (typeof SORT_MODES)[number];
 
 export const THEME_ORDERS = ["rate", "custom", "traded"] as const satisfies readonly HeatmapThemeOrder[];
 
-export const HEATMAP_VIEWS = ["board", "list", "flow"] as const;
+export const HEATMAP_VIEWS = ["list", "board"] as const;
 export type HeatmapView = (typeof HEATMAP_VIEWS)[number];
 
 export interface HeatmapSettings {
@@ -20,12 +20,12 @@ export interface HeatmapSettings {
   order: HeatmapThemeOrder;
 }
 
-export const DEFAULT_SETTINGS: HeatmapSettings = { range: DEFAULT_COLOR_RANGE, size: "traded", sort: "rate", view: "board", order: "rate" };
+export const DEFAULT_SETTINGS: HeatmapSettings = { range: DEFAULT_COLOR_RANGE, size: "traded", sort: "rate", view: "list", order: "rate" };
 
 export const SIZE_LABEL: Record<SizeMode, string> = { traded: "거래대금", equal: "같게" };
-export const SORT_LABEL: Record<SortMode, string> = { rate: "등락률", traded: "거래대금", name: "이름" };
+export const SORT_LABEL: Record<SortMode, string> = { custom: "내 순서", rate: "등락률", traded: "거래대금", name: "이름" };
 export const ORDER_LABEL: Record<HeatmapThemeOrder, string> = { rate: "가중 평균 등락률", custom: "내 순서", traded: "거래대금" };
-export const VIEW_LABEL: Record<HeatmapView, string> = { board: "히트맵", list: "리스트", flow: "흐름 비교" };
+export const VIEW_LABEL: Record<HeatmapView, string> = { list: "리스트", board: "히트맵" };
 
 function oneOf<T extends string>(values: readonly T[], raw: string | null, fallback: T): T {
   return values.find((value) => value === raw) ?? fallback;

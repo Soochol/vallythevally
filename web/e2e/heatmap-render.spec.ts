@@ -124,7 +124,7 @@ test("테마 여덟 개·종목 일흔두 개 보드에서 한 종목의 시세 
   const table = wideTable();
   seedWideBoard(scenario, table);
   await countTileRenders(page);
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect(main(page).locator(".hm-tile")).toHaveCount(72);
   const target = CODES[10]!;
   await pollSaved(() => scenario.live.messages.some((m) => m.type === "watch" && m.symbols.includes(target))).toBe(true);
@@ -143,7 +143,7 @@ test("테마 여덟 개·종목 일흔두 개 보드에서 한 종목의 시세 
 
 test("1440×900에서 첫 타일의 위 끝은 y=220 이하이고 390×844에서는 y=300 이하다", async ({ page, scenario }) => {
   seedWideBoard(scenario, wideTable());
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect(tile(page, CODES[0]!)).toBeVisible();
   const top = async () => Math.min(...(await main(page).locator(".hm-tile").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().y))));
   expect(await top()).toBeLessThanOrEqual(220);
@@ -154,7 +154,7 @@ test("1440×900에서 첫 타일의 위 끝은 y=220 이하이고 390×844에서
 
 test("글자가 붙은 타일 가운데 이름이 말줄임된 것은 10% 이하다", async ({ page, scenario }) => {
   seedWideBoard(scenario, wideTable());
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect(main(page).locator(".hm-tile")).toHaveCount(72);
   const result = await main(page).locator(".hm-tile-name").evaluateAll((nodes) => ({
     labelled: nodes.length,
@@ -166,7 +166,7 @@ test("글자가 붙은 타일 가운데 이름이 말줄임된 것은 10% 이하
 
 test("등락률순 배치에서 가로세로 비 4:1을 넘는 타일은 72개 중 4개 이하다", async ({ page, scenario }) => {
   seedWideBoard(scenario, wideTable());
-  await page.goto("/heatmap?sort=rate");
+  await page.goto("/heatmap?view=board&sort=rate");
   await expect(main(page).locator(".hm-tile")).toHaveCount(72);
   const stretched = await main(page).locator(".hm-tile").evaluateAll((nodes) => nodes.filter((node) => {
     const box = node.getBoundingClientRect();
@@ -175,31 +175,12 @@ test("등락률순 배치에서 가로세로 비 4:1을 넘는 타일은 72개 �
   expect(stretched).toBeLessThanOrEqual(4);
 });
 
-test("390px 흐름 비교의 눈금 글자는 실제 11px 이상으로 그려진다", async ({ page, scenario }) => {
-  seedWideBoard(scenario, wideTable());
-  const flow = (rates: number[]) => ({ date: "2026-11-09", bucketMinutes: 5, points: rates.map((rate, i) => ({ t: 1_794_182_400 + i * 300, rate })), used: [], missing: [], overLimit: [], limit: 60 });
-  scenario.on("/api/heatmap/flow", () => ({ body: flow([0.2, 0.9, 1.4, 1.1, 1.8]) }));
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/heatmap?view=flow");
-  const chart = main(page).locator(".hm-flow-chart");
-  await expect(chart).toBeVisible();
-  const box = (await chart.boundingBox())!;
-  const viewBox = (await chart.getAttribute("viewBox"))!.split(" ").map(Number);
-  expect(Math.abs(viewBox[2]! - box.width)).toBeLessThanOrEqual(1);
-  const sizes = await chart.locator(".hm-flow-grid text, .hm-flow-hour").evaluateAll((nodes) => nodes.map((node) => parseFloat(getComputedStyle(node).fontSize)));
-  expect(sizes.length).toBeGreaterThan(0);
-  for (const size of sizes) expect(size).toBeGreaterThanOrEqual(11);
-});
-
-test("테마 편집은 모달 없이 페이지 안에서 멀티컬럼 시트로 열린다", async ({ page, scenario }) => {
+test("기본 리스트 탭은 여덟 테마를 24px 초밀집 행과 등락 강도 헤더로 렌더링한다", async ({ page, scenario }) => {
   seedWideBoard(scenario, wideTable());
   await page.goto("/heatmap");
-  await expect(main(page).locator(".hm-tile")).toHaveCount(72);
-  await page.getByRole("button", { name: "테마 편집" }).click();
-  await expect(page.getByRole("dialog", { name: "테마 편집" })).toHaveCount(0);
-  const sheet = main(page).getByRole("region", { name: "테마 편집" });
-  await expect(sheet).toBeVisible();
-  await expect(sheet.locator(".hm-edit-col")).toHaveCount(8);
-  const symBox = (await sheet.locator(".hm-edit-sym").first().boundingBox())!;
-  expect(symBox.height).toBeLessThanOrEqual(28);
+  await expect(main(page).locator(".hm-list-group")).toHaveCount(8);
+  await expect(main(page).locator(".hm-list-row")).toHaveCount(72);
+  const rowBox = (await main(page).locator(".hm-list-row").first().boundingBox())!;
+  expect(rowBox.height).toBeLessThanOrEqual(25);
+  await expect(main(page).locator(".hm-list-head").first()).toHaveAttribute("data-level", /^[0-3]$/);
 });

@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Screen } from "../src/api/generated/Screen";
 import type { RankingPage } from "../src/api/generated/RankingPage";
-import { HEATMAP_FLOWS, HEATMAP_TABLE, flowSeries, seedHeatmapFlow, seedHeatmapThemes } from "./fixtures/heatmap-data";
+import { HEATMAP_TABLE, seedHeatmapThemes } from "./fixtures/heatmap-data";
 import { marketOverviewBaseline } from "./fixtures/market-data";
 import { isRankingRequest, rankingRows } from "./fixtures/ranking-data";
 import { currentResult } from "./fixtures/screener";
@@ -88,7 +88,7 @@ test("히트맵 보드는 기준 시각이 낡으면 나이와 낡음 표시를 
   const asked = seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
   await page.clock.install({ time: scenario.now });
   await page.goto("/heatmap");
-  await expect(page.getByRole("region", { name: "반도체 지도" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "반도체 목록" })).toBeVisible();
   await expect(notes(page)).toHaveCount(0);
   const first = asked.length;
 
@@ -101,20 +101,6 @@ test("히트맵 보드는 기준 시각이 낡으면 나이와 낡음 표시를 
   await page.clock.runFor(6 * MINUTE);
   await expect(notes(page)).toContainText("자료가 늦어지고 있습니다");
   await expect(notes(page)).toHaveAttribute("data-stale", "true");
-});
-
-test("히트맵 흐름은 기준 시각이 낡으면 나이를 보이고 실시간 수집 대상이 아닌 종목을 테마 칸에 알린다", async ({ page, scenario }) => {
-  seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
-  const asOf = scenario.now / 1000 - 10 * 60;
-  seedHeatmapFlow(scenario, {
-    "005930,000660": flowSeries([0.5, 1.2], ["005930"], { asOf, notCollected: ["000660"] }),
-    "028260,086520": { ...HEATMAP_FLOWS["028260,086520"]!, asOf },
-  });
-  await page.goto("/heatmap?view=flow");
-  const flow = page.getByRole("region", { name: "테마 흐름 비교" });
-  await expect(flow.getByText("반도체: 실시간 수집 대상이 아닌 종목 1개")).toHaveAttribute("title", "SK하이닉스");
-  await expect(flow.getByText(/지주: 실시간 수집 대상이 아닌/)).toHaveCount(0);
-  await expect(flow.getByTestId("data-age")).toHaveText("10분 전 자료 · 자료가 늦어지고 있습니다");
 });
 
 test("스크리너 결과는 수집이 낡으면 나이와 낡음 표시를 보이고 새것이면 보이지 않는다", async ({ page, scenario, screener }) => {

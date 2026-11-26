@@ -11,7 +11,7 @@ const quote = (rate: number, price: number) => ({ ...heatmapQuote("000660", { ra
 
 test("예상 시세 타일은 등락률 뒤와 카드 현재가 뒤에 별표를 단다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
-  await page.goto("/heatmap?size=equal&order=custom");
+  await page.goto("/heatmap?view=board&size=equal&order=custom");
   const target = tile(page, "000660");
   await expect(target).toHaveAttribute("data-side", "down");
   await pollSaved(() => watched(scenario, "000660")).toBe(true);

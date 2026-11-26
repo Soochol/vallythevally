@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { Ranking } from "../src/api/generated/Ranking";
 import type { RankingPage } from "../src/api/generated/RankingPage";
-import { flowSeries, HEATMAP_FLOWS, HEATMAP_TABLE, seedHeatmapFlow, seedHeatmapThemes } from "./fixtures/heatmap-data";
+import { HEATMAP_TABLE, seedHeatmapThemes } from "./fixtures/heatmap-data";
 import type { PublicSession } from "./fixtures/public-mode-data";
 import { isRankingRequest, rankingCalls, rankingRows, serveRankings } from "./fixtures/ranking-data";
 import { DEFAULT_LAYOUT_ID, expect, test, windowTab, type Scenario } from "./harness";
@@ -15,13 +15,11 @@ const SESSION: PublicSession = { provider: "google", createdAt: Date.parse("2026
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] } as const;
 const TRADE_AMOUNT: Ranking = { kind: "tradeAmount", market: "all", venue: "combined", excludes: { etfEtn: true, preferred: false }, excludeManaged: false };
 const EMPTY_TITLE = "실시간·차트 연결은 준비 중입니다";
-const FLOW_REFRESH_MS = 60_000;
 
 const landing = (page: Page) => page.getByTestId("landing");
 const loginDialog = (page: Page) => page.getByRole("dialog", { name: "로그인", exact: true });
 const settings = (page: Page) => page.getByRole("dialog", { name: "시스템 설정", exact: true });
 const main = (page: Page) => page.getByRole("main", { name: "히트맵", exact: true });
-const flowLine = (page: Page) => main(page).locator(".hm-flow-line");
 const callsTo = (scenario: Scenario, method: string, pathname: string) => scenario.requests.filter((r) => r.method() === method && new URL(r.url()).pathname === pathname);
 const pathOf = (request: { url(): string }) => new URL(request.url()).pathname;
 
@@ -150,7 +148,7 @@ test.describe("로그인 뒤", () => {
   test("히트맵 페이지는 고정값을 보인다", async ({ page, scenario }) => {
     seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
     await page.goto("/heatmap");
-    await expect(main(page).locator('.hm-tile[data-code="005930"]')).toHaveAccessibleName("삼성전자 +2.00%");
+    await expect(main(page).locator('.hm-list-row[data-code="005930"]')).toContainText("+2.00%");
     listenerOnlyForbidden(scenario);
   });
 
@@ -229,27 +227,6 @@ test.describe("로그인 뒤", () => {
     await expect(page.getByTestId("ranking-limited")).toBeVisible();
     await expect(more).toHaveCount(0);
     expect(Math.max(...rankingCalls(scenario).map((call) => call.pages))).toBe(5);
-  });
-
-  test("흐름은 첫 로딩 뒤 60초가 지나야 다시 요청한다", async ({ page, scenario }) => {
-    seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
-    const asked = seedHeatmapFlow(scenario, HEATMAP_FLOWS);
-    await page.clock.install({ time: scenario.now });
-    await page.goto("/heatmap?view=flow");
-    await expect(flowLine(page)).toHaveCount(2);
-    const loaded = asked.length;
-    await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1_000);
-    await page.clock.runFor(FLOW_REFRESH_MS - 5_000);
-    expect(asked).toHaveLength(loaded);
-    await page.clock.runFor(10_000);
-    await expect.poll(() => asked.length).toBe(loaded * 2);
-  });
-
-  test("흐름 응답의 테마 밖 종목은 빠진 종목으로 보인다", async ({ page, scenario }) => {
-    seedHeatmapThemes(scenario, structuredClone(HEATMAP_TABLE));
-    seedHeatmapFlow(scenario, { ...HEATMAP_FLOWS, "005930,000660": flowSeries([0.5, 1.2], ["005930"], { notInThemes: ["000660"] }) });
-    await page.goto("/heatmap?view=flow");
-    await expect(main(page).getByText("반도체: 분봉을 받지 못해 평균에서 뺀 종목 SK하이닉스")).toBeVisible();
   });
 
   test("429의 retryAt이 지나기 전에는 같은 요청을 다시 보내지 않는다", async ({ page, scenario }) => {

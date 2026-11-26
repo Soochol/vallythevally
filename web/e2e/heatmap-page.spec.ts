@@ -16,7 +16,7 @@ const watched = (scenario: Scenario, code: string) => scenario.live.messages.som
 
 test("테마마다 타일 지도가 보이고 칸 색이 등락률 부호를 따른다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, table());
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect(group(page, "반도체").locator(".hm-tile")).toHaveCount(2);
   await expect(group(page, "지주").locator(".hm-tile")).toHaveCount(2);
   await expect(tile(page, "005930")).toHaveAttribute("data-side", "up");
@@ -39,7 +39,7 @@ test("테마마다 타일 지도가 보이고 칸 색이 등락률 부호를 따
 
 test("색 범위를 ±3으로 바꾸면 범례와 칸 색이 바뀌고 주소에 남는다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, table());
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect(tile(page, "005930")).toBeVisible();
   const before = await fill(tile(page, "005930"));
   await main(page).getByRole("group", { name: "색 범위" }).getByRole("button", { name: "±3%" }).click();
@@ -55,7 +55,7 @@ test("색 범위를 ±3으로 바꾸면 범례와 칸 색이 바뀌고 주소에
 
 test("크기 기준과 칸 정렬은 주소에 남고 정렬 기준을 글자로 보인다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, table());
-  await page.goto("/heatmap?size=equal&sort=name");
+  await page.goto("/heatmap?view=board&size=equal&sort=name");
   await expect(tile(page, "005930")).toBeVisible();
   const a = (await tile(page, "005930").boundingBox())!;
   const b = (await tile(page, "000660").boundingBox())!;
@@ -73,7 +73,7 @@ test("실시간 프레임은 칸 색을 바로 바꾸지만 자리는 1분마다
   const rows = table();
   const asked = seedHeatmapThemes(scenario, rows);
   await page.clock.install({ time: scenario.now });
-  await page.goto("/heatmap?size=equal&order=custom");
+  await page.goto("/heatmap?view=board&size=equal&order=custom");
   await expect(tile(page, "000660")).toHaveAttribute("data-side", "down");
   await pollSaved(() => watched(scenario, "000660")).toBe(true);
   const fetched = asked.length;
@@ -102,7 +102,7 @@ test("칸을 누르면 고른 연동 색 차트에 그 종목이 열리고 작�
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: [...withFirstChart(layout, { link: "a", symbol: "005930", venue: "combined" }), second] });
   const ui = scenario.documents.uiState();
   scenario.documents.saveUiState({ ...ui, pageLink: "b", revision: ui.revision + 1 });
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect(page.getByRole("button", { name: "보낼 연동 색: B" })).toBeVisible();
   await tile(page, "028260").click();
   await expect(page).toHaveURL(/\/$/);
@@ -112,7 +112,7 @@ test("칸을 누르면 고른 연동 색 차트에 그 종목이 열리고 작�
 
 test("테마 머리에 거래대금 가중 평균과 거래대금 합, 상승·하락 수, 대장주가 보인다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, table());
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   const chips = group(page, "반도체");
   await expect(chips.getByLabel(/^거래대금 가중 평균/)).toHaveAccessibleName("거래대금 가중 평균 +0.80%");
   await expect(chips.getByLabel(/^거래대금 가중 평균/)).toHaveAttribute("data-side", "up");
@@ -133,7 +133,7 @@ test("테마 머리에 거래대금 가중 평균과 거래대금 합, 상승·�
 test("테마 순서는 기본이 가중 평균 등락률 높은 순이고 바꾸면 주소에 남는다", async ({ page, scenario }) => {
   const asked = seedHeatmapThemes(scenario, table());
   const titles = () => main(page).locator(".hm-group h2").allTextContents();
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect.poll(titles).toEqual(["지주", "반도체"]);
   await main(page).getByRole("button", { name: "보기 설정" }).click();
   const order = settings(page).getByRole("group", { name: "테마 순서" });
@@ -150,7 +150,7 @@ test("테마 순서는 기본이 가중 평균 등락률 높은 순이고 바꾸
 
 test("시세를 받지 못한 종목은 빈 칸으로 남고 요약에서 뺐다고 알린다", async ({ page, scenario }) => {
   seedHeatmapThemes(scenario, table(), { revision: 100, themes: [{ id: "chips", name: "반도체", symbols: ["005930", "999990"] }] });
-  await page.goto("/heatmap");
+  await page.goto("/heatmap?view=board");
   await expect(tile(page, "999990")).toHaveAttribute("data-side", "none");
   await expect(group(page, "반도체").getByRole("note")).toHaveText("시세를 받지 못해 요약에서 뺀 종목: 999990");
   await expect(group(page, "반도체").getByLabel("테마 요약")).toContainText("상승 1 · 보합 0 · 하락 0");
@@ -160,6 +160,6 @@ test("테마가 없으면 테마를 만들라고 안내한다", async ({ page, s
   seedHeatmapThemes(scenario, table(), { revision: 100, themes: [] });
   await page.goto("/heatmap");
   await expect(main(page).getByText("테마가 없습니다")).toBeVisible();
-  await expect(main(page).getByText(/테마마다 지도를 그립니다/)).toBeVisible();
+  await expect(main(page).getByText(/테마마다 목록과 지도를 보여 줍니다/)).toBeVisible();
   await expect(main(page).locator(".hm-tile")).toHaveCount(0);
 });
