@@ -3,7 +3,7 @@ import { EmptyState } from "../features/overlay/State";
 
 export const PUBLIC_UNAVAILABLE_TITLE = "실시간·차트 연결은 준비 중입니다";
 
-export const PUBLIC_UNAVAILABLE_KINDS: ReadonlySet<WindowKind> = new Set<WindowKind>(["chart", "trades", "book", "program", "brokers", "order"]);
+export const PUBLIC_UNAVAILABLE_KINDS: ReadonlySet<WindowKind> = new Set<WindowKind>(["chart", "trades", "book", "program", "brokers", "order", "premarket"]);
 
 export function PublicUnavailable() {
   return (

@@ -89,6 +89,9 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
     scenario.on(
       (url) => /^\/api\/symbols\/[^/]+\/premarket\/days$/.test(url.pathname),
       (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
         const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
         return { body: { symbol, days: [] } };
       },
@@ -96,6 +99,9 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
     scenario.on(
       (url) => /^\/api\/symbols\/[^/]+\/premarket\/compare$/.test(url.pathname),
       (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
         const symbol = decodeURIComponent(new URL(request.url()).pathname.split("/")[3] ?? "");
         return { body: { symbol, series: [] } };
       },
@@ -103,6 +109,9 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
     scenario.on(
       (url) => url.pathname === "/api/premarket/snapshot",
       (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
         const date = new URL(request.url()).searchParams.get("date") ?? "";
         return { body: { date, availableDates: [], source: "none", rows: [] } };
       },

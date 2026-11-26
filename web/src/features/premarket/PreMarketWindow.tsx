@@ -5,7 +5,7 @@ import { usePreMarketCompare, usePreMarketDays, usePreMarketSnapshot } from "../
 import { useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
 import { isIndexCode } from "../../lib/symbol";
-import { useLayoutStore } from "../../stores/layout";
+import { linkedWindowSymbol, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
 import { defaultSelectedDates, toggleDateSelection, WIDE_BREAKPOINT_PX } from "./logic";
@@ -20,12 +20,17 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
   const [wide, setWide] = useState(true);
   const [narrowTab, setNarrowTab] = useState<NarrowTab>("compare");
   const [snapshotDate, setSnapshotDate] = useState<string | undefined>(undefined);
+  const [knownSnapshotDates, setKnownSnapshotDates] = useState<readonly string[]>([]);
   const linkedSymbol = useLinkedSymbol(id);
   const [override, setOverride] = useState<{ readonly base: SymbolCode | null; readonly code: SymbolCode } | null>(null);
   const activeSymbol = override !== null && override.base === linkedSymbol ? override.code : linkedSymbol;
   const stockSymbol = activeSymbol !== null && !isIndexCode(activeSymbol) ? activeSymbol : null;
-  const symbolInfo = useSymbolInfo(stockSymbol ?? "");
+  const symbolInfo = useSymbolInfo(stockSymbol);
   const [selectedBySymbol, setSelectedBySymbol] = useState<{ readonly symbol: SymbolCode; readonly days: readonly string[] } | null>(null);
+
+  useEffect(() => {
+    setOverride((prev) => (prev !== null && prev.base !== linkedSymbol ? null : prev));
+  }, [linkedSymbol]);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -57,6 +62,16 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
   const compareQuery = usePreMarketCompare(stockSymbol, selectedDays);
   const snapshotQuery = usePreMarketSnapshot(snapshotDate);
 
+  useEffect(() => {
+    const incoming = snapshotQuery.data?.availableDates ?? [];
+    if (incoming.length > 0) {
+      setKnownSnapshotDates(incoming);
+    } else if (snapshotQuery.data?.date) {
+      const fallbackDate = snapshotQuery.data.date;
+      setKnownSnapshotDates((prev) => (prev.length > 0 ? prev : [fallbackDate]));
+    }
+  }, [snapshotQuery.data?.availableDates, snapshotQuery.data?.date]);
+
   const handleToggleDay = (date: string) => {
     if (stockSymbol === null) return;
     setSelectedBySymbol({ symbol: stockSymbol, days: toggleDateSelection(selectedDays, date) });
@@ -70,7 +85,8 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
       layoutStore.pinSymbol(id, row.code);
     }
     layoutStore.sendSymbol(id, activeCell, { code: row.code, name: row.name });
-    setOverride({ base: linkedSymbol, code: row.code });
+    const nextLinked = linkedWindowSymbol(useLayoutStore.getState().layout, id, activeCell);
+    setOverride(nextLinked === row.code ? null : { base: nextLinked, code: row.code });
     if (!wide) setNarrowTab("compare");
   };
 
@@ -99,6 +115,7 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
   const snapshotPane = (
     <SnapshotPane
       snapshot={snapshotQuery.data}
+      fallbackDates={knownSnapshotDates}
       selectedDate={snapshotDate}
       onChangeDate={(next) => setSnapshotDate(next || undefined)}
       activeSymbol={stockSymbol}

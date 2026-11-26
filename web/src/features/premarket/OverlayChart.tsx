@@ -135,6 +135,21 @@ export function OverlayChart({ availableDays, selectedDays, onToggleDay, series,
                 })}
                 {series.map((day, idx) => {
                   if (day.points.length === 0) return null;
+                  if (day.points.length === 1) {
+                    const p = day.points[0]!;
+                    return (
+                      <circle
+                        key={day.date}
+                        className="pm-dot"
+                        data-testid={`premarket-single-point-${day.date}`}
+                        data-series={String(idx)}
+                        data-date={day.date}
+                        cx={geom.xOf(p.secOfDay)}
+                        cy={geom.yOf(p.expectedReturnPct)}
+                        r={3.5}
+                      />
+                    );
+                  }
                   const pts = day.points
                     .map((p) => `${geom.xOf(p.secOfDay).toFixed(1)},${geom.yOf(p.expectedReturnPct).toFixed(1)}`)
                     .join(" ");

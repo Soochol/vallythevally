@@ -44,8 +44,8 @@ export function useSymbolSearch(normalized: string, filters: SymbolSearchFilters
 }
 
 /** `GET /api/symbols/:code`. 없으면 unknown_symbol. */
-export function useSymbolInfo(code: SymbolCode) {
-  return useQuery(symbolInfoQuery(code));
+export function useSymbolInfo(code: SymbolCode | null) {
+  return useQuery(symbolInfoQuery(code ?? ""));
 }
 
 export function fetchSymbolInfo(code: SymbolCode, signal?: AbortSignal): Promise<SymbolInfo> {
@@ -55,6 +55,7 @@ export function fetchSymbolInfo(code: SymbolCode, signal?: AbortSignal): Promise
 export const symbolInfoQuery = (code: SymbolCode) => ({
   queryKey: ["symbol", code],
   queryFn: ({ signal }: { signal: AbortSignal }) => fetchSymbolInfo(code, signal),
+  enabled: code !== "",
   staleTime: Infinity,
 });
 
