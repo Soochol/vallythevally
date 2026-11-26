@@ -93,7 +93,7 @@ export class DrawingSurface implements ChartExtension {
     this.cleanup.push(useUiStore.subscribe(() => this.refresh()));
     const media = matchMedia(DESKTOP_QUERY); const resize = () => { this.editable = media.matches; this.reset(); this.refresh(); };
     media.addEventListener("change", resize); this.cleanup.push(() => media.removeEventListener("change", resize));
-    const observer = new MutationObserver(() => this.refresh()); observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const observer = new MutationObserver(() => this.refresh()); observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-style"] });
     this.cleanup.push(() => observer.disconnect());
   }
 

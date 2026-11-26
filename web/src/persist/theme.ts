@@ -1,21 +1,76 @@
-export type Theme = "dark" | "light" | "bento" | "glass";
+export type ThemeStyle = "editorial" | "bento" | "glass" | "forest";
+export type ThemeMode = "dark" | "light";
+export type ThemeKey = `${ThemeStyle}-${ThemeMode}`;
 
-export const THEMES = ["dark", "light", "bento", "glass"] as const satisfies readonly Theme[];
+export interface Theme {
+  readonly style: ThemeStyle;
+  readonly mode: ThemeMode;
+}
+
+export const THEME_STYLES = ["editorial", "bento", "glass", "forest"] as const satisfies readonly ThemeStyle[];
+export const THEME_MODES = ["dark", "light"] as const satisfies readonly ThemeMode[];
+export const THEME_KEYS = [
+  "editorial-dark",
+  "editorial-light",
+  "bento-dark",
+  "bento-light",
+  "glass-dark",
+  "glass-light",
+  "forest-dark",
+  "forest-light",
+] as const satisfies readonly ThemeKey[];
 
 export const THEME_STORAGE_KEY = "vally.theme";
 
-export const DEFAULT_THEME: Theme = "dark";
+export const DEFAULT_THEME_STYLE: ThemeStyle = "editorial";
+export const DEFAULT_THEME_MODE: ThemeMode = "dark";
+export const DEFAULT_THEME_KEY: ThemeKey = "editorial-dark";
+export const DEFAULT_THEME: Theme = { style: DEFAULT_THEME_STYLE, mode: DEFAULT_THEME_MODE };
 
-export const THEME_OPTIONS = [
-  { value: "dark", label: "다크 (Editorial)" },
-  { value: "light", label: "화이트 (Editorial)" },
+export const THEME_STYLE_OPTIONS = [
+  { value: "editorial", label: "에디토리얼" },
   { value: "bento", label: "소프트 벤토" },
   { value: "glass", label: "플로팅 글래스" },
-] as const satisfies readonly { value: Theme; label: string }[];
+  { value: "forest", label: "포레스트" },
+] as const satisfies readonly { value: ThemeStyle; label: string }[];
 
-const isTheme = (raw: unknown): raw is Theme => typeof raw === "string" && (THEMES as readonly string[]).includes(raw);
+export const THEME_MODE_OPTIONS = [
+  { value: "dark", label: "다크" },
+  { value: "light", label: "화이트" },
+] as const satisfies readonly { value: ThemeMode; label: string }[];
 
-export const parseTheme = (raw: unknown): Theme => (isTheme(raw) ? raw : DEFAULT_THEME);
+const THEME_BY_KEY: Record<ThemeKey, Theme> = {
+  "editorial-dark": { style: "editorial", mode: "dark" },
+  "editorial-light": { style: "editorial", mode: "light" },
+  "bento-dark": { style: "bento", mode: "dark" },
+  "bento-light": { style: "bento", mode: "light" },
+  "glass-dark": { style: "glass", mode: "dark" },
+  "glass-light": { style: "glass", mode: "light" },
+  "forest-dark": { style: "forest", mode: "dark" },
+  "forest-light": { style: "forest", mode: "light" },
+};
+
+const LEGACY_THEME_MAP: Record<string, Theme> = {
+  dark: THEME_BY_KEY["editorial-dark"],
+  light: THEME_BY_KEY["editorial-light"],
+  bento: THEME_BY_KEY["bento-dark"],
+  glass: THEME_BY_KEY["glass-dark"],
+  forest: THEME_BY_KEY["forest-dark"],
+};
+
+const isThemeStyle = (raw: unknown): raw is ThemeStyle => typeof raw === "string" && (THEME_STYLES as readonly string[]).includes(raw);
+const isThemeMode = (raw: unknown): raw is ThemeMode => typeof raw === "string" && (THEME_MODES as readonly string[]).includes(raw);
+const isThemeKey = (raw: unknown): raw is ThemeKey => typeof raw === "string" && (THEME_KEYS as readonly string[]).includes(raw);
+
+export const themeKeyOf = (theme: Theme): ThemeKey => `${theme.style}-${theme.mode}`;
+
+export const themeFromKey = (key: ThemeKey): Theme => THEME_BY_KEY[key];
+
+export function parseTheme(raw: unknown): Theme {
+  if (typeof raw !== "string") return DEFAULT_THEME;
+  if (isThemeKey(raw)) return THEME_BY_KEY[raw];
+  return LEGACY_THEME_MAP[raw] ?? DEFAULT_THEME;
+}
 
 type ThemeStorage = Pick<Storage, "getItem" | "setItem">;
 
@@ -37,7 +92,7 @@ export function readTheme(storage: () => ThemeStorage | null = browserStorage): 
 
 export function writeTheme(theme: Theme, storage: () => ThemeStorage | null = browserStorage): void {
   try {
-    storage()?.setItem(THEME_STORAGE_KEY, theme);
+    storage()?.setItem(THEME_STORAGE_KEY, themeKeyOf(theme));
   } catch {
     return;
   }
@@ -50,10 +105,22 @@ export function subscribeTheme(listener: () => void): () => void {
   return () => void themeListeners.delete(listener);
 }
 
-export const appliedTheme = (root: HTMLElement = document.documentElement): Theme => parseTheme(root.dataset.theme);
+export function appliedTheme(root: HTMLElement = document.documentElement): Theme {
+  const { style, theme } = root.dataset;
+  if (isThemeStyle(style)) {
+    const mode = isThemeMode(theme) ? theme : DEFAULT_THEME_MODE;
+    return THEME_BY_KEY[`${style}-${mode}`];
+  }
+  return parseTheme(theme);
+}
+
+export const appliedThemeStyle = (root: HTMLElement = document.documentElement): ThemeStyle => appliedTheme(root).style;
+export const appliedThemeMode = (root: HTMLElement = document.documentElement): ThemeMode => appliedTheme(root).mode;
+export const appliedThemeKey = (root: HTMLElement = document.documentElement): ThemeKey => themeKeyOf(appliedTheme(root));
 
 export function applyTheme(theme: Theme, root: HTMLElement = document.documentElement): void {
-  root.dataset.theme = theme;
+  root.dataset.style = theme.style;
+  root.dataset.theme = theme.mode;
   themeListeners.forEach((listener) => listener());
 }
 
@@ -74,6 +141,14 @@ function followThemeOfOtherTabs(): void {
 export function chooseTheme(theme: Theme): void {
   applyTheme(theme);
   writeTheme(theme);
+}
+
+export function chooseThemeStyle(style: ThemeStyle): void {
+  chooseTheme({ style, mode: appliedThemeMode() });
+}
+
+export function chooseThemeMode(mode: ThemeMode): void {
+  chooseTheme({ style: appliedThemeStyle(), mode });
 }
 
 export function applyStoredTheme(): Theme {

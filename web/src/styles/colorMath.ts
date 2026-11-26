@@ -1,4 +1,4 @@
-import type { Theme } from "../persist/theme";
+import { themeFromKey, type Theme, type ThemeKey } from "../persist/theme";
 
 export interface Rgba { r: number; g: number; b: number; a: number }
 
@@ -85,13 +85,22 @@ export function parseCustomProperties(css: string): Map<string, string> {
   return properties;
 }
 
-export function parseThemeProperties(css: string, theme: Theme): Map<string, string> {
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+function applyBlock(css: string, selector: string, properties: Map<string, string>): void {
+  const match = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`).exec(css);
+  if (!match) throw new Error(`${selector} 블록이 tokens.css에 없다`);
+  for (const [name, value] of parseCustomProperties(match[1]!)) properties.set(name, value);
+}
+
+export function parseThemeProperties(css: string, theme: ThemeKey | Theme): Map<string, string> {
+  const resolved = typeof theme === "string" ? themeFromKey(theme) : theme;
   const rootMatch = /:root\s*\{([^}]*)\}/.exec(css);
   const properties = parseCustomProperties(rootMatch?.[1] ?? css);
-  if (theme !== "dark") {
-    const themeMatch = new RegExp(`\\[data-theme="${theme}"\\]\\s*\\{([^}]*)\\}`).exec(css);
-    if (!themeMatch) throw new Error(`[data-theme="${theme}"] 블록이 tokens.css에 없다`);
-    for (const [name, value] of parseCustomProperties(themeMatch[1]!)) properties.set(name, value);
+  if (resolved.mode === "light") applyBlock(css, '[data-theme="light"]', properties);
+  if (resolved.style !== "editorial") {
+    applyBlock(css, `[data-style="${resolved.style}"]`, properties);
+    applyBlock(css, `[data-style="${resolved.style}"][data-theme="${resolved.mode}"]`, properties);
   }
   return properties;
 }

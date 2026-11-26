@@ -1,5 +1,23 @@
 import { describe, expect, test } from "vitest";
-import { appliedTheme, applyTheme, parseTheme, readTheme, subscribeTheme, THEME_OPTIONS, THEME_STORAGE_KEY, THEMES, writeTheme } from "./theme";
+import {
+  appliedTheme,
+  appliedThemeKey,
+  appliedThemeMode,
+  appliedThemeStyle,
+  applyTheme,
+  parseTheme,
+  readTheme,
+  subscribeTheme,
+  THEME_KEYS,
+  THEME_MODE_OPTIONS,
+  THEME_MODES,
+  THEME_STORAGE_KEY,
+  THEME_STYLE_OPTIONS,
+  THEME_STYLES,
+  themeFromKey,
+  themeKeyOf,
+  writeTheme,
+} from "./theme";
 
 const memory = (initial: Record<string, string> = {}) => {
   const values = new Map(Object.entries(initial));
@@ -11,44 +29,64 @@ const blocked = () => {
 };
 
 describe("화면 테마 저장", () => {
-  test("저장된 값이 없으면 다크 테마로 동작한다", () => {
-    expect(readTheme(() => memory())).toBe("dark");
+  test("저장된 값이 없으면 에디토리얼 다크로 동작한다", () => {
+    expect(readTheme(() => memory())).toEqual({ style: "editorial", mode: "dark" });
   });
 
-  test("알 수 없는 값이면 다크 테마로 동작한다", () => {
-    expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "sepia" }))).toBe("dark");
-    expect(parseTheme(null)).toBe("dark");
-    expect(parseTheme(1)).toBe("dark");
+  test("알 수 없는 값이면 에디토리얼 다크로 동작한다", () => {
+    expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "sepia" }))).toEqual({ style: "editorial", mode: "dark" });
+    expect(parseTheme(null)).toEqual({ style: "editorial", mode: "dark" });
+    expect(parseTheme(1)).toEqual({ style: "editorial", mode: "dark" });
   });
 
-  test("저장소를 쓸 수 없으면 다크 테마로 동작한다", () => {
-    expect(readTheme(blocked)).toBe("dark");
-    expect(readTheme(() => ({ getItem: blocked, setItem: blocked }))).toBe("dark");
-    expect(() => writeTheme("bento", blocked)).not.toThrow();
-    expect(() => writeTheme("glass", () => ({ getItem: blocked, setItem: blocked }))).not.toThrow();
+  test("기존 단일 테마 저장값을 스타일과 모드로 하위 호환 매핑한다", () => {
+    expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "dark" }))).toEqual({ style: "editorial", mode: "dark" });
+    expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "light" }))).toEqual({ style: "editorial", mode: "light" });
+    expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "bento" }))).toEqual({ style: "bento", mode: "dark" });
+    expect(readTheme(() => memory({ [THEME_STORAGE_KEY]: "glass" }))).toEqual({ style: "glass", mode: "dark" });
   });
 
-  test("네 가지 테마를 모두 저장하고 다시 읽는다", () => {
+  test("저장소를 쓸 수 없으면 에디토리얼 다크로 동작한다", () => {
+    expect(readTheme(blocked)).toEqual({ style: "editorial", mode: "dark" });
+    expect(readTheme(() => ({ getItem: blocked, setItem: blocked }))).toEqual({ style: "editorial", mode: "dark" });
+    expect(() => writeTheme({ style: "bento", mode: "light" }, blocked)).not.toThrow();
+    expect(() => writeTheme({ style: "glass", mode: "light" }, () => ({ getItem: blocked, setItem: blocked }))).not.toThrow();
+  });
+
+  test("여덟 가지 스타일·모드 조합을 모두 저장하고 다시 읽는다", () => {
     const storage = memory();
-    for (const theme of THEMES) {
+    expect(THEME_KEYS).toHaveLength(8);
+    for (const key of THEME_KEYS) {
+      const theme = themeFromKey(key);
       writeTheme(theme, () => storage);
-      expect(readTheme(() => storage)).toBe(theme);
+      expect(storage.values.get(THEME_STORAGE_KEY)).toBe(key);
+      expect(readTheme(() => storage)).toEqual(theme);
+      expect(themeKeyOf(theme)).toBe(key);
     }
-    expect(THEME_OPTIONS.map((option) => option.value)).toEqual([...THEMES]);
+    expect(THEME_STYLE_OPTIONS.map((option) => option.value)).toEqual([...THEME_STYLES]);
+    expect(THEME_MODE_OPTIONS.map((option) => option.value)).toEqual([...THEME_MODES]);
   });
 
-  test("문서 뿌리 속성으로 반영하고 구독자에게 알린다", () => {
+  test("문서 뿌리 속성으로 스타일과 모드를 반영하고 구독자에게 알린다", () => {
     const root = { dataset: {} } as HTMLElement;
-    expect(appliedTheme(root)).toBe("dark");
+    expect(appliedTheme(root)).toEqual({ style: "editorial", mode: "dark" });
     const seen: string[] = [];
-    const unsubscribe = subscribeTheme(() => seen.push(appliedTheme(root)));
-    applyTheme("light", root);
-    applyTheme("bento", root);
-    applyTheme("glass", root);
-    expect(root.dataset.theme).toBe("glass");
-    expect(seen).toEqual(["light", "bento", "glass"]);
+    const unsubscribe = subscribeTheme(() => seen.push(appliedThemeKey(root)));
+    applyTheme({ style: "editorial", mode: "light" }, root);
+    applyTheme({ style: "bento", mode: "light" }, root);
+    applyTheme({ style: "glass", mode: "light" }, root);
+    expect(root.dataset.style).toBe("glass");
+    expect(root.dataset.theme).toBe("light");
+    expect(appliedThemeStyle(root)).toBe("glass");
+    expect(appliedThemeMode(root)).toBe("light");
+    expect(seen).toEqual(["editorial-light", "bento-light", "glass-light"]);
     unsubscribe();
-    applyTheme("dark", root);
-    expect(seen).toEqual(["light", "bento", "glass"]);
+    applyTheme({ style: "editorial", mode: "dark" }, root);
+    expect(seen).toEqual(["editorial-light", "bento-light", "glass-light"]);
+  });
+
+  test("문서 뿌리에 data-style 없이 기존 data-theme만 있어도 올바르게 읽는다", () => {
+    expect(appliedTheme({ dataset: { theme: "bento" } } as unknown as HTMLElement)).toEqual({ style: "bento", mode: "dark" });
+    expect(appliedTheme({ dataset: { theme: "light" } } as unknown as HTMLElement)).toEqual({ style: "editorial", mode: "light" });
   });
 });

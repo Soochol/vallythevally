@@ -67,7 +67,7 @@ export function useCanvasPalette(): CanvasPalette {
     const refresh = () => setPalette(readCanvasPalette());
     refresh();
     const observer = new MutationObserver(refresh);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-style"] });
     return () => observer.disconnect();
   }, []);
   return palette;
