@@ -1,7 +1,7 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WindowId } from "../../layout/kinds";
-import { useOrderSettings } from "../../stores/ui";
+import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { ReplayStrip } from "../book-replay/ReplayStrip";
 import { FeedStrip } from "../market-window/FeedStrip";
 import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
@@ -13,8 +13,10 @@ import { ladderColumns, PriceLadder } from "../market-window/PriceLadder";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { SymbolHead } from "../market-window/SymbolHead";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
+import { ladderRowHeightPx } from "../order/orderSettings";
 import { EmptyState, ErrorState } from "../overlay/State";
 import { Notice } from "../ui/Notice";
+import { BookSettingsPopover } from "./BookSettingsPopover";
 import { useRowsPerSide, visibleLadderRows } from "./useRowsPerSide";
 
 const REJECTION: Record<string, string> = {
@@ -26,12 +28,18 @@ const REJECTION: Record<string, string> = {
 
 function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const ladderBox = useRef<HTMLDivElement>(null);
-  const rowsPerSide = useRowsPerSide(ladderBox);
-  const { skipSpreadGap, rate } = useOrderSettings();
+  const settings = useOrderSettings();
+  const setSettings = useUiStore((s) => s.setOrderSettings);
+  const { skipSpreadGap, rate, ladderDensity } = settings;
+  const rowsPerSide = useRowsPerSide(ladderBox, ladderRowHeightPx(ladderDensity));
   const market = useLadderMarket(code, pager, skipSpreadGap);
   const { feed, replay, totals, view, liveView, trades } = market;
   const afterHours = totals.source === "afterHours";
   const notice = replay.kind === "live" && feed.rejected ? REJECTION[feed.rejected] : null;
+  const settingsPopover = useMemo(
+    () => <BookSettingsPopover settings={settings} onChange={setSettings} />,
+    [settings, setSettings],
+  );
 
   const ladder = (() => {
     if (replay.kind === "none") return <EmptyState title={replay.reason} />;
@@ -48,11 +56,11 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   })();
 
   return (
-    <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined} data-rate-hidden={rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
+    <div className="bk" data-testid="book-window" data-symbol={code} data-connected={feed.connected ? "" : undefined} data-rate-hidden={rate ? undefined : ""} data-ladder-density={ladderDensity} data-replay={replay.kind === "live" ? undefined : replay.kind}>
       {replay.kind === "live" ? (
-        <MarketHead code={code} venue={market.venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge />
+        <MarketHead code={code} venue={market.venue} lastPrice={feed.lastPrice} previousClose={feed.previousClose} nxtBadge trailing={settingsPopover} />
       ) : (
-        <SymbolHead code={code} name={market.symbolInfo?.name ?? null} lastPrice={market.headPrice} previousClose={market.headPreviousClose} nxtTraded={market.symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" />
+        <SymbolHead code={code} name={market.symbolInfo?.name ?? null} lastPrice={market.headPrice} previousClose={market.headPreviousClose} nxtTraded={market.symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" trailing={settingsPopover} />
       )}
       {market.replayEnabled && <ReplayStrip view={replay} />}
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}

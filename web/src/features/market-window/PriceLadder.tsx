@@ -175,12 +175,12 @@ export function PriceLadder({ rows, previousClose, slots, rowSlots, mark, dayPri
           expected={expectedPrice !== null && row.price === expectedPrice && !row.repeat} left={slots?.left?.(row)} right={slots?.right?.(row)} />
       ))}
       {cardRows > 0 && rowSlots?.infoCard && (
-        <div className="mw-info-layer" data-testid="ladder-info-layer" style={{ gridTemplateColumns: columns, top: "var(--s2)", height: `calc(${cardRows} * var(--size-24))` }}>
+        <div className="mw-info-layer" data-testid="ladder-info-layer" style={{ gridTemplateColumns: columns, top: "var(--s2)", height: `calc(${cardRows} * var(--mw-row-h, var(--size-24)))` }}>
           <div className="mw-info-cell" style={{ gridColumn: slots?.left ? 4 : 3 }}>{rowSlots.infoCard(cardRows)}</div>
         </div>
       )}
       {boxRows > 0 && rowSlots?.bottomLeft && (
-        <div className="mw-box-layer" data-testid="ladder-box-layer" style={{ gridTemplateColumns: columns, top: `calc(var(--s2) + ${boxStart} * var(--size-24))`, height: `calc(${boxRows} * var(--size-24))` }}>
+        <div className="mw-box-layer" data-testid="ladder-box-layer" style={{ gridTemplateColumns: columns, top: `calc(var(--s2) + ${boxStart} * var(--mw-row-h, var(--size-24)))`, height: `calc(${boxRows} * var(--mw-row-h, var(--size-24)))` }}>
           <div className="mw-box" style={slots?.left ? { gridColumn: 2 } : undefined}>{rowSlots.bottomLeft(boxRows)}</div>
         </div>
       )}

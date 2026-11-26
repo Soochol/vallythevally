@@ -34,10 +34,10 @@
 .od-cell[data-order-cell][data-side=buy]:hover:not([data-disabled]) { background:color-mix(in srgb, var(--up) 14%, transparent); box-shadow:inset 0 0 0 var(--size-1) color-mix(in srgb, var(--up) 42%, transparent); }
 .od-cell[data-disabled] { cursor:not-allowed; opacity:.45; }
 .od-cell[data-target] { box-shadow:inset 0 0 0 2px var(--accent); }
-.od-preview { color:var(--text-2); font-size:var(--fs-xs); font-weight:600; pointer-events:none; white-space:nowrap; }
+.od-preview { color:var(--text-2); font-size:var(--mw-card-fs, var(--fs-xs)); font-weight:600; pointer-events:none; white-space:nowrap; }
 .od-cell[data-side=sell] .od-preview { color:var(--down); }
 .od-cell[data-side=buy] .od-preview { color:var(--up); }
-.od-chip { position:relative; width:100%; height:calc(100% - 2 * var(--size-2)); border-radius:0; font-size:var(--fs-xs); font-weight:700; cursor:grab; touch-action:none; background:var(--bg); font-variant-numeric:tabular-nums; }
+.od-chip { position:relative; width:100%; height:calc(100% - 2 * var(--mw-bar-inset, var(--size-2))); border-radius:0; font-size:var(--mw-card-fs, var(--fs-xs)); font-weight:700; cursor:grab; touch-action:none; background:var(--bg); font-variant-numeric:tabular-nums; }
 .od-chip[data-side=sell] { border:var(--size-1) solid var(--down); color:var(--down); box-shadow:none; }
 .od-chip[data-side=buy] { border:var(--size-1) solid var(--up); color:var(--up); box-shadow:none; }
 .od-chip[data-dragging] { opacity:.4; }

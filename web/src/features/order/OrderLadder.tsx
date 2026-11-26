@@ -38,6 +38,7 @@ interface Props {
   readonly dayPrices?: DayPrices | null;
   readonly divider: boolean;
   readonly rateShown: boolean;
+  readonly rowHeightPx?: number;
   readonly explorerOn: boolean;
   readonly explorerUnavailable: boolean;
   readonly explorerTitle: string | undefined;
@@ -157,7 +158,7 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
@@ -170,9 +171,9 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   const measureRange = useCallback(() => {
     const element = ladder.current;
     if (!element) return;
-    const next = visibleRowRange(element.scrollTop, element.clientHeight, rowCount);
+    const next = visibleRowRange(element.scrollTop, element.clientHeight, rowCount, rowHeightPx);
     setRange((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
-  }, [rowCount]);
+  }, [rowCount, rowHeightPx]);
 
   useLayoutEffect(() => {
     if (!exploring) return;
@@ -187,9 +188,9 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
   useLayoutEffect(() => {
     const element = ladder.current;
     if (!exploring || !element || centerIndex < 0) return;
-    element.scrollTop = scrollTopToCenter(centerIndex, element.clientHeight);
+    element.scrollTop = scrollTopToCenter(centerIndex, element.clientHeight, rowHeightPx);
     measureRange();
-  }, [exploring]);
+  }, [exploring, rowHeightPx]);
 
   const hasCurrent = rows.some((row) => row.current);
   const hasPricedRows = rows.some((row) => row.price !== null);
@@ -265,7 +266,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
       <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />
       {exploring
-        ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * LADDER_ROW_HEIGHT_PX, paddingBottom: (rowCount - range.end) * LADDER_ROW_HEIGHT_PX }}>{ladderView}</div>
+        ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * rowHeightPx, paddingBottom: (rowCount - range.end) * rowHeightPx }}>{ladderView}</div>
         : ladderView}
       {menu && <OrderList label={menu.group ? "주문 목록" : "주문 취소"} root={ladder} point={{ x: menu.x, y: menu.y }} drag={drag} items={items(menu)} onClose={() => setMenu(null)} />}
     </div>

@@ -28,7 +28,7 @@ import { FALLBACK_NOTICE, type OrderAccountChoice } from "./orderAccount";
 import { orderEntryKey } from "./orderEntries";
 import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
 import { typedQuantity } from "./orderRules";
-import type { PresetMode } from "./orderSettings";
+import { ladderRowHeightPx, type PresetMode } from "./orderSettings";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { OrderTotals } from "./OrderTotals";
@@ -192,8 +192,10 @@ function OrderBody({
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
   const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", !explorerOn && shownLadder);
 
+  const rowHeightPx = ladderRowHeightPx(settings.ladderDensity);
+
   return (
-    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-replay={replay.kind === "live" ? undefined : replay.kind}>
+    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-ladder-density={settings.ladderDensity} data-replay={replay.kind === "live" ? undefined : replay.kind}>
       {access.reason && (
         <div className="od-gate" role="status" data-testid="order-gate">
           <span>{access.reason}</span>
@@ -241,7 +243,7 @@ function OrderBody({
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (
