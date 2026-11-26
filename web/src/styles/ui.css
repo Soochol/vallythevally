@@ -13,7 +13,8 @@
 .ui-field-cell .ui-field { padding-right:var(--size-120); }
 .ui-field[aria-invalid=true] { border-color:var(--danger); }
 .ui-tabs { display:flex; flex:none; gap:var(--size-24); padding:0 var(--size-24); border-bottom:var(--size-1) solid var(--line); }
-.ui-tabs button { min-height:var(--size-42); padding:0 var(--size-4) var(--size-8); border-bottom:var(--size-2) solid transparent; color:var(--text-2); font-size:var(--fs-b); white-space:nowrap; }
+.ui-tabs button { min-height:var(--size-42); padding:0 var(--size-6) var(--size-8); border-radius:var(--r-s) var(--r-s) 0 0; border-bottom:var(--size-2) solid transparent; color:var(--text-2); font-size:var(--fs-b); white-space:nowrap; transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.ui-tabs button:not([aria-selected=true]):not(:disabled):hover { background:var(--hover); color:var(--text); }
 .ui-tabs button:disabled { color:var(--text-3); cursor:not-allowed; }
 .ui-tabs [aria-selected=true] { border-color:var(--accent); color:var(--accent); font-weight:600; }
 .ui-tabs button span { margin-left:var(--size-8); padding:var(--size-4) var(--size-8); border-radius:var(--r-s); background:var(--raised); color:var(--text-2); font-size:var(--fs-xs); }

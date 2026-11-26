@@ -65,6 +65,7 @@
 }
 
 :is([data-style="bento"], [data-style="carbon"]) .dock-tab-group[data-selected] {
+  border-radius: var(--r-pill);
   background: var(--raised);
   color: var(--text);
   box-shadow: none;
@@ -108,6 +109,7 @@
 :is([data-style="bento"], [data-style="carbon"]) .ui-seg-item[aria-checked="true"],
 :is([data-style="bento"], [data-style="carbon"]) .ui-seg-item[aria-pressed="true"],
 :is([data-style="bento"], [data-style="carbon"]) .ui-seg-item[aria-selected="true"] {
+  border-radius: var(--r-pill);
   background: var(--surface);
   color: var(--accent);
   box-shadow: 0 1px 4px rgba(3, 7, 14, 0.34);
@@ -144,9 +146,14 @@
 :is([data-style="bento"], [data-style="carbon"]) .od-preset[data-picked],
 :is([data-style="bento"], [data-style="carbon"]) .od-colhead-explorer[aria-pressed="true"] {
   border-bottom-color: transparent;
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: none;
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .od-tab[aria-expanded="true"] b {
+  color: var(--accent);
 }
 
 :is([data-style="bento"], [data-style="carbon"]) .od-preset[data-side-tone="buy"][data-picked],
@@ -194,6 +201,7 @@
 
 :is([data-style="bento"], [data-style="carbon"]) .draw-tool[aria-pressed="true"],
 :is([data-style="bento"], [data-style="carbon"]) .draw-tool[data-active-tool][aria-pressed="true"] {
+  border-radius: var(--r-m);
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: none;
@@ -593,6 +601,7 @@
 }
 
 [data-style="glass"] .dock-tab-group[data-selected] {
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 36%, transparent);
@@ -637,6 +646,7 @@
 [data-style="glass"] .ui-seg-item[aria-checked="true"],
 [data-style="glass"] .ui-seg-item[aria-pressed="true"],
 [data-style="glass"] .ui-seg-item[aria-selected="true"] {
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
@@ -674,9 +684,14 @@
 [data-style="glass"] .od-preset[data-picked],
 [data-style="glass"] .od-colhead-explorer[aria-pressed="true"] {
   border-bottom-color: transparent;
+  border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-style="glass"] .od-tab[aria-expanded="true"] b {
+  color: var(--accent);
 }
 
 [data-style="glass"] .draw-tool {
@@ -685,6 +700,7 @@
 
 [data-style="glass"] .draw-tool[aria-pressed="true"],
 [data-style="glass"] .draw-tool[data-active-tool][aria-pressed="true"] {
+  border-radius: var(--r-m);
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
@@ -951,6 +967,7 @@
 }
 
 [data-style="forest"] .dock-tab-group[data-selected] {
+  border-radius: var(--r-m) var(--r-m) 0 0;
   background: var(--raised);
   color: var(--text);
   box-shadow: none;
@@ -1003,6 +1020,7 @@
 [data-style="forest"] .ui-seg-item[aria-checked="true"],
 [data-style="forest"] .ui-seg-item[aria-pressed="true"],
 [data-style="forest"] .ui-seg-item[aria-selected="true"] {
+  border-radius: var(--r-s);
   background: var(--surface);
   color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--line-strong);
@@ -1043,9 +1061,14 @@
 [data-style="forest"] .draw-tool[aria-pressed="true"],
 [data-style="forest"] .draw-tool[data-active-tool][aria-pressed="true"] {
   border-bottom-color: transparent;
+  border-radius: var(--r-m);
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: none;
+}
+
+[data-style="forest"] .od-tab[aria-expanded="true"] b {
+  color: var(--accent);
 }
 
 [data-style="forest"] .page-rail-item {
