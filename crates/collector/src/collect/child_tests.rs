@@ -8,11 +8,12 @@ use server::config::Secret;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-use super::child::{ChildParts, connector, is_loopback_ws, read_commands, run_session, write_events};
-use super::link::{Events, Incoming};
+use super::child::{ChildParts, connector, heartbeat, is_loopback_ws, read_commands, run_session, write_events};
+use super::link::{Events, Incoming, LoopProgress};
+use super::output::Throughput;
 use super::session::{Finish, Halt, Timings, WallClock};
 use super::testing::*;
-use crate::protocol::{Command, Event, KeyName, ProtocolError, RealType, Registration, SessionState, encode_line, parse_event};
+use crate::protocol::{Command, Event, HEARTBEAT_EVERY, KeyName, ProtocolError, RealType, Registration, SessionState, encode_line, parse_event};
 use crate::raw_read::{RawContent, RawItem, read_day};
 use crate::shared::LiveTapConfig;
 
@@ -628,4 +629,30 @@ async fn a_session_outage_reaches_the_quote_gaps() {
         .collect();
     assert_eq!(gaps, [(down_sec, live_sec)]);
     assert!(live_sec > down_sec);
+}
+
+#[tokio::test(start_paused = true)]
+async fn heartbeat_stops_emitting_once_loop_progress_reaches_stall_limit() {
+    let (event_sink, events) = channel();
+    let throughput = Arc::new(Throughput::default());
+    let (_state_tx, state_rx) = watch::channel(SessionState::Live);
+    let progress = Arc::new(LoopProgress::new());
+    let stall_limit = HEARTBEAT_EVERY * 2;
+    let task = tokio::spawn(heartbeat(Events::to(event_sink), throughput, state_rx, progress.clone(), stall_limit));
+
+    tokio::time::sleep(HEARTBEAT_EVERY + Duration::from_millis(100)).await;
+    let first: Vec<Event> = events.try_iter().collect();
+    assert_eq!(first, [Event::Heartbeat { frames: 0, bytes: 0, state: SessionState::Live }]);
+
+    tokio::time::sleep(stall_limit).await;
+    let stalled: Vec<Event> = events.try_iter().collect();
+    assert!(stalled.is_empty(), "{stalled:?}");
+
+    progress.touch();
+    tokio::time::sleep(HEARTBEAT_EVERY).await;
+    let resumed: Vec<Event> = events.try_iter().collect();
+    assert_eq!(resumed, [Event::Heartbeat { frames: 0, bytes: 0, state: SessionState::Live }]);
+
+    task.abort();
+    let _ = task.await;
 }

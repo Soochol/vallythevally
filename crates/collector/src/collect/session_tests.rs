@@ -311,11 +311,11 @@ async fn written_lines_become_readable_within_a_second_while_the_file_is_open() 
     settle().await;
     tokio::time::sleep(Duration::from_millis(1100)).await;
     let date = running.wall.date();
-    let items: Vec<RawItem> = read_day(&paths.data(), date).unwrap().collect();
-    assert!(
-        items.iter().any(|item| matches!(item, RawItem::Record(record) if record.content == RawContent::Frame(REAL_FRAME.into()))),
-        "{items:?}"
-    );
+    wait_for_disk(|| {
+        read_day(&paths.data(), date)
+            .map(|mut items| items.any(|item| matches!(item, RawItem::Record(record) if record.content == RawContent::Frame(REAL_FRAME.into()))))
+            .unwrap_or(false)
+    });
     running.stop().await;
 }
 
@@ -400,11 +400,7 @@ async fn the_down_line_is_readable_during_the_reconnect_wait() {
     until("여섯째 연결", || peer.connect_count() == 6).await;
     tokio::time::sleep(Duration::from_secs(3)).await;
     let date = running.wall.date();
-    let downs = read_day(&paths.data(), date)
-        .unwrap()
-        .filter(|item| matches!(item, RawItem::Record(record) if matches!(record.content, RawContent::Down { .. })))
-        .count();
-    assert_eq!(downs, 6);
+    wait_for_disk(|| down_count(&paths.data(), date) == 6);
     running.stop().await;
 }
 
@@ -457,18 +453,30 @@ async fn frames_before_a_disconnect_are_flushed_during_the_reconnect_wait() {
     settle().await;
     tokio::time::sleep(Duration::from_secs(5)).await;
     let date = running.wall.date();
-    let stored = read_day(&paths.data(), date)
-        .unwrap()
-        .any(|item| matches!(item, RawItem::Record(record) if record.content == RawContent::Frame(REAL_FRAME.into())));
-    assert!(stored);
+    wait_for_disk(|| {
+        read_day(&paths.data(), date)
+            .map(|mut items| items.any(|item| matches!(item, RawItem::Record(record) if record.content == RawContent::Frame(REAL_FRAME.into()))))
+            .unwrap_or(false)
+    });
     running.stop().await;
+}
+
+fn wait_for_disk(condition: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !condition() {
+        assert!(std::time::Instant::now() < deadline, "원문 쓰기 스레드가 파일을 비우지 못했습니다");
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 fn down_count(data: &std::path::Path, date: u32) -> usize {
     read_day(data, date)
-        .unwrap()
-        .filter(|item| matches!(item, RawItem::Record(record) if matches!(record.content, RawContent::Down { .. })))
-        .count()
+        .map(|items| {
+            items
+                .filter(|item| matches!(item, RawItem::Record(record) if matches!(record.content, RawContent::Down { .. })))
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 #[tokio::test(start_paused = true)]
@@ -477,9 +485,10 @@ async fn silence_is_cut_at_thirty_seconds_not_before_or_after() {
     let (paths, _kiwoom, running) = running_session(&peer).await;
     let date = running.wall.date();
     tokio::time::sleep(Duration::from_secs(29)).await;
+    wait_for_disk(|| read_day(&paths.data(), date).is_ok());
     assert_eq!(down_count(&paths.data(), date), 0);
     tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert_eq!(down_count(&paths.data(), date), 1);
+    wait_for_disk(|| down_count(&paths.data(), date) == 1);
     running.stop().await;
 }
 
@@ -535,4 +544,148 @@ async fn a_halt_after_a_disconnect_records_why_it_stopped() {
     let names: Vec<&str> = recorded.iter().map(|(event, _)| event.as_str()).collect();
     assert_eq!(names, ["live", "down", "down"]);
     assert!(recorded[2].1.as_deref().unwrap().contains("REG가 거절돼 멈춥니다"));
+}
+
+struct StallingSocket {
+    inner: super::ws::Socket,
+    stall_send_after: Option<usize>,
+    sends: usize,
+    stall_close: bool,
+}
+
+impl futures::Stream for StallingSocket {
+    type Item = Result<Message, WsError>;
+
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.inner).poll_next(context)
+    }
+}
+
+impl futures::Sink<Message> for StallingSocket {
+    type Error = WsError;
+
+    fn poll_ready(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        if self.stall_send_after.is_some_and(|limit| self.sends >= limit) {
+            return std::task::Poll::Pending;
+        }
+        std::pin::Pin::new(&mut self.inner).poll_ready(context)
+    }
+
+    fn start_send(mut self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        self.sends += 1;
+        std::pin::Pin::new(&mut self.inner).start_send(item)
+    }
+
+    fn poll_flush(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        std::pin::Pin::new(&mut self.inner).poll_flush(context)
+    }
+
+    fn poll_close(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        if self.stall_close {
+            return std::task::Poll::Pending;
+        }
+        std::pin::Pin::new(&mut self.inner).poll_close(context)
+    }
+}
+
+struct StallingConnector {
+    peer: Peer,
+    stall_send_on_first_after: Option<usize>,
+    stall_close: bool,
+    attempt: std::sync::atomic::AtomicUsize,
+}
+
+impl super::ws::Connector for StallingConnector {
+    fn connect(&self) -> futures::future::BoxFuture<'_, Result<super::ws::Socket, WsError>> {
+        let index = self.attempt.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let stall_send_after = if index == 0 { self.stall_send_on_first_after } else { None };
+        let stall_close = self.stall_close;
+        let peer = self.peer.clone();
+        Box::pin(async move {
+            let inner = peer.connect().await?;
+            Ok(Box::new(StallingSocket { inner, stall_send_after, sends: 0, stall_close }) as super::ws::Socket)
+        })
+    }
+}
+
+fn launch_with_connector(
+    paths: &Paths,
+    connector: Arc<dyn super::ws::Connector>,
+    kiwoom: &Arc<FakeKiwoom>,
+    timings: Timings,
+) -> (Arc<FakeWall>, tokio::sync::watch::Sender<bool>, tokio::task::JoinHandle<Result<Finish, super::start::StartError>>) {
+    let wall = FakeWall::new();
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let injected = super::start::Injected {
+        transport: transport(kiwoom),
+        connector,
+        wall_clock: wall.clone(),
+        token_clock: server::clock::Clock::fake(start_clock()),
+        timings,
+    };
+    let (config, data) = (paths.config(), paths.data());
+    let task = tokio::spawn(async move { super::start::execute(&config, data, &items(), injected, shutdown).await });
+    (wall, stop, task)
+}
+
+#[tokio::test(start_paused = true)]
+async fn hanging_ws_close_finishes_within_close_timeout_and_leaves_valid_raw_file() {
+    let peer = Peer::accepting();
+    let connector = Arc::new(StallingConnector {
+        peer: peer.clone(),
+        stall_send_on_first_after: None,
+        stall_close: true,
+        attempt: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let paths = Paths::new();
+    let kiwoom = FakeKiwoom::issuing_tokens();
+    let timings = timings();
+    let (wall, stop, task) = launch_with_connector(&paths, connector, &kiwoom, timings);
+    until("REG를 보냈다", || peer.count_sent("REG") >= 1).await;
+    settle().await;
+    peer.text(0, REAL_FRAME);
+    settle().await;
+    let date = wall.date();
+
+    let stopped_at = tokio::time::Instant::now();
+    stop.send(true).unwrap();
+    let finish = task.await.unwrap().unwrap();
+    let elapsed = stopped_at.elapsed();
+
+    assert!(matches!(finish, Finish::Shutdown));
+    assert_eq!(elapsed, timings.close);
+    let items: Vec<RawItem> = read_day(&paths.data(), date).unwrap().collect();
+    assert!(items.iter().all(|item| !matches!(item, RawItem::Truncated { .. })), "{items:?}");
+    assert!(items.iter().all(|item| matches!(item, RawItem::Record(_))), "{items:?}");
+    assert!(items.iter().any(|item| matches!(item, RawItem::Record(record) if record.content == RawContent::Frame(REAL_FRAME.into()))));
+    assert!(matches!(items.last(), Some(RawItem::Record(record)) if record.content == RawContent::Down { reason: "종료".into() }));
+}
+
+#[tokio::test(start_paused = true)]
+async fn hanging_ws_send_times_out_after_control_timeout_and_reconnects() {
+    let peer = Peer::accepting();
+    let connector = Arc::new(StallingConnector {
+        peer: peer.clone(),
+        stall_send_on_first_after: Some(1),
+        stall_close: false,
+        attempt: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let paths = Paths::new();
+    let kiwoom = FakeKiwoom::issuing_tokens();
+    let timings = timings();
+    let (wall, stop, task) = launch_with_connector(&paths, connector, &kiwoom, timings);
+    until("둘째 연결의 REG를 보냈다", || peer.count_sent("REG") >= 1).await;
+    settle().await;
+
+    assert_eq!(peer.connect_count(), 2);
+    let connect_times = peer.connect_times();
+    assert_eq!(connect_times[1] - connect_times[0], timings.control + timings.backoff[0]);
+
+    let date = wall.date();
+    stop.send(true).unwrap();
+    assert!(matches!(task.await.unwrap().unwrap(), Finish::Shutdown));
+    let recorded = events(&raw_lines(&paths.data(), date));
+    assert_eq!(recorded[0].0, "down");
+    assert!(recorded[0].1.as_deref().unwrap().contains("WebSocket 전송 시간이 초과됐습니다"), "{recorded:?}");
+    assert_eq!(recorded[1].0, "live");
 }
