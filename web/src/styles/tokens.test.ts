@@ -152,11 +152,15 @@ describe("공통 치수 토큰", () => {
     expect(["--ctl-xs", "--ctl-s", "--ctl-m", "--ctl-l"].map(token)).toEqual(["22px", "26px", "30px", "36px"]);
   });
 
-  it("소프트 벤토·플로팅 글래스·포레스트 다크·화이트 조형·강조 토큰이 규격과 일치한다", () => {
+  it("소프트 벤토·카본 벤토·플로팅 글래스·포레스트 다크·화이트 조형·강조 토큰이 규격과 일치한다", () => {
     const bentoDark = parseThemeProperties(tokensCss, "bento-dark");
-    expect(["--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => bentoDark.get(name))).toEqual(["16px", "999px", "10px", "#42E3A8"]);
+    expect(["--bg", "--chart-bg", "--surface", "--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => bentoDark.get(name))).toEqual(["#06080B", "#0B0E14", "#0F1319", "16px", "999px", "10px", "#42E3A8"]);
     const bentoLight = parseThemeProperties(tokensCss, "bento-light");
     expect(["--bg", "--surface", "--chart-bg", "--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => bentoLight.get(name))).toEqual(["#F2F4F6", "#FFFFFF", "#FFFFFF", "16px", "999px", "10px", "#006953"]);
+    const carbonDark = parseThemeProperties(tokensCss, "carbon-dark");
+    expect(["--bg", "--chart-bg", "--surface", "--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => carbonDark.get(name))).toEqual(["#000000", "#060708", "#0B0C0E", "16px", "999px", "10px", "#42E3A8"]);
+    const carbonLight = parseThemeProperties(tokensCss, "carbon-light");
+    expect(["--bg", "--surface", "--chart-bg", "--r-l", "--r-pill", "--island-gap", "--accent"].map((name) => carbonLight.get(name))).toEqual(["#F3F4F5", "#FFFFFF", "#FFFFFF", "16px", "999px", "10px", "#006953"]);
     const glassDark = parseThemeProperties(tokensCss, "glass-dark");
     expect(["--r-l", "--r-pill", "--glass-blur", "--accent"].map((name) => glassDark.get(name))).toEqual(["12px", "999px", "blur(22px)", "#B49BFF"]);
     const glassLight = parseThemeProperties(tokensCss, "glass-light");
