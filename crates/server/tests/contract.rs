@@ -234,6 +234,7 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<TradingBalance>(),
         generated::<TradingExecution>(),
         generated::<TradingExecutions>(),
+        generated::<TradingFillNotice>(),
         generated::<DiagnosisTag>(),
         generated::<ExecutionForensic>(),
         generated::<ExecutionForensics>(),

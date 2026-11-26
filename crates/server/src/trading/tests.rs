@@ -23,7 +23,7 @@ use crate::kiwoom::error::Category;
 use crate::kiwoom::private_file::PrivateFile;
 use crate::kiwoom::rest::testing::{FakeTransport, Sent, ok, token};
 use crate::kiwoom::rest::{Access, KiwoomError, KiwoomRest};
-use crate::kiwoom::stream::{AccountEvent, AccountFeed, AccountKind, KiwoomStream};
+use crate::kiwoom::stream::{AccountEvent, AccountFeed, AccountFill, AccountKind, KiwoomStream};
 use crate::kiwoom::transport::{HttpResponse, Stage, TransportError};
 use crate::symbols::SymbolDirectory;
 use crate::trading::TradingApiId;
@@ -332,7 +332,7 @@ async fn account_number_never_leaves_in_responses_or_logs() {
     }
     f.state.accounts.market().set_enabled(OrdersSwitchInput { enabled: true, confirm_account_tail: Some("99".into()), key_id: None }).await.unwrap_err();
     *f.account.lock().unwrap() = OTHER_ACCOUNT.to_owned();
-    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()) });
+    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()), fill: None });
     tokio::task::yield_now().await;
     let mut all = bodies.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
     all.push_str(&logs.text());
@@ -616,17 +616,18 @@ async fn orderable_validates_its_query_before_asking_kiwoom() {
 async fn account_events_for_the_confirmed_account_tell_the_browser_the_account_changed() {
     let f = fixture().await;
     let mut changes = f.state.accounts.market().subscribe_changes();
-    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()) });
+    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()), fill: None });
     tokio::task::yield_now().await;
     assert!(changes.try_recv().is_err(), "꺼져 있으면 알리지 않는다");
 
     let (_, enabled) = enable(&f.app, "01").await;
     let account_ref = enabled["accountRef"].as_str().unwrap().to_owned();
     let sent = f.fake.sent().len();
-    f.feed.emit(AccountEvent { kind: AccountKind::Balance, account: Secret::new(OTHER_ACCOUNT.into()) });
-    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()) });
+    f.feed.emit(AccountEvent { kind: AccountKind::Balance, account: Secret::new(OTHER_ACCOUNT.into()), fill: None });
+    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()), fill: Some(AccountFill { order_no: Some("0000001".into()), quantity: Some(3), cumulative_quantity: Some(5) }) });
     let changed = tokio::time::timeout(Duration::from_secs(5), changes.recv()).await.unwrap().unwrap();
     assert_eq!(changed.account_ref, account_ref);
+    assert_eq!(changed.fill, Some(crate::api::TradingFillNotice { order_no: Some("0000001".into()), quantity: Some(3), cumulative_quantity: Some(5) }));
     assert!(changes.try_recv().is_err(), "다른 계좌의 이벤트는 알리지 않는다");
     assert_eq!(f.fake.sent().len(), sent, "이벤트만으로는 아무것도 조회하지 않는다");
 }

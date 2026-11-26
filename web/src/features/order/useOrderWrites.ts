@@ -97,9 +97,9 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
       setStatus(plan.starting);
       try {
         const result = await plan.call(commandId);
+        plan.onResult?.(result);
         pendingWrites.resolve(plan.mark.key, plan.settled(result));
         setStatus(plan.describe(result));
-        plan.onResult?.(result);
       } catch (error) {
         if (isUnanswered(error)) settlement = "unanswered";
         setStatus(statusOfFailure(error, () => enqueue(plan), accountText));

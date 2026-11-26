@@ -13,7 +13,7 @@ use tokio_tungstenite::connect_async;
 use super::error::{Category, CodeKey, WsRejection, classify};
 use super::rest::{Access, KiwoomRest};
 use super::vi::ViBackfill;
-pub use super::wire::{AccountEvent, AccountKind};
+pub use super::wire::{AccountEvent, AccountFill, AccountKind};
 use super::wire::{self, RealItem, RealType, Registrations, WsControl, WsFrame};
 use crate::api::KiwoomEnvironment;
 use crate::clock::Clock;
@@ -1861,8 +1861,12 @@ pub(crate) mod tests {
             peer.real(0, vec![fill(SYNTHETIC_ACCOUNT), trade("093001", 71_200, 15, 100, "KRX")]);
             assert_eq!(tick(next(&mut events).await).price.centi(), 7_120_000);
             let event = received.recv().await.unwrap();
-            assert_eq!(event, AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(SYNTHETIC_ACCOUNT.into()) });
+            assert_eq!(event, AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(SYNTHETIC_ACCOUNT.into()), fill: None });
             assert!(!format!("{event:?}").contains(SYNTHETIC_ACCOUNT), "Debug 출력에 계좌번호가 없다");
+
+            peer.real(0, vec![json!({"type": "00", "item": "", "values": {"9201": SYNTHETIC_ACCOUNT, "9203": "0000002", "913": "체결", "915": "3", "911": "8"}})]);
+            let filled = received.recv().await.unwrap();
+            assert_eq!(filled, AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(SYNTHETIC_ACCOUNT.into()), fill: Some(AccountFill { order_no: Some("0000002".into()), quantity: Some(3), cumulative_quantity: Some(8) }) });
         }
     }
 }

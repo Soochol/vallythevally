@@ -219,3 +219,25 @@ test("주문 소리 설정은 기본 켜짐이고 끄면 새로고침 뒤에도 
   await pollSaved(() => executionCount(api)).toBeGreaterThan(beforeNextFill);
   await expect.poll(() => readRecorded(page)).toEqual(expectedTones("filled"));
 });
+
+test("실시간 체결 통보가 오면 체결 조회 응답을 기다리지 않고 즉시 울리며 뒤이은 조회에는 중복으로 울리지 않는다", async ({ page, scenario }) => {
+  await installAudioRecorder(page);
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.executions = [fill("0000001", 5, "buy", "093000")];
+  await openOrderWindow(page, scenario);
+  await pollSaved(() => executionCount(api)).toBeGreaterThanOrEqual(1);
+  expect(await readRecorded(page)).toEqual([]);
+
+  const heldExecutions = scenario.hold((url) => url.pathname === "/api/trading/executions");
+  scenario.live.emit({ type: "trading_account_changed", accountRef: ACCOUNT, fill: { orderNo: "0000002", quantity: 3, cumulativeQuantity: 3 } });
+  await expect.poll(() => readRecorded(page)).toEqual(expectedTones("filled"));
+
+  await clearRecorded(page);
+  await heldExecutions.received;
+  heldExecutions.reply({ body: { accountRef: ACCOUNT, day: "2026-11-18", executions: [fill("0000001", 5, "buy", "093000"), fill("0000002", 3, "sell", "093100")] } });
+  await page.getByTestId("account-tab-fills").click();
+  await expect(page.getByTestId("account-fill")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  expect(await readRecorded(page)).toEqual([]);
+});

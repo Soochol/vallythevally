@@ -735,7 +735,7 @@ async fn cancel_of_an_order_missing_from_recent_open_orders_queries_again() {
     assert_eq!(sent_since(&f, before), ["ka10075", "kt10003"], "이 서버의 쓰기가 접수된 뒤에는 기억을 버린다");
 
     get(&f.app, OPEN_ORDERS).await;
-    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()) });
+    f.feed.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(ACCOUNT.into()), fill: None });
     for _ in 0..10 {
         tokio::task::yield_now().await;
     }

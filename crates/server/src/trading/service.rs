@@ -35,6 +35,7 @@ const REF_HEX_CHARS: usize = 24;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountChanged {
     pub account_ref: String,
+    pub fill: Option<api::TradingFillNotice>,
 }
 
 #[derive(Debug)]
@@ -697,7 +698,8 @@ impl Trading {
             return;
         }
         self.recent_open.forget();
-        self.notify(account_ref);
+        let fill = event.fill.as_ref().map(|fill| api::TradingFillNotice { order_no: fill.order_no.clone(), quantity: fill.quantity, cumulative_quantity: fill.cumulative_quantity });
+        self.notify_change(account_ref, fill);
     }
 
     fn on_fill_notice(&self, notice: &FillNotice) {
@@ -711,11 +713,16 @@ impl Trading {
             self.fill_venues.remember(&notice.order_no, self.clock.now().kst_date(), venue);
         }
         self.recent_open.forget();
-        self.notify(account_ref);
+        let fill = notice.filled.then(|| api::TradingFillNotice { order_no: Some(notice.order_no.clone()), quantity: notice.quantity, cumulative_quantity: None });
+        self.notify_change(account_ref, fill);
     }
 
     pub(super) fn notify(&self, account_ref: String) {
-        let _ = self.changes.send(AccountChanged { account_ref });
+        self.notify_change(account_ref, None);
+    }
+
+    fn notify_change(&self, account_ref: String, fill: Option<api::TradingFillNotice>) {
+        let _ = self.changes.send(AccountChanged { account_ref, fill });
     }
 
     fn on_events_missed(&self) {

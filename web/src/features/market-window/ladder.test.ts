@@ -284,6 +284,36 @@ test("호가 사이 빈 가격 건너뛰기를 켜도 단일가 호가는 그대
   expect(skipGap({ asks: CAPTURE_ASKS, bids: CAPTURE_BIDS })).toEqual(captured({ asks: CAPTURE_ASKS, bids: CAPTURE_BIDS }));
 });
 
+test("호가 사이 빈 가격 건너뛰기를 켜면 1호가가 붙어 있어도 매도·매수 단 사이의 빈 가격 행을 모두 건너뛴다", () => {
+  const gappedAsks = [0, 2, 5, 6, 9, 11, 14, 15, 18, 22].map((step, i) => level(196_400 + 100 * step, 100 + i));
+  const gappedBids = [0, 2, 4, 7, 10, 12, 15, 17, 20, 25].map((step, i) => level(196_300 - 100 * step, 200 + i));
+  const off = captured({ asks: gappedAsks, bids: gappedBids });
+  expect(off.filter((row) => row.ask !== null).length).toBeLessThan(10);
+  expect(off.filter((row) => row.bid !== null).length).toBeLessThan(10);
+
+  const on = skipGap({ asks: gappedAsks, bids: gappedBids });
+  expect(prices(on).slice(0, 10)).toEqual([...gappedAsks].reverse().map((l) => l.price));
+  expect(prices(on).slice(10)).toEqual(gappedBids.map((l) => l.price));
+  expect(on.slice(0, 10).every((row) => row.ask !== null && row.bid === null)).toBe(true);
+  expect(on.slice(10).every((row) => row.bid !== null && row.ask === null)).toBe(true);
+});
+
+test("호가 사이 빈 가격 건너뛰기는 10단 미만 벌어진 호가에서 있는 단을 붙이고 바깥 빈 줄은 한 틱씩 채운다", () => {
+  const asks = [level(70_100, 10), level(70_400, 20), level(70_800, 30), level(71_000, 40)];
+  const bids = [level(69_700, 15), level(69_500, 25), level(69_100, 35), level(68_900, 45)];
+  const rows = skipGap({ asks, bids, lastPrice: 70_000, previousClose: 70_000, bounds: { lower: 68_700, upper: 71_200 } });
+  expect(prices(rows).slice(0, 10)).toEqual([null, null, null, null, 71_200, 71_100, 71_000, 70_800, 70_400, 70_100]);
+  expect(prices(rows).slice(10)).toEqual([69_700, 69_500, 69_100, 68_900, 68_800, 68_700, null, null, null, null]);
+});
+
+test("호가 사이 빈 가격 건너뛰기는 한쪽 호가만 있어도 있는 쪽의 빈 가격을 건너뛰고 잔량 0 단을 무시한다", () => {
+  const bids = [level(70_000, 0), level(69_800, 10), level(69_500, 20), level(69_200, 30), level(69_000, 40)];
+  const rows = skipGap({ asks: [], bids, lastPrice: 69_800, previousClose: 70_000 });
+  expect(prices(rows)[9]).toBe(69_900);
+  expect(prices(rows).slice(10, 14)).toEqual([69_800, 69_500, 69_200, 69_000]);
+  expect(prices(rows)[14]).toBe(68_900);
+});
+
 test("예상체결가가 6호가 가격이면 그 행 가격이 목록에 있어 같은 가격으로 찾을 수 있다", () => {
   const rows = auction();
   expect(rows.filter((row) => row.price === 819_000)).toHaveLength(1);

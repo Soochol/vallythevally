@@ -651,7 +651,9 @@ async fn an_encrypted_fill_notice_names_the_kis_account_records_sor_nxt_as_nxt_a
     peer.say(&sealed_notice("5559999901", "0000099999", "1"));
     assert!(tokio::time::timeout(Duration::from_millis(300), changes.recv()).await.is_err(), "다른 계좌의 통보는 알리지 않는다");
     peer.say(&sealed_notice(KIS_DIGITS, "0000012345", "4"));
-    assert_eq!(next_change(&mut changes).await.account_ref, reference_b, "이 계좌의 통보는 B 참조의 체결 알림이 된다");
+    let noticed = next_change(&mut changes).await;
+    assert_eq!(noticed.account_ref, reference_b, "이 계좌의 통보는 B 참조의 체결 알림이 된다");
+    assert_eq!(noticed.fill, Some(crate::api::TradingFillNotice { order_no: Some("0000012345".into()), quantity: Some(3), cumulative_quantity: None }));
 
     let before = f.kis.trs().len();
     let (_, executions) = get(&f.app, &format!("/api/trading/executions?account={reference_b}")).await;

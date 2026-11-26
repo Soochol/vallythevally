@@ -290,10 +290,10 @@ async fn trading_realtime_fill_of_the_second_account_names_that_account() {
 
     let mut changes = f.state.accounts.subscribe_changes();
     let reference_b = f.account_ref(1).await;
-    lane(1).account.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(OTHER_ACCOUNT.into()) });
+    lane(1).account.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(OTHER_ACCOUNT.into()), fill: None });
     assert_eq!(next_change(&mut changes).await.account_ref, reference_b);
-    lane(0).account.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(OTHER_ACCOUNT.into()) });
-    lane(0).account.emit(AccountEvent { kind: AccountKind::Balance, account: Secret::new(ACCOUNT.into()) });
+    lane(0).account.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(OTHER_ACCOUNT.into()), fill: None });
+    lane(0).account.emit(AccountEvent { kind: AccountKind::Balance, account: Secret::new(ACCOUNT.into()), fill: None });
     assert_eq!(next_change(&mut changes).await.account_ref, f.account_ref(0).await, "첫 키의 줄은 자기 계좌의 사건만 알린다");
 
     assert_eq!(f.disable(1).await.0, StatusCode::OK);
@@ -304,7 +304,7 @@ async fn trading_realtime_fill_of_the_second_account_names_that_account() {
 async fn heard_after_swap(changes: &mut tokio::sync::broadcast::Receiver<super::AccountChanged>, lane: &crate::kiwoom::keys::Lane, account: &str) -> String {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            lane.account.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(account.into()) });
+            lane.account.emit(AccountEvent { kind: AccountKind::OrderFill, account: Secret::new(account.into()), fill: None });
             if let Ok(Ok(change)) = tokio::time::timeout(Duration::from_millis(50), changes.recv()).await {
                 return change.account_ref;
             }

@@ -619,6 +619,43 @@ test("호가 사이 빈 가격 건너뛰기를 켜면 벌어진 호가에서도 
   await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ skipSpreadGap: false });
 });
 
+test("호가 사이 빈 가격 건너뛰기를 켜면 1호가가 붙어 있어도 매도·매수 단 사이의 빈 가격 행을 건너뛰고 새로고침 뒤에도 유지된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  const gappedSnapshot = {
+    ...askAtLastSnapshot(),
+    asks: [0, 2, 5, 6, 9, 11, 14, 15, 18, 22].map((step, i) => ({ price: 70_000 + 100 * step, quantity: 10 + i })),
+    bids: [0, 2, 4, 7, 10, 12, 15, 17, 20, 25].map((step, i) => ({ price: 69_900 - 100 * step, quantity: 20 + i })),
+  };
+  await openOrderWindow(page, scenario, false, "krx", undefined, false, gappedSnapshot);
+  const prices = ladderRows(page).locator(".mw-px-num");
+  const asks = ladderRows(page).locator(".mw-qty[data-side=ask] .mw-qty-value");
+  const bids = ladderRows(page).locator(".mw-qty[data-side=bid] .mw-qty-value");
+  await expect(prices.nth(8)).toHaveText("70,100");
+  await expect(asks).toHaveCount(5);
+  await expect(bids).toHaveCount(4);
+
+  await openSettings(page);
+  await page.getByRole("checkbox", { name: "호가 사이 빈 가격 건너뛰기" }).check();
+  await expect(prices.nth(9)).toHaveText("70,000");
+  await expect(prices.nth(8)).toHaveText("70,200");
+  await expect(prices.nth(7)).toHaveText("70,500");
+  await expect(prices.nth(0)).toHaveText("72,200");
+  await expect(prices.nth(10)).toHaveText("69,900");
+  await expect(prices.nth(11)).toHaveText("69,700");
+  await expect(prices.nth(19)).toHaveText("67,400");
+  await expect(asks).toHaveCount(10);
+  await expect(bids).toHaveCount(10);
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ skipSpreadGap: true });
+
+  await page.reload();
+  await expect(win(page)).toBeVisible();
+  await expect(prices.nth(8)).toHaveText("70,200");
+  await expect(prices.nth(11)).toHaveText("69,700");
+  await expect(asks).toHaveCount(10);
+  await expect(bids).toHaveCount(10);
+});
+
 test("금액 프리셋 2에 750을 입력하고 Enter를 누르면 단추가 바로 750만이 되고 새로고침해도 유지되며 틀린 값은 되돌린다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);

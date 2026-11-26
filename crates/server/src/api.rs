@@ -267,9 +267,25 @@ pub enum ServerMessage {
     Account { status: AccountStatus },
     CollectorDaemon { judgment: crate::collector::DaemonJudgment, at: UnixSeconds },
     SetupChanged { kinds: Vec<setup::DocumentKind> },
-    TradingAccountChanged { account_ref: String },
+    TradingAccountChanged {
+        account_ref: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        fill: Option<TradingFillNotice>,
+    },
     ViSnapshot { states: Vec<ViState> },
     ViUpdate { state: ViState },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingFillNotice {
+    pub order_no: Option<String>,
+    #[ts(type = "number | null")]
+    pub quantity: Option<u64>,
+    #[ts(type = "number | null")]
+    pub cumulative_quantity: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]

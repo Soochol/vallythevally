@@ -112,14 +112,54 @@ export interface LadderPrices {
 }
 
 const bestAskPrice = ({ asks }: LadderQuotes): number | null => {
-  const prices = pricedLevels(asks).map((level) => level.price);
+  const prices = activePricedLevels(asks).map((level) => level.price);
   return prices.length > 0 ? Math.min(...prices) : null;
 };
 
 const bestBidPrice = ({ bids }: LadderQuotes): number | null => {
-  const prices = pricedLevels(bids).map((level) => level.price);
+  const prices = activePricedLevels(bids).map((level) => level.price);
   return prices.length > 0 ? Math.max(...prices) : null;
 };
+
+function distinctBoundedPrices(levels: readonly BookLevel[], bounds: PriceBounds, direction: 1 | -1): number[] {
+  const unique = new Set<number>();
+  for (const level of activePricedLevels(levels)) {
+    if (withinBounds(level.price, bounds)) unique.add(level.price);
+  }
+  return [...unique].sort((a, b) => (direction === 1 ? a - b : b - a)).slice(0, ROWS_ABOVE_BASE);
+}
+
+function fillCompactSide(quoted: readonly number[], fallbackAnchor: number | null, bounds: PriceBounds, rule: TickRule, direction: 1 | -1): (number | null)[] {
+  const listed = (price: number): number | null => (withinBounds(price, bounds) ? price : null);
+  const side = Array<number | null>(ROWS_ABOVE_BASE).fill(null);
+  for (let rank = 0; rank < quoted.length; rank++) side[rank] = quoted[rank]!;
+  let cursor = quoted.length > 0 ? quoted[quoted.length - 1]! : fallbackAnchor;
+  if (cursor === null) return side;
+  for (let rank = quoted.length; rank < ROWS_ABOVE_BASE; rank++) {
+    cursor = stepPrice(cursor, direction, rule);
+    side[rank] = listed(cursor);
+  }
+  return side;
+}
+
+function compactLadderPrices(input: LadderInput): LadderPrices {
+  const { asks, bids, bounds, tickRule } = input;
+  const askPrices = distinctBoundedPrices(asks, bounds, 1);
+  const bidPrices = distinctBoundedPrices(bids, bounds, -1);
+  if (askPrices.length === 0 && bidPrices.length === 0) {
+    return { prices: gridPrices(basePrice(input), bounds, tickRule), sidesSplit: false };
+  }
+  const bestAsk = askPrices[0] ?? null;
+  const bestBid = bidPrices[0] ?? null;
+  const askSide = fillCompactSide(askPrices, bestBid, bounds, tickRule, 1);
+  const bidSide = fillCompactSide(bidPrices, bestAsk, bounds, tickRule, -1);
+  const prices = Array<number | null>(LADDER_ROWS).fill(null);
+  for (let rank = 0; rank < ROWS_ABOVE_BASE; rank++) {
+    prices[ROWS_ABOVE_BASE - 1 - rank] = askSide[rank]!;
+    prices[ROWS_ABOVE_BASE + rank] = bidSide[rank]!;
+  }
+  return { prices, sidesSplit: bestAsk !== null && bestBid !== null && bestBid >= bestAsk };
+}
 
 function splitSideGrid(bestAsk: number, bestBid: number, bounds: PriceBounds, rule: TickRule): (number | null)[] {
   const listed = (price: number): number | null => (withinBounds(price, bounds) ? price : null);
@@ -145,15 +185,12 @@ function askAnchoredLadder(input: LadderInput, bestAsk: number): LadderPrices {
   if (bestBid !== null && bestBid >= bestAsk) {
     return { prices: splitSideGrid(bestAsk, bestBid, bounds, tickRule), sidesSplit: true };
   }
-  const spreadHasGap = bestBid !== null && bestBid < stepPrice(bestAsk, -1, tickRule);
-  if (input.skipSpreadGap && spreadHasGap) {
-    return { prices: splitSideGrid(bestAsk, bestBid, bounds, tickRule), sidesSplit: false };
-  }
   return { prices: gridAround(bestAsk, ROWS_ABOVE_BASE - 1, bounds, tickRule), sidesSplit: false };
 }
 
 export function defaultLadderPrices(input: LadderInput): LadderPrices {
   if (isSinglePriceBook(input)) return { prices: singlePricePrices(input), sidesSplit: true };
+  if (input.skipSpreadGap) return compactLadderPrices(input);
   const bestAsk = bestAskPrice(input);
   if (bestAsk !== null) return askAnchoredLadder(input, bestAsk);
   return { prices: gridPrices(bestBidPrice(input) ?? basePrice(input), input.bounds, input.tickRule), sidesSplit: false };

@@ -288,6 +288,30 @@ test("호가 사이 빈 가격 건너뛰기가 꺼져 있으면 10호가창은 �
   await expect(MID_SLOT(page, "bid")).toHaveCount(8);
 });
 
+test("호가 사이 빈 가격 건너뛰기가 켜져 있으면 10호가창도 매도·매수 단 사이의 빈 가격 행을 건너뛴다", async ({ page, scenario }) => {
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), orderSettings: { skipSpreadGap: true } });
+  bookWindow(scenario, CODE);
+  replyBook(scenario, CAPTURE_LAST);
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/fundamentals", { body: { symbol: CODE, upperLimit: 255_000, lowerLimit: 137_000, marketCap: null, listedShares: null, per: null, pbr: null, roe: null, eps: null, bps: null, foreignExhaustionRate: null, high52w: null, low52w: null } });
+  scenario.reply((url) => url.pathname === "/api/symbols/005930/order-book", { body: {
+    ...snapshotOf(CAPTURE_LAST),
+    asks: [0, 2, 5, 6, 9, 11, 14, 15, 18, 22].map((step, i) => ({ price: CAPTURE_LAST + 100 * step, quantity: 10 + i })),
+    bids: [0, 2, 4, 7, 10, 12, 15, 17, 20, 25].map((step, i) => ({ price: CAPTURE_LAST - 100 - 100 * step, quantity: 20 + i })),
+  } });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
+  const prices = ladderRows(page).locator(".mw-px-num");
+  await expect(prices.nth(9)).toHaveText("196,400");
+  await expect(prices.nth(8)).toHaveText("196,600");
+  await expect(prices.nth(0)).toHaveText("198,600");
+  await expect(prices.nth(10)).toHaveText("196,300");
+  await expect(prices.nth(11)).toHaveText("196,100");
+  await expect(prices.nth(19)).toHaveText("193,800");
+  await expect(MID_SLOT(page, "ask")).toHaveCount(10);
+  await expect(MID_SLOT(page, "bid")).toHaveCount(10);
+});
+
 test("동시호가 6호가는 매도 3단이 가운데 선 위, 매수 3단이 아래 행에 놓이고 정보 여섯 칸이 모두 보인다", async ({ page, scenario }) => {
   await open(page, scenario, 810_000);
   const bookSub = await subOf(scenario, "book");
