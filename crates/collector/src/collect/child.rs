@@ -130,13 +130,20 @@ pub fn is_loopback_ws(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("ws://") else {
         return false;
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if rest.contains('#') {
+        return false;
+    }
+    let authority = rest.split(['/', '?']).next().unwrap_or_default();
     if authority.contains(['@', '\\']) {
         return false;
     }
     let (host, port) = match authority.strip_prefix('[') {
         Some(inside) => match inside.split_once(']') {
-            Some((address, tail)) => (format!("[{address}]"), tail.strip_prefix(':')),
+            Some((address, "")) => (format!("[{address}]"), None),
+            Some((address, tail)) => match tail.strip_prefix(':') {
+                Some(port) => (format!("[{address}]"), Some(port)),
+                None => return false,
+            },
             None => return false,
         },
         None => match authority.split_once(':') {
@@ -144,7 +151,7 @@ pub fn is_loopback_ws(url: &str) -> bool {
             None => (authority.to_owned(), None),
         },
     };
-    let port_ok = port.is_none_or(|port| !port.is_empty() && port.chars().all(|digit| digit.is_ascii_digit()));
+    let port_ok = port.is_none_or(|port| !port.is_empty() && port.bytes().all(|digit| digit.is_ascii_digit()) && port.parse::<u16>().is_ok());
     port_ok && LOOPBACK_HOSTS.contains(&host.as_str())
 }
 

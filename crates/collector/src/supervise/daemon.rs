@@ -619,7 +619,7 @@ impl Supervisor {
         }
         let Some((token, generation)) = key.tokens.current() else { return };
         if key.sent_generation != Some(generation) {
-            key.slot.send_if_ready(&Command::Token { token, generation, expires_at: None });
+            key.slot.send_if_ready(&Command::Token { token, generation, expires_at: None, app_key: None, app_secret: None });
             key.sent_generation = Some(generation);
         }
     }

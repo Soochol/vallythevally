@@ -75,6 +75,21 @@ pub struct RecentCloses {
     pub closes: HashMap<StockCode, Vec<Price>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentDatedCloses {
+    pub latest_day: Option<KstDate>,
+    pub closes: HashMap<StockCode, Vec<(KstDate, Price)>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedMeta {
+    pub code: StockCode,
+    pub name: String,
+    pub market: Market,
+    pub listed_shares: Option<NonZeroU64>,
+    pub is_etf_etn: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MicroSums {
     pub program_net_won: i128,
@@ -242,20 +257,123 @@ impl Store {
         .collect()
     }
 
+    pub fn listed_meta(&self) -> Result<Vec<ListedMeta>, StoreError> {
+        let conn = self.conn();
+        let etf_etn_mask = exclusion_mask(&[ExcludeKind::Etf, ExcludeKind::Etn]);
+        let mut stmt = conn.prepare("SELECT code, name, market, listed_shares, excludable_as FROM listed ORDER BY code")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, Option<u64>>(3)?, row.get::<_, u16>(4)?))
+        })?;
+        rows.map(|row| {
+            let (code, name, market, listed_shares, excludable_as) = row?;
+            Ok(ListedMeta {
+                code: stock_code(&code)?,
+                name,
+                market: market_of(&market)?,
+                listed_shares: listed_shares.and_then(NonZeroU64::new),
+                is_etf_etn: (excludable_as & etf_etn_mask) != 0,
+            })
+        })
+        .collect()
+    }
+
+    pub fn daily_codes(&self) -> Result<Vec<StockCode>, StoreError> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT DISTINCT code FROM daily ORDER BY code")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|row| stock_code(&row?)).collect()
+    }
+
+    pub fn recent_trading_days(&self, count: usize) -> Result<Vec<KstDate>, StoreError> {
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn();
+        let Some(latest_day) = anchored_latest_day(&conn)? else {
+            return Ok(Vec::new());
+        };
+        let mut stmt = conn.prepare("SELECT DISTINCT day FROM daily WHERE day <= ? ORDER BY day DESC LIMIT ?")?;
+        let rows = stmt.query_map(params![date_value(latest_day), count as u64], |row| row.get::<_, i32>(0))?;
+        let mut days = rows.map(|row| Ok(date_of(row?))).collect::<Result<Vec<_>, StoreError>>()?;
+        days.reverse();
+        Ok(days)
+    }
+
     pub fn recent_closes(&self, codes: &[StockCode], count: usize) -> Result<RecentCloses, StoreError> {
         let conn = self.conn();
-        let latest_day = conn.query_row("SELECT max(day) FROM daily", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+        let latest_day = anchored_latest_day(&conn)?;
         let mut closes = HashMap::new();
         let Some(latest_day) = latest_day else { return Ok(RecentCloses { latest_day, closes }) };
-        let mut stmt = conn.prepare("SELECT day, close FROM daily WHERE code = ? ORDER BY day DESC LIMIT ?")?;
-        for &code in codes {
-            let rows = stmt.query_map(params![code.as_str(), count as u64], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, u64>(1)?)))?;
-            let newest_first = rows.collect::<Result<Vec<_>, _>>()?;
-            if newest_first.first().is_some_and(|(day, _)| date_of(*day) == latest_day) {
-                closes.insert(code, newest_first.into_iter().map(|(_, close)| price_of(close)).collect::<Result<Vec<_>, _>>()?);
+        if codes.is_empty() || count == 0 {
+            return Ok(RecentCloses { latest_day: Some(latest_day), closes });
+        }
+        let wanted: HashSet<&str> = codes.iter().map(StockCode::as_str).collect();
+        let mut stmt = conn.prepare(
+            "SELECT code, day, close FROM (SELECT code, day, close, row_number() OVER (PARTITION BY code ORDER BY day DESC) AS rn FROM daily WHERE day <= ?) WHERE rn <= ? ORDER BY code, day DESC",
+        )?;
+        let rows = stmt.query_map(params![date_value(latest_day), count as u64], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, u64>(2)?)))?;
+        let mut current: Option<(String, bool, Vec<Price>)> = None;
+        for row in rows {
+            let (code, day, close) = row?;
+            if !wanted.contains(code.as_str()) {
+                continue;
+            }
+            let same = current.as_ref().is_some_and(|(prev, _, _)| *prev == code);
+            if !same {
+                if let Some((prev_code, matches_latest, prices)) = current.take()
+                    && matches_latest
+                {
+                    closes.insert(stock_code(&prev_code)?, prices);
+                }
+                let matches_latest = date_of(day) == latest_day;
+                let mut prices = Vec::new();
+                if matches_latest {
+                    prices.push(price_of(close)?);
+                }
+                current = Some((code, matches_latest, prices));
+            } else if let Some((_, true, prices)) = current.as_mut() {
+                prices.push(price_of(close)?);
             }
         }
+        if let Some((prev_code, true, prices)) = current {
+            closes.insert(stock_code(&prev_code)?, prices);
+        }
         Ok(RecentCloses { latest_day: Some(latest_day), closes })
+    }
+
+    pub fn recent_dated_closes(&self, codes: &[StockCode], count: usize) -> Result<RecentDatedCloses, StoreError> {
+        let conn = self.conn();
+        let latest_day = anchored_latest_day(&conn)?;
+        let mut closes = HashMap::new();
+        let Some(latest_day) = latest_day else { return Ok(RecentDatedCloses { latest_day, closes }) };
+        if codes.is_empty() || count == 0 {
+            return Ok(RecentDatedCloses { latest_day: Some(latest_day), closes });
+        }
+        let wanted: HashSet<&str> = codes.iter().map(StockCode::as_str).collect();
+        let mut stmt = conn.prepare(
+            "SELECT code, day, close FROM (SELECT code, day, close, row_number() OVER (PARTITION BY code ORDER BY day DESC) AS rn FROM daily WHERE day <= ?) WHERE rn <= ? ORDER BY code, day DESC",
+        )?;
+        let rows = stmt.query_map(params![date_value(latest_day), count as u64], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?, row.get::<_, u64>(2)?)))?;
+        let mut current: Option<(String, Vec<(KstDate, Price)>)> = None;
+        for row in rows {
+            let (code, day, close) = row?;
+            if !wanted.contains(code.as_str()) {
+                continue;
+            }
+            let same = current.as_ref().is_some_and(|(prev, _)| *prev == code);
+            if !same {
+                if let Some((prev_code, prices)) = current.take() {
+                    closes.insert(stock_code(&prev_code)?, prices);
+                }
+                current = Some((code, vec![(date_of(day), price_of(close)?)]));
+            } else if let Some((_, prices)) = current.as_mut() {
+                prices.push((date_of(day), price_of(close)?));
+            }
+        }
+        if let Some((prev_code, prices)) = current {
+            closes.insert(stock_code(&prev_code)?, prices);
+        }
+        Ok(RecentDatedCloses { latest_day: Some(latest_day), closes })
     }
 
     pub fn bars_from(&self, code: StockCode, from: KstDate) -> Result<Vec<DayBar>, StoreError> {
@@ -387,36 +505,35 @@ impl Store {
 
     pub fn ingest_daily_micro(&self, shared_dir: &Path) -> Result<usize, StoreError> {
         let dir = daily_micro_dir(shared_dir);
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-            Err(error) => return Err(StoreError(format!("{}를 읽을 수 없습니다: {error}", dir.display()))),
-        };
         let mut files: Vec<(i32, PathBuf, u64, i64)> = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|error| StoreError(format!("{} 항목을 읽을 수 없습니다: {error}", dir.display())))?;
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            let Some(stem) = name.strip_suffix(".parquet") else { continue };
-            if stem.len() != 8 || !stem.bytes().all(|byte| byte.is_ascii_digit()) {
-                continue;
+        match std::fs::read_dir(&dir) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = entry.map_err(|error| StoreError(format!("{} 항목을 읽을 수 없습니다: {error}", dir.display())))?;
+                    let name = entry.file_name();
+                    let Some(name) = name.to_str() else { continue };
+                    let Some(stem) = name.strip_suffix(".parquet") else { continue };
+                    if stem.len() != 8 || !stem.bytes().all(|byte| byte.is_ascii_digit()) {
+                        continue;
+                    }
+                    let Ok(date) = stem.parse::<i32>() else { continue };
+                    let metadata = match entry.metadata() {
+                        Ok(metadata) if metadata.is_file() => metadata,
+                        _ => continue,
+                    };
+                    let mtime_ns = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+                        .map_or(0, |duration| duration.as_nanos().min(i64::MAX as u128) as i64);
+                    files.push((date, entry.path(), metadata.len(), mtime_ns));
+                }
             }
-            let Ok(date) = stem.parse::<i32>() else { continue };
-            let metadata = match entry.metadata() {
-                Ok(metadata) if metadata.is_file() => metadata,
-                _ => continue,
-            };
-            let mtime_ns = metadata
-                .modified()
-                .ok()
-                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-                .map_or(0, |duration| duration.as_nanos().min(i64::MAX as u128) as i64);
-            files.push((date, entry.path(), metadata.len(), mtime_ns));
-        }
-        if files.is_empty() {
-            return Ok(0);
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(StoreError(format!("{}를 읽을 수 없습니다: {error}", dir.display()))),
         }
         files.sort_unstable_by_key(|(date, ..)| *date);
+        let present_dates: HashSet<i32> = files.iter().map(|(date, ..)| *date).collect();
 
         let mut conn = self.conn();
         let existing: HashMap<i32, (u64, i64)> = {
@@ -424,47 +541,86 @@ impl Store {
             let rows = stmt.query_map([], |row| Ok((row.get::<_, i32>(0)?, (row.get::<_, u64>(1)?, row.get::<_, i64>(2)?))))?;
             rows.collect::<Result<HashMap<_, _>, _>>()?
         };
+        let mut removed: Vec<i32> = existing.keys().copied().filter(|date| !present_dates.contains(date)).collect();
+        removed.sort_unstable();
         let changed: Vec<(i32, PathBuf, u64, i64)> = files
             .into_iter()
             .filter(|(date, _, size, mtime_ns)| existing.get(date) != Some(&(*size, *mtime_ns)))
             .collect();
-        if changed.is_empty() {
+        if removed.is_empty() && changed.is_empty() {
             return Ok(0);
         }
-        let tx = conn.transaction()?;
-        for (date, path, size, mtime_ns) in &changed {
-            tx.execute("DELETE FROM daily_micro WHERE date = ?", params![*date])?;
-            tx.execute(
-                "INSERT INTO daily_micro (symbol, date, whale_net_won, program_net_won, program_share_bps, foreign_est_net_qty, spoof_cancel_rate_bps, vi_count, vwap_close_gap_bps)
-                 SELECT symbol, date, whale_net_won, program_net_won, program_share_bps, foreign_est_net_qty, spoof_cancel_rate_bps, vi_count, vwap_close_gap_bps
-                 FROM read_parquet(?)",
-                params![path.to_string_lossy().as_ref()],
-            )?;
-            tx.execute(
-                "INSERT INTO daily_micro_files VALUES (?, ?, ?) ON CONFLICT (date) DO UPDATE SET size = excluded.size, mtime_ns = excluded.mtime_ns",
-                params![*date, *size, *mtime_ns],
-            )?;
+
+        let mut updated = 0usize;
+        if !removed.is_empty() {
+            let tx = conn.transaction()?;
+            for date in &removed {
+                tx.execute("DELETE FROM daily_micro WHERE date = ?", params![*date])?;
+                tx.execute("DELETE FROM daily_micro_files WHERE date = ?", params![*date])?;
+            }
+            tx.commit()?;
+            updated += removed.len();
         }
-        tx.commit()?;
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        Ok(changed.len())
+        for (date, path, size, mtime_ns) in &changed {
+            let ingest_result = (|| -> Result<(), duckdb::Error> {
+                let tx = conn.transaction()?;
+                tx.execute("DELETE FROM daily_micro WHERE date = ?", params![*date])?;
+                tx.execute(
+                    "INSERT INTO daily_micro (symbol, date, whale_net_won, program_net_won, program_share_bps, foreign_est_net_qty, spoof_cancel_rate_bps, vi_count, vwap_close_gap_bps)
+                     SELECT symbol, date, whale_net_won, program_net_won, program_share_bps, foreign_est_net_qty, spoof_cancel_rate_bps, vi_count, vwap_close_gap_bps
+                     FROM read_parquet(?)",
+                    params![path.to_string_lossy().as_ref()],
+                )?;
+                tx.execute(
+                    "INSERT INTO daily_micro_files VALUES (?, ?, ?) ON CONFLICT (date) DO UPDATE SET size = excluded.size, mtime_ns = excluded.mtime_ns",
+                    params![*date, *size, *mtime_ns],
+                )?;
+                tx.commit()
+            })();
+            match ingest_result {
+                Ok(()) => updated += 1,
+                Err(error) => {
+                    tracing::warn!(date = *date, path = %path.display(), error = %error, "손상된 일별 미시 parquet 파일을 건너뜁니다");
+                }
+            }
+        }
+        if updated > 0 {
+            self.generation.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(updated)
     }
 
     pub(super) fn micro_windows(&self, as_of: KstDate, days_list: &[u32]) -> Result<HashMap<u32, HashMap<StockCode, MicroSums>>, StoreError> {
         if days_list.is_empty() {
             return Ok(HashMap::new());
         }
-        let as_of_date = as_of.year() * 10_000 + i32::from(as_of.month()) * 100 + i32::from(as_of.day());
+        let max_days = days_list.iter().copied().max().unwrap_or(0) as usize;
+        if max_days == 0 {
+            return Ok(days_list.iter().map(|&days| (days, HashMap::new())).collect());
+        }
+        let as_of_date = yyyymmdd(as_of);
         let conn = self.conn();
+        let mut trading_days = {
+            let mut cal_stmt = conn.prepare(
+                "SELECT day FROM (
+                     SELECT day FROM calendar WHERE day <= ?
+                     UNION
+                     SELECT DISTINCT day FROM daily WHERE day <= ?
+                 )
+                 ORDER BY day DESC
+                 LIMIT ?",
+            )?;
+            let rows = cal_stmt.query_map(params![date_value(as_of), date_value(as_of), max_days as i64], |row| row.get::<_, i32>(0))?;
+            rows.map(|row| row.map(date_of)).collect::<Result<Vec<_>, _>>()?
+        };
+        if trading_days.first() != Some(&as_of) {
+            trading_days.insert(0, as_of);
+            trading_days.truncate(max_days);
+        }
         let mut stmt = conn.prepare(
             "SELECT symbol, COALESCE(CAST(sum(program_net_won) AS BIGINT), 0), COALESCE(CAST(sum(whale_net_won) AS BIGINT), 0), COALESCE(CAST(sum(vi_count) AS BIGINT), 0)
-             FROM (
-                 SELECT symbol, program_net_won, whale_net_won, vi_count,
-                        row_number() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
-                 FROM daily_micro
-                 WHERE date <= ?
-             )
-             WHERE rn <= ?
+             FROM daily_micro
+             WHERE date >= ? AND date <= ?
              GROUP BY symbol",
         )?;
         let mut by_days = HashMap::with_capacity(days_list.len());
@@ -472,7 +628,11 @@ impl Store {
             if by_days.contains_key(&days) {
                 continue;
             }
-            let rows = stmt.query_map(params![as_of_date, i64::from(days)], |row| {
+            let Some(&start_day) = (days as usize).checked_sub(1).and_then(|idx| trading_days.get(idx).or_else(|| trading_days.last())) else {
+                by_days.insert(days, HashMap::new());
+                continue;
+            };
+            let rows = stmt.query_map(params![yyyymmdd(start_day), as_of_date], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?))
             })?;
             let mut sums = HashMap::new();
@@ -493,6 +653,14 @@ impl Store {
         }
         Ok(by_days)
     }
+}
+
+fn anchored_latest_day(conn: &Connection) -> Result<Option<KstDate>, StoreError> {
+    let last_day = conn.query_row("SELECT last_day FROM store_meta", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of);
+    if last_day.is_some() {
+        return Ok(last_day);
+    }
+    Ok(conn.query_row("SELECT max(day) FROM daily", [], |row| row.get::<_, Option<i32>>(0))?.map(date_of))
 }
 
 fn connect(path: &Path) -> Result<Connection, StoreError> {
@@ -592,6 +760,10 @@ pub(super) fn date_of(days: i32) -> KstDate {
     KstDate::from_days_since_epoch(i64::from(days))
 }
 
+fn yyyymmdd(day: KstDate) -> i32 {
+    day.year() * 10_000 + i32::from(day.month()) * 100 + i32::from(day.day())
+}
+
 pub(super) fn price_of(centi: u64) -> Result<Price, StoreError> {
     Price::from_centi(centi).ok_or_else(|| StoreError("저장된 가격이 0입니다".into()))
 }
@@ -632,6 +804,58 @@ mod generation_tests {
         let (captured, codes) = store.collection_targets().unwrap();
         assert_eq!(captured, store.generation());
         assert_eq!(codes, [code]);
+    }
+
+    #[test]
+    fn deleting_daily_micro_files_and_directory_advances_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("screener.duckdb")).unwrap();
+        let shared = dir.path().join("shared");
+        let micro_dir = daily_micro_dir(&shared);
+        std::fs::create_dir_all(&micro_dir).unwrap();
+        let write_file = |date: i32| {
+            let path = micro_dir.join(format!("{date}.parquet"));
+            let config = Config::default().enable_autoload_extension(false).unwrap();
+            let conn = Connection::open_in_memory_with_flags(config).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE tmp (date INTEGER, symbol VARCHAR, whale_net_won BIGINT, program_net_won BIGINT, program_share_bps INTEGER, foreign_est_net_qty BIGINT, spoof_cancel_rate_bps INTEGER, vi_count INTEGER, vwap_close_gap_bps INTEGER);
+                 INSERT INTO tmp VALUES (20261105, '300000', 100000000, 200000000, 1000, 0, 0, 1, 0);",
+            )
+            .unwrap();
+            conn.execute("UPDATE tmp SET date = ?", params![date]).unwrap();
+            let escaped = path.to_string_lossy().replace('\'', "''");
+            conn.execute_batch(&format!("COPY tmp TO '{escaped}' (FORMAT PARQUET);")).unwrap();
+            path
+        };
+
+        let first = write_file(20_261_105);
+        let second = write_file(20_261_106);
+        let g0 = store.generation();
+        assert_eq!(store.ingest_daily_micro(&shared).unwrap(), 2);
+        let g1 = store.generation();
+        assert!(g1 > g0);
+
+        std::fs::remove_file(&second).unwrap();
+        assert_eq!(store.ingest_daily_micro(&shared).unwrap(), 1);
+        let g2 = store.generation();
+        assert!(g2 > g1);
+
+        std::fs::remove_file(&first).unwrap();
+        assert_eq!(store.ingest_daily_micro(&shared).unwrap(), 1);
+        let g3 = store.generation();
+        assert!(g3 > g2);
+        assert_eq!(store.ingest_daily_micro(&shared).unwrap(), 0);
+        assert_eq!(store.generation(), g3);
+
+        let third = write_file(20_261_106);
+        assert_eq!(store.ingest_daily_micro(&shared).unwrap(), 1);
+        let g4 = store.generation();
+        assert!(g4 > g3);
+
+        std::fs::remove_file(&third).unwrap();
+        std::fs::remove_dir(&micro_dir).unwrap();
+        assert_eq!(store.ingest_daily_micro(&shared).unwrap(), 1);
+        assert!(store.generation() > g4);
     }
 }
 

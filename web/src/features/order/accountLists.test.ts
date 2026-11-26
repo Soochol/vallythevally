@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { TradingExecution } from "../../api/generated/TradingExecution";
-import { newestFirst } from "./accountLists";
+import { keyNewestFirstFills, newestFirst } from "./accountLists";
 
 const fill = (orderNo: string, time: string): TradingExecution => ({ orderNo, code: "005930", name: "삼성전자", side: "buy", quantity: 1, price: 70_000, time, venue: "krx" });
 const orderNos = (fills: readonly TradingExecution[]) => fills.map((f) => f.orderNo);
@@ -26,4 +26,19 @@ test("받은 목록은 바꾸지 않는다", () => {
   const received = [fill("1", "090000"), fill("2", "100000")];
   newestFirst(received);
   expect(orderNos(received)).toEqual(["1", "2"]);
+});
+
+test("새 체결이 앞에 붙어도 기존 체결 키는 유지되고 같은 주문의 부분 체결은 서로 다른 키를 갖는다", () => {
+  const older = fill("0001001", "091500");
+  const partial = { ...older, time: "092000", price: 70_200, quantity: 5 };
+  const duplicate = { ...older };
+
+  const initial = keyNewestFirstFills(newestFirst([older]));
+  const withPartial = keyNewestFirstFills(newestFirst([older, partial]));
+  const withDuplicate = keyNewestFirstFills(newestFirst([older, duplicate]));
+
+  expect(withPartial[1]!.key).toBe(initial[0]!.key);
+  expect(withPartial[0]!.key).not.toBe(withPartial[1]!.key);
+  expect(withDuplicate[1]!.key).toBe(initial[0]!.key);
+  expect(withDuplicate[0]!.key).not.toBe(withDuplicate[1]!.key);
 });

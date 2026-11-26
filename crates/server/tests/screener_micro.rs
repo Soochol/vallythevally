@@ -10,7 +10,7 @@ use common::{ScriptedTransport, Server};
 use domain::{KstDate, Weekday};
 use duckdb::{Config, Connection};
 use serde_json::{Value, json};
-use server::shared_data::daily_micro_path;
+use server::shared_data::{daily_micro_dir, daily_micro_path};
 
 fn day(y: i32, m: u8, d: u8) -> KstDate {
     KstDate::new(y, m, d).unwrap()
@@ -253,6 +253,206 @@ async fn screener_ingests_daily_micro_and_evaluates_program_whale_vi_and_new_hig
     assert_eq!(refreshed_rows[0]["symbol"], json!("100030"));
     assert_eq!(refreshed_rows[0]["whaleNetMillionWon"], json!(2_000));
     assert_eq!(refreshed_rows[0]["viCount"], json!(4));
+
+    server.stop().await;
+}
+
+async fn spawn_ready_micro_server() -> (tempfile::TempDir, std::path::PathBuf, Server, Api) {
+    let days = open_days(day(2026, 10, 26), day(2026, 11, 6));
+    let today = *days.last().unwrap();
+    let alpha_bars: Vec<KrxBar> = days.iter().enumerate().map(|(i, &d)| bar(d, 10_000 + i as u64 * 100, 10_000)).collect();
+    let beta_bars: Vec<KrxBar> = days.iter().enumerate().map(|(i, &d)| bar(d, 20_000 + i as u64 * 100, 10_000)).collect();
+
+    let fake = ScriptedTransport::new();
+    fake.set_krx_market(KrxMarket {
+        days,
+        stocks: vec![stock("100010", alpha_bars), stock("100020", beta_bars)],
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let hoga = dir.path().join("hoga");
+    let shared = hoga.join("shared");
+    fs::create_dir_all(&hoga).unwrap();
+
+    let clock_start = at(today, "2030");
+    let server = Server::spawn_with(
+        &fake,
+        &dir.path().join("run/server.lock"),
+        dir.path(),
+        &[
+            ("VALLY_CLOCK_START", OsStr::new(&clock_start)),
+            ("VALLY_HOGA_DATA_DIR", hoga.as_os_str()),
+        ],
+    );
+    let api = Api::of(&server).await;
+    api.start_update().await;
+    api.wait_until_idle().await;
+    (dir, shared, server, api)
+}
+
+#[tokio::test]
+async fn micro_windows_anchor_to_market_trading_days_and_ignore_stale_or_gapped_rows() {
+    let (_dir, shared, server, api) = spawn_ready_micro_server().await;
+
+    write_micro_parquet(
+        &shared,
+        20_261_102,
+        &[MicroRow { symbol: "100010", whale_net_won: 900_000_000, program_net_won: 900_000_000, vi_count: 5 }],
+    );
+
+    let stale_one_day = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 1, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(stale_one_day["rows"].as_array().unwrap().len(), 0);
+
+    let stale_three_day = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 3, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(stale_three_day["rows"].as_array().unwrap().len(), 0);
+
+    let stale_five_day = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 5, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(stale_five_day["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(stale_five_day["rows"][0]["symbol"], json!("100010"));
+
+    write_micro_parquet(
+        &shared,
+        20_261_104,
+        &[
+            MicroRow { symbol: "100010", whale_net_won: 900_000_000, program_net_won: 900_000_000, vi_count: 3 },
+            MicroRow { symbol: "100020", whale_net_won: 100_000_000, program_net_won: 100_000_000, vi_count: 1 },
+        ],
+    );
+    write_micro_parquet(
+        &shared,
+        20_261_105,
+        &[MicroRow { symbol: "100020", whale_net_won: 400_000_000, program_net_won: 400_000_000, vi_count: 1 }],
+    );
+    write_micro_parquet(
+        &shared,
+        20_261_106,
+        &[
+            MicroRow { symbol: "100010", whale_net_won: 200_000_000, program_net_won: 200_000_000, vi_count: 1 },
+            MicroRow { symbol: "100020", whale_net_won: 300_000_000, program_net_won: 300_000_000, vi_count: 1 },
+        ],
+    );
+
+    let gapped_two_day = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 2, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    let rows = gapped_two_day["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["symbol"], json!("100010"));
+    assert_eq!(rows[0]["programNetMillionWon"], json!(200));
+    assert_eq!(rows[1]["symbol"], json!("100020"));
+    assert_eq!(rows[1]["programNetMillionWon"], json!(700));
+
+    let gapped_threshold = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 2, "minMillionWon": 500.0, "maxMillionWon": null})])
+        .await;
+    let high_rows = gapped_threshold["rows"].as_array().unwrap();
+    assert_eq!(high_rows.len(), 1);
+    assert_eq!(high_rows[0]["symbol"], json!("100020"));
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn deleting_daily_micro_files_or_directory_removes_stale_rows() {
+    let (_dir, shared, server, api) = spawn_ready_micro_server().await;
+
+    write_micro_parquet(
+        &shared,
+        20_261_105,
+        &[MicroRow { symbol: "100010", whale_net_won: 300_000_000, program_net_won: 400_000_000, vi_count: 1 }],
+    );
+    write_micro_parquet(
+        &shared,
+        20_261_106,
+        &[MicroRow { symbol: "100010", whale_net_won: 500_000_000, program_net_won: 600_000_000, vi_count: 2 }],
+    );
+
+    let initial = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 2, "minMillionWon": 900.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(initial["rows"].as_array().unwrap().len(), 1);
+
+    fs::remove_file(daily_micro_path(&shared, 20_261_106)).unwrap();
+    let after_one_delete = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 1, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(after_one_delete["rows"].as_array().unwrap().len(), 0);
+
+    let after_one_delete_two_day = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 2, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(after_one_delete_two_day["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(after_one_delete_two_day["rows"][0]["programNetMillionWon"], json!(400));
+
+    fs::remove_file(daily_micro_path(&shared, 20_261_105)).unwrap();
+    let after_empty_dir = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 5, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(after_empty_dir["rows"].as_array().unwrap().len(), 0);
+
+    write_micro_parquet(
+        &shared,
+        20_261_106,
+        &[MicroRow { symbol: "100020", whale_net_won: 500_000_000, program_net_won: 700_000_000, vi_count: 1 }],
+    );
+    let repopulated = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 1, "minMillionWon": 500.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(repopulated["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(repopulated["rows"][0]["symbol"], json!("100020"));
+
+    fs::remove_dir_all(daily_micro_dir(&shared)).unwrap();
+    let after_dir_removed = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 5, "minMillionWon": 100.0, "maxMillionWon": null})])
+        .await;
+    assert_eq!(after_dir_removed["rows"].as_array().unwrap().len(), 0);
+
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn corrupt_daily_micro_parquet_is_skipped_without_failing_healthy_dates() {
+    let (_dir, shared, server, api) = spawn_ready_micro_server().await;
+
+    write_micro_parquet(
+        &shared,
+        20_261_104,
+        &[MicroRow { symbol: "100010", whale_net_won: 200_000_000, program_net_won: 300_000_000, vi_count: 1 }],
+    );
+    write_micro_parquet(
+        &shared,
+        20_261_105,
+        &[MicroRow { symbol: "100010", whale_net_won: 300_000_000, program_net_won: 500_000_000, vi_count: 2 }],
+    );
+    let corrupt_path = daily_micro_path(&shared, 20_261_106);
+    fs::write(&corrupt_path, b"not a valid parquet file").unwrap();
+
+    let with_corrupt = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 3, "minMillionWon": 700.0, "maxMillionWon": null})])
+        .await;
+    let rows = with_corrupt["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["symbol"], json!("100010"));
+    assert_eq!(rows[0]["programNetMillionWon"], json!(800));
+
+    write_micro_parquet(
+        &shared,
+        20_261_106,
+        &[MicroRow { symbol: "100020", whale_net_won: 900_000_000, program_net_won: 1_100_000_000, vi_count: 3 }],
+    );
+    let after_repair = api
+        .run(vec![json!({"kind": "program_net_buy", "days": 1, "minMillionWon": 1_000.0, "maxMillionWon": null})])
+        .await;
+    let repaired_rows = after_repair["rows"].as_array().unwrap();
+    assert_eq!(repaired_rows.len(), 1);
+    assert_eq!(repaired_rows[0]["symbol"], json!("100020"));
+    assert_eq!(repaired_rows[0]["programNetMillionWon"], json!(1_100));
 
     server.stop().await;
 }

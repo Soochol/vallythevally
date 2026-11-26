@@ -56,7 +56,21 @@ const isRevision = (x: unknown): x is number => typeof x === "number" && Number.
 const isWatchlist = (x: unknown): x is Watchlist =>
   isObject(x) && typeof x.id === "string" && typeof x.name === "string" && Array.isArray(x.symbols) && x.symbols.every((s) => typeof s === "string");
 const stale = (stored: number) => fail(409, "stale_revision", `더 새 편집(revision ${stored})이 이미 저장돼 있습니다`);
+const MAX_MICRO_DAYS = 60;
 const isU32 = (x: unknown): x is number => Number.isInteger(x) && (x as number) >= 0 && (x as number) <= MAX_U32;
+const isFiniteBound = (x: unknown): x is number | null => x === null || (typeof x === "number" && Number.isFinite(x));
+const isValidBounds = (min: unknown, max: unknown): boolean =>
+  isFiniteBound(min) && isFiniteBound(max) && (min !== null || max !== null) && (min === null || max === null || min <= max);
+const isMicroDays = (x: unknown): x is number => typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= MAX_MICRO_DAYS;
+const isMicroCondition = (x: Record<string, unknown>): boolean => {
+  if (x.kind === "program_net_buy" || x.kind === "whale_net_buy") {
+    return isMicroDays(x.days) && isValidBounds(x.minMillionWon, x.maxMillionWon);
+  }
+  if (x.kind === "vi_triggered") {
+    return isMicroDays(x.days) && isU32(x.minCount) && x.minCount >= 1;
+  }
+  return false;
+};
 const CONDITION_KINDS: readonly string[] = [
   "new_high",
   "new_low",
@@ -73,15 +87,32 @@ const CONDITION_KINDS: readonly string[] = [
   "bollinger",
   "ichimoku",
   "market_cap",
+  "program_net_buy",
+  "whale_net_buy",
+  "vi_triggered",
 ] satisfies Condition["kind"][];
 const SCREEN_PERIODS: readonly string[] = ["D", "W", "M"] satisfies ScreenPeriod[];
 const isRecordKind = (kind: unknown) => kind === "new_high" || kind === "new_low";
-const isCondition = (x: unknown): x is Condition =>
-  isObject(x) &&
-  typeof x.kind === "string" &&
-  CONDITION_KINDS.includes(x.kind) &&
-  (x.kind === "market_cap" || (typeof x.period === "string" && SCREEN_PERIODS.includes(x.period) && typeof x.recentBars === "number" && Number.isInteger(x.recentBars) && x.recentBars >= 1 && x.recentBars <= 4_294_967_296 && !("barRange" in x) && !("m" in x))) &&
-  (!isRecordKind(x.kind) || (typeof x.field === "string" && BAR_FIELDS.includes(x.field) && isU32(x.n)));
+const isCondition = (x: unknown): x is Condition => {
+  if (!isObject(x) || typeof x.kind !== "string" || !CONDITION_KINDS.includes(x.kind)) return false;
+  if (x.kind === "market_cap") return true;
+  if (x.kind === "program_net_buy" || x.kind === "whale_net_buy" || x.kind === "vi_triggered") {
+    return isMicroCondition(x);
+  }
+  if (
+    typeof x.period !== "string" ||
+    !SCREEN_PERIODS.includes(x.period) ||
+    typeof x.recentBars !== "number" ||
+    !Number.isInteger(x.recentBars) ||
+    x.recentBars < 1 ||
+    x.recentBars > 4_294_967_296 ||
+    "barRange" in x ||
+    "m" in x
+  ) {
+    return false;
+  }
+  return !isRecordKind(x.kind) || (typeof x.field === "string" && BAR_FIELDS.includes(x.field) && isU32(x.n));
+};
 const MAX_HEATMAP_THEME_NAME = 40;
 const MAX_HEATMAP_THEME_SYMBOLS = 60;
 

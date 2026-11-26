@@ -6,6 +6,7 @@ import type { OrderCommands } from "../../api/generated/OrderCommands";
 import type { OrderSide } from "../../api/generated/OrderSide";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { Venue } from "../../api/generated/Venue";
+import { EXECUTION_FORENSICS_QUERY_KEY } from "../../api/trading";
 import { actionInAccount, cancelAction, cancelBatchAction, modifyAction, orderLedger, placeAction, type Settlement } from "./commandLedger";
 import { accountNumberText, type CurrentAccount } from "./orderAccount";
 import { cancelOrder, cancelOrdersAtPrice, modifyOrder, placeOrder, reconcileOrders } from "./orderApi";
@@ -108,6 +109,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
         else orderLedger.settleEach(windowId, ledgerKey, commandId, settlement);
         setQueued((n) => n - 1);
         void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
+        void queryClient.invalidateQueries({ queryKey: EXECUTION_FORENSICS_QUERY_KEY });
       }
     });
   }, [queryClient, accountRef, accountText, windowId]);
@@ -181,7 +183,10 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
     reconcileOrders(accountRef).then(
       (result) => setStatus({ tone: "ok", text: `조회로 확인했습니다 · 미체결 ${result.openOrders.length}건, 정리 ${result.cleared}건` }),
       (error: unknown) => setStatus(statusOfFailure(error)),
-    ).finally(() => void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY }));
+    ).finally(() => {
+      void queryClient.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: EXECUTION_FORENSICS_QUERY_KEY });
+    });
   }, [queryClient, accountRef]);
 
   return { status, queued, place, modifyAll, cancelOne, cancelAtPrice, reconcile, say: setStatus, dismiss: () => setStatus(null) };

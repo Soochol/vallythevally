@@ -44,7 +44,14 @@ fn held_from_stored(bytes: &[u8], code: StockCode, day: KstDate) -> Result<Vec<H
     if stored.schema_version != STORED_SCHEMA_VERSION || stored.code != code.as_str() || stored.as_of != day.to_string() {
         return Err("자료 버전·ETF 코드·기준일이 파일 위치와 다릅니다".into());
     }
-    Ok(stored.holdings.into_iter().map(|h| Held { code: h.code, name: h.name, quantity: h.cu_quantity }).collect())
+    if stored.holdings.is_empty() {
+        return Err("구성 종목이 없습니다".into());
+    }
+    let held: Vec<Held> = stored.holdings.into_iter().map(|h| Held { code: h.code, name: h.name, quantity: h.cu_quantity }).collect();
+    if !held.iter().any(is_held) {
+        return Err("유효한 보유 수량이 없습니다".into());
+    }
+    Ok(held)
 }
 
 fn is_held(held: &Held) -> bool {
@@ -52,17 +59,21 @@ fn is_held(held: &Held) -> bool {
 }
 
 pub(super) fn median(mut values: Vec<f64>) -> Option<f64> {
+    values.retain(|v| v.is_finite());
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
     match values.len() {
         0 => None,
         len if len % 2 == 1 => Some(values[middle]),
-        _ => Some((values[middle - 1] + values[middle]) / 2.0),
+        _ => {
+            let mid = values[middle - 1] / 2.0 + values[middle] / 2.0;
+            mid.is_finite().then_some(mid)
+        }
     }
 }
 
 fn kind_of(real_change: f64) -> EtfChangeKind {
-    if real_change.abs() - UNCHANGED_LIMIT <= BOUNDARY_TOLERANCE {
+    if !real_change.is_finite() || real_change.abs() - UNCHANGED_LIMIT <= BOUNDARY_TOLERANCE {
         EtfChangeKind::Unchanged
     } else if real_change > 0.0 {
         EtfChangeKind::Increased
@@ -89,16 +100,21 @@ pub(super) struct Comparison {
 pub(super) fn compare(before: &[Held], after: &[Held]) -> Comparison {
     let before: BTreeMap<&str, &Held> = before.iter().filter(|h| is_held(h)).map(|h| (h.code.as_str(), h)).collect();
     let after: BTreeMap<&str, &Held> = after.iter().filter(|h| is_held(h)).map(|h| (h.code.as_str(), h)).collect();
-    let ratios: Vec<f64> = after.iter().filter_map(|(code, now)| before.get(code).map(|was| now.quantity / was.quantity)).collect();
-    let common_scale = median(ratios);
+    let ratios: Vec<f64> = after
+        .iter()
+        .filter_map(|(code, now)| before.get(code).map(|was| now.quantity / was.quantity).filter(|r| r.is_finite() && *r > 0.0))
+        .collect();
+    let common_scale = median(ratios).filter(|scale| scale.is_finite() && *scale > 0.0);
     let mut rows: Vec<EtfChangeRow> = Vec::new();
     for (code, now) in &after {
         rows.push(match before.get(code) {
             None => EtfChangeRow { code: (*code).into(), name: now.name.clone(), before_quantity: None, after_quantity: Some(now.quantity), real_change: None, kind: EtfChangeKind::Added },
             Some(was) => {
-                let scale = common_scale.expect("공통 종목이 있으면 배율이 있다");
-                let real_change = now.quantity / was.quantity / scale - 1.0;
-                EtfChangeRow { code: (*code).into(), name: now.name.clone(), before_quantity: Some(was.quantity), after_quantity: Some(now.quantity), real_change: Some(real_change), kind: kind_of(real_change) }
+                let real_change = common_scale
+                    .map(|scale| now.quantity / was.quantity / scale - 1.0)
+                    .filter(|rc| rc.is_finite());
+                let kind = real_change.map_or(EtfChangeKind::Unchanged, kind_of);
+                EtfChangeRow { code: (*code).into(), name: now.name.clone(), before_quantity: Some(was.quantity), after_quantity: Some(now.quantity), real_change, kind }
             }
         });
     }
@@ -165,5 +181,51 @@ mod tests {
         assert_eq!(comparison.common_scale, None);
         let kinds: Vec<_> = comparison.rows.iter().map(|row| row.kind).collect();
         assert_eq!(kinds, [EtfChangeKind::Added, EtfChangeKind::Removed]);
+    }
+
+    #[test]
+    fn scale_underflow_and_overflow_never_classify_unchanged_as_increased() {
+        let underflow_mixed = compare(
+            &[held("000001", 1e200), held("000002", 1e200), held("005930", 100.0)],
+            &[held("000001", 1e-200), held("000002", 1e-200), held("005930", 100.0)],
+        );
+        assert_eq!(underflow_mixed.common_scale, Some(1.0));
+        let samsung = underflow_mixed.rows.iter().find(|r| r.code == "005930").unwrap();
+        assert_eq!(samsung.kind, EtfChangeKind::Unchanged);
+        assert!(underflow_mixed.rows.iter().all(|r| !matches!(r.kind, EtfChangeKind::Increased) || r.real_change.is_some_and(f64::is_finite)));
+
+        let all_underflow = compare(
+            &[held("000001", 1e200), held("000002", 1e200)],
+            &[held("000001", 1e-200), held("000002", 1e-200)],
+        );
+        assert_eq!(all_underflow.common_scale, None);
+        assert!(all_underflow.rows.iter().all(|r| r.kind == EtfChangeKind::Unchanged && r.real_change.is_none()));
+
+        let overflow_mixed = compare(
+            &[held("000001", 1e-200), held("005930", 100.0), held("000660", 100.0)],
+            &[held("000001", 1e200), held("005930", 100.0), held("000660", 100.0)],
+        );
+        assert_eq!(overflow_mixed.common_scale, Some(1.0));
+        let outlier = overflow_mixed.rows.iter().find(|r| r.code == "000001").unwrap();
+        assert_eq!((outlier.kind, outlier.real_change), (EtfChangeKind::Unchanged, None));
+
+        assert_eq!(median(vec![1e308, 1e308]), Some(1e308));
+        assert_eq!(median(vec![f64::INFINITY, f64::NAN]), None);
+    }
+
+    #[test]
+    fn held_from_stored_rejects_empty_and_non_positive_holdings() {
+        let code = StockCode::parse("444200").unwrap();
+        let day = KstDate::parse_yyyymmdd("20261118").unwrap();
+        let empty = serde_json::json!({"schemaVersion": 1, "code": "444200", "asOf": "2026-11-18", "holdings": []}).to_string();
+        assert!(held_from_stored(empty.as_bytes(), code, day).is_err());
+        let zero = serde_json::json!({
+            "schemaVersion": 1,
+            "code": "444200",
+            "asOf": "2026-11-18",
+            "holdings": [{"code": "005930", "name": "삼성전자", "cuQuantity": 0.0, "weightBps": 10000}]
+        })
+        .to_string();
+        assert!(held_from_stored(zero.as_bytes(), code, day).is_err());
     }
 }

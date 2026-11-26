@@ -434,6 +434,7 @@ fn source_error(error: &KisError) -> SourceError {
         KisError::Stopped(_) => unavailable(ApiErrorReason::UnknownFailure),
         KisError::Gated { until } => SourceFailure { retry_at: Some(*until), ..unavailable(ApiErrorReason::IssueInterval) },
         KisError::TokenFile(_) => SourceFailure { code: ApiErrorCode::KiwoomAuthFailed, manual_action_required: true, ..unavailable(ApiErrorReason::TokenFile) },
+        KisError::TokenNotSupplied => unavailable(ApiErrorReason::TokenInvalid),
         KisError::Transport(transport) => unavailable(if transport.timed_out { ApiErrorReason::KiwoomTimeout } else { ApiErrorReason::KiwoomUnreachable }),
         KisError::BadTokenResponse => unavailable(ApiErrorReason::Protocol),
         KisError::QueueGone | KisError::NotAdmitted => unavailable(ApiErrorReason::KiwoomUnreachable),

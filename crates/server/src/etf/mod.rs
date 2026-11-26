@@ -365,7 +365,13 @@ async fn stock(
 ) -> Result<Json<EtfStockHolders>, ApiFailure> {
     let catalog = st.etf.catalog();
     let stock = code_in(&code)?;
-    let ma = cache.snapshot(&st.screener, || catalog.stock_codes()).await;
+    let ma = cache
+        .snapshot(&st.screener, || {
+            let mut codes = catalog.stock_codes();
+            codes.push(stock);
+            codes
+        })
+        .await;
     let activity = activity_cache.get(&st).await;
     let holders = catalog
         .holders(stock)

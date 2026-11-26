@@ -123,12 +123,16 @@ async fn walk<R: MarketRequest>(rest: &KiwoomRest, request: &R, priority: Priori
     Ok(Walked { bodies, complete: false })
 }
 
-fn walk_failure(e: WalkFailure, st: &AppState) -> ApiFailure {
+pub(crate) fn walk_failure_at(e: WalkFailure, now: KstTime) -> ApiFailure {
     match e {
-        WalkFailure::Kiwoom(e) => Lookup::KiwoomThemes.failure(BarError::from(e), st.clock.now()),
+        WalkFailure::Kiwoom(e) => Lookup::KiwoomThemes.failure(BarError::from(e), now),
         WalkFailure::KeyRepeated => ApiFailure::kiwoom_protocol("키움 테마의 연속조회 키가 되풀이돼 끝까지 받지 못했습니다"),
         WalkFailure::KeyMissing => ApiFailure::kiwoom_protocol("키움 테마가 다음 페이지가 있다고 하면서 연속조회 키를 주지 않았습니다"),
     }
+}
+
+fn walk_failure(e: WalkFailure, st: &AppState) -> ApiFailure {
+    walk_failure_at(e, st.clock.now())
 }
 
 fn count(n: usize) -> u32 {
@@ -179,16 +183,13 @@ pub fn routes() -> Router<Arc<AppState>> {
         .layer(Extension(Arc::new(ThemeCache::default())))
 }
 
-async fn list(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<ThemeCache>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<KiwoomThemeList>, ApiFailure> {
-    let days = period_param(&q)?;
-    let venue = venue_param(&q)?.unwrap_or(Venue::Combined);
-    let now = st.clock.now();
-    let key = (String::new(), days, venue);
-    if let Some(hit) = fresh(&cache.lists, &key, now) {
-        return Ok(Json((*hit).clone()));
-    }
-    let request = ThemeGroups::by_change_rate(days, venue).expect("days는 범위 안이다");
-    let walked = walk(&st.rest, &request, Priority::Screen).await.map_err(|e| walk_failure(e, &st))?;
+pub async fn fetch_theme_list(rest: &KiwoomRest, period_days: u8, priority: Priority, now: KstTime) -> Result<KiwoomThemeList, WalkFailure> {
+    fetch_theme_list_for_venue(rest, period_days, Venue::Combined, priority, now).await
+}
+
+async fn fetch_theme_list_for_venue(rest: &KiwoomRest, period_days: u8, venue: Venue, priority: Priority, now: KstTime) -> Result<KiwoomThemeList, WalkFailure> {
+    let request = ThemeGroups::by_change_rate(period_days, venue).expect("days는 범위 안이다");
+    let walked = walk(rest, &request, priority).await?;
     let unknown = walked.bodies.iter().flat_map(ThemeGroupsResponse::unknown_fields).collect();
     let mut seen = BTreeSet::new();
     let (mut themes, mut skipped) = (Vec::new(), 0);
@@ -202,7 +203,18 @@ async fn list(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<T
         }
     }
     log_walk("ka90001", walked.bodies.len(), themes.len(), skipped, walked.complete, &unknown);
-    let value = Arc::new(KiwoomThemeList { period_days: days, fetched_at: UnixSeconds(now.unix()), themes, pages: count(walked.bodies.len()), complete: walked.complete, skipped });
+    Ok(KiwoomThemeList { period_days, fetched_at: UnixSeconds(now.unix()), themes, pages: count(walked.bodies.len()), complete: walked.complete, skipped })
+}
+
+async fn list(State(st): State<Arc<AppState>>, Extension(cache): Extension<Arc<ThemeCache>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<KiwoomThemeList>, ApiFailure> {
+    let days = period_param(&q)?;
+    let venue = venue_param(&q)?.unwrap_or(Venue::Combined);
+    let now = st.clock.now();
+    let key = (String::new(), days, venue);
+    if let Some(hit) = fresh(&cache.lists, &key, now) {
+        return Ok(Json((*hit).clone()));
+    }
+    let value = Arc::new(fetch_theme_list_for_venue(&st.rest, days, venue, Priority::Screen, now).await.map_err(|e| walk_failure(e, &st))?);
     keep(&cache.lists, key, now, value.clone());
     Ok(Json((*value).clone()))
 }

@@ -7,6 +7,10 @@ use std::time::Duration;
 use domain::{KstDate, KstTime};
 use server::api::KiwoomEnvironment;
 use server::clock::Clock;
+use server::config::KisCredentials;
+use server::kis::auth::{Halt as KisHalt, KisAuth, TokenGen as KisTokenGen};
+use server::kis::rest::KisRest;
+use server::kis::transport::{ReqwestTransport as KisReqwestTransport, Transport as KisTransport};
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::transport::{ReqwestTransport, Transport};
@@ -27,7 +31,7 @@ use crate::collect::config::process_variables;
 use crate::collect::link::{Commands, Events, Incoming};
 use crate::collect::start::{forward_termination_signals, init_logging};
 use crate::protocol::{Command, Event, HEARTBEAT_EVERY, KeyName, SessionState};
-use crate::supervise::rest_base_url;
+use crate::supervise::{kis_base_url, rest_base_url};
 
 const USAGE_POLL: Duration = Duration::from_secs(5);
 const STATS_EVERY: Duration = Duration::from_secs(60);
@@ -39,6 +43,7 @@ pub struct SharedParts {
     pub broker: Broker,
     pub shared_dir: PathBuf,
     pub transport: Arc<dyn Transport>,
+    pub kis_transport: Option<Arc<dyn KisTransport>>,
     pub clock: Clock,
     pub total_per_second: Option<u32>,
     pub commands: Commands,
@@ -65,10 +70,21 @@ fn expires_dt(at: KstTime) -> String {
     format!("{}{:02}{:02}{:02}", at.kst_date().yyyymmdd(), seconds / 3600, seconds / 60 % 60, seconds % 60)
 }
 
+fn kis_halt_reason(halt: &KisHalt) -> String {
+    match halt {
+        KisHalt::Rejected(failure) => failure.to_string(),
+        KisHalt::TokenFileUnreadable(error) => format!("한투 토큰 파일: {error}"),
+    }
+}
+
 pub async fn run_shared(parts: SharedParts) {
-    let SharedParts { key, broker, shared_dir, transport, clock, total_per_second, mut commands, events, mut shutdown } = parts;
+    let SharedParts { key, broker, shared_dir, transport, kis_transport, clock, total_per_second, mut commands, events, mut shutdown } = parts;
     let auth = KiwoomAuth::keyless(None);
     let rest = KiwoomRest::with_total_per_second(transport, auth, clock.clone(), KiwoomEnvironment::Real, total_per_second);
+    let kis_rest = match (broker, kis_transport) {
+        (Broker::Kis, Some(kis_transport)) => Some(KisRest::new(kis_transport, KisAuth::supplied(clock.clone()))),
+        _ => None,
+    };
     events.emit(Event::Hello { key: key.clone(), pid: std::process::id() });
     let mut heartbeat = interval_at(Instant::now() + HEARTBEAT_EVERY, HEARTBEAT_EVERY);
     let mut poll = interval_at(Instant::now() + USAGE_POLL, USAGE_POLL);
@@ -81,22 +97,41 @@ pub async fn run_shared(parts: SharedParts) {
     let mut running = Running { tasks: Vec::new(), stats: Vec::new() };
     let mut supplied_generation: Option<u64> = None;
     let mut reported_invalid: Option<u64> = None;
+    let mut reported_halt = false;
     loop {
         tokio::select! {
             _ = shutdown.wait_for(|stop| *stop) => break,
             incoming = commands.recv() => match incoming {
                 None | Some(Ok(Command::Shutdown)) => break,
                 Some(Err(error)) => tracing::warn!(%key, %error, "읽을 수 없는 명령을 건너뜁니다"),
-                Some(Ok(Command::Token { token, generation, expires_at })) => {
+                Some(Ok(Command::Token { token, generation, expires_at, app_key, app_secret })) => {
                     let now = clock.now();
                     let expires = expires_at.map_or_else(|| now.plus_secs(TOKEN_LIFETIME_WHEN_UNSTATED_SECS), KstTime::from_unix);
-                    let issued = rest.auth().record_issued(TokenResponse { token: token.expose().clone(), expires_dt: expires_dt(expires) }, now);
-                    match issued {
-                        Ok(_) => {
-                            supplied_generation = Some(generation);
-                            reported_invalid = None;
+                    match broker {
+                        Broker::Kiwoom => {
+                            let issued = rest.auth().record_issued(TokenResponse { token: token.expose().clone(), expires_dt: expires_dt(expires) }, now);
+                            match issued {
+                                Ok(_) => {
+                                    supplied_generation = Some(generation);
+                                    reported_invalid = None;
+                                }
+                                Err(error) => tracing::error!(%key, ?error, "받은 토큰을 쓰지 못했습니다"),
+                            }
                         }
-                        Err(error) => tracing::error!(%key, ?error, "받은 토큰을 쓰지 못했습니다"),
+                        Broker::Kis => match (&kis_rest, app_key, app_secret) {
+                            (Some(kis_rest), Some(app_key), Some(app_secret)) => {
+                                match kis_rest.auth().record_supplied(KisCredentials { app_key, app_secret }, token, KisTokenGen(generation), now, expires) {
+                                    Ok(()) => {
+                                        supplied_generation = Some(generation);
+                                        reported_invalid = None;
+                                        reported_halt = false;
+                                    }
+                                    Err(error) => tracing::error!(%key, %error, "받은 한투 토큰을 쓰지 못했습니다"),
+                                }
+                            }
+                            (None, _, _) => tracing::error!(%key, "한투 세션이 없어 받은 토큰을 쓰지 못했습니다"),
+                            (_, None, _) | (_, _, None) => tracing::error!(%key, "한투 앱키와 시크릿이 없어 받은 토큰을 쓰지 못했습니다"),
+                        },
                     }
                 }
                 Some(Ok(Command::Assign { date, jobs })) => {
@@ -108,13 +143,17 @@ pub async fn run_shared(parts: SharedParts) {
                     for job in jobs {
                         let stats = Arc::new(LoopStats::default());
                         running.stats.push((job.job, stats.clone()));
-                        running.tasks.push(tokio::spawn(JobTask { assigned: job, day, broker, rest: rest.clone(), key: key.clone(), shared_dir: shared_dir.clone(), clock: clock.clone(), stats }.run()));
+                        running.tasks.push(tokio::spawn(JobTask { assigned: job, day, broker, rest: rest.clone(), kis_rest: kis_rest.clone(), key: key.clone(), shared_dir: shared_dir.clone(), clock: clock.clone(), stats }.run()));
                     }
                 }
                 Some(Ok(Command::Register(_) | Command::Unregister(_))) => tracing::warn!(%key, "공용 자료 자식은 등록 명령을 받지 않습니다"),
             },
             _ = heartbeat.tick() => {
-                let state = if supplied_generation.is_some() { SessionState::Live } else { SessionState::WaitingForToken };
+                let halted = match broker {
+                    Broker::Kiwoom => rest.auth().halted().is_some(),
+                    Broker::Kis => kis_rest.as_ref().is_some_and(|kis_rest| kis_rest.auth().halted().is_some()),
+                };
+                let state = if supplied_generation.is_some() && !halted { SessionState::Live } else { SessionState::WaitingForToken };
                 events.heartbeat(0, 0, state);
             }
             _ = poll.tick() => {
@@ -128,7 +167,18 @@ pub async fn run_shared(parts: SharedParts) {
                 }
             }
             _ = watch_tick.tick() => {
-                if let Some(generation) = supplied_generation.filter(|generation| reported_invalid != Some(*generation) && rest.auth().needs_issue(clock.now())) {
+                if let Some(halt) = kis_rest.as_ref().filter(|_| broker == Broker::Kis).and_then(|kis_rest| kis_rest.auth().halted()) {
+                    if !reported_halt {
+                        reported_halt = true;
+                        events.halted(&kis_halt_reason(&halt), "한투 키와 인증 상태를 확인한 뒤 다시 시작하세요");
+                    }
+                    continue;
+                }
+                let needs_issue = match broker {
+                    Broker::Kiwoom => rest.auth().needs_issue(clock.now()),
+                    Broker::Kis => kis_rest.as_ref().is_some_and(|kis_rest| kis_rest.auth().needs_issue()),
+                };
+                if let Some(generation) = supplied_generation.filter(|generation| reported_invalid != Some(*generation) && needs_issue) {
                     reported_invalid = Some(generation);
                     events.token_invalid(generation);
                 }
@@ -143,6 +193,7 @@ struct JobTask {
     day: KstDate,
     broker: Broker,
     rest: KiwoomRest,
+    kis_rest: Option<KisRest>,
     key: KeyName,
     shared_dir: PathBuf,
     clock: Clock,
@@ -161,7 +212,7 @@ impl JobTask {
         };
         let market = match self.broker {
             Broker::Kiwoom => Market::Kiwoom(&self.rest),
-            Broker::Kis => Market::Kis(None),
+            Broker::Kis => Market::Kis(self.kis_rest.as_ref()),
         };
         job_loop.run(market, &self.key, &self.shared_dir, &self.clock, &self.stats).await;
     }
@@ -210,13 +261,26 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    let rest_url = match rest_base_url(&process_variables()) {
+    let process = process_variables();
+    let rest_url = match rest_base_url(&process) {
         Ok(url) => url,
         Err(message) => return fail(message),
     };
     let transport = match ReqwestTransport::new(rest_url) {
         Ok(transport) => transport,
         Err(error) => return fail(format_args!("HTTP 클라이언트를 만들지 못했습니다: {error}")),
+    };
+    let kis_transport: Option<Arc<dyn KisTransport>> = if broker == Broker::Kis {
+        let kis_url = match kis_base_url(&process) {
+            Ok(url) => url,
+            Err(message) => return fail(message),
+        };
+        match KisReqwestTransport::new(kis_url) {
+            Ok(transport) => Some(Arc::new(transport)),
+            Err(error) => return fail(format_args!("한투 HTTP 클라이언트를 만들지 못했습니다: {error}")),
+        }
+    } else {
+        None
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(runtime) => runtime,
@@ -230,7 +294,7 @@ pub fn run(raw_arguments: &[String]) -> ExitCode {
     let (stop, shutdown) = watch::channel(false);
     runtime.block_on(async {
         tokio::spawn(forward_termination_signals(stop));
-        run_shared(SharedParts { key, broker, shared_dir, transport: Arc::new(transport), clock: Clock::system(), total_per_second, commands, events: events.clone(), shutdown }).await;
+        run_shared(SharedParts { key, broker, shared_dir, transport: Arc::new(transport), kis_transport, clock: Clock::system(), total_per_second, commands, events: events.clone(), shutdown }).await;
     });
     drop(events);
     runtime.shutdown_background();

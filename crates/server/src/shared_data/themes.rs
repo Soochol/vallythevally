@@ -11,3 +11,11 @@ pub struct ThemeEntry {
 pub struct ThemesBody {
     pub themes: Vec<ThemeEntry>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IntradayThemesBody {
+    pub themes: Vec<crate::kiwoom_themes::KiwoomTheme>,
+    pub pages: u32,
+    pub complete: bool,
+    pub skipped: u32,
+}

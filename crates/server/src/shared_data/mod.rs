@@ -9,6 +9,7 @@ mod snapshot;
 mod symbol_flow;
 mod themes;
 mod trade_minute;
+mod vi;
 mod write;
 
 use std::path::{Path, PathBuf};
@@ -34,8 +35,9 @@ pub use symbol_flow::{
     FLOW_FORMAT_VERSION, FlowBlock, FlowCursor, FlowDescription, FlowLinkEvent, FlowLinkLine, FlowRow, FlowWriter, SYMBOL_FLOW_FOLDER, complete_jsonl_prefix, flow_folder, flow_links_path, flow_path,
     read_flow_links,
 };
-pub use themes::{ThemeEntry, ThemesBody};
+pub use themes::{IntradayThemesBody, ThemeEntry, ThemesBody};
 pub use trade_minute::{TradeMinuteLine, read_trade_minute_file, trade_minute_path};
+pub use vi::{ViEventRow, ViEventsBody};
 
 use domain::{KstTime, Venue};
 
@@ -124,6 +126,8 @@ pub struct SharedData {
     pub probe: Board<ProbeBody>,
     pub probe_feed: Feed<ProbeItem>,
     pub kiwoom_themes: Board<ThemesBody>,
+    pub intraday_themes: Board<IntradayThemesBody>,
+    pub vi_events: Board<ViEventsBody>,
     pub market_overview: Board<OverviewBody>,
     pub snapshot_krx: Board<SnapshotBody>,
     pub snapshot_combined: Board<SnapshotBody>,
@@ -144,6 +148,8 @@ impl SharedData {
             snapshot_nxt: Board::new(DataKind::SnapshotNxt),
             rankings: RankingsBoard::new(),
             kiwoom_themes: Board::new(DataKind::KiwoomThemes),
+            intraday_themes: Board::new(DataKind::IntradayThemes),
+            vi_events: Board::new(DataKind::ViEvents),
             market_overview: Board::new(DataKind::MarketOverview),
             minutes: MinuteBook::new(),
             market_samples: SampleBoard::new(),
@@ -193,6 +199,8 @@ impl SharedData {
             data.probe_feed.poll(&dir);
             data.rankings.poll(&dir);
             data.kiwoom_themes.poll(&dir);
+            data.intraday_themes.poll(&dir);
+            data.vi_events.poll(&dir);
             data.market_overview.poll(&dir);
             data.minutes.poll(&dir);
             data.market_samples.poll(&dir);
@@ -211,6 +219,8 @@ impl SharedData {
             DataKind::Probe => self.probe.errors() + self.probe_feed.errors(),
             DataKind::Rankings => self.rankings.errors(),
             DataKind::KiwoomThemes => self.kiwoom_themes.errors(),
+            DataKind::IntradayThemes => self.intraday_themes.errors(),
+            DataKind::ViEvents => self.vi_events.errors(),
             DataKind::MarketOverview => self.market_overview.errors(),
             DataKind::SnapshotKrx => self.snapshot_krx.errors(),
             DataKind::SnapshotCombined => self.snapshot_combined.errors(),
@@ -226,6 +236,8 @@ impl SharedData {
             DataKind::Probe => self.probe.age_secs(now),
             DataKind::Rankings => self.rankings.age_secs(now),
             DataKind::KiwoomThemes => self.kiwoom_themes.age_secs(now),
+            DataKind::IntradayThemes => self.intraday_themes.age_secs(now),
+            DataKind::ViEvents => self.vi_events.age_secs(now),
             DataKind::MarketOverview => self.market_overview.age_secs(now),
             DataKind::SnapshotKrx => self.snapshot_krx.age_secs(now),
             DataKind::SnapshotCombined => self.snapshot_combined.age_secs(now),

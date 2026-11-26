@@ -52,7 +52,7 @@ fn launch_child(peer: &Peer) -> Child {
 }
 
 fn token(value: &str, generation: u64) -> Command {
-    Command::Token { token: Secret::new(value.to_owned()), generation, expires_at: None }
+    Command::Token { token: Secret::new(value.to_owned()), generation, expires_at: None, app_key: None, app_secret: None }
 }
 
 fn stocks(id: &str, count: usize, types: &[RealType]) -> Registration {

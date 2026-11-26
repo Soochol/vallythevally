@@ -437,6 +437,7 @@ pub async fn start_with(config: &Config, lock: &InstanceLock, adapters: Adapters
     crate::etf::start_collection(state.clone(), config.etf_pdf_dir.clone(), config.naver_base_url.clone());
     crate::kiwoom_themes::start_collection(state.clone(), config.kiwoom_themes_dir.clone());
 
+    state.market_overview.set_financial_db_path(Some(config.financial_db_path.clone()));
     let financials = crate::financials::Financials::read_only(&config.financial_db_path, clock.clone());
     let financial_routes = crate::financials::routes(financials, symbols.clone());
     let public = crate::public::start(config, state.clone(), financial_routes.clone(), public_listener).await?;

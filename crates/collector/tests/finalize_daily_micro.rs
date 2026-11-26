@@ -61,24 +61,28 @@ fn write_day_plan(data: &Path, date: u32, stocks: &[&str]) {
     write_plan(data, &plan).unwrap();
 }
 
-fn trade_frame(code: &str, hhmmss: &str, price: &str, qty: &str) -> String {
+fn trade_frame_item(item: &str, hhmmss: &str, price: &str, qty: &str) -> String {
     json!({
         "trnm": "REAL",
         "data": [{
             "type": "0B",
-            "item": format!("{code}_AL"),
+            "item": item,
             "values": {"20": hhmmss, "10": price, "15": qty}
         }]
     })
     .to_string()
 }
 
-fn program_frame(code: &str, hhmmss: &str, sell_m: i64, buy_m: i64, net_m: i64) -> String {
+fn trade_frame(code: &str, hhmmss: &str, price: &str, qty: &str) -> String {
+    trade_frame_item(&format!("{code}_AL"), hhmmss, price, qty)
+}
+
+fn program_frame_item(item: &str, hhmmss: &str, sell_m: i64, buy_m: i64, net_m: i64) -> String {
     json!({
         "trnm": "REAL",
         "data": [{
             "type": "0w",
-            "item": format!("{code}_AL"),
+            "item": item,
             "values": {
                 "20": hhmmss,
                 "204": sell_m.to_string(),
@@ -90,31 +94,68 @@ fn program_frame(code: &str, hhmmss: &str, sell_m: i64, buy_m: i64, net_m: i64) 
     .to_string()
 }
 
-fn broker_frame(code: &str, foreign_net_qty: i64) -> String {
+fn program_frame(code: &str, hhmmss: &str, sell_m: i64, buy_m: i64, net_m: i64) -> String {
+    program_frame_item(&format!("{code}_AL"), hhmmss, sell_m, buy_m, net_m)
+}
+
+fn blank_program_frame(code: &str, hhmmss: &str, include_blank_fids: bool) -> String {
+    let values = if include_blank_fids {
+        json!({"20": hhmmss, "204": "", "208": "", "212": ""})
+    } else {
+        json!({"20": hhmmss})
+    };
+    json!({
+        "trnm": "REAL",
+        "data": [{
+            "type": "0w",
+            "item": format!("{code}_AL"),
+            "values": values
+        }]
+    })
+    .to_string()
+}
+
+fn broker_frame_item(item: &str, foreign_net_qty: i64) -> String {
     json!({
         "trnm": "REAL",
         "data": [{
             "type": "0F",
-            "item": format!("{code}_AL"),
+            "item": item,
             "values": {"267": foreign_net_qty.to_string()}
         }]
     })
     .to_string()
 }
 
-fn vi_frame(item: &str, f9001: &str, kind: &str, direction: &str) -> String {
+fn broker_frame(code: &str, foreign_net_qty: i64) -> String {
+    broker_frame_item(&format!("{code}_AL"), foreign_net_qty)
+}
+
+fn vi_frame_with_release(item: &str, f9001: &str, kind: &str, direction: &str, release: Option<&str>) -> String {
+    let mut values = Map::new();
+    values.insert("9001".to_owned(), json!(f9001));
+    values.insert("9068".to_owned(), json!(kind));
+    values.insert("9069".to_owned(), json!(direction));
+    values.insert("1223".to_owned(), json!("093000"));
+    if let Some(release) = release {
+        values.insert("1224".to_owned(), json!(release));
+    }
     json!({
         "trnm": "REAL",
         "data": [{
             "type": "1h",
             "item": item,
-            "values": {"9001": f9001, "9068": kind, "9069": direction, "1223": "093000"}
+            "values": values
         }]
     })
     .to_string()
 }
 
-fn book_frame(code: &str, hhmmss: &str, asks: &[(i64, i64)], bids: &[(i64, i64)]) -> String {
+fn vi_frame(item: &str, f9001: &str, kind: &str, direction: &str) -> String {
+    vi_frame_with_release(item, f9001, kind, direction, None)
+}
+
+fn book_frame_item(item: &str, hhmmss: &str, asks: &[(i64, i64)], bids: &[(i64, i64)]) -> String {
     let mut values = Map::new();
     values.insert("21".to_owned(), json!(hhmmss));
     for (idx, &(price, qty)) in asks.iter().enumerate() {
@@ -129,11 +170,15 @@ fn book_frame(code: &str, hhmmss: &str, asks: &[(i64, i64)], bids: &[(i64, i64)]
         "trnm": "REAL",
         "data": [{
             "type": "0D",
-            "item": format!("{code}_AL"),
+            "item": item,
             "values": values
         }]
     })
     .to_string()
+}
+
+fn book_frame(code: &str, hhmmss: &str, asks: &[(i64, i64)], bids: &[(i64, i64)]) -> String {
+    book_frame_item(&format!("{code}_AL"), hhmmss, asks, bids)
 }
 
 fn read_parquet_rows(path: &Path) -> BTreeMap<String, Row> {
@@ -265,6 +310,187 @@ fn finalize_emits_exact_daily_micro_parquet_for_every_collected_stock() {
     let rerun = write_daily_micro(&data, &shared, DATE, 2).unwrap();
     assert_eq!(rerun.stocks, 3);
     assert_eq!(read_parquet_rows(&parquet_path), rows);
+}
+
+#[test]
+fn vi_counts_only_krx_and_nxt_trigger_frames_and_ignores_releases_and_al_duplicates() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let shared = dir.path().join("shared");
+    fs::create_dir_all(&data).unwrap();
+    write_day_plan(&data, DATE, &[ALPHA]);
+
+    let mut writer = RawWriter::for_key(&data, key("collect-01"));
+    let base = at_ms(DATE, 9, 0, 0);
+    let mut emit = |offset_ms: i64, text: String| writer.write(&RawLine::Frame { recv_ms: base + offset_ms, text: &text }).unwrap();
+    emit(0, json!({"trnm": "LOGIN", "return_code": 0}).to_string());
+
+    emit(1_000, vi_frame_with_release(ALPHA, ALPHA, "1", "1", Some("000000")));
+    emit(2_000, vi_frame_with_release(ALPHA, ALPHA, "1", "1", Some("093200")));
+    emit(3_000, vi_frame_with_release(&format!("{ALPHA}_NX"), ALPHA, "2", "2", Some("")));
+    emit(4_000, vi_frame_with_release(&format!("{ALPHA}_NX"), ALPHA, "2", "2", Some("093500")));
+    emit(5_000, vi_frame_with_release(&format!("{ALPHA}_AL"), ALPHA, "1", "1", Some("000000")));
+    emit(6_000, vi_frame_with_release(&format!("{ALPHA}_AL"), ALPHA, "1", "1", Some("093200")));
+    emit(7_000, vi_frame_with_release("", ALPHA, "1", "1", Some("000000")));
+    writer.close().unwrap();
+
+    let options = Options {
+        data_dir: data,
+        date: DATE,
+        threads: 2,
+        buckets: 8,
+        verify_only: false,
+        spill_budget_bytes: finalize::DEFAULT_SPILL_BUDGET_BYTES,
+    };
+    let report = finalize_day_with_shared(&options, &shared).unwrap();
+    assert!(report.passed);
+
+    let rows = read_parquet_rows(&daily_micro_path(&shared, DATE));
+    assert_eq!(rows[ALPHA].vi_count, 2);
+}
+
+#[test]
+fn combined_al_stream_is_not_mixed_with_nxt_and_bare_only_still_works() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let shared = dir.path().join("shared");
+    fs::create_dir_all(&data).unwrap();
+    write_day_plan(&data, DATE, &[ALPHA, BETA]);
+
+    let mut writer = RawWriter::for_key(&data, key("collect-01"));
+    let base = at_ms(DATE, 9, 0, 0);
+    let mut emit = |offset_ms: i64, text: String| writer.write(&RawLine::Frame { recv_ms: base + offset_ms, text: &text }).unwrap();
+    emit(0, json!({"trnm": "LOGIN", "return_code": 0}).to_string());
+
+    emit(1_000, trade_frame_item(&format!("{ALPHA}_AL"), "090001", "+100000", "+2000"));
+    emit(1_500, trade_frame_item(&format!("{ALPHA}_NX"), "090001", "+100000", "+3000"));
+
+    emit(2_000, program_frame_item(&format!("{ALPHA}_AL"), "090002", 20, 80, 60));
+    emit(5_000, program_frame_item(&format!("{ALPHA}_NX"), "090005", 1, 2, 1));
+
+    emit(2_000, broker_frame_item(&format!("{ALPHA}_AL"), 9_000));
+    emit(5_000, broker_frame_item(&format!("{ALPHA}_NX"), -100));
+
+    emit(500, book_frame_item(&format!("{ALPHA}_AL"), "090000", &[(100_000, 3_000)], &[]));
+    emit(1_100, book_frame_item(&format!("{ALPHA}_AL"), "090001", &[(100_000, 1_000)], &[]));
+    emit(3_000, book_frame_item(&format!("{ALPHA}_NX"), "090003", &[(100_000, 3_000)], &[]));
+    emit(3_500, book_frame_item(&format!("{ALPHA}_NX"), "090003", &[(100_000, 1_000)], &[]));
+
+    emit(1_000, trade_frame_item(BETA, "090001", "+100000", "+1500"));
+    emit(2_000, program_frame_item(BETA, "090002", 10, 40, 30));
+    emit(2_500, broker_frame_item(BETA, 4_000));
+    emit(4_000, book_frame_item(BETA, "090004", &[(100_000, 3_000)], &[]));
+    emit(4_500, book_frame_item(BETA, "090004", &[(100_000, 1_000)], &[]));
+    writer.close().unwrap();
+
+    let options = Options {
+        data_dir: data,
+        date: DATE,
+        threads: 2,
+        buckets: 8,
+        verify_only: false,
+        spill_budget_bytes: finalize::DEFAULT_SPILL_BUDGET_BYTES,
+    };
+    let report = finalize_day_with_shared(&options, &shared).unwrap();
+    assert!(report.passed);
+
+    let rows = read_parquet_rows(&daily_micro_path(&shared, DATE));
+    assert_eq!(
+        rows[ALPHA],
+        Row {
+            date: DATE as i32,
+            whale_net_won: 200_000_000,
+            program_net_won: 60_000_000,
+            program_share_bps: 5_000,
+            foreign_est_net_qty: 9_000,
+            spoof_cancel_rate_bps: 0,
+            vi_count: 0,
+            vwap_close_gap_bps: 0,
+        }
+    );
+    assert_eq!(
+        rows[BETA],
+        Row {
+            date: DATE as i32,
+            whale_net_won: 150_000_000,
+            program_net_won: 30_000_000,
+            program_share_bps: 3_333,
+            foreign_est_net_qty: 4_000,
+            spoof_cancel_rate_bps: 10_000,
+            vi_count: 0,
+            vwap_close_gap_bps: 0,
+        }
+    );
+}
+
+#[test]
+fn unsigned_call_auction_trades_do_not_count_as_whale_buys() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let shared = dir.path().join("shared");
+    fs::create_dir_all(&data).unwrap();
+    write_day_plan(&data, DATE, &[ALPHA]);
+
+    let mut writer = RawWriter::for_key(&data, key("collect-01"));
+    let base = at_ms(DATE, 9, 0, 0);
+    let mut emit = |offset_ms: i64, text: String| writer.write(&RawLine::Frame { recv_ms: base + offset_ms, text: &text }).unwrap();
+    emit(0, json!({"trnm": "LOGIN", "return_code": 0}).to_string());
+
+    emit(1_000, trade_frame(ALPHA, "090001", "100000", "5000"));
+    emit(2_000, trade_frame(ALPHA, "090002", "+100000", "+2000"));
+    emit(3_000, trade_frame(ALPHA, "090003", "-100000", "-1500"));
+    emit(4_000, program_frame(ALPHA, "090004", 85, 85, 0));
+    writer.close().unwrap();
+
+    let options = Options {
+        data_dir: data,
+        date: DATE,
+        threads: 2,
+        buckets: 8,
+        verify_only: false,
+        spill_budget_bytes: finalize::DEFAULT_SPILL_BUDGET_BYTES,
+    };
+    let report = finalize_day_with_shared(&options, &shared).unwrap();
+    assert!(report.passed);
+
+    let rows = read_parquet_rows(&daily_micro_path(&shared, DATE));
+    assert_eq!(rows[ALPHA].whale_net_won, 50_000_000);
+    assert_eq!(rows[ALPHA].program_share_bps, 2_000);
+}
+
+#[test]
+fn trailing_blank_program_frame_preserves_prior_cumulative_values() {
+    let dir = tempdir().unwrap();
+    let data = dir.path().join("data");
+    let shared = dir.path().join("shared");
+    fs::create_dir_all(&data).unwrap();
+    write_day_plan(&data, DATE, &[ALPHA]);
+
+    let mut writer = RawWriter::for_key(&data, key("collect-01"));
+    let base = at_ms(DATE, 9, 0, 0);
+    let mut emit = |offset_ms: i64, text: String| writer.write(&RawLine::Frame { recv_ms: base + offset_ms, text: &text }).unwrap();
+    emit(0, json!({"trnm": "LOGIN", "return_code": 0}).to_string());
+
+    emit(1_000, trade_frame(ALPHA, "090001", "+100000", "+4000"));
+    emit(2_000, program_frame(ALPHA, "090002", 40, 160, 120));
+    emit(5_000, blank_program_frame(ALPHA, "090005", true));
+    emit(6_000, blank_program_frame(ALPHA, "090006", false));
+    writer.close().unwrap();
+
+    let options = Options {
+        data_dir: data,
+        date: DATE,
+        threads: 2,
+        buckets: 8,
+        verify_only: false,
+        spill_budget_bytes: finalize::DEFAULT_SPILL_BUDGET_BYTES,
+    };
+    let report = finalize_day_with_shared(&options, &shared).unwrap();
+    assert!(report.passed);
+
+    let rows = read_parquet_rows(&daily_micro_path(&shared, DATE));
+    assert_eq!(rows[ALPHA].program_net_won, 120_000_000);
+    assert_eq!(rows[ALPHA].program_share_bps, 5_000);
 }
 
 #[test]

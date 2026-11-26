@@ -70,6 +70,7 @@ impl MaCache {
                 None
             }
         };
+        let is_partial = missing.is_some();
         let fetch_codes = missing.unwrap_or_else(|| requested.iter().copied().collect());
         let recent = match screener.recent_closes(fetch_codes.clone(), LONGEST_WINDOW).await {
             Ok(recent) => recent,
@@ -80,25 +81,45 @@ impl MaCache {
         };
         let fetched_states: HashMap<StockCode, EtfMaStates> =
             recent.closes.iter().map(|(code, closes)| (*code, states_of(closes))).collect();
-        let mut guard = self.entry.lock().expect("이평선 캐시 잠금");
-        if let Some(entry) = guard.as_mut()
-            && entry.generation == generation
-            && entry.snapshot.as_of == recent.latest_day
         {
-            let mut merged_states = entry.snapshot.states.clone();
-            merged_states.extend(fetched_states);
-            entry.loaded.extend(fetch_codes);
-            let snapshot = Arc::new(MaSnapshot { as_of: recent.latest_day, ok: true, states: merged_states });
-            entry.snapshot = snapshot.clone();
-            return snapshot;
+            let mut guard = self.entry.lock().expect("이평선 캐시 잠금");
+            if let Some(entry) = guard.as_mut()
+                && entry.generation == generation
+                && entry.snapshot.as_of == recent.latest_day
+            {
+                let mut merged_states = entry.snapshot.states.clone();
+                merged_states.extend(fetched_states);
+                entry.loaded.extend(fetch_codes);
+                let snapshot = Arc::new(MaSnapshot { as_of: recent.latest_day, ok: true, states: merged_states });
+                entry.snapshot = snapshot.clone();
+                return snapshot;
+            }
+            if !is_partial {
+                let snapshot = Arc::new(MaSnapshot { as_of: recent.latest_day, ok: true, states: fetched_states });
+                *guard = Some(MaCacheEntry { generation, loaded: requested, snapshot: snapshot.clone() });
+                return snapshot;
+            }
         }
-        let snapshot = Arc::new(MaSnapshot { as_of: recent.latest_day, ok: true, states: fetched_states });
-        if fetch_codes.len() == requested.len() {
-            *guard = Some(MaCacheEntry { generation, loaded: requested, snapshot: snapshot.clone() });
-        } else {
-            let loaded: HashSet<StockCode> = fetch_codes.into_iter().collect();
-            *guard = Some(MaCacheEntry { generation, loaded, snapshot: snapshot.clone() });
-        }
+        let fresh_generation = match screener.store_generation().await {
+            Ok(fresh) => fresh,
+            Err(e) => {
+                tracing::warn!(error = %e, "ETF 이평선 세대를 읽지 못했습니다");
+                return Arc::default();
+            }
+        };
+        let all_codes: Vec<StockCode> = requested.iter().copied().collect();
+        let recent = match screener.recent_closes(all_codes, LONGEST_WINDOW).await {
+            Ok(recent) => recent,
+            Err(e) => {
+                tracing::warn!(error = %e, "ETF 이평선을 일봉 저장소에서 읽지 못했습니다");
+                return Arc::default();
+            }
+        };
+        let states: HashMap<StockCode, EtfMaStates> =
+            recent.closes.iter().map(|(code, closes)| (*code, states_of(closes))).collect();
+        let snapshot = Arc::new(MaSnapshot { as_of: recent.latest_day, ok: true, states });
+        let mut guard = self.entry.lock().expect("이평선 캐시 잠금");
+        *guard = Some(MaCacheEntry { generation: fresh_generation, loaded: requested, snapshot: snapshot.clone() });
         snapshot
     }
 }

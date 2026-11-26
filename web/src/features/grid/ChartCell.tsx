@@ -18,7 +18,7 @@ import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { useTheme, useVenue } from "../../stores/ui";
-import { chartPointerScheduler, useChartPointerStore } from "../../stores/chartPointer";
+import { chartPointerScheduler, matchesSnapTarget, useChartPointerStore } from "../../stores/chartPointer";
 import { replayPointScheduler } from "../book-replay/pointScheduler";
 import { useBookReplayEnabled } from "../book-replay/useBookReplay";
 import { type CellAction, cellErrorView, olderErrorView } from "./cellError";
@@ -79,6 +79,8 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const theme = useTheme();
   const replayEnabled = useBookReplayEnabled();
   const brokerSyncActive = useChartPointerStore((s) => (s.brokerSyncSymbols[cell.symbol] ?? 0) > 0);
+  const pointerSnap = useChartPointerStore((s) => s.snap);
+  const lastSnapSeq = useRef(0);
   const replayDaysEnabled = replayEnabled && isIntraday(cell.period);
   const brokerDaysEnabled = brokerSyncActive && (isIntraday(cell.period) || cell.period === "D");
   const replayDaysQuery = useBookReplayDays(cell.symbol, replayDaysEnabled);
@@ -152,6 +154,19 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });
   }, [cell, chartSettings, venue, info, preview, compareNames]);
+
+  useEffect(() => {
+    if (!pointerSnap) return;
+    if (lastSnapSeq.current === pointerSnap.seq) return;
+    if (!matchesSnapTarget(pointerSnap.target, cellId, cell.link)) {
+      lastSnapSeq.current = pointerSnap.seq;
+      return;
+    }
+    if (pointerSnap.symbol !== cell.symbol || status.kind !== "ready" || !ctl.current) return;
+    if (ctl.current.snapCrosshair(pointerSnap.symbol, pointerSnap.bar)) {
+      lastSnapSeq.current = pointerSnap.seq;
+    }
+  }, [pointerSnap, cell.symbol, cell.link, cellId, status.kind]);
 
   useEffect(() => {
     ctl.current?.setFinancials(financial.data ?? null, financial.error ? "재무자료 조회 실패" : undefined);
