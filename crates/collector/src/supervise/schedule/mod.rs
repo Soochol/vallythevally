@@ -268,6 +268,12 @@ impl Daemon {
             tracing::warn!(date = day.date, "그날 정리를 아침 일정 앞에서 시작하지 않습니다. 다음 정리 기회에 밀린 날로 정리합니다");
             return Ok(());
         }
+        self.reporter.phase(DayPhase::AfterClose);
+        self.after_close(day, shutdown).await?;
+        if self.clock.now().unix() >= start_before.unix() {
+            tracing::warn!(date = day.date, "그날 정리를 아침 일정 앞에서 시작하지 않습니다. 다음 정리 기회에 밀린 날로 정리합니다");
+            return Ok(());
+        }
         self.finalize(day, false, shutdown).await
     }
 

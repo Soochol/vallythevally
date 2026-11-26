@@ -311,12 +311,21 @@ impl Daemon {
     }
 
     async fn after_close_rest(&mut self, day: &mut DayRun, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
+        let needs_list = !after_close_path(&self.data_dir, day.date).is_file();
+        let needs_index = !has_event(&journal_path(&self.data_dir, day.date), "index_checked");
+        if !needs_list && !needs_index {
+            return Ok(());
+        }
         let opened = self.open_rest(shutdown).await;
         let Some(session) = self.soft("마감 뒤 REST 준비", opened)? else { return Ok(()) };
-        let listed = self.after_close_list(&session, day, shutdown).await;
-        self.soft("마감 뒤 목록", listed)?;
-        let checked = self.index_check(&session, day, shutdown).await;
-        self.soft("지수 일봉 대조", checked)?;
+        if needs_list {
+            let listed = self.after_close_list(&session, day, shutdown).await;
+            self.soft("마감 뒤 목록", listed)?;
+        }
+        if needs_index {
+            let checked = self.index_check(&session, day, shutdown).await;
+            self.soft("지수 일봉 대조", checked)?;
+        }
         Ok(())
     }
 
@@ -390,6 +399,9 @@ impl Daemon {
         let key = &self.keys[index];
         let tokens = crate::supervise::tokens::KeyTokens::open(key, self.transport.clone(), self.clock.clone())
             .map_err(|error| Halt::Failed(format!("잠금을 잡지 못했습니다: {error}")))?;
+        if tokens.issued_since(day.times.close) {
+            return Ok(());
+        }
         tokens.mark_current_stale();
         for _ in 0..3 {
             if let Some(generation) = self.issue_with_retry(&tokens, shutdown).await? {
