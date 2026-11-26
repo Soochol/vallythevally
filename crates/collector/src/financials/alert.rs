@@ -106,11 +106,18 @@ impl AlertWatch {
     }
 }
 
-fn financials_context(clock: &Clock) -> MarketContext {
+fn is_kst_weekend(unix_secs: i64) -> bool {
+    let kst_days = (unix_secs + 9 * 3600).div_euclid(86400);
+    let weekday = (kst_days + 4).rem_euclid(7);
+    weekday == 0 || weekday == 6
+}
+
+pub fn financials_context(clock: &Clock) -> MarketContext {
     let now = clock.now();
     let date: u32 = now.kst_date().yyyymmdd().parse().unwrap_or(0);
+    let observation = if is_kst_weekend(now.unix()) { MarketObservation::NotObserved } else { MarketObservation::Observed };
     let secs = now.kst_time_of_day().secs();
-    let phase = if secs < 7 * 3600 + 20 * 60 {
+    let phase = if secs < 8 * 3600 {
         MarketPhase::OffHours
     } else if secs < 20 * 3600 + 5 * 60 {
         MarketPhase::Collecting
@@ -119,22 +126,50 @@ fn financials_context(clock: &Clock) -> MarketContext {
     } else {
         MarketPhase::OffHours
     };
-    MarketContext::new(date, phase, MarketObservation::Observed)
+    MarketContext::new(date, phase, observation)
+}
+
+pub fn poll_once(pipeline: &AlertPipeline, page: &FinancialUpdatePage, clock: &Clock) {
+    let ctx = financials_context(clock);
+    let current = alert_kind(page);
+    for fp in pipeline.active_fingerprints() {
+        if fp.source == AlertSource::Financials && current.map(AlertKind::code) != Some(fp.code) {
+            let resolved = AlertEvent::resolved(
+                AlertSource::Financials,
+                fp.code,
+                fp.target,
+                "재무 수집 정상 재개",
+                "중단 상태가 해소되어 재무자료 수집이 재개됐습니다",
+            );
+            pipeline.emit(resolved, ctx);
+        }
+    }
+    if let Some(kind) = current {
+        pipeline.emit(active_event(kind, page), ctx);
+    }
+    if !ctx.is_quiet_hours() && pipeline.deferred_p2_count() > 0 {
+        let deferred = pipeline.peek_deferred_p2();
+        let items: Vec<String> = deferred.iter().map(|item| format!("{}: {}", item.title, item.summary)).collect();
+        let summary_event = AlertEvent::active(
+            AlertSource::Financials,
+            AlertCode::MorningBrief,
+            format!("financials-deferred:{}", ctx.date),
+            format!("{} 재무 수집 야간·휴장일 지연 경고 요약", ctx.date),
+            items.join("\n"),
+        )
+        .with_metric("지연 경고", format!("{}건", deferred.len()));
+        pipeline.emit_digest_clearing_deferred(&format!("financials_deferred:{}", ctx.date), summary_event, ctx);
+    }
+    pipeline.tick(ctx);
 }
 
 pub async fn run(service: Arc<Financials>, telegram: Telegram, state_folder: &Path, clock: Clock, interval: Duration) {
     let router = AlertRouter::single(Arc::new(TelegramSink::new(telegram)));
     let store = StateStore::in_folder(state_folder, "financials");
     let pipeline = AlertPipeline::spawn(router, Some(store), clock.clone());
-    let mut watch = AlertWatch::default();
     loop {
         let page = service.update_status().await;
-        let ctx = financials_context(&clock);
-        let events = watch.observe_events(&page);
-        for event in events {
-            pipeline.emit(event, ctx);
-        }
-        pipeline.tick(ctx);
+        poll_once(&pipeline, &page, &clock);
         tokio::time::sleep(interval).await;
     }
 }
@@ -169,5 +204,49 @@ mod tests {
         assert_eq!(cleared.len(), 1);
         assert_eq!(cleared[0].signal, Signal::Resolved);
         assert_eq!(cleared[0].fingerprint.code, AlertCode::FinancialsRateLimited);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn healthy_restart_resolves_persisted_p1_and_stops_reminders() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = StateStore::in_folder(folder.path(), "financials");
+        let sink = Arc::new(server::alert::MemorySink::new());
+        let clock = Clock::fake(server::clock::kst(domain::KstDate::new(2026, 11, 26).unwrap(), 9, 0, 0));
+
+        let first = AlertPipeline::spawn(AlertRouter::single(sink.clone()), Some(store.clone()), clock.clone());
+        poll_once(&first, &page_with(Some(StopReason::Authentication)), &clock);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(sink.messages().len(), 1);
+
+        let restarted = AlertPipeline::spawn(AlertRouter::single(sink.clone()), Some(store), clock.clone());
+        poll_once(&restarted, &page_with(None), &clock);
+        clock.jump(22_000);
+        poll_once(&restarted, &page_with(None), &clock);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent = sink.messages();
+        assert_eq!(sent.len(), 2, "{sent:?}");
+        assert!(sent[1].html.contains("복구 완료") && sent[1].silent);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn quiet_hours_and_weekend_rate_limit_p2_defer_and_flush_on_weekday_open() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = StateStore::in_folder(folder.path(), "financials");
+        let sink = Arc::new(server::alert::MemorySink::new());
+        let saturday = domain::KstDate::new(2026, 11, 28).unwrap();
+        let clock = Clock::fake(server::clock::kst(saturday, 10, 0, 0));
+        let pipeline = AlertPipeline::spawn(AlertRouter::single(sink.clone()), Some(store), clock.clone());
+
+        poll_once(&pipeline, &page_with(Some(StopReason::RateLimited)), &clock);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(sink.messages().is_empty(), "주말 P2는 즉시 발송되지 않고 지연된다");
+
+        let monday_open = server::clock::kst(domain::KstDate::new(2026, 11, 30).unwrap(), 8, 5, 0);
+        clock.jump(monday_open.unix() - clock.now().unix());
+        poll_once(&pipeline, &page_with(Some(StopReason::RateLimited)), &clock);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let sent = sink.messages();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(sent[0].html.contains("지연 경고 요약") && sent[0].html.contains("OpenDART"));
     }
 }

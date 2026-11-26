@@ -263,8 +263,14 @@ impl Daemon {
         let mut task = tokio::spawn(supervisor.run(shutdown.clone()));
         let mut shared_report = shared_supervisor.as_ref().map(SharedSupervisor::report);
         let mut shared_task = shared_supervisor.map(|shared| tokio::spawn(shared.run(shutdown.clone())));
+        let mut housekeeping = tokio::time::interval(self.supervisor.housekeeping_every);
+        housekeeping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        housekeeping.tick().await;
         loop {
             tokio::select! {
+                _ = housekeeping.tick() => {
+                    self.reporter.housekeeping();
+                }
                 Some(Ok(())) = async { match shared_report.as_mut() { Some(report) => Some(report.changed().await), None => std::future::pending().await } } => {
                     if let Some(report) = shared_report.as_mut() {
                         let snapshot = report.borrow_and_update().clone();
@@ -451,6 +457,7 @@ impl Daemon {
 
     pub(super) async fn finalize_date(&mut self, date: u32, collected: bool, shutdown: &mut watch::Receiver<bool>) -> Result<(), DayEnd> {
         if store_dir(&self.data_dir, date).join(COMPLETE_FILE_NAME).is_file() {
+            self.reporter.resolve_finalize(date);
             return Ok(());
         }
         if !raw_day_dir(&self.data_dir, date).is_dir() {
@@ -472,7 +479,7 @@ impl Daemon {
         let finalizer = self.finalizer.clone();
         let outcome = stoppable(shutdown, async move { finalizer.run(arguments).await }).await.map_err(|_| DayEnd::Stopped)?;
         match outcome {
-            Ok(0) => {}
+            Ok(0) => self.reporter.resolve_finalize(date),
             Ok(3) => self.reporter.alert(AlertKind::StageFailed, format!("정리: 분 호가를 만들지 못했습니다({date}). 다음 정리 때 다시 만듭니다")),
             Ok(code) => self.reporter.alert(AlertKind::StageFailed, format!("정리: finalize가 종료 코드 {code}로 끝났습니다. {FINALIZE_RETRY_NOTE}")),
             Err(error) => self.reporter.alert(AlertKind::StageFailed, format!("정리: finalize를 돌리지 못했습니다: {error}. {FINALIZE_RETRY_NOTE}")),

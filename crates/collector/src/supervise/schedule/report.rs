@@ -70,9 +70,24 @@ impl Reporter {
         self.publish();
         if let Some(telegram) = &self.telegram {
             let ctx = self.market_context();
+            telegram.retire_previous_day_incidents(date, &self.data_dir);
             telegram.resolve_pending_crash(ctx);
             telegram.check_disk(&self.data_dir, ctx);
             telegram.tick(ctx);
+        }
+    }
+
+    pub(super) fn housekeeping(&self) {
+        if let Some(telegram) = &self.telegram {
+            let ctx = self.market_context();
+            telegram.check_disk(&self.data_dir, ctx);
+            telegram.tick(ctx);
+        }
+    }
+
+    pub(super) fn resolve_finalize(&self, date: u32) {
+        if let Some(telegram) = &self.telegram {
+            telegram.resolve_finalize(self.market_context(), date);
         }
     }
 
