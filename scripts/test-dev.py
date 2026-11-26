@@ -330,6 +330,123 @@ class DevCacheTest(unittest.TestCase):
         self.assertEqual(failed["artifacts"], {})
 
 
+class DevServeAndSyncTest(unittest.TestCase):
+    def setUp(self):
+        temporary = ROOT / "target/dev-build-tests"
+        temporary.mkdir(parents=True, exist_ok=True)
+        self.directory = tempfile.TemporaryDirectory(dir=temporary)
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name) / "worktree"
+        self.home = Path(self.directory.name) / "home"
+        self.root.mkdir()
+        self.home.mkdir()
+
+    def test_dev_server_environment_enforces_mock_and_strips_inherited_secrets(self):
+        polluted = {
+            "HOME": str(self.home),
+            "PATH": "/usr/bin:/bin",
+            "XDG_STATE_HOME": str(self.home / "state"),
+            "XDG_RUNTIME_DIR": str(self.home / "run"),
+            "VALLY_KIWOOM_ENV": "real",
+            "VALLY_KIWOOM_APP_KEY": "real-app-key",
+            "VALLY_KIWOOM_APP_SECRET": "real-app-secret",
+            "VALLY_ENV_FILE": "/etc/vally/server.env",
+            "VALLY_ACCOUNT_SERVER_URL": "https://account.invalid",
+            "VALLY_COLLECTOR_SOCKET": "/run/collector.sock",
+            "VALLY_COLLECTOR_TELEGRAM": "1",
+            "OPENDART_API_KEY": "dart-secret",
+        }
+        env = dev.dev_server_environment(self.root, polluted)
+        self.assertEqual(env["VALLY_KIWOOM_ENV"], "mock")
+        self.assertEqual(env["VALLY_BIND"], "127.0.0.1:8082")
+        self.assertEqual(env["VALLY_SCREENER_UPDATE_ON_START"], "off")
+        self.assertEqual(env["PATH"], "/usr/bin:/bin")
+        for forbidden in (
+            "VALLY_KIWOOM_APP_KEY",
+            "VALLY_KIWOOM_APP_SECRET",
+            "VALLY_ENV_FILE",
+            "VALLY_ACCOUNT_SERVER_URL",
+            "VALLY_COLLECTOR_SOCKET",
+            "VALLY_COLLECTOR_TELEGRAM",
+            "OPENDART_API_KEY",
+            "VALLY_HOGA_DATA_DIR",
+            "VALLY_SHARED_DATA_DIR",
+            "VALLY_FINANCIAL_DB_PATH",
+            "VALLY_TAILNET_HOSTS",
+        ):
+            self.assertNotIn(forbidden, env)
+        expected_data = (self.home / "vally-data" / "dev-local").resolve()
+        self.assertEqual(env["VALLY_DB_PATH"], str(expected_data / "vally.db"))
+        self.assertEqual(env["VALLY_SCREENER_DB_PATH"], str(expected_data / "screener.duckdb"))
+        self.assertEqual(env["VALLY_LOCK_PATH"], str((self.home / "run" / "vallythevally" / "dev-local" / "server.lock").resolve()))
+        self.assertEqual(env["VALLY_TOKEN_PATH"], str((self.home / "state" / "vallythevally" / "dev-local" / "token.json").resolve()))
+        self.assertEqual(env["VALLY_KIWOOM_KEY_PATH"], str((self.home / "state" / "vallythevally" / "dev-local" / "kiwoom-key.json").resolve()))
+        self.assertEqual(env["VALLY_STATIC_DIR"], str((self.root / "web" / "dist").resolve()))
+
+    def test_dev_server_environment_autowires_optional_data_libduckdb_and_tailnet(self):
+        data_dir = Path(self.directory.name) / "dev-data"
+        (data_dir / "hoga" / "shared").mkdir(parents=True)
+        (data_dir / "financials.db").write_bytes(b"sqlite")
+        bin_dir = self.root / "target" / "dev" / "bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "libduckdb.so").write_bytes(b"duckdb")
+        env = dev.dev_server_environment(
+            self.root,
+            {"HOME": str(self.home), "LD_LIBRARY_PATH": "/opt/lib"},
+            port=8091,
+            data_dir=data_dir,
+            tailnet_hosts="dev.example.ts.net:8443",
+        )
+        self.assertEqual(env["VALLY_BIND"], "127.0.0.1:8091")
+        self.assertEqual(env["VALLY_HOGA_DATA_DIR"], str((data_dir / "hoga").resolve()))
+        self.assertEqual(env["VALLY_SHARED_DATA_DIR"], str((data_dir / "hoga" / "shared").resolve()))
+        self.assertEqual(env["VALLY_FINANCIAL_DB_PATH"], str((data_dir / "financials.db").resolve()))
+        self.assertEqual(env["VALLY_TAILNET_HOSTS"], "dev.example.ts.net:8443")
+        self.assertEqual(env["LD_LIBRARY_PATH"], f"{bin_dir.resolve()}:/opt/lib")
+
+    def test_dev_server_environment_rejects_invalid_ports(self):
+        for bad_port in (0, -1, 65536, True, "8082"):
+            with self.subTest(port=bad_port), self.assertRaises(ValueError):
+                dev.dev_server_environment(self.root, {"HOME": str(self.home)}, port=bad_port)
+
+    def test_sync_sample_plan_validates_host_and_days(self):
+        data_dir = self.home / "vally-data" / "dev-local"
+        for bad_host in ("", "-oProxyCommand=id", "user@host extra"):
+            with self.subTest(host=bad_host), self.assertRaises(ValueError):
+                dev.sync_sample_plan(bad_host, data_dir, days=1, dates=["20261126"])
+        for bad_days in (0, -1, 6, True, "2"):
+            with self.subTest(days=bad_days), self.assertRaises(ValueError):
+                dev.sync_sample_plan("dev@preview-box", data_dir, days=bad_days, dates=["20261126"])
+
+    def test_sync_sample_plan_selects_latest_dates_and_excludes_sensitive_files(self):
+        data_dir = (self.home / "vally-data" / "dev-local").resolve()
+        commands = dev.sync_sample_plan(
+            "dev@preview-box",
+            data_dir,
+            days=2,
+            dates=["20261120", "notes.txt", "20261125", "20261122", "20261124", "20261125", "20261126.tmp"],
+        )
+        self.assertEqual(
+            commands[0],
+            ["rsync", "-a", "dev@preview-box:vally-data/server/screener.duckdb", str(data_dir / "screener.duckdb")],
+        )
+        self.assertEqual(len(commands), 1 + 2 * len(dev.SAMPLE_HOGA_SUBPATHS))
+        hoga_commands = commands[1:]
+        for command in hoga_commands:
+            self.assertEqual(command[:3], ["rsync", "-a", "--ignore-missing-args"])
+            self.assertTrue(any(date in command[3] for date in ("20261124", "20261125")), command)
+            self.assertNotIn("20261120", command[3])
+            self.assertNotIn("20261122", command[3])
+            self.assertNotIn("notes.txt", command[3])
+            self.assertNotIn("20261126.tmp", command[3])
+        joined = "\n".join(" ".join(command) for command in commands)
+        for subpath in dev.SAMPLE_HOGA_SUBPATHS:
+            self.assertIn(f"hoga/{subpath}/20261124/", joined)
+            self.assertIn(f"hoga/{subpath}/20261125/", joined)
+        for forbidden in ("vally.db", "server.env", "kiwoom-", "token", "financials.db"):
+            self.assertNotIn(forbidden, joined)
+
+
 if __name__ == "__main__":
     with contextlib.redirect_stdout(io.StringIO()):
         unittest.main()
