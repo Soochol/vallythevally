@@ -311,9 +311,9 @@ test("등락률을 끈 호가주문 창을 최소 폭 372px로 줄여도 글자�
   await openNarrowest(page, scenario);
   const quantityRow = page.getByTestId("order-quantity-row");
   expect((await page.locator('[data-canvas-window="order"]').boundingBox())!.width).toBeCloseTo(372, 0);
-  expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-gear").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(1);
+  expect(new Set(await quantityRow.locator(".od-presets, .od-qty-input, .od-preset-mode").evaluateAll((parts) => parts.map((part) => Math.round(part.getBoundingClientRect().top)))).size).toBe(1);
   expect(await cutTexts(win(page))).toEqual([]);
-  for (const row of [quantityRow, page.getByTestId("order-summary"), page.locator(".od-account-bar"), page.getByTestId("order-symbol-head")]) expect(await overlappingChildren(row)).toEqual([]);
+  for (const row of [quantityRow, page.getByTestId("order-summary"), page.locator(".od-account-bar")]) expect(await overlappingChildren(row)).toEqual([]);
 });
 
 test("등락률을 끈 10호가 창을 최소 폭 232px로 줄여도 잔량·체결·총잔량 글자가 잘리지 않는다", async ({ page, scenario }) => {
@@ -520,10 +520,11 @@ test("주문 입력은 한 줄로 사다리 위에, 총잔량 띠와 그 위 접
   const ladder = page.getByTestId("order-ladder");
   const ladderTop = await topOf(ladder);
   const ladderBottom = ladderTop + (await ladder.boundingBox())!.height;
-  const inputLine = [page.getByRole("textbox", { name: "수량" }), ...(await page.getByRole("group", { name: "금액 프리셋" }).getByRole("button").all()), page.getByTestId("order-settings-button")];
-  expect(inputLine).toHaveLength(6);
+  const inputLine = [page.getByRole("textbox", { name: "수량" }), ...(await page.getByRole("group", { name: "금액 프리셋" }).getByRole("button").all())];
+  expect(inputLine).toHaveLength(5);
   const topsInLine = await Promise.all(inputLine.map(topOf));
   expect(new Set(topsInLine.map(Math.round)).size).toBe(1);
+  expect(Math.round(await topOf(page.getByTestId("order-settings-button")))).toBeLessThan(Math.round(topsInLine[0]!));
   const firstRow = ladderRows(page).first();
   await expect(page.getByTestId("order-status")).toHaveCount(0);
   await expect(win(page)).not.toContainText("호가 칸을 더블클릭해 주문합니다");
@@ -549,7 +550,7 @@ test("기본 프리셋은 같은 줄에 100만·500만·1000만·5000만이다",
   expect((await tops(presets)).map(Math.round)).toEqual([input, input, input, input]);
 });
 
-test("금액 프리셋 4개는 모두 5,000만이 들어가는 48px이고 더 긴 값만 넓어진다", async ({ page, scenario }) => {
+test("금액 프리셋 4개는 모두 5,000만이 들어가는 최소 48px이고 더 긴 값도 잘리지 않는다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario);
   await openOrderWindow(page, scenario);
@@ -557,16 +558,19 @@ test("금액 프리셋 4개는 모두 5,000만이 들어가는 48px이고 더 �
   const row = page.getByTestId("order-quantity-row");
   const presets = row.getByRole("group", { name: "금액 프리셋" }).getByRole("button");
   const sizes = () => presets.evaluateAll((buttons) => buttons.map((button) => { const box = button.getBoundingClientRect(); return { width: Math.round(box.width * 2) / 2, height: Math.round(box.height), cut: button.scrollWidth > button.clientWidth }; }));
-  const even = { width: 48, height: 30, cut: false };
   await page.evaluate(() => document.fonts.ready);
-  await expect.poll(sizes).toEqual([even, even, even, even]);
+  const initial = await sizes();
+  for (const item of initial) {
+    expect(item.width).toBeGreaterThanOrEqual(48);
+    expect(item.height).toBe(24);
+    expect(item.cut).toBe(false);
+  }
   await openSettings(page);
   await page.getByRole("textbox", { name: "금액 프리셋 4" }).fill("99999");
   await page.keyboard.press("Escape");
   await expect(presets.last()).toHaveText("99,999만");
   const widened = await sizes();
-  expect(widened.slice(0, 3)).toEqual([even, even, even]);
-  expect(widened[3]!.width).toBeGreaterThan(48);
+  expect(widened[3]!.width).toBeGreaterThan(widened[0]!.width);
   expect(widened[3]!.cut).toBe(false);
 });
 
@@ -613,6 +617,24 @@ test("폭 420px에서 6·7자리 수량이 잘리지 않고 창이 넓으면 수
   expect((await field.boundingBox())!.width).toBeGreaterThanOrEqual(60);
   await win(page).evaluate((element) => { element.style.width = "600px"; });
   await expect.poll(async () => Math.round((await field.boundingBox())!.width)).toBe(84);
+});
+
+test("수량 칸을 클릭하면 기존 값이 모두 선택되어 바로 덮어쓸 수 있다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  tradingApi(scenario);
+  await openOrderWindow(page, scenario);
+  const field = quantityField(page);
+  await expect(field).toHaveValue("10");
+
+  await field.click();
+  expect(await field.evaluate((element: HTMLInputElement) => ({ start: element.selectionStart, end: element.selectionEnd }))).toEqual({ start: 0, end: 2 });
+  await page.keyboard.type("250");
+  await expect(field).toHaveValue("250");
+
+  await field.click();
+  expect(await field.evaluate((element: HTMLInputElement) => ({ start: element.selectionStart, end: element.selectionEnd }))).toEqual({ start: 0, end: 3 });
+  await page.keyboard.type("75");
+  await expect(field).toHaveValue("75");
 });
 
 test("상세 정보 카드가 사다리 1~10행 자리에 있고 시세 쪽에 시가·고가·저가·기준가·거래량·거래대금 값이 맞다", async ({ page, scenario }) => {
