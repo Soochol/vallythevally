@@ -14,6 +14,9 @@
 }
 .indicator-grip { opacity: 0.55; transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 [data-indicator-row]:hover .indicator-grip { opacity: 1; color: var(--accent); }
+[data-indicator-row] [data-indicator-tools] > button[data-fade] { opacity: 0; }
+[data-indicator-row]:is(:hover, :has(:focus-visible)) [data-indicator-tools] > button[data-fade] { opacity: 1; }
+[data-indicator-row]:is(:hover, :has(:focus-visible)) [data-indicator-tools] > button[data-fade]:disabled { opacity: 0.4; }
 .indicator-axis-pill {
   display: inline-flex;
   align-items: center;
