@@ -1,8 +1,12 @@
 import { type RefObject, useLayoutEffect, useState } from "react";
 import type { Size } from "../../layout/dock/geometry";
+import { appliedTheme, type Theme } from "../../persist/theme";
 
 export const DOCK_GAP = 6;
 export const CANVAS_DOCK_HEIGHT = 48;
+
+export const dockGapForTheme = (theme: Theme): number => (theme === "bento" ? 10 : theme === "glass" ? 8 : DOCK_GAP);
+export const currentDockGap = (): number => (typeof document === "undefined" ? DOCK_GAP : dockGapForTheme(appliedTheme()));
 
 export function useElementSize(ref: RefObject<HTMLElement | null>): Size | null {
   const [size, setSize] = useState<Size | null>(null);

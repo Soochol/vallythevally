@@ -98,4 +98,50 @@
   color-scheme: light;
 }
 
+[data-theme="bento"] {
+  --r-s: 8px; --r-m: 12px; --r-l: 16px; --r-pill: 999px;
+  --island-gap: 10px;
+  --bg: #0B1018; --chart-bg: #121A26; --surface: #121A26; --raised: #202C3E; --overlay: #303E54; --line: rgba(180, 204, 240, 0.08); --line-subtle: rgba(180, 204, 240, 0.045); --line-strong: rgba(180, 204, 240, 0.16); --grid: rgba(180, 204, 240, 0.045); --grid-h: rgba(180, 204, 240, 0.07);
+  --text: #F2F6FC; --text-name: #DFE8F5; --text-price: #F6F9FE; --text-2: #B7C4D9; --text-3: #98A7BD;
+  --accent: #42E3A8; --accent-ink: #071612; --accent-soft: rgba(66, 227, 168, 0.22); --hover: rgba(180, 206, 245, 0.06);
+  --success: #7CE5A8; --warning: #F2CA6E; --danger: #FFA44A; --on-data: #091018;
+  --danger-soft: rgba(255, 164, 74, 0.16); --warning-soft: rgba(242, 202, 110, 0.16); --success-soft: rgba(124, 229, 168, 0.16); --up-soft: rgba(255, 118, 128, 0.15); --down-soft: rgba(116, 178, 255, 0.15);
+  --up: #FF7680; --down: #74B2FF; --tile-up: #C93D4C; --tile-down: #2F6AE0; --tile-ink-strong: #FFFFFF; --up-vol: rgba(255, 118, 128, 0.30); --down-vol: rgba(116, 178, 255, 0.30);
+  --series-1: #49D0F2; --series-2: #C549F2; --series-3: #F2B6CA; --series-4: #A69632; --series-5: #32A696;
+  --series-6: #D9417E; --series-7: #7C87A6; --series-8: #32A632; --series-9: #A66F4B; --series-10: #C6D8FA;
+  --crosshair: #7F90AB; --series-line: #42E3A8; --series-fill: rgba(66, 227, 168, 0.12);
+  --ind-1: #E6C178; --ind-2: #BCA8FF; --ind-3: #6ED4C2; --ind-4: #F59D73; --ind-5: #AAB995;
+  --cmp-1: #42E3A8; --cmp-2: #EE9DD0; --cmp-3: #6EC7D8;
+  --link-a: #B9A6FF; --link-b: #5ED4E8; --link-c: #E88AE0;
+  --link-d: #F59047; --link-e: #B5C07C; --link-f: #DEBDBA; --link-g: #64F7DE; --link-h: #DED2BA; --link-i: #BAD2DE; --link-j: #CA91A4;
+  --draw: #FFE100; --cloud-up: rgba(255, 118, 128, 0.11); --cloud-down: rgba(116, 178, 255, 0.11);
+  --shadow: 0 12px 36px rgba(3, 7, 14, 0.56); --scrim: rgba(5, 9, 16, 0.72);
+  --shadow-s: 0 4px 16px rgba(3, 7, 14, 0.42); --scrim-nested: rgba(5, 9, 16, 0.52);
+  --glass: rgba(21, 30, 44, 0.90); --glass-solid: #172130; --glass-blur: blur(18px);
+  color-scheme: dark;
+}
+
+[data-theme="glass"] {
+  --r-s: 6px; --r-m: 10px; --r-l: 12px; --r-pill: 999px;
+  --island-gap: 8px;
+  --bg: #0B0D17; --chart-bg: #101423; --surface: #141827; --raised: #222940; --overlay: #303954; --line: rgba(210, 218, 255, 0.14); --line-subtle: rgba(210, 218, 255, 0.07); --line-strong: rgba(218, 224, 255, 0.26); --grid: rgba(210, 218, 255, 0.05); --grid-h: rgba(210, 218, 255, 0.08);
+  --text: #F4F5FB; --text-name: #E2E5F3; --text-price: #F7F8FD; --text-2: #B9C0D8; --text-3: #99A0BC;
+  --accent: #B49BFF; --accent-ink: #0E0A1D; --accent-soft: rgba(180, 155, 255, 0.24); --hover: rgba(205, 212, 255, 0.065);
+  --success: #73E0A8; --warning: #F0C76E; --danger: #FFA34A; --on-data: #0B0D17;
+  --danger-soft: rgba(255, 163, 74, 0.16); --warning-soft: rgba(240, 199, 110, 0.16); --success-soft: rgba(115, 224, 168, 0.16); --up-soft: rgba(255, 118, 130, 0.15); --down-soft: rgba(116, 178, 255, 0.15);
+  --up: #FF7682; --down: #74B2FF; --tile-up: #CA3D52; --tile-down: #3068DC; --tile-ink-strong: #FFFFFF; --up-vol: rgba(255, 118, 130, 0.30); --down-vol: rgba(116, 178, 255, 0.30);
+  --series-1: #49D0F2; --series-2: #C549F2; --series-3: #F2B6CA; --series-4: #A69632; --series-5: #32A696;
+  --series-6: #D9417E; --series-7: #7C87A6; --series-8: #32A632; --series-9: #A66F4B; --series-10: #C6D8FA;
+  --crosshair: #8890AF; --series-line: #B49BFF; --series-fill: rgba(180, 155, 255, 0.12);
+  --ind-1: #E6C178; --ind-2: #C4B5FF; --ind-3: #73D2BF; --ind-4: #F49D74; --ind-5: #AAB995;
+  --cmp-1: #B49BFF; --cmp-2: #EE9DD0; --cmp-3: #6EC7D8;
+  --link-a: #C4B5FF; --link-b: #5ED4E8; --link-c: #E88AE0;
+  --link-d: #F59047; --link-e: #B5C07C; --link-f: #DEBDBA; --link-g: #64F7DE; --link-h: #DED2BA; --link-i: #BAD2DE; --link-j: #CA91A4;
+  --draw: #FFE100; --cloud-up: rgba(255, 118, 130, 0.11); --cloud-down: rgba(116, 178, 255, 0.11);
+  --shadow: 0 0 0 1px rgba(216, 224, 255, 0.18), 0 22px 54px rgba(3, 5, 16, 0.68), inset 0 1px 0 rgba(255, 255, 255, 0.12); --scrim: rgba(6, 8, 18, 0.68);
+  --shadow-s: 0 0 0 1px rgba(216, 224, 255, 0.14), 0 8px 24px rgba(3, 5, 16, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.08); --scrim-nested: rgba(6, 8, 18, 0.50);
+  --glass: rgba(22, 26, 44, 0.68); --glass-solid: #171C2F; --glass-blur: blur(22px);
+  color-scheme: dark;
+}
+
 [data-density="compact"] { --row-h: 28px; }

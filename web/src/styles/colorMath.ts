@@ -1,3 +1,5 @@
+import type { Theme } from "../persist/theme";
+
 export interface Rgba { r: number; g: number; b: number; a: number }
 
 const HEX_COLOR = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i;
@@ -83,13 +85,13 @@ export function parseCustomProperties(css: string): Map<string, string> {
   return properties;
 }
 
-export function parseThemeProperties(css: string, theme: "dark" | "light"): Map<string, string> {
+export function parseThemeProperties(css: string, theme: Theme): Map<string, string> {
   const rootMatch = /:root\s*\{([^}]*)\}/.exec(css);
   const properties = parseCustomProperties(rootMatch?.[1] ?? css);
-  if (theme === "light") {
-    const lightMatch = /\[data-theme="light"\]\s*\{([^}]*)\}/.exec(css);
-    if (!lightMatch) throw new Error('[data-theme="light"] 블록이 tokens.css에 없다');
-    for (const [name, value] of parseCustomProperties(lightMatch[1]!)) properties.set(name, value);
+  if (theme !== "dark") {
+    const themeMatch = new RegExp(`\\[data-theme="${theme}"\\]\\s*\\{([^}]*)\\}`).exec(css);
+    if (!themeMatch) throw new Error(`[data-theme="${theme}"] 블록이 tokens.css에 없다`);
+    for (const [name, value] of parseCustomProperties(themeMatch[1]!)) properties.set(name, value);
   }
   return properties;
 }

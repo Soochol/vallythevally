@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { appliedTheme, DEFAULT_THEME, subscribeTheme } from "../../persist/theme";
 import { fitCanvas } from "../../layout/canvas/arrange";
 import { workArea } from "../../layout/canvas/geometry";
 import { placementForMode } from "../../layout/modes";
@@ -25,7 +26,7 @@ import { DockTabMenu } from "./DockTabMenu";
 import { floatPanelId, useDockInteraction } from "./dockInteraction";
 import { useDockMaximize } from "./useDockMaximize";
 import { WindowHost } from "./WindowHost";
-import { CANVAS_DOCK_HEIGHT, DOCK_GAP, useElementSize } from "./size";
+import { CANVAS_DOCK_HEIGHT, dockGapForTheme, useElementSize } from "./size";
 
 const FOLD_NOTICE = "자리가 좁아 창 묶음 일부를 탭으로 접었습니다 · 창을 넓히면 돌아옵니다";
 
@@ -42,9 +43,11 @@ export function Workspace() {
   const refs = useMemo(() => windowRefs(windows, !rateShown), [windows, rateShown]);
   const dock = useMemo(() => fitDock(saved, refs), [saved, refs]);
   const canvas = useMemo(() => canvasArea && fitCanvas(placement.canvas, refs, canvasArea), [placement.canvas, refs, canvasArea]);
+  const theme = useSyncExternalStore(subscribeTheme, () => appliedTheme(), () => DEFAULT_THEME);
+  const dockGap = dockGapForTheme(theme);
   const [draft, setDraft] = useState<DockPlacement | null>(null);
   const [pick, setPick] = useState<WindowId | null>(null);
-  const space: DockSpace | null = useMemo(() => area && { area, gap: DOCK_GAP, windows: refs }, [area, refs]);
+  const space: DockSpace | null = useMemo(() => area && { area, gap: dockGap, windows: refs }, [area, dockGap, refs]);
   const drawn = useMemo(() => (space && mode === "dock" ? drawDock(dock, space, pick) : { dock, folds: 0 }), [dock, space, mode, pick]);
   const interaction = useDockInteraction({ root, dock: drawn.dock, saved: dock, space, enabled: mode === "dock", onPick: setPick });
   const pending = draft ?? interaction.shown;
@@ -81,8 +84,8 @@ export function Workspace() {
     const state = useLayoutStore.getState();
     state.setWorkspaceArea(area);
     state.setCanvasArea(mode === "canvas" ? canvasArea : null);
-    if ((mode === "canvas" || (placement.dock === null && placement.canvas !== null)) && canvasArea && area) state.settlePlacement(placementForMode(placement, refs, mode, { dock: { area, gap: DOCK_GAP }, canvas: canvasArea }));
-  }, [mode, canvasArea, area, placement, refs]);
+    if ((mode === "canvas" || (placement.dock === null && placement.canvas !== null)) && canvasArea && area) state.settlePlacement(placementForMode(placement, refs, mode, { dock: { area, gap: dockGap }, canvas: canvasArea }));
+  }, [mode, canvasArea, area, dockGap, placement, refs]);
   useLayoutEffect(() => () => {
     const state = useLayoutStore.getState();
     state.setWorkspaceArea(null);
