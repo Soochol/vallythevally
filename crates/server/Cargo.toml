@@ -21,6 +21,7 @@ path = "src/bin/dart-smoke.rs"
 
 [dependencies]
 domain = { path = "../domain" }
+hoga-format = { path = "../hoga-format" }
 indicators = { path = "../indicators" }
 setup = { path = "../setup" }
 axum = { version = "0.8", features = ["ws"] }

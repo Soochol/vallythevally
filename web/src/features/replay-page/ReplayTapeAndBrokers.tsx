@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Bar } from "../../api/generated/Bar";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice } from "../../lib/format";
@@ -12,23 +12,21 @@ import type { BrokerDayResult } from "../brokers/useBrokerDay";
 import "../brokers/brokers.css";
 import { formatClock } from "../market-window/format";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
+import type { ReplayEngine, ReplayEngineFrame } from "./replayEngine";
 import {
   formatReplayClock,
   formatSignedQty,
   formatWonCompact,
-  type ReplayFrame,
-  type ReplayTradeSummary,
 } from "./replayModel";
 
 interface Props {
-  readonly frame: ReplayFrame | null;
+  readonly engine: ReplayEngine;
   readonly previousClose: number | null;
   readonly dayStartUnix: UnixSeconds;
-  readonly cursorSec: number;
-  readonly tradeSummary: ReplayTradeSummary;
+  readonly activeSecond: number;
   readonly tapeMinWon: number;
   readonly onTapeMinWon: (minWon: number) => void;
-  readonly onJumpSec: (sec: number) => void;
+  readonly onJumpMs: (ms: number) => void;
   readonly brokerDay: BrokerDayResult;
   readonly bars1m: readonly Bar[];
 }
@@ -40,17 +38,29 @@ const TAPE_FILTERS = [
   { value: 100_000_000, label: "1억+" },
 ] as const;
 
+const TAPE_SLOTS = Array.from({ length: 40 }, (_, i) => i);
 const EMPTY_RUNS: ReadonlyMap<string, readonly TrackRun[]> = new Map();
 
+interface TapeSlotRefs {
+  btn: HTMLButtonElement | null;
+  time: HTMLSpanElement | null;
+  price: HTMLSpanElement | null;
+  qty: HTMLSpanElement | null;
+  val: HTMLSpanElement | null;
+}
+
+function setText(el: HTMLElement | null, value: string): void {
+  if (el && el.textContent !== value) el.textContent = value;
+}
+
 export function ReplayTapeAndBrokers({
-  frame,
+  engine,
   previousClose,
   dayStartUnix,
-  cursorSec,
-  tradeSummary,
+  activeSecond,
   tapeMinWon,
   onTapeMinWon,
-  onJumpSec,
+  onJumpMs,
   brokerDay,
   bars1m,
 }: Props) {
@@ -59,7 +69,88 @@ export function ReplayTapeAndBrokers({
   const [selectedBroker, setSelectedBroker] = useState<string | null>(null);
   const [hoverBrokerCursor, setHoverBrokerCursor] = useState<UnixSeconds | null>(null);
 
-  const replayUnix: UnixSeconds = dayStartUnix + Math.floor(cursorSec);
+  const countRef = useRef<HTMLSpanElement>(null);
+  const strengthRef = useRef<HTMLElement>(null);
+  const net1mRef = useRef<HTMLElement>(null);
+  const whaleBuyRef = useRef<HTMLSpanElement>(null);
+  const whaleSellRef = useRef<HTMLSpanElement>(null);
+  const emptyRef = useRef<HTMLDivElement>(null);
+  const brokerPriceRef = useRef<HTMLSpanElement>(null);
+  const jumpTargetsRef = useRef<number[]>(TAPE_SLOTS.map(() => 0));
+  const slotRefs = useRef<TapeSlotRefs[]>(
+    TAPE_SLOTS.map(() => ({ btn: null, time: null, price: null, qty: null, val: null })),
+  );
+
+  useEffect(() => {
+    const apply = (frame: ReplayEngineFrame) => {
+      const perfNow = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const trades = frame.recentTrades;
+      const withMs = frame.resolution === "tick";
+
+      setText(countRef.current, `${trades.length}건`);
+      if (strengthRef.current) {
+        strengthRef.current.className = frame.strength >= 100 ? "rp-up" : "rp-down";
+        setText(strengthRef.current, `${frame.strength.toFixed(1)}%`);
+      }
+      if (net1mRef.current) {
+        net1mRef.current.className = frame.tradeSummary.net1mQty >= 0 ? "rp-up" : "rp-down";
+        setText(net1mRef.current, `${formatSignedQty(frame.tradeSummary.net1mQty)}주`);
+      }
+      setText(whaleBuyRef.current, `매수 ${frame.tradeSummary.whaleBuy}`);
+      setText(whaleSellRef.current, `매도 ${frame.tradeSummary.whaleSell}`);
+      setText(brokerPriceRef.current, frame.price !== null ? formatPrice(frame.price, false) : "-");
+
+      if (emptyRef.current) {
+        emptyRef.current.hidden = trades.length > 0;
+        if (trades.length === 0) {
+          setText(
+            emptyRef.current,
+            tapeMinWon > 0
+              ? `필터 조건(${formatWonCompact(tapeMinWon)}+)에 맞는 체결이 없습니다`
+              : "이 시점까지 기록된 체결이 없습니다",
+          );
+        }
+      }
+
+      for (let i = 0; i < TAPE_SLOTS.length; i++) {
+        const refs = slotRefs.current[i]!;
+        const tr = trades[i];
+        if (!refs.btn) continue;
+        if (!tr) {
+          refs.btn.hidden = true;
+          refs.btn.removeAttribute("data-testid");
+          continue;
+        }
+        refs.btn.hidden = false;
+        refs.btn.setAttribute("data-testid", "replay-tape-row");
+        refs.btn.setAttribute("data-side", tr.side);
+        if (tr.whale) refs.btn.setAttribute("data-whale", "true");
+        else refs.btn.removeAttribute("data-whale");
+        if (perfNow < tr.freshUntilMs) refs.btn.setAttribute("data-fresh", "true");
+        else refs.btn.removeAttribute("data-fresh");
+        jumpTargetsRef.current[i] = tr.recvMs;
+
+        setText(refs.time, formatReplayClock(tr.recvMs / 1000, withMs));
+        if (refs.price) {
+          const pTone = previousClose !== null && previousClose > 0
+            ? tr.price > previousClose
+              ? "rp-up"
+              : tr.price < previousClose
+                ? "rp-down"
+                : ""
+            : "";
+          if (refs.price.className !== pTone) refs.price.className = pTone;
+          setText(refs.price, formatPrice(tr.price, false));
+        }
+        setText(refs.qty, formatPrice(tr.quantity, false));
+        setText(refs.val, formatWonCompact(tr.value));
+      }
+    };
+
+    return engine.subscribeFrame(apply);
+  }, [engine, previousClose, tapeMinWon]);
+
+  const replayUnix: UnixSeconds = dayStartUnix + activeSecond;
   const effectiveCursor = hoverBrokerCursor ?? replayUnix;
 
   const grid = brokerDay.state.grid;
@@ -71,15 +162,13 @@ export function ReplayTapeAndBrokers({
   const showEmpty = !brokerDay.failed && brokerDay.mode !== "loading" && grid.times.length === 0;
   const showContent = !brokerDay.failed && grid.times.length > 0;
 
-  const strength = frame?.strength ?? 100;
-
   return (
     <section className="rp-col" aria-label="체결 테이프 및 거래원 입체분석">
       <div className="rp-tape-section">
         <div className="rp-pane-head">
           <div className="rp-pane-title">
             <span>체결 테이프</span>
-            <span className="rp-muted rp-mono">{`${tradeSummary.rows.length}건`}</span>
+            <span ref={countRef} className="rp-muted rp-mono">0건</span>
           </div>
           <div className="rp-seg" role="group" aria-label="체결 금액 필터">
             {TAPE_FILTERS.map((opt) => (
@@ -98,18 +187,18 @@ export function ReplayTapeAndBrokers({
         <div className="rp-strength-bar rp-mono">
           <div className="rp-kpi">
             <span>체결강도</span>
-            <b className={strength >= 100 ? "rp-up" : "rp-down"}>{`${strength.toFixed(1)}%`}</b>
+            <b ref={strengthRef} className="rp-up">100.0%</b>
           </div>
           <div className="rp-kpi">
             <span>최근 1분 순매수</span>
-            <b className={tradeSummary.net1mQty >= 0 ? "rp-up" : "rp-down"}>{`${formatSignedQty(tradeSummary.net1mQty)}주`}</b>
+            <b ref={net1mRef} className="rp-up">0주</b>
           </div>
           <div className="rp-kpi">
             <span>대량체결(5천만+)</span>
             <b>
-              <span className="rp-up">{`매수 ${tradeSummary.whaleBuy}`}</span>
+              <span ref={whaleBuyRef} className="rp-up">매수 0</span>
               {" · "}
-              <span className="rp-down">{`매도 ${tradeSummary.whaleSell}`}</span>
+              <span ref={whaleSellRef} className="rp-down">매도 0</span>
             </b>
           </div>
         </div>
@@ -122,37 +211,43 @@ export function ReplayTapeAndBrokers({
         </div>
 
         <div className="rp-tape-list rp-mono" data-testid="replay-tape">
-          {tradeSummary.rows.length === 0 ? (
-            <div className="rp-tape-empty">
-              {tapeMinWon > 0 ? `필터 조건(${formatWonCompact(tapeMinWon)}+)에 맞는 체결이 없습니다` : "이 시점까지 기록된 체결이 없습니다"}
-            </div>
-          ) : (
-            tradeSummary.rows.map((tr) => {
-              const pTone = previousClose !== null && previousClose > 0
-                ? tr.price > previousClose
-                  ? "rp-up"
-                  : tr.price < previousClose
-                    ? "rp-down"
-                    : ""
-                : "";
-              return (
-                <button
-                  key={tr.key}
-                  type="button"
-                  className="rp-tape-row"
-                  data-testid="replay-tape-row"
-                  data-side={tr.side}
-                  data-whale={tr.whale ? "true" : undefined}
-                  onClick={() => onJumpSec(tr.secondOfDay)}
-                >
-                  <span className="rp-t-time">{formatReplayClock(tr.secondOfDay, false)}</span>
-                  <span className={pTone}>{formatPrice(tr.price, false)}</span>
-                  <span className="rp-t-qty">{formatPrice(tr.quantity, false)}</span>
-                  <span className="rp-t-val">{formatWonCompact(tr.value)}</span>
-                </button>
-              );
-            })
-          )}
+          <div ref={emptyRef} className="rp-tape-empty">이 시점까지 기록된 체결이 없습니다</div>
+          {TAPE_SLOTS.map((idx) => (
+            <button
+              key={idx}
+              ref={(el) => {
+                slotRefs.current[idx]!.btn = el;
+              }}
+              type="button"
+              className="rp-tape-row"
+              hidden
+              onClick={() => onJumpMs(jumpTargetsRef.current[idx] ?? 0)}
+            >
+              <span
+                ref={(el) => {
+                  slotRefs.current[idx]!.time = el;
+                }}
+                className="rp-t-time"
+              />
+              <span
+                ref={(el) => {
+                  slotRefs.current[idx]!.price = el;
+                }}
+              />
+              <span
+                ref={(el) => {
+                  slotRefs.current[idx]!.qty = el;
+                }}
+                className="rp-t-qty"
+              />
+              <span
+                ref={(el) => {
+                  slotRefs.current[idx]!.val = el;
+                }}
+                className="rp-t-val"
+              />
+            </button>
+          ))}
         </div>
       </div>
 
@@ -171,7 +266,7 @@ export function ReplayTapeAndBrokers({
           )}
           <span className="br-now rp-mono">
             <span className="br-time">{formatClock(effectiveCursor).slice(0, 5)}</span>
-            <span className="br-price">{frame?.price !== null && frame?.price !== undefined ? formatPrice(frame.price, false) : "-"}</span>
+            <span ref={brokerPriceRef} className="br-price">-</span>
           </span>
         </div>
 

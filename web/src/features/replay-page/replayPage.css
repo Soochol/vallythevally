@@ -543,6 +543,24 @@
   box-shadow: inset 0 0 0 var(--size-1) var(--accent);
 }
 
+.rp-lrow[data-last-hit="buy"] {
+  background: color-mix(in srgb, var(--up) 16%, transparent);
+}
+
+.rp-lrow[data-last-hit="sell"] {
+  background: color-mix(in srgb, var(--down) 16%, transparent);
+}
+
+.rp-qcell[data-flash="add"] {
+  box-shadow: inset 0 0 0 var(--size-1) color-mix(in srgb, var(--up) 55%, transparent);
+  background: color-mix(in srgb, var(--up) 12%, transparent);
+}
+
+.rp-qcell[data-flash="sub"] {
+  box-shadow: inset 0 0 0 var(--size-1) color-mix(in srgb, var(--down) 55%, transparent);
+  background: color-mix(in srgb, var(--down) 12%, transparent);
+}
+
 .rp-ladder-foot {
   display: flex;
   flex-direction: column;
@@ -695,6 +713,10 @@
   background: var(--down);
 }
 
+.rp-tape-row[data-fresh="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .rp-tape-empty {
   padding: var(--size-20);
   text-align: center;
@@ -761,6 +783,58 @@
 .rp-session-pill[data-kind="vi"] { background: var(--warning-soft); color: var(--warning); }
 .rp-session-pill[data-kind="gap"] { background: var(--danger-soft); color: var(--danger); }
 .rp-session-pill[data-kind="open"] { background: var(--accent-soft); color: var(--accent); }
+
+.rp-dt-pill,
+.rp-skip-pill,
+.rp-buf-pill {
+  padding: var(--size-1) var(--size-6);
+  border-radius: var(--r-s);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rp-dt-pill {
+  background: var(--raised);
+  color: var(--text-2);
+}
+
+.rp-skip-pill {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.rp-buf-pill {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.rp-mode-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-6);
+  flex-wrap: wrap;
+}
+
+.rp-seg-label {
+  padding: 0 var(--size-6);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.rp-badge-mini[data-resolution="tick"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.rp-badge-mini[data-resolution="minute_only"] {
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
 
 .rp-transport {
   display: inline-flex;
