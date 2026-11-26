@@ -66,11 +66,12 @@ async fn execute(config: RunConfig) -> ExitCode {
         Ok(socket) => socket,
         Err(error) => return usage_error(format_args!("상태 소켓을 열 수 없습니다: {error}")),
     };
-    let (listing, listing_task) = watch_listings(data_dir.clone(), clock, POLL_INTERVAL);
+    let (listing, listing_task) = watch_listings(data_dir.clone(), clock.clone(), POLL_INTERVAL);
     let _automatic = service.start_automatic(listing.symbols.clone());
     tokio::spawn(socket::serve(socket, Arc::new(Control { service: service.clone(), listing })));
     if let Some(telegram) = telegram {
-        tokio::spawn(alert::run(service.clone(), telegram, alert::POLL_INTERVAL));
+        let alert_state = state_folder.clone();
+        tokio::spawn(async move { alert::run(service.clone(), telegram, &alert_state, clock, alert::POLL_INTERVAL).await });
     }
     tracing::info!(database = %database.display(), data = %data_dir.display(), "재무 수집 프로세스를 시작했습니다");
     let (stop, mut stopped) = watch::channel(false);
