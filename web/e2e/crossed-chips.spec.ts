@@ -111,7 +111,7 @@ test.describe("낮은 10호가 창 동시호가", () => {
       bids: Array.from({ length: 10 }, (_, i) => ({ price: 70_600 - 100 * i, quantity: 20 + i })),
     } });
     scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/trades`, { body: { symbol: CODE, venue: "combined", trades: [], skippedRows: 0 } });
-    await page.setViewportSize({ width: 1440, height: 520 });
+    await page.setViewportSize({ width: 1440, height: 508 });
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
