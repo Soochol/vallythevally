@@ -5,7 +5,6 @@ import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { isForeignBroker } from "./board";
 import { priceAt } from "./history";
 
-export type TransferLevel = "broker" | "group";
 export type TransferMode = "net" | "gross";
 export type BrokerGroupKind = "foreign" | "retail" | "domestic" | "other";
 export type TransferConfidence = "high" | "medium" | "low";
@@ -39,7 +38,6 @@ export interface TransferEdge {
 }
 
 export interface TransferSummary {
-  readonly otherLabel: string;
   readonly edges: readonly TransferEdge[];
   readonly srcTotals: ReadonlyMap<string, number>;
   readonly dstTotals: ReadonlyMap<string, number>;
@@ -99,13 +97,6 @@ export interface TransferSankeyLayout {
 
 export const OTHER_BROKER_LABEL = "기타(6위↓)";
 
-export const GROUP_LABELS: Record<BrokerGroupKind, string> = {
-  foreign: "외국계",
-  retail: "리테일 집중",
-  domestic: "국내 대형 종합",
-  other: OTHER_BROKER_LABEL,
-};
-
 const RETAIL_HINTS: readonly string[] = ["키움", "토스", "카카오페이"];
 const BAR_PERIOD_SECONDS = 60;
 const EVENT_WINDOW_HALF_SECONDS = 180;
@@ -116,10 +107,7 @@ const MAX_EVENTS = 4;
 const MAX_SANKEY_NODES = 7;
 
 export function brokerGroupOf(name: string): BrokerGroupKind {
-  if (name === OTHER_BROKER_LABEL || name === GROUP_LABELS.other) return "other";
-  if (name === GROUP_LABELS.foreign) return "foreign";
-  if (name === GROUP_LABELS.retail) return "retail";
-  if (name === GROUP_LABELS.domestic) return "domestic";
+  if (name === OTHER_BROKER_LABEL) return "other";
   if (isForeignBroker(name)) return "foreign";
   const upper = name.toUpperCase();
   if (RETAIL_HINTS.some((hint) => upper.includes(hint.toUpperCase()))) return "retail";
@@ -235,47 +223,24 @@ export function buildTransferSteps(
   return steps;
 }
 
-function keyForLevel(name: string, level: TransferLevel): string {
-  return level === "broker" ? name : GROUP_LABELS[brokerGroupOf(name)];
-}
-
-function otherLabelForLevel(level: TransferLevel): string {
-  return level === "broker" ? OTHER_BROKER_LABEL : GROUP_LABELS.other;
-}
-
 interface StepFlowBreakdown {
   readonly sMap: Map<string, number>;
   readonly bMap: Map<string, number>;
   readonly vEff: number;
   readonly selfCancel: number;
-  readonly otherLabel: string;
 }
 
-function computeStepFlows(step: TransferStep, level: TransferLevel, mode: TransferMode): StepFlowBreakdown {
-  const otherLabel = otherLabelForLevel(level);
-  const rawS = new Map<string, number>();
-  const rawB = new Map<string, number>();
-  for (const [name, qty] of step.sells) {
-    if (qty <= 0) continue;
-    const key = keyForLevel(name, level);
-    rawS.set(key, (rawS.get(key) ?? 0) + qty);
-  }
-  for (const [name, qty] of step.buys) {
-    if (qty <= 0) continue;
-    const key = keyForLevel(name, level);
-    rawB.set(key, (rawB.get(key) ?? 0) + qty);
-  }
-
+function computeStepFlows(step: TransferStep, mode: TransferMode): StepFlowBreakdown {
   const sMap = new Map<string, number>();
   const bMap = new Map<string, number>();
-  const allKeys = new Set<string>([...rawS.keys(), ...rawB.keys()]);
+  const allKeys = new Set<string>([...step.sells.keys(), ...step.buys.keys()]);
   let topS = 0;
   let topB = 0;
   let selfCancel = 0;
 
   for (const key of allKeys) {
-    const sq = rawS.get(key) ?? 0;
-    const bq = rawB.get(key) ?? 0;
+    const sq = Math.max(0, step.sells.get(key) ?? 0);
+    const bq = Math.max(0, step.buys.get(key) ?? 0);
     if (mode === "net") {
       selfCancel += Math.min(sq, bq);
       const diff = bq - sq;
@@ -300,14 +265,14 @@ function computeStepFlows(step: TransferStep, level: TransferLevel, mode: Transf
 
   const poolVol = mode === "net" ? Math.max(0, step.vol - selfCancel) : Math.max(0, step.vol);
   if (poolVol <= 0 && topS <= 0 && topB <= 0) {
-    return { sMap, bMap, vEff: 0, selfCancel, otherLabel };
+    return { sMap, bMap, vEff: 0, selfCancel };
   }
   const vEff = Math.max(poolVol, topS, topB, 1);
   const sOther = Math.max(0, vEff - topS);
   const bOther = Math.max(0, vEff - topB);
-  if (sOther > 0) sMap.set(otherLabel, (sMap.get(otherLabel) ?? 0) + sOther);
-  if (bOther > 0) bMap.set(otherLabel, (bMap.get(otherLabel) ?? 0) + bOther);
-  return { sMap, bMap, vEff, selfCancel, otherLabel };
+  if (sOther > 0) sMap.set(OTHER_BROKER_LABEL, (sMap.get(OTHER_BROKER_LABEL) ?? 0) + sOther);
+  if (bOther > 0) bMap.set(OTHER_BROKER_LABEL, (bMap.get(OTHER_BROKER_LABEL) ?? 0) + bOther);
+  return { sMap, bMap, vEff, selfCancel };
 }
 
 interface MutableEdge {
@@ -330,10 +295,8 @@ function classifyConfidence(covSellPct: number, covBuyPct: number, identifiedPct
 export function computeTransfer(
   steps: readonly TransferStep[],
   range: TransferRange,
-  level: TransferLevel,
   mode: TransferMode,
 ): TransferSummary {
-  const otherLabel = otherLabelForLevel(level);
   const edgeMap = new Map<string, MutableEdge>();
   const srcTotals = new Map<string, number>();
   const dstTotals = new Map<string, number>();
@@ -354,7 +317,7 @@ export function computeTransfer(
     }
     stepCount += 1;
     if (step.volumeEstimated) volumeEstimated = true;
-    const { sMap, bMap, vEff, selfCancel } = computeStepFlows(step, level, mode);
+    const { sMap, bMap, vEff, selfCancel } = computeStepFlows(step, mode);
     totalVol += step.vol;
     selfCancelVol += selfCancel;
     totalGrossS += step.grossSellTop5;
@@ -376,7 +339,7 @@ export function computeTransfer(
             valueWon: 0,
             peakT: step.t,
             peakQty: 0,
-            isOther: sKey === otherLabel || bKey === otherLabel,
+            isOther: sKey === OTHER_BROKER_LABEL || bKey === OTHER_BROKER_LABEL,
           };
           edgeMap.set(edgeKey, edge);
         }
@@ -407,7 +370,6 @@ export function computeTransfer(
   const confidence = classifyConfidence(covSellPct, covBuyPct, identifiedPct);
 
   return {
-    otherLabel,
     edges,
     srcTotals,
     dstTotals,
@@ -425,11 +387,9 @@ export function computeTransfer(
 
 export function detectTransferEvents(
   steps: readonly TransferStep[],
-  level: TransferLevel,
   mode: TransferMode,
 ): readonly TransferEvent[] {
   if (steps.length === 0) return [];
-  const otherLabel = otherLabelForLevel(level);
   const minT = steps[0]!.t;
   const maxT = steps[steps.length - 1]!.t;
   const span = Math.max(0, maxT - minT);
@@ -438,13 +398,13 @@ export function detectTransferEvents(
   const scored: { readonly t: UnixSeconds; readonly idQty: number; readonly ratio: number; score: number }[] = [];
   for (const step of steps) {
     if (step.gap) continue;
-    const { sMap, bMap, vEff } = computeStepFlows(step, level, mode);
+    const { sMap, bMap, vEff } = computeStepFlows(step, mode);
     if (vEff <= 0) continue;
     let idQty = 0;
     for (const [sKey, sq] of sMap) {
-      if (sKey === otherLabel) continue;
+      if (sKey === OTHER_BROKER_LABEL) continue;
       for (const [bKey, bq] of bMap) {
-        if (bKey === otherLabel) continue;
+        if (bKey === OTHER_BROKER_LABEL) continue;
         idQty += (sq * bq) / vEff;
       }
     }
@@ -468,7 +428,7 @@ export function detectTransferEvents(
     if (!picked.every((existing) => Math.abs(existing.t - cand.t) >= minSeparation)) continue;
     const from = Math.max(minT, cand.t - EVENT_WINDOW_HALF_SECONDS);
     const to = Math.min(maxT, cand.t + EVENT_WINDOW_HALF_SECONDS);
-    const sub = computeTransfer(steps, { from, to }, level, mode);
+    const sub = computeTransfer(steps, { from, to }, mode);
     const bestEdge = sub.edges.find((edge) => !edge.isOther);
     if (bestEdge === undefined) continue;
     picked.push({
@@ -490,16 +450,15 @@ export function detectTransferEvents(
 
 function selectSideKeys(
   totals: ReadonlyMap<string, number>,
-  otherLabel: string,
   showOther: boolean,
 ): readonly string[] {
   const nonOther = [...totals.entries()]
-    .filter(([name, qty]) => qty > 0 && name !== otherLabel)
+    .filter(([name, qty]) => qty > 0 && name !== OTHER_BROKER_LABEL)
     .sort((a, b) => b[1] - a[1]);
-  const hasOther = showOther && (totals.get(otherLabel) ?? 0) > 0;
+  const hasOther = showOther && (totals.get(OTHER_BROKER_LABEL) ?? 0) > 0;
   const maxNamed = hasOther ? MAX_SANKEY_NODES - 1 : MAX_SANKEY_NODES;
   const keys = nonOther.slice(0, maxNamed).map(([name]) => name);
-  if (hasOther) keys.push(otherLabel);
+  if (hasOther) keys.push(OTHER_BROKER_LABEL);
   return keys;
 }
 
@@ -507,7 +466,6 @@ function buildSideNodes(
   side: "src" | "dst",
   keys: readonly string[],
   visSums: ReadonlyMap<string, number>,
-  otherLabel: string,
   x: number,
   nodeW: number,
   height: number,
@@ -541,7 +499,7 @@ function buildSideNodes(
       height: nodeH,
       qty,
       sharePct: (qty / total) * 100,
-      isOther: name === otherLabel,
+      isOther: name === OTHER_BROKER_LABEL,
     };
     y += nodeH + nodeGap;
     return node;
@@ -565,8 +523,8 @@ export function layoutSankey(
   const leftX = labelSpace;
   const rightX = Math.max(leftX + nodeW * 3, width - labelSpace);
 
-  const srcKeys = selectSideKeys(summary.srcTotals, summary.otherLabel, showOther);
-  const dstKeys = selectSideKeys(summary.dstTotals, summary.otherLabel, showOther);
+  const srcKeys = selectSideKeys(summary.srcTotals, showOther);
+  const dstKeys = selectSideKeys(summary.dstTotals, showOther);
   const srcSet = new Set(srcKeys);
   const dstSet = new Set(dstKeys);
 
@@ -582,8 +540,8 @@ export function layoutSankey(
     visDstSum.set(edge.dst, (visDstSum.get(edge.dst) ?? 0) + edge.qty);
   }
 
-  const srcNodes = buildSideNodes("src", srcKeys, visSrcSum, summary.otherLabel, leftX, nodeW, height, padTop, padBottom, nodeGap);
-  const dstNodes = buildSideNodes("dst", dstKeys, visDstSum, summary.otherLabel, rightX - nodeW, nodeW, height, padTop, padBottom, nodeGap);
+  const srcNodes = buildSideNodes("src", srcKeys, visSrcSum, leftX, nodeW, height, padTop, padBottom, nodeGap);
+  const dstNodes = buildSideNodes("dst", dstKeys, visDstSum, rightX - nodeW, nodeW, height, padTop, padBottom, nodeGap);
 
   const srcNodeMap = new Map(srcNodes.map((node, index) => [node.name, { node, index }]));
   const dstNodeMap = new Map(dstNodes.map((node, index) => [node.name, { node, index }]));

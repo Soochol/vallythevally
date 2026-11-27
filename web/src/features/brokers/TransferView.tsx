@@ -10,9 +10,7 @@ import type { BoardAxis } from "./board";
 import { axisGapRanges } from "./history";
 import type { TransferRangePreset } from "./prefs";
 import {
-  GROUP_LABELS,
   OTHER_BROKER_LABEL,
-  brokerGroupOf,
   buildTransferSteps,
   computeTransfer,
   detectTransferEvents,
@@ -21,7 +19,6 @@ import {
   type SankeyLinkLayout,
   type TransferConfidence,
   type TransferEvent,
-  type TransferLevel,
   type TransferMode,
   type TransferRange,
 } from "./transfer";
@@ -70,11 +67,6 @@ interface StageSize {
   readonly height: number;
 }
 
-const LEVEL_OPTIONS: readonly SegmentOption<TransferLevel>[] = [
-  { value: "broker", label: "개별 창구" },
-  { value: "group", label: "주체 그룹" },
-];
-
 const MODE_OPTIONS: readonly SegmentOption<TransferMode>[] = [
   { value: "net", label: "순이동" },
   { value: "gross", label: "총량" },
@@ -118,14 +110,14 @@ function truncateLabel(text: string, maxChars: number): string {
   return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
-function groupColorToken(group: BrokerGroupKind, side: "src" | "dst", level: TransferLevel): string {
+function brokerColorToken(group: BrokerGroupKind, side: "src" | "dst"): string {
   switch (group) {
     case "foreign":
       return "var(--ind-2)";
     case "retail":
       return "var(--series-1)";
     case "domestic":
-      return level === "group" ? "var(--ind-1)" : side === "src" ? "var(--down)" : "var(--up)";
+      return side === "src" ? "var(--down)" : "var(--up)";
     case "other":
       return "var(--text-3)";
   }
@@ -139,7 +131,6 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const brokerPrefs = useBrokerPrefs();
   const setBrokerPrefs = useUiStore((s) => s.setBrokerPrefs);
-  const level = brokerPrefs.transferLevel;
   const mode = brokerPrefs.transferMode;
   const showOther = brokerPrefs.transferShowOther;
   const rangePreset = brokerPrefs.transferRangePreset;
@@ -172,7 +163,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
   }, [snapshots.length]);
 
   const steps = useMemo(() => buildTransferSteps(snapshots, gapBefore, bars), [snapshots, gapBefore, bars]);
-  const events = useMemo(() => detectTransferEvents(steps, level, mode), [steps, level, mode]);
+  const events = useMemo(() => detectTransferEvents(steps, mode), [steps, mode]);
 
   const minT = steps.length > 0 ? steps[0]!.t : axis.from;
   const maxT = steps.length > 0 ? steps[steps.length - 1]!.t : axis.to;
@@ -217,8 +208,8 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
         : null;
 
   const summary = useMemo(
-    () => computeTransfer(steps, activeRange, level, mode),
-    [steps, activeRange, level, mode],
+    () => computeTransfer(steps, activeRange, mode),
+    [steps, activeRange, mode],
   );
 
   const sankey = useMemo(
@@ -305,12 +296,11 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
           peer,
           qty: edge.qty,
           sharePct: (edge.qty / total) * 100,
-          group: brokerGroupOf(peer),
-          isOther: peer === summary.otherLabel,
+          isOther: peer === OTHER_BROKER_LABEL,
         };
       }),
     };
-  }, [focusNode, summary.edges, summary.otherLabel, showOther]);
+  }, [focusNode, summary.edges, showOther]);
 
   if (snapshots.length < 2) {
     return (
@@ -319,12 +309,6 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
       </div>
     );
   }
-
-  const handleLevelChange = (next: TransferLevel) => {
-    setBrokerPrefs({ transferLevel: next });
-    setFocusNode(null);
-    setHoveredLink(null);
-  };
 
   const handleModeChange = (next: TransferMode) => {
     setBrokerPrefs({ transferMode: next });
@@ -457,7 +441,6 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
     <div className="br-tr" data-testid="broker-transfer-view">
       <div className="br-tr-bar">
         <div className="br-tr-controls">
-          <Segmented label="집계 단위" options={LEVEL_OPTIONS} value={level} onChange={handleLevelChange} />
           <Segmented label="계산 모드" options={MODE_OPTIONS} value={mode} onChange={handleModeChange} />
           <button
             type="button"
@@ -539,8 +522,8 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
               </pattern>
               {sankey.links.map((link, index) => (
                 <linearGradient key={link.id} id={`br-tr-grad-${uid}-${index}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor={groupColorToken(link.srcGroup, "src", level)} />
-                  <stop offset="100%" stopColor={groupColorToken(link.dstGroup, "dst", level)} />
+                  <stop offset="0%" stopColor={brokerColorToken(link.srcGroup, "src")} />
+                  <stop offset="100%" stopColor={brokerColorToken(link.dstGroup, "dst")} />
                 </linearGradient>
               ))}
             </defs>
@@ -602,7 +585,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
               const midY = node.y + node.height / 2;
               const labelX = node.side === "src" ? node.x - 8 : node.x + node.width + 8;
               const textAnchor = node.side === "src" ? "end" : "start";
-              const fill = node.isOther ? `url(#${hatchId})` : groupColorToken(node.group, node.side, level);
+              const fill = node.isOther ? `url(#${hatchId})` : brokerColorToken(node.group, node.side);
               const shortName = truncateLabel(node.name, maxLabelChars);
               const showTwoLines = node.height >= 26;
 
@@ -929,9 +912,9 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
                     onClick={() => toggleFocus("src", edge.src)}
                   >
                     <span className="br-tr-pair-route">
-                      <span data-tone={edge.src === summary.otherLabel ? "other" : "down"}>{edge.src}</span>
+                      <span data-tone={edge.src === OTHER_BROKER_LABEL ? "other" : "down"}>{edge.src}</span>
                       <span className="br-tr-pair-arrow">→</span>
-                      <span data-tone={edge.dst === summary.otherLabel ? "other" : "up"}>{edge.dst}</span>
+                      <span data-tone={edge.dst === OTHER_BROKER_LABEL ? "other" : "up"}>{edge.dst}</span>
                     </span>
                     <span className="br-tr-pair-qty">{`${formatCompactQty(edge.qty)}주`}</span>
                     <span className="br-tr-pair-pct">{`${sharePct.toFixed(1)}%`}</span>
@@ -942,10 +925,10 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
             <div className="br-tr-drawer-foot">
               <span>{honestyNote}</span>
               <span className="br-tr-legend">
-                <span><i className="br-tr-dot" data-group="foreign" />{GROUP_LABELS.foreign}</span>
-                <span><i className="br-tr-dot" data-group="retail" />{GROUP_LABELS.retail}</span>
-                <span><i className="br-tr-dot" data-group="domestic" />{GROUP_LABELS.domestic}</span>
-                <span><i className="br-tr-dot" data-group="other" />{GROUP_LABELS.other}</span>
+                <span><i className="br-tr-dot" data-group="foreign" />외국계</span>
+                <span><i className="br-tr-dot" data-group="retail" />리테일 집중</span>
+                <span><i className="br-tr-dot" data-group="domestic" />국내 대형 종합</span>
+                <span><i className="br-tr-dot" data-group="other" />{OTHER_BROKER_LABEL}</span>
               </span>
             </div>
           </div>

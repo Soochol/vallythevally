@@ -1,4 +1,4 @@
-import type { TransferLevel, TransferMode } from "./transfer";
+import type { TransferMode } from "./transfer";
 
 export const BROKER_VIEWS = ["board", "list", "table", "transfer"] as const;
 export type BrokerView = (typeof BROKER_VIEWS)[number];
@@ -10,7 +10,6 @@ export const TRANSFER_RANGE_PRESETS = ["all", "last30", "last10", "peak"] as con
 export type TransferRangePreset = (typeof TRANSFER_RANGE_PRESETS)[number];
 
 export interface BrokerPrefs {
-  readonly transferLevel: TransferLevel;
   readonly transferMode: TransferMode;
   readonly transferShowOther: boolean;
   readonly transferRangePreset: TransferRangePreset;
@@ -21,7 +20,6 @@ export interface BrokerPrefs {
 }
 
 export const DEFAULT_BROKER_PREFS: BrokerPrefs = {
-  transferLevel: "broker",
   transferMode: "net",
   transferShowOther: true,
   transferRangePreset: "all",
@@ -40,9 +38,6 @@ export const isBrokerView = (value: unknown): value is BrokerView =>
 export const isBrokerCards = (value: unknown): value is BrokerCards =>
   value === "bars" || value === "both" || value === "numbers";
 
-const isTransferLevel = (value: unknown): value is TransferLevel =>
-  value === "broker" || value === "group";
-
 const isTransferMode = (value: unknown): value is TransferMode =>
   value === "net" || value === "gross";
 
@@ -53,7 +48,6 @@ export function parseBrokerPrefs(raw: unknown): BrokerPrefs {
   if (!isRecord(raw)) return DEFAULT_BROKER_PREFS;
   const flag = (value: unknown, fallback: boolean): boolean => (typeof value === "boolean" ? value : fallback);
   return {
-    transferLevel: isTransferLevel(raw.transferLevel) ? raw.transferLevel : DEFAULT_BROKER_PREFS.transferLevel,
     transferMode: isTransferMode(raw.transferMode) ? raw.transferMode : DEFAULT_BROKER_PREFS.transferMode,
     transferShowOther: flag(raw.transferShowOther, DEFAULT_BROKER_PREFS.transferShowOther),
     transferRangePreset: isTransferRangePreset(raw.transferRangePreset) ? raw.transferRangePreset : DEFAULT_BROKER_PREFS.transferRangePreset,
@@ -66,7 +60,6 @@ export function parseBrokerPrefs(raw: unknown): BrokerPrefs {
 
 export function mergeBrokerPrefs(current: BrokerPrefs, patch: Partial<BrokerPrefs>): BrokerPrefs {
   const next: BrokerPrefs = {
-    transferLevel: patch.transferLevel ?? current.transferLevel,
     transferMode: patch.transferMode ?? current.transferMode,
     transferShowOther: patch.transferShowOther ?? current.transferShowOther,
     transferRangePreset: patch.transferRangePreset ?? current.transferRangePreset,
@@ -76,7 +69,6 @@ export function mergeBrokerPrefs(current: BrokerPrefs, patch: Partial<BrokerPref
     replayCards: patch.replayCards ?? current.replayCards,
   };
   if (
-    next.transferLevel === current.transferLevel &&
     next.transferMode === current.transferMode &&
     next.transferShowOther === current.transferShowOther &&
     next.transferRangePreset === current.transferRangePreset &&

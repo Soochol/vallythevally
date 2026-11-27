@@ -261,15 +261,11 @@ test("이동 보기는 추정 물량 이동과 이벤트를 보이고 새로고�
   await toggleOther.click();
   await expect(toggleOther).toHaveAttribute("aria-pressed", "true");
 
-  const levelGroup = win.getByRole("group", { name: "집계 단위" });
+  await expect(win.getByRole("group", { name: "집계 단위" })).toHaveCount(0);
   const modeGroup = win.getByRole("group", { name: "계산 모드" });
-  await levelGroup.getByRole("button", { name: "주체 그룹", exact: true }).click();
-  await expect(levelGroup.getByRole("button", { name: "주체 그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
   await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
   await expect(modeGroup.getByRole("button", { name: "총량", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
-  await levelGroup.getByRole("button", { name: "개별 창구", exact: true }).click();
   await modeGroup.getByRole("button", { name: "순이동", exact: true }).click();
 
   const firstNode = win.getByTestId("broker-transfer-node").first();
@@ -332,13 +328,12 @@ test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새
   await viewGroup.getByRole("button", { name: "이동", exact: true }).click();
   await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
 
-  const levelGroup = win.getByRole("group", { name: "집계 단위" });
+  await expect(win.getByRole("group", { name: "집계 단위" })).toHaveCount(0);
   const modeGroup = win.getByRole("group", { name: "계산 모드" });
   const toggleOther = win.getByTestId("broker-transfer-toggle-other");
   const detailsToggle = win.getByTestId("broker-transfer-details-toggle");
   const syncButton = win.getByTestId("brokers-chart-sync");
 
-  await levelGroup.getByRole("button", { name: "주체 그룹", exact: true }).click();
   await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
   await toggleOther.click();
   await win.getByTestId("broker-transfer-preset-last10").click();
@@ -346,7 +341,7 @@ test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새
   await syncButton.click();
 
   const assertOptions = async (presetTestId: string) => {
-    await expect(levelGroup.getByRole("button", { name: "주체 그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(win.getByRole("group", { name: "집계 단위" })).toHaveCount(0);
     await expect(modeGroup.getByRole("button", { name: "총량", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(toggleOther).toHaveAttribute("aria-pressed", "false");
     await expect(win.getByTestId(presetTestId)).toHaveAttribute("aria-pressed", "true");
@@ -377,13 +372,13 @@ test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새
   await assertOptions("broker-transfer-preset-peak");
 
   await pollSaved(() => scenario.documents.uiPrefs().brokers).toMatchObject({
-    transferLevel: "group",
     transferMode: "gross",
     transferShowOther: false,
     transferRangePreset: "peak",
     transferDetailsOpen: true,
     chartSync: true,
   });
+  expect(scenario.documents.uiPrefs().brokers).not.toHaveProperty("transferLevel");
 
   await page.reload();
   await expect(win).toHaveAttribute("data-symbol", "000660");

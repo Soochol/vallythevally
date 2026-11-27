@@ -542,12 +542,11 @@ test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵
   const brokers = page.getByTestId("replay-brokers");
   await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
 
-  const levelGroup = brokers.getByRole("group", { name: "집계 단위" });
+  await expect(brokers.getByRole("group", { name: "집계 단위" })).toHaveCount(0);
   const modeGroup = brokers.getByRole("group", { name: "계산 모드" });
   const toggleOther = brokers.getByTestId("broker-transfer-toggle-other");
   const preset30 = brokers.getByTestId("broker-transfer-preset-last30");
 
-  await levelGroup.getByRole("button", { name: "주체 그룹", exact: true }).click();
   await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
   await toggleOther.click();
   await preset30.click();
@@ -563,7 +562,7 @@ test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵
   await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
 
   const assertTransferOptions = async () => {
-    await expect(levelGroup.getByRole("button", { name: "주체 그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(brokers.getByRole("group", { name: "집계 단위" })).toHaveCount(0);
     await expect(modeGroup.getByRole("button", { name: "총량", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(toggleOther).toHaveAttribute("aria-pressed", "false");
     await expect(preset30).toHaveAttribute("aria-pressed", "true");
@@ -583,13 +582,13 @@ test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵
   await assertTransferOptions();
 
   await pollSaved(() => scenario.documents.uiPrefs().brokers).toMatchObject({
-    transferLevel: "group",
     transferMode: "gross",
     transferShowOther: false,
     transferRangePreset: "last30",
     replayView: "transfer",
     replayCards: "both",
   });
+  expect(scenario.documents.uiPrefs().brokers).not.toHaveProperty("transferLevel");
 
   await page.reload();
   await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
