@@ -62,7 +62,8 @@ test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 �
     await expect(selected).toHaveCSS("border-bottom-width", "2px");
     await expect(selected).toHaveCSS("border-bottom-color", "rgb(243, 241, 236)");
   }
-  await expect(settingsPopover(page).getByRole("region", { name: "지표 창", exact: true })).toBeInViewport();
+  await settingsPopover(page).getByRole("tab", { name: "창 · 동작", exact: true }).click();
+  await expect(settingsPopover(page).getByRole("region", { name: "창 · 동작", exact: true })).toBeInViewport();
 });
 
 test("800px에서 연 차트 설정 창도 화면 가운데에서 열리고 너비가 바뀌어도 가운데를 유지한다", async ({ page }) => {
@@ -101,6 +102,7 @@ test("1440px에서 저장된 선택이 없으면 지표 버튼이 차트 옆 지
   await expect(commandDialog(page)).toHaveCount(0);
 
   await settingsButton(page).click();
+  await settingsPopover(page).getByRole("tab", { name: "창 · 동작", exact: true }).click();
   const windows = settingsPopover(page).getByRole("group", { name: "지표 창", exact: true });
   await expect(windows.getByRole("button", { name: "차트 옆", exact: true })).toHaveAttribute("aria-pressed", "true");
   await windows.getByRole("button", { name: "가운데 창", exact: true }).click();

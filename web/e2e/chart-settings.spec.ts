@@ -48,8 +48,11 @@ test("위 막대의 차트 설정 버튼은 화면 가운데에 통합 차트 �
   await expect(popover(page)).toBeVisible();
   await expect(settingsButton(page)).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창" })).toHaveCount(0);
-  await expect(popover(page).getByRole("tablist")).toHaveCount(0);
-  for (const name of ["봉·축", "표시", "지표 창"]) await expect(section(page, name)).toBeVisible();
+  await expect(popover(page).getByRole("tablist", { name: "차트 설정 메뉴" })).toBeVisible();
+  for (const name of ["봉 · 축", "범례 · 표시", "격자 · 구분선", "창 · 동작"]) {
+    await expect(popover(page).getByRole("tab", { name, exact: true })).toBeVisible();
+  }
+  await expect(section(page, "봉 · 축")).toBeVisible();
   await expect(popover(page).getByRole("group", { name: "차트 설정 영역", exact: true }).getByRole("button", { name: "차트 설정", exact: true })).toHaveAttribute("aria-pressed", "true");
   const box = (await popover(page).boundingBox())!;
   expect(box.width).toBeLessThanOrEqual(760);
@@ -87,41 +90,51 @@ test("차트 설정 창은 닫기 버튼·바깥 클릭으로 닫으면 바꾼 �
   await pollSaved(() => saved(scenario).style).toBe("bar");
 });
 
-test("구역 셋이 두 열로 배치되고 구역 제목 오른쪽에 적용 범위가 붙으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
+test("좌측 사이드바 메뉴와 우측 내용이 2단으로 배치되고 각 구역에 적용 범위가 붙으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
   await open(page);
   await openSettings(page);
-  const names = ["봉·축", "표시", "지표 창"];
-  const boxes = new Map<string, { x: number; y: number }>();
-  for (const name of names) {
-    const box = (await section(page, name).boundingBox())!;
-    boxes.set(name, { x: box.x, y: box.y });
+  const navBox = (await popover(page).getByRole("tablist", { name: "차트 설정 메뉴" }).boundingBox())!;
+  const paneBox = (await section(page, "봉 · 축").boundingBox())!;
+  expect(navBox.x).toBeLessThan(paneBox.x);
+  const cases = [
+    ["봉 · 축", "이 칸"],
+    ["범례 · 표시", "이 칸"],
+    ["격자 · 구분선", "이 칸"],
+    ["창 · 동작", "모든 차트"],
+  ] as const;
+  for (const [name, scope] of cases) {
+    await chooseSettingsMenu(page, name);
+    await expect(section(page, name).getByText(scope, { exact: true })).toBeVisible();
   }
-  expect(Math.abs(boxes.get("봉·축")!.y - boxes.get("표시")!.y)).toBeLessThanOrEqual(2);
-  expect(boxes.get("봉·축")!.x).toBeLessThan(boxes.get("표시")!.x);
-  expect(boxes.get("지표 창")!.y).toBeGreaterThan(boxes.get("봉·축")!.y);
-  const scopes = ["이 칸", "이 칸", "모든 차트"];
-  for (const [i, name] of names.entries()) await expect(section(page, name).getByText(scopes[i]!, { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(popover(page)).toBeHidden();
   await reload(page);
   await settingsButton(page).click();
-  for (const name of names) await expect(section(page, name)).toBeVisible();
+  await expect(section(page, "봉 · 축")).toBeVisible();
 });
 
 test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async ({ page }) => {
   await open(page);
-  const dialog = await openSettings(page);
-  const bars = section(page, "봉·축");
+  const dialog = await openSettings(page, "봉 · 축");
+  const bars = section(page, "봉 · 축");
   for (const name of ["봉 모양", "가격 축", "화면에 보이는 봉"]) await expect(bars.getByRole("group", { name })).toBeVisible();
   await expect(bars.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
   await expect(bars.getByRole("switch")).toHaveCount(0);
-  const display = section(page, "표시");
-  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "가로 격자선", "세로 격자선", "날짜 구분선"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+
+  await chooseSettingsMenu(page, "범례 · 표시");
+  const display = section(page, "범례 · 표시");
+  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
   await expect(display.getByRole("group", { name: "최고·최저 등락률" })).toBeVisible();
   await expect(display.getByRole("group", { name: "봉 모양" })).toHaveCount(0);
-  await expect(section(page, "지표 창").getByRole("group", { name: "지표 창" })).toBeVisible();
+
+  await chooseSettingsMenu(page, "격자 · 구분선");
+  const grid = section(page, "격자 · 구분선");
+  for (const name of ["가로 격자선", "세로 격자선", "날짜 구분선"]) await expect(grid.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+
+  await chooseSettingsMenu(page, "창 · 동작");
+  await expect(section(page, "창 · 동작").getByRole("group", { name: "지표 창" })).toBeVisible();
   await expect(dialog.getByText("모든 차트", { exact: true })).toHaveCount(1);
-  await expect(section(page, "지표 창").getByRole("group", { name: "가격 축" })).toHaveCount(0);
+  await expect(section(page, "창 · 동작").getByRole("group", { name: "가격 축" })).toHaveCount(0);
 });
 
 test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자선을 켜고 끄며 저장·복원 및 Esc 되돌리기가 동작한다", async ({ page, scenario }) => {
@@ -132,7 +145,7 @@ test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자
   });
   await expect.poll(gridVisible).toEqual({ horz: true, vert: true });
 
-  const settings = await openSettings(page);
+  const settings = await openSettings(page, "격자 · 구분선");
   const horzSwitch = settings.getByRole("switch", { name: /^가로 격자선/ });
   const vertSwitch = settings.getByRole("switch", { name: /^세로 격자선/ });
   await expect(horzSwitch).toHaveAttribute("aria-checked", "true");
@@ -150,7 +163,7 @@ test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(gridVisible).toEqual({ horz: false, vert: true });
 
-  await openSettings(page);
+  await openSettings(page, "격자 · 구분선");
   await vertSwitch.click();
   await expect.poll(gridVisible).toEqual({ horz: false, vert: false });
   await page.keyboard.press("Escape");

@@ -39,7 +39,7 @@ async function open(page: Page) {
 }
 
 async function setSwitch(page: Page, on: boolean) {
-  await openChartSettings(page, "표시");
+  await openChartSettings(page, "격자 · 구분선");
   if (await daySwitch(page).getAttribute("aria-checked") !== String(on)) await daySwitch(page).click();
   await expect(daySwitch(page)).toHaveAttribute("aria-checked", String(on));
   await afterPaint(page);
