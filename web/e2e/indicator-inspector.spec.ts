@@ -36,21 +36,25 @@ test("차트 옆을 고르면 지표 버튼이 지표 창을 보여 지표를 �
   await expect(dialog(page)).toHaveCount(0);
   await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(search(page)).toBeFocused();
-  await expect(inspector(page).getByRole("tab", { name: /^이 칸에 띄운 지표/ })).toHaveAttribute("aria-selected", "true");
+  await expect(inspector(page).getByRole("tab")).toHaveCount(0);
+  await expect(inspector(page).getByRole("group", { name: "지표 창 영역", exact: true }).getByRole("button", { name: "지표", exact: true })).toHaveAttribute("aria-pressed", "true");
+  for (const group of ["가격 패널", "아래 패널", "호가지표", "재무지표"]) {
+    await expect(inspector(page).getByText(group, { exact: true })).toBeVisible();
+  }
   await expect(inspector(page).getByRole("button", { name: "거래량 설정", exact: true })).toHaveAttribute("aria-expanded", "false");
   await pollSaved(() => windowKinds(scenario)).toContain("indicators");
 
   await search(page).fill("이평 9");
-  await expect(inspector(page).getByRole("tab", { name: "지표 추가", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(inspector(page).getByRole("button", { name: "이동평균 단순 9 추가 후보", exact: true })).toHaveAttribute("aria-expanded", "true");
   await expect(inspector(page).getByRole("img", { name: "선 미리보기" })).toHaveCount(0);
   await inspector(page).getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
   await pollSaved(async () => indicators(scenario).map((i) => i.spec)).toContainEqual({ kind: "ma", method: "sma", period: 9 });
+  await expect(inspector(page).getByRole("button", { name: "이동평균 단순 9 설정", exact: true })).toHaveAttribute("aria-expanded", "true");
   await search(page).fill("rsi");
   await search(page).press("Enter");
   await pollSaved(async () => indicators(scenario).map((i) => i.spec.kind)).toEqual(["volume", "ma", "rsi"]);
 
-  await inspector(page).getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
+  await search(page).fill("");
   const ma = inspector(page).getByRole("button", { name: "이동평균 단순 9 설정", exact: true });
   await ma.click();
   await expect(ma).toHaveAttribute("aria-expanded", "true");
@@ -89,7 +93,7 @@ test("차트 옆을 고르면 지표 버튼이 지표 창을 보여 지표를 �
   await expect(rail(page).getByRole("tab", { name: "지표", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(inspector(page).getByRole("button", { name: "이동평균 단순 9 설정", exact: true })).toBeVisible();
   await topbar(page).getByRole("button", { name: "비교", exact: true }).click();
-  await expect(inspector(page).getByRole("tab", { name: "비교 종목", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(inspector(page).getByRole("group", { name: "지표 창 영역", exact: true }).getByRole("button", { name: "비교", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(inspector(page).getByText("비교 종목 0/3")).toBeVisible();
   await search(page).fill("삼성SDI");
   const sdi = inspector(page).getByRole("button", { name: /^삼성SDI/ }).first();
@@ -139,7 +143,7 @@ test("인스펙터의 추가 후보 미리보기는 접거나 Esc를 누르거�
   await expect.poll(previews).toBe(0);
   await search(page).fill("이평 8");
   await expect.poll(previews).toBe(1);
-  await inspector(page).getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
+  await inspector(page).getByRole("group", { name: "지표 창 영역", exact: true }).getByRole("button", { name: "비교", exact: true }).click();
   await expect.poll(previews).toBe(0);
   expect(indicators(scenario)).toEqual(before);
 });
@@ -161,7 +165,7 @@ test("인스펙터는 설정칸의 Enter로 추가하고, 펼친 지표를 범�
   await search(page).press("Enter");
   await pollSaved(async () => indicators(scenario).filter((i) => i.spec.kind === "ma").length).toBe(2);
 
-  await inspector(page).getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
+  await search(page).fill("");
   const first = inspector(page).getByRole("button", { name: "이동평균 단순 11 설정", exact: true });
   await first.click();
   await expect(first).toHaveAttribute("aria-expanded", "true");
@@ -170,8 +174,10 @@ test("인스펙터는 설정칸의 Enter로 추가하고, 펼친 지표를 범�
   await legendRow.hover();
   await legendRow.getByRole("button", { name: /지우기$/ }).click();
   await pollSaved(async () => indicators(scenario).map((i) => i.id)).not.toContain(id);
-  await expect(inspector(page).getByRole("button", { name: "이동평균 단순 13 설정", exact: true })).toBeVisible();
-  await expect(inspector(page).locator('[aria-expanded="true"]')).toHaveCount(0);
+  const remaining = inspector(page).getByRole("button", { name: "이동평균 단순 13 설정", exact: true });
+  await expect(remaining).toBeVisible();
+  await expect(remaining).toHaveAttribute("aria-expanded", "false");
+  await expect(inspector(page).getByRole("group", { name: /설정$/ })).toHaveCount(0);
 });
 
 test("차트 옆 지표 창에서도 호가·재무 지표의 봉 주기 안내를 보인다", async ({ page, scenario }) => {
@@ -179,7 +185,6 @@ test("차트 옆 지표 창에서도 호가·재무 지표의 봉 주기 안내�
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-  await inspector(page).getByRole("tab", { name: "지표 추가", exact: true }).click();
   await inspector(page).getByRole("button", { name: "총잔량 추가 후보", exact: true }).click();
   await expect(inspector(page)).toContainText("주식·ETF 분봉의 호가 자료입니다");
 });
