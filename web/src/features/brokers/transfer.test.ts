@@ -3,14 +3,12 @@ import type { Bar } from "../../api/generated/Bar";
 import type { FeedBroker } from "../../api/generated/FeedBroker";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
 import {
-  GROUP_LABELS,
   OTHER_BROKER_LABEL,
   brokerGroupOf,
   buildTransferSteps,
   computeTransfer,
   detectTransferEvents,
   layoutSankey,
-  type TransferLevel,
   type TransferMode,
   type TransferSummary,
 } from "./transfer";
@@ -50,7 +48,7 @@ function sumEdges(summary: TransferSummary): number {
 }
 
 describe("거래원 물량 이동 추정 엔진", () => {
-  it("모든 단위(broker/group)와 모드(net/gross)에서 질량 보존을 정확히 지킨다", () => {
+  it("모든 모드(net/gross)에서 개별 창구 기준 질량 보존을 정확히 지킨다", () => {
     const t0 = kst("09:00");
     const t1 = kst("09:01");
     const t2 = kst("09:02");
@@ -80,18 +78,15 @@ describe("거래원 물량 이동 추정 엔진", () => {
     const steps = buildTransferSteps(snapshots, [false, false, false], bars);
     expect(steps).toHaveLength(2);
 
-    const levels: readonly TransferLevel[] = ["broker", "group"];
     const modes: readonly TransferMode[] = ["net", "gross"];
-    for (const level of levels) {
-      for (const mode of modes) {
-        const summary = computeTransfer(steps, { from: t1, to: t2 }, level, mode);
-        const srcSum = sumMap(summary.srcTotals);
-        const dstSum = sumMap(summary.dstTotals);
-        const edgeSum = sumEdges(summary);
-        expect(srcSum).toBeGreaterThan(0);
-        expect(Math.abs(srcSum - dstSum)).toBeLessThan(1e-6);
-        expect(Math.abs(srcSum - edgeSum)).toBeLessThan(1e-6);
-      }
+    for (const mode of modes) {
+      const summary = computeTransfer(steps, { from: t1, to: t2 }, mode);
+      const srcSum = sumMap(summary.srcTotals);
+      const dstSum = sumMap(summary.dstTotals);
+      const edgeSum = sumEdges(summary);
+      expect(srcSum).toBeGreaterThan(0);
+      expect(Math.abs(srcSum - dstSum)).toBeLessThan(1e-6);
+      expect(Math.abs(srcSum - edgeSum)).toBeLessThan(1e-6);
     }
   });
 
@@ -114,7 +109,7 @@ describe("거래원 물량 이동 추정 엔진", () => {
     ];
 
     const steps = buildTransferSteps(snapshots, [false, false, false, false], bars);
-    const summary = computeTransfer(steps, { from: t0, to: t3 }, "broker", "net");
+    const summary = computeTransfer(steps, { from: t0, to: t3 }, "net");
 
     const crossEdge = summary.edges.find((edge) => edge.src === "키움증권" && edge.dst === "JP모간서울");
     const morningEdge = summary.edges.find((edge) => edge.src === "키움증권" && edge.dst === "KB증권");
@@ -166,7 +161,7 @@ describe("거래원 물량 이동 추정 엔진", () => {
     const steps = buildTransferSteps(snapshots, [false, false, true, false], bars);
     expect(steps.filter((step) => step.gap)).toHaveLength(1);
 
-    const summary = computeTransfer(steps, { from: t0, to: t3 }, "broker", "net");
+    const summary = computeTransfer(steps, { from: t0, to: t3 }, "net");
     expect(summary.skippedGaps).toBe(1);
     expect(summary.stepCount).toBe(2);
     expect(summary.totalVol).toBe(400);
@@ -184,8 +179,8 @@ describe("거래원 물량 이동 추정 엔진", () => {
     const bars: Bar[] = [bar(t0, 60000, 1000), bar(t1, 60000, 600)];
 
     const steps = buildTransferSteps(snapshots, [false, false], bars);
-    const netSummary = computeTransfer(steps, { from: t0, to: t1 }, "broker", "net");
-    const grossSummary = computeTransfer(steps, { from: t0, to: t1 }, "broker", "gross");
+    const netSummary = computeTransfer(steps, { from: t0, to: t1 }, "net");
+    const grossSummary = computeTransfer(steps, { from: t0, to: t1 }, "gross");
 
     expect(netSummary.selfCancelVol).toBe(400);
     expect(netSummary.srcTotals.get("키움증권")).toBeCloseTo(200, 6);
@@ -221,7 +216,7 @@ describe("거래원 물량 이동 추정 엔진", () => {
     }
 
     const steps = buildTransferSteps(snapshots, snapshots.map(() => false), bars);
-    const events = detectTransferEvents(steps, "broker", "net");
+    const events = detectTransferEvents(steps, "net");
 
     expect(events).toHaveLength(1);
     const spike = events[0]!;
@@ -244,7 +239,7 @@ describe("거래원 물량 이동 추정 엔진", () => {
       ];
       const bars = [bar(t0, 50000, totalBarVol), bar(t1, 50000, totalBarVol)];
       const steps = buildTransferSteps(snapshots, [false, false], bars);
-      return computeTransfer(steps, { from: t0, to: t1 }, "broker", "net");
+      return computeTransfer(steps, { from: t0, to: t1 }, "net");
     };
 
     const high = makeScenario(700, 1000);
@@ -280,20 +275,19 @@ describe("거래원 물량 이동 추정 엔진", () => {
     expect(noBarSteps[0]!.volumeEstimated).toBe(true);
     expect(noBarSteps[0]!.vol).toBe(300);
 
-    const summary = computeTransfer(noBarSteps, { from: t0, to: t1 }, "broker", "net");
+    const summary = computeTransfer(noBarSteps, { from: t0, to: t1 }, "net");
     expect(summary.volumeEstimated).toBe(true);
     expect(Number.isNaN(summary.identifiedPct)).toBe(false);
     expect(Number.isNaN(summary.covSellPct)).toBe(false);
   });
 
-  it("창구 그룹 분류와 Sankey 레이아웃에서 기타(6위↓)가 맨 아래에 고정된다", () => {
+  it("창구 색상 분류와 Sankey 레이아웃에서 기타(6위↓)가 맨 아래에 고정된다", () => {
     expect(brokerGroupOf("JP모간서울")).toBe("foreign");
     expect(brokerGroupOf("키움증권")).toBe("retail");
     expect(brokerGroupOf("토스증권")).toBe("retail");
     expect(brokerGroupOf("카카오페이증권")).toBe("retail");
     expect(brokerGroupOf("미래에셋")).toBe("domestic");
     expect(brokerGroupOf(OTHER_BROKER_LABEL)).toBe("other");
-    expect(brokerGroupOf(GROUP_LABELS.foreign)).toBe("foreign");
 
     const t0 = kst("09:00");
     const t1 = kst("09:01");
@@ -305,7 +299,7 @@ describe("거래원 물량 이동 추정 엔진", () => {
       [false, false],
       [bar(t0, 50000, 1000), bar(t1, 50000, 1000)],
     );
-    const summary = computeTransfer(steps, { from: t0, to: t1 }, "broker", "net");
+    const summary = computeTransfer(steps, { from: t0, to: t1 }, "net");
 
     const withOther = layoutSankey(summary, true, 820, 340);
     expect(withOther.srcNodes[withOther.srcNodes.length - 1]!.name).toBe(OTHER_BROKER_LABEL);

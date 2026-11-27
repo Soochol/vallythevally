@@ -44,16 +44,21 @@ beforeEach(() => {
 
 resetDomAfterEach();
 
-test("TransferView는 언마운트 뒤 다시 마운트해도 마지막 하위 옵션을 유지한다", () => {
+test("TransferView는 집계 단위 전환 없이 개별 창구 기준으로 동작하고 언마운트 뒤 다시 마운트해도 마지막 하위 옵션을 유지한다", () => {
   const first = render(<TransferView snapshots={SNAPSHOTS} gapBefore={GAP_BEFORE} gaps={[]} bars={BARS} axis={AXIS} />);
 
-  fireEvent.click(screen.getByRole("button", { name: "주체 그룹" }));
+  expect(screen.queryByRole("group", { name: "집계 단위" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "개별 창구" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "주체 그룹" })).toBeNull();
+  const nodeNames = screen.getAllByTestId("broker-transfer-node").map((node) => node.getAttribute("data-name"));
+  expect(nodeNames).toContain("모간서울");
+  expect(nodeNames).toContain("키움");
+
   fireEvent.click(screen.getByRole("button", { name: "총량" }));
   fireEvent.click(screen.getByTestId("broker-transfer-toggle-other"));
   fireEvent.click(screen.getByTestId("broker-transfer-preset-peak"));
   fireEvent.click(screen.getByTestId("broker-transfer-details-toggle"));
 
-  expect(screen.getByRole("button", { name: "주체 그룹" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByRole("button", { name: "총량" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByTestId("broker-transfer-toggle-other").getAttribute("aria-pressed")).toBe("false");
   expect(screen.getByTestId("broker-transfer-preset-peak").getAttribute("aria-pressed")).toBe("true");
@@ -63,7 +68,7 @@ test("TransferView는 언마운트 뒤 다시 마운트해도 마지막 하위 �
 
   render(<TransferView snapshots={SNAPSHOTS} gapBefore={GAP_BEFORE} gaps={[]} bars={BARS} axis={AXIS} />);
 
-  expect(screen.getByRole("button", { name: "주체 그룹" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("group", { name: "집계 단위" })).toBeNull();
   expect(screen.getByRole("button", { name: "총량" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByTestId("broker-transfer-toggle-other").getAttribute("aria-pressed")).toBe("false");
   expect(screen.getByTestId("broker-transfer-preset-peak").getAttribute("aria-pressed")).toBe("true");

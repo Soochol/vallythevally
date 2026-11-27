@@ -208,7 +208,7 @@
 .br-tr-dot { display:inline-block; width:var(--size-8); height:var(--size-8); border-radius:var(--r-s); }
 .br-tr-dot[data-group=foreign] { background:var(--ind-2); }
 .br-tr-dot[data-group=retail] { background:var(--series-1); }
-.br-tr-dot[data-group=domestic] { background:var(--ind-1); }
+.br-tr-dot[data-group=domestic] { background:linear-gradient(135deg, var(--down) 50%, var(--up) 50%); }
 .br-tr-dot[data-group=other] { background:var(--text-3); }
 @container brokers (width < 520px) {
   .br-tr-pair-list { grid-template-columns:1fr; }
