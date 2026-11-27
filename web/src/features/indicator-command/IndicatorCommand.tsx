@@ -188,7 +188,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
               event.preventDefault();
               const next = rows[stepIndex(index, action.step, rows.length)];
               if (next) selectRow(next);
-            }} placeholder={mode === "compare" ? "비교할 종목 이름·코드" : "이평 20, bb 20 2, rsi 14"} autoComplete="off" spellCheck={false} />
+            }} placeholder={mode === "compare" ? "비교할 종목 이름·코드" : mode === "current" ? "띄운 지표 검색 (예: 이평, 거래량)" : "추가할 지표 검색 (예: 이평 20, bb 20 2, rsi 14)"} autoComplete="off" spellCheck={false} />
           {input !== "" && (
             <button type="button" className="ic-search-clear" aria-label="검색어 지우기" onClick={() => { command.type(""); inputRef.current?.focus(); }}>
               <CloseIcon size={12} />

@@ -349,6 +349,7 @@ test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 �
   const theme = picker.getByRole("group", { name: "테마 색", exact: true });
   const table = picker.getByRole("group", { name: "색상표", exact: true });
 
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await input.fill("이평 9");
   await dialog.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
   await expect(theme.getByRole("button", { name: /^테마 2 / })).toHaveAttribute("aria-pressed", "true");

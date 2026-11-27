@@ -152,7 +152,7 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
               <label className="ic-search cd-search">
                 <SearchIcon size={14} />
                 <input ref={inputRef} type="search" aria-label="지표·비교 찾기" value={input} autoComplete="off" spellCheck={false}
-                  placeholder={section === "compare" ? "종목 이름·코드" : "이평 20, bb 20 2"}
+                  placeholder={section === "compare" ? "종목 이름·코드" : command.mode === "current" ? "띄운 지표 검색" : "추가할 지표 검색"}
                   onChange={(e) => command.type(e.target.value)} />
               </label>
 
