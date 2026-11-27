@@ -180,6 +180,10 @@ impl Screener {
         let _ = self.daily_micro_dir.set(shared_dir);
     }
 
+    pub fn has_daily_micro_dir(&self) -> bool {
+        self.daily_micro_dir.get().is_some()
+    }
+
     pub fn result_reuse(&self) -> Option<ReuseCounts> {
         self.shared.get().map(SharedQuotes::counts)
     }
@@ -236,6 +240,24 @@ impl Screener {
 
     pub async fn recent_trading_days(&self, count: usize) -> Result<Vec<KstDate>, StoreError> {
         self.with_store(move |store| store.recent_trading_days(count)).await
+    }
+
+    pub async fn daily_micro_program_series(
+        &self,
+        code: domain::StockCode,
+        from: Option<KstDate>,
+        to: Option<KstDate>,
+    ) -> Result<(bool, Vec<store::DailyMicroProgramRow>), StoreError> {
+        let shared_dir = self.daily_micro_dir.get().cloned();
+        self.with_store(move |store| {
+            if let Some(shared_dir) = shared_dir {
+                store.ingest_daily_micro(&shared_dir)?;
+            }
+            let has_any = store.has_daily_micro_for_symbol(code)?;
+            let rows = store.daily_micro_program_series(code, from, to)?;
+            Ok((has_any, rows))
+        })
+        .await
     }
 
     pub fn start(self: &Arc<Self>, full: bool) {
