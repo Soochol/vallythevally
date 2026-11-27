@@ -310,3 +310,41 @@ test("연동 차트를 끔으로 바꾼 뒤 프로그램 체결 창을 열고 �
   await expect(page.getByText("연동된 종목이 없습니다")).toHaveCount(0);
   await expect(page.getByTestId("program-window")).toHaveAttribute("data-symbol", CODE);
 });
+
+test("차트 없는 연동 색에 보낸 종목은 새로고침 뒤에도 프로그램 체결 창에 남는다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "watchlist", link: "c", kind: "watchlist" },
+    { id: "program", link: "c", kind: "program" },
+  ];
+  scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+  const watchlists = scenario.documents.watchlists();
+  scenario.documents.saveWatchlists({
+    ...watchlists,
+    lists: watchlists.lists.map((list, index) => (index === 0 ? { ...list, symbols: [CODE] } : list)),
+    revision: watchlists.revision + 1,
+  });
+  serve(scenario);
+  await start(page);
+
+  await windowTabs(page).getByRole("tab", { name: /^관심종목/ }).click();
+  await page.locator('aside[aria-label="관심종목"] [data-main]').filter({ hasText: NAME }).click();
+  await windowTabs(page).getByRole("tab", { name: /^프로그램 체결/ }).click();
+
+  const program = page.getByTestId("program-window");
+  await expect(program).toBeVisible();
+  await expect(program).toHaveAttribute("data-symbol", CODE);
+  await expect(program.getByTestId("market-symbol-name")).toHaveText(NAME);
+  await expect(page.getByText("연동된 종목이 없습니다")).toHaveCount(0);
+
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await windowTabs(page).getByRole("tab", { name: /^프로그램 체결/ }).click();
+
+  const reloaded = page.getByTestId("program-window");
+  await expect(reloaded).toBeVisible();
+  await expect(reloaded).toHaveAttribute("data-symbol", CODE);
+  await expect(reloaded.getByTestId("market-symbol-name")).toHaveText(NAME);
+  await expect(page.getByText("연동된 종목이 없습니다")).toHaveCount(0);
+});

@@ -25,11 +25,13 @@ import type { CanvasPlacement, DockPlacement, Placement } from "../layout/placem
 import { isIndexCode } from "../lib/symbol";
 import type { BrokerCards, BrokerView } from "../features/brokers/prefs";
 import { readDockOrigins, writeDockOrigins } from "../persist/dockOrigins";
+import { readGroupSymbols, writeGroupSymbols, type GroupSymbols } from "../persist/groupSymbols";
 import { activeWindowId, onWindowTouch } from "./activeWindow";
+import { usePersistStore } from "./persist";
 import { ladderRateHidden, useUiStore } from "./ui";
 import { reclaimWindow, swapReclaimedWindow, type ReclaimedWindow } from "./windowReclaim";
 
-export type { ReclaimedWindow };
+export type { GroupSymbols, ReclaimedWindow };
 
 type ChartWindowWire = Extract<LayoutWindow, { kind: "chart" }>;
 export type OtherWindowKind = Exclude<LayoutWindow, { kind: "chart" }>["kind"];
@@ -115,7 +117,7 @@ export function watchedSymbol(
   layout: EditableLayout,
   sender: WindowId | null,
   activeCell: WindowId,
-  groupSymbols: Partial<Record<LinkColor, SymbolCode>> = {},
+  groupSymbols: GroupSymbols,
 ): SymbolCode | null {
   const link = senderLink(layout, sender);
   if (link === null) return chartWindow(layout, activeCell).symbol;
@@ -126,16 +128,16 @@ export function linkedWindowSymbol(
   layout: EditableLayout,
   id: WindowId,
   activeCell: WindowId,
-  groupSymbols: Partial<Record<LinkColor, SymbolCode>> = {},
+  groupSymbols: GroupSymbols,
 ): SymbolCode | null {
   const window = layout.windows.find((w) => w.id === id);
   return (window && isPinnableWindow(window) ? window.symbol : undefined) ?? watchedSymbol(layout, id, activeCell, groupSymbols);
 }
 
-function seedGroupSymbols(layout: EditableLayout): Partial<Record<LinkColor, SymbolCode>> {
-  const symbols: Partial<Record<LinkColor, SymbolCode>> = {};
+function seedGroupSymbols(layout: EditableLayout): GroupSymbols {
+  const symbols: GroupSymbols = readGroupSymbols(layout);
   for (const chart of chartWindows(layout)) {
-    if (chart.link !== null && symbols[chart.link] === undefined) symbols[chart.link] = chart.symbol;
+    if (chart.link !== null) symbols[chart.link] ??= chart.symbol;
   }
   return symbols;
 }
@@ -172,14 +174,14 @@ function freeChartId(windows: readonly WindowState[]): WindowId {
 
 function pruneGroupSymbols(
   windows: readonly WindowState[],
-  groupSymbols: Partial<Record<LinkColor, SymbolCode>>,
-): Partial<Record<LinkColor, SymbolCode>> {
+  groupSymbols: GroupSymbols,
+): GroupSymbols {
   const liveLinks = new Set<LinkColor>();
   for (const w of windows) {
     if (w.link !== null && isFollowsWindow(w)) liveLinks.add(w.link);
   }
   let pruned = false;
-  const next: Partial<Record<LinkColor, SymbolCode>> = {};
+  const next: GroupSymbols = {};
   for (const link of LINK_COLORS) {
     const code = groupSymbols[link];
     if (code === undefined) continue;
@@ -192,7 +194,7 @@ function pruneGroupSymbols(
 function hasLinkSymbol(
   layout: EditableLayout,
   link: LinkColor,
-  groupSymbols: Partial<Record<LinkColor, SymbolCode>>,
+  groupSymbols: GroupSymbols,
 ): boolean {
   if (chartWindows(layout).some((chart) => chart.link === link)) return true;
   return groupSymbols[link] !== undefined && layout.windows.some((w) => w.link === link && isFollowsWindow(w));
@@ -202,7 +204,7 @@ function resolveNewWindowLink(
   layout: EditableLayout,
   kind: WindowKind,
   lastUsedLink: LinkColor | null,
-  groupSymbols: Partial<Record<LinkColor, SymbolCode>>,
+  groupSymbols: GroupSymbols,
   fallbackActiveId: WindowId | null,
   explicitLink?: LinkColor | null,
 ): LinkColor | null {
@@ -218,7 +220,7 @@ function resolveNewWindowLink(
 
 export const ARRANGEMENT_STEPS = 20;
 export type Arrangement = Pick<EditableLayout, "windows" | "placement">;
-export type ArrangementStep = { id: number; before: Arrangement; dockOrigins: DockOrigins; groupSymbols: Partial<Record<LinkColor, SymbolCode>>; reclaimed?: ReclaimedWindow };
+export type ArrangementStep = { id: number; before: Arrangement; dockOrigins: DockOrigins; groupSymbols: GroupSymbols; reclaimed?: ReclaimedWindow };
 export type DockRoom = { area: Size; gap: number };
 
 let lastStepId = 0;
@@ -251,7 +253,7 @@ interface LayoutState {
   redos: readonly ArrangementStep[];
   dockOrigins: DockOrigins;
   lastUsedLink: LinkColor | null;
-  groupSymbols: Partial<Record<LinkColor, SymbolCode>>;
+  groupSymbols: GroupSymbols;
   lockedWindows: readonly WindowId[];
   commitDock(edit: { session: number; expected: DockPlacement | null; next: DockPlacement }): boolean;
   attachFloat(window: WindowId): void;
@@ -340,7 +342,7 @@ function returnTo(s: Pick<LayoutState, "layout" | "revision" | "groupSymbols">, 
     if (restored.link !== null && isFollowsWindow(restored)) restoredLinks.add(restored.link);
     return restored;
   });
-  const groupSymbols: Partial<Record<LinkColor, SymbolCode>> = { ...s.groupSymbols };
+  const groupSymbols: GroupSymbols = { ...s.groupSymbols };
   for (const link of restoredLinks) {
     if (groupSymbols[link] === undefined && !survivingChartLinks.has(link) && step.groupSymbols[link] !== undefined) {
       groupSymbols[link] = step.groupSymbols[link];
@@ -569,7 +571,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         const refs = windowRefs(windows);
         arrangeDock(windows, targetGroup ? putTab(dock!, id, targetGroup) : selectTab(fitDock(room ? placeBeside(dock!, id, source.id, { ...room, windows: refs }) : dock!, refs), id));
       }
-      if (link !== null) set((s) => ({ lastUsedLink: link, ...(s.groupSymbols[link] === undefined ? { groupSymbols: { ...s.groupSymbols, [link]: added.symbol } } : {}) }));
+      if (link !== null) set((s) => ({ lastUsedLink: link, ...(leader === undefined || s.groupSymbols[link] === undefined ? { groupSymbols: { ...s.groupSymbols, [link]: added.symbol } } : {}) }));
       return id;
     },
     closeWindow: (id, replacement) => {
@@ -686,7 +688,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         const changed = windows.some((w, i) => w !== s.layout.windows[i]);
         if (!changed && nextLastUsedLink === s.lastUsedLink) return s;
         let groupSymbols = changed ? pruneGroupSymbols(windows, s.groupSymbols) : s.groupSymbols;
-        if (changed && link !== null && isChartWindow(target) && groupSymbols[link] === undefined) {
+        if (changed && link !== null && isChartWindow(target) && (leader === undefined || groupSymbols[link] === undefined)) {
           groupSymbols = { ...groupSymbols, [link]: leader ? leader.symbol : target.symbol };
         }
         return {
@@ -748,6 +750,9 @@ export const useCell = (cellId: WindowId): ChartWindowState => useLayoutStore((s
 
 useLayoutStore.subscribe((state, previous) => {
   if (state.layout !== previous.layout || state.dockOrigins !== previous.dockOrigins) writeDockOrigins(state.layout, state.dockOrigins);
+  if ((state.layout !== previous.layout || state.groupSymbols !== previous.groupSymbols) && usePersistStore.getState().phase.kind !== "offline") {
+    writeGroupSymbols(state.layout, state.groupSymbols);
+  }
 });
 
 onWindowTouch((id) => {

@@ -63,13 +63,13 @@ describe("symbolDrag", () => {
 
   it("updates the whole link group when dropping on an unpinned linked auxiliary window without auto-pinning", () => {
     useLayoutStore.getState().dropSymbolOnWindow(windowId("order-b"), { code: "000660", name: "SK하이닉스" });
-    const layout = useLayoutStore.getState().layout;
+    const { layout, groupSymbols } = useLayoutStore.getState();
     const chartB = layout.windows.find((w) => w.id === windowId("chart-b1"));
     const orderB = layout.windows.find((w) => w.id === windowId("order-b"));
     expect(chartB && chartB.kind === "chart" ? chartB.symbol : null).toBe("000660");
     expect(orderB && orderB.kind === "order" ? orderB.symbol : null).toBeUndefined();
-    expect(linkedWindowSymbol(layout, windowId("order-b"), windowId("chart-a1"))).toBe("000660");
-    expect(linkedWindowSymbol(layout, windowId("book-b-pinned"), windowId("chart-a1"))).toBe("035420");
+    expect(linkedWindowSymbol(layout, windowId("order-b"), windowId("chart-a1"), groupSymbols)).toBe("000660");
+    expect(linkedWindowSymbol(layout, windowId("book-b-pinned"), windowId("chart-a1"), groupSymbols)).toBe("035420");
   });
 
   it("ignores drops directly on an explicitly pinned linked window", () => {

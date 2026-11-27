@@ -201,12 +201,12 @@ test("종목을 바꾸면 그 색의 모든 차트의 종목이 바뀌고 봉 �
 test("보내는 창이 보고 있는 종목은 자기 색의 차트 종목이고, 색이 꺼져 있으면 활성 칸의 종목, 그 색의 차트가 없으면 없다", () => {
   linked();
   const layout = () => state().layout;
-  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"))).toBe("035420");
-  expect(watchedSymbol(layout(), null, windowId("off"))).toBe("000660");
+  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"), state().groupSymbols)).toBe("035420");
+  expect(watchedSymbol(layout(), null, windowId("off"), state().groupSymbols)).toBe("000660");
   state().setLink(windowId("watchlist"), "a");
-  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"))).toBe("005930");
+  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"), state().groupSymbols)).toBe("005930");
   state().setLink(windowId("watchlist"), "c");
-  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"))).toBeNull();
+  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"), state().groupSymbols)).toBeNull();
 });
 
 test("색을 맞추면 앞선 차트의 종목을 따른다", () => {
@@ -631,10 +631,10 @@ test("시세 창이 보이는 종목은 고정 종목이 연동 색과 활성 �
   state().openWindow("trades", undefined, { link: null });
   state().openWindow("book", undefined, { link: null });
   const layout = () => state().layout;
-  const shownIn = (id: string, active: string) => linkedWindowSymbol(layout(), windowId(id), windowId(active));
+  const shownIn = (id: string, active: string) => linkedWindowSymbol(layout(), windowId(id), windowId(active), state().groupSymbols);
   expect([shownIn("trades", "off"), shownIn("trades", "b1")]).toEqual(["000660", "035420"]);
   state().setLink(windowId("book"), "a");
-  expect(shownIn("book", "b1")).toBe(watchedSymbol(layout(), windowId("book"), windowId("b1")));
+  expect(shownIn("book", "b1")).toBe(watchedSymbol(layout(), windowId("book"), windowId("b1"), state().groupSymbols));
   state().pinSymbol(windowId("trades"), "005930");
   state().pinSymbol(windowId("book"), "005930");
   expect([shownIn("trades", "off"), shownIn("trades", "b1"), shownIn("book", "b1")]).toEqual(["005930", "005930", "005930"]);
@@ -653,7 +653,7 @@ test("고정된 창에 연동 색을 고르면 고정이 풀리고 그 색을 �
   state().setLink(windowId("trades"), "b");
   const trades = state().layout.windows.find((w) => w.id === "trades")!;
   expect(trades).toEqual({ id: "trades", link: "b", kind: "trades" });
-  expect(linkedWindowSymbol(state().layout, windowId("trades"), windowId("off"))).toBe("035420");
+  expect(linkedWindowSymbol(state().layout, windowId("trades"), windowId("off"), state().groupSymbols)).toBe("035420");
 });
 
 test("관심종목·스크리너의 보이는 종목은 창 종목이 아니라 보내는 규칙으로만 정해진다", () => {
@@ -661,9 +661,9 @@ test("관심종목·스크리너의 보이는 종목은 창 종목이 아니라 
   state().openWindow("trades", undefined, { link: null });
   state().pinSymbol(windowId("trades"), "005930");
   const layout = () => state().layout;
-  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"))).toBe("035420");
-  expect(watchedSymbol(layout(), windowId("trades"), windowId("b1"))).toBe("035420");
-  expect(watchedSymbol(layout(), null, windowId("off"))).toBe("000660");
+  expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"), state().groupSymbols)).toBe("035420");
+  expect(watchedSymbol(layout(), windowId("trades"), windowId("b1"), state().groupSymbols)).toBe("035420");
+  expect(watchedSymbol(layout(), null, windowId("off"), state().groupSymbols)).toBe("000660");
 });
 
 test("새 창은 활성 창의 연동 색을 상속하고, 활성 창이 무그룹이거나 없으면 마지막 사용 연동 색, 그것도 없으면 A로 만든다", () => {
@@ -671,12 +671,12 @@ test("새 창은 활성 창의 연동 색을 상속하고, 활성 창이 무그�
   touchWindow(windowId("b1"));
   const bookId = state().openWindow("book")!;
   expect(state().layout.windows.find((w) => w.id === bookId)?.link).toBe("b");
-  expect(linkedWindowSymbol(state().layout, bookId, windowId("a1"))).toBe("035420");
+  expect(linkedWindowSymbol(state().layout, bookId, windowId("a1"), state().groupSymbols)).toBe("035420");
 
   touchWindow(windowId("off"));
   const tradesId = state().openWindow("trades")!;
   expect(state().layout.windows.find((w) => w.id === tradesId)?.link).toBe("b");
-  expect(linkedWindowSymbol(state().layout, tradesId, windowId("a1"))).toBe("035420");
+  expect(linkedWindowSymbol(state().layout, tradesId, windowId("a1"), state().groupSymbols)).toBe("035420");
 
   state().setLink(tradesId, "c");
   state().setLink(tradesId, null);
