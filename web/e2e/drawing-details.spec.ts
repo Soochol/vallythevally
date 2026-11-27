@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
-import { cell, chartOf, expect, pollSaved, test } from "./harness";
-import { chartPoint, drawingDock, drawings, mirror, open, settledMirror } from "./drawing-probe";
+import { cell, expect, pollSaved, test } from "./harness";
+import { chartPoint, drawingDock, drawings, mirror, open } from "./drawing-probe";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -56,14 +56,6 @@ async function placeWith(page: Page, key: string, spots: readonly (readonly [num
   await page.mouse.click(second!.x, second!.y);
 }
 
-async function selectedBounds(page: Page, n = 1) {
-  const frame = (await chartOf(cell(page, n)).boundingBox())!;
-  const shown = (await settledMirror(page, n)).find((d) => d.selected)!;
-  const xs = shown.points.map((p) => frame.x + p!.x);
-  const ys = shown.points.map((p) => frame.y + p!.y);
-  return { left: Math.min(...xs), right: Math.max(...xs), top: Math.min(...ys), bottom: Math.max(...ys) };
-}
-
 const detailsDialog = (page: Page, title: string) => page.getByRole("dialog", { name: `${title} 세부 설정`, exact: true });
 
 async function placeFibAndOpenDetails(page: Page) {
@@ -82,19 +74,45 @@ async function box(locator: Locator) {
   return found;
 }
 
-test("피보나치 세부 설정 창은 560px 안이고 위 막대 아래에서 시작하며 고친 드로잉 반대쪽에 뜬다", async ({ page }, testInfo) => {
+test("피보나치 세부 설정 창은 화면 중앙에 560px 안으로 뜨고 헤더 드래그 이동·중앙 복귀·템플릿·주기 프리셋이 동작한다", async ({ page }, testInfo) => {
   const dialog = await placeFibAndOpenDetails(page);
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("details-fib.png") });
   const frame = await box(dialog);
+  expect(frame.width).toBeLessThanOrEqual(472);
   expect(frame.height).toBeLessThanOrEqual(560);
   const topbar = await box(page.getByRole("toolbar", { name: "차트 도구 막대", exact: true }));
   expect(frame.y).toBeGreaterThanOrEqual(topbar.y + topbar.height);
+  expect(Math.abs((frame.x + frame.width / 2) - 720)).toBeLessThanOrEqual(24);
   await expect(dialog.getByRole("tablist", { name: "세부 설정 묶음", exact: true }).getByRole("tab")).toHaveText(["스타일", "좌표", "보이기"]);
 
-  const drawing = await selectedBounds(page);
-  const overlaps = frame.x < drawing.right && frame.x + frame.width > drawing.left && frame.y < drawing.bottom && frame.y + frame.height > drawing.top;
-  expect(overlaps).toBe(false);
-  expect(frame.x).toBeGreaterThan(drawing.right);
+  const head = await box(dialog.locator(".draw-dialog-head"));
+  const dragStart = { x: head.x + head.width / 2, y: head.y + head.height / 2 };
+  await page.mouse.move(dragStart.x, dragStart.y);
+  await page.mouse.down();
+  await page.mouse.move(dragStart.x + 180, dragStart.y + 40, { steps: 6 });
+  await page.mouse.up();
+  const moved = await box(dialog);
+  expect(moved.x).toBeGreaterThan(frame.x + 120);
+  expect(moved.y).toBeGreaterThanOrEqual(topbar.y + topbar.height);
+
+  await dialog.getByRole("button", { name: "중앙으로 이동", exact: true }).click();
+  const recentered = await box(dialog);
+  expect(Math.abs((recentered.x + recentered.width / 2) - 720)).toBeLessThanOrEqual(24);
+
+  await dialog.getByRole("button", { name: /템플릿/ }).click();
+  const tplPop = page.getByRole("dialog", { name: "스타일 템플릿", exact: true });
+  await expect(tplPop).toBeVisible();
+  await expect(tplPop.getByRole("button", { name: "기본 스타일로", exact: true })).toBeVisible();
+  await expect(tplPop.getByRole("button", { name: "현재 스타일을 기본값으로 저장", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(tplPop).toBeHidden();
+  await expect(dialog).toBeVisible();
+
+  await dialog.getByRole("tab", { name: "보이기", exact: true }).click();
+  await dialog.getByRole("button", { name: "분봉만", exact: true }).click();
+  await expect(dialog.getByRole("checkbox", { name: "모든 봉 주기", exact: true })).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "1분", exact: true })).toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "일", exact: true })).not.toBeChecked();
 });
 
 test("피보나치 수준 줄은 40px 안에 다섯 칸이 한 줄로 놓인다", async ({ page }) => {

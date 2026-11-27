@@ -29,11 +29,11 @@ test("드로잉 막대는 도구가 둘 이상인 그룹에 펼침 버튼을 두
   expect(html).toContain("드로잉 지우기 메뉴");
 });
 
-test("작은 막대의 팝오버는 모달 없이 기존 글자·좌표·주기와 전체 스타일을 제공한다", () => {
+test("세부 설정 중앙 모달은 기존 글자·좌표·주기와 전체 스타일·템플릿·중앙 복귀를 제공한다", () => {
   const html = renderToStaticMarkup(createElement(DrawingDetails, { cellId: windowId("cell-0"), editor: { kind: "settings", original: drawing, draft: drawing }, anchor: { current: null } }));
   expect(html).toContain("data-chart-control");
   expect(html).not.toContain('aria-modal="true"');
-  for (const label of ["수평선 세부 설정", "선 색 선택", "선 굵기", "선 모양", "가격 라벨", "글자 모양", "가로 정렬", "세로 정렬", "모든 봉 주기", "기본 스타일로"]) expect(html).toContain(label);
+  for (const label of ["수평선 세부 설정", "선 색 선택", "선 굵기", "선 모양", "가격 라벨", "글자 모양", "가로 정렬", "세로 정렬", "모든 봉 주기", "템플릿", "중앙으로 이동", "분봉만"]) expect(html).toContain(label);
   expect(html).not.toContain('type="datetime-local"');
 });
 
