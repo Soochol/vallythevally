@@ -53,8 +53,17 @@ test("위 막대의 차트 설정 버튼은 화면 가운데에 통합 차트 �
     await expect(popover(page).getByRole("tab", { name, exact: true })).toBeVisible();
   }
   await expect(section(page, "봉 · 축")).toBeVisible();
-  await expect(popover(page).getByRole("group", { name: "차트 설정 영역", exact: true }).getByRole("button", { name: "차트 설정", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const pillButtons = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "차트 개별 설정", exact: true }).locator("button");
+  await expect(pillButtons).toHaveCount(3);
+  expect(await pillButtons.evaluateAll((buttons) => buttons.map((button) => button.querySelector(".topbar-label-lg")?.textContent))).toEqual(["지표", "차트", "비교"]);
+  const sectionGroup = popover(page).getByRole("group", { name: "차트 설정 영역", exact: true });
+  expect(await sectionGroup.locator("button").allTextContents()).toEqual(["지표", "차트", "비교"]);
+  await expect(sectionGroup.getByRole("button", { name: "차트 설정", exact: true })).toHaveAttribute("aria-pressed", "true");
   const box = (await popover(page).boundingBox())!;
+  const sidebarBox = (await popover(page).locator(".cs-sidebar").boundingBox())!;
+  const footerBox = (await popover(page).locator(".cs-foot-bar").boundingBox())!;
+  expect(Math.round(sidebarBox.width)).toBe(240);
+  expect(Math.abs(footerBox.width - (box.width - 2))).toBeLessThanOrEqual(2);
   expect(box.width).toBeLessThanOrEqual(760);
   expect(Math.abs(box.x + box.width / 2 - 1440 / 2)).toBeLessThanOrEqual(2);
   expect(Math.abs(box.y + box.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
