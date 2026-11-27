@@ -193,6 +193,7 @@ test("재무·호가·수급 지표만 주기 안내 문구를 돌려준다", ()
   expect(indicatorPeriodNotice("tickCvd")).toContain("주식·ETF 분봉");
   expect(indicatorPeriodNotice("programFlow")).toContain("주식·ETF 분봉");
   expect(indicatorPeriodNotice("programFlow")).toContain("일봉 이상");
+  expect(indicatorPeriodNotice("programFlow")).toContain("일별 프로그램 매매");
   expect(indicatorPeriodNotice("foreignFlow")).toContain("일봉 이상");
   expect(indicatorPeriodNotice("institutionFlow")).toContain("일봉 이상");
   expect(indicatorPeriodNotice("ma")).toBeNull();
