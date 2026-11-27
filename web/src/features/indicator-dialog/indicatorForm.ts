@@ -4,8 +4,11 @@ import {
   type IndicatorColor,
   type IndicatorKind,
   isFinancial,
-  isMicro,
+  isFlow,
+  isInvestorFlow,
+  isProgramFlow,
   isQuote,
+  isTickCvd,
   KINDS,
   colorLine,
   type Placement,
@@ -14,7 +17,7 @@ import {
   shownColor,
   specName,
 } from "../../chart/indicators/kinds";
-import { barOpacityOf, DEFAULT_BAR_OPACITY, DEFAULT_ICHIMOKU_STYLE, ichimokuStyleOf, type IchimokuStyle, type IndicatorConfig, type LineWidth, type Panel, placementOfConfig, readSpecShape } from "../../chart/settings";
+import { barOpacityOf, defaultBarOpacity, DEFAULT_ICHIMOKU_STYLE, ichimokuStyleOf, type IchimokuStyle, type IndicatorConfig, type LineWidth, type Panel, placementOfConfig, readSpecShape } from "../../chart/settings";
 import { normalizeHex } from "../../lib/colors";
 
 export type { Validate };
@@ -39,13 +42,21 @@ export interface Draft {
 }
 
 export const canOverlayPrice = (kind: IndicatorKind): boolean => placementsOf(kind).includes("price") && placementsOf(kind).includes("panel");
-export const hasBarOpacity = (kind: IndicatorKind): boolean => kind === "volume";
+
+export function hasBarOpacity(target: IndicatorKind | SpecForm): boolean {
+  if (typeof target === "string") {
+    return target === "volume" || isFlow(KINDS[target].defaults);
+  }
+  if (target.kind === "volume") return true;
+  if (!isFlow(KINDS[target.kind].defaults)) return false;
+  return target.text.displayMode !== "line";
+}
 
 export function draftStyle(draft: Draft, colors: IndicatorColor[]): IndicatorConfig["style"] {
   return {
     colors,
     width: draft.width,
-    ...(hasBarOpacity(draft.form.kind) ? { barOpacity: draft.barOpacity } : {}),
+    ...(hasBarOpacity(draft.form) ? { barOpacity: draft.barOpacity } : {}),
     ...(draft.form.kind === "ichimoku" ? { ichimoku: draft.ichimoku ?? DEFAULT_ICHIMOKU_STYLE } : {}),
   };
 }
@@ -80,7 +91,7 @@ export function startDraft(editing: IndicatorConfig | null, kind: IndicatorKind)
       color: shownColor(editing.spec, editing.style.colors),
       width: editing.style.width,
       placement: placementOfConfig(editing),
-      barOpacity: barOpacityOf(editing.style),
+      barOpacity: barOpacityOf(editing.style, editing.spec.kind),
       ...(editing.spec.kind === "ichimoku" ? { ichimoku: { ...ichimokuStyleOf(editing.style) } } : {}),
     };
   }
@@ -89,7 +100,7 @@ export function startDraft(editing: IndicatorConfig | null, kind: IndicatorKind)
     color: "auto",
     width: 1,
     placement: KINDS[kind].place,
-    barOpacity: DEFAULT_BAR_OPACITY,
+    barOpacity: defaultBarOpacity(kind),
     ...(kind === "ichimoku" ? { ichimoku: { ...DEFAULT_ICHIMOKU_STYLE } } : {}),
   };
 }
@@ -158,7 +169,11 @@ export function placeErrors(kind: IndicatorKind, errors: readonly FieldError[]):
 
 export function hasColor(form: SpecForm): boolean {
   const shape: Record<string, unknown> = { ...KINDS[form.kind].defaults };
-  for (const f of KINDS[form.kind].fields) if (f.type === "optionalInt") shape[f.key] = form.enabled[f.key] ? 1 : null;
+  for (const f of KINDS[form.kind].fields) {
+    if (f.type === "optionalInt") shape[f.key] = form.enabled[f.key] ? 1 : null;
+    else if (f.type === "choice" && form.text[f.key] !== undefined) shape[f.key] = form.text[f.key];
+    else if (f.type === "flag" && (form.text[f.key] === "true" || form.text[f.key] === "false")) shape[f.key] = form.text[f.key] === "true";
+  }
   const spec = readSpecShape(shape);
   return spec !== null && colorLine(spec) !== null;
 }
@@ -180,6 +195,8 @@ export function indicatorPeriodNotice(kind: IndicatorKind): string | null {
   const spec = KINDS[kind].defaults;
   if (isFinancial(spec)) return "분기봉·연봉의 보고기간별 자료입니다. DPS는 연간 전용이며 다른 봉 주기에서는 설정을 보존하고 숨깁니다.";
   if (isQuote(spec)) return "주식·ETF 분봉의 호가 자료입니다. 일봉 이상이나 지수에서는 설정을 보존하고 숨깁니다.";
-  if (isMicro(spec)) return "주식·ETF 분봉의 체결·프로그램 수급 자료입니다. 일봉 이상이나 지수에서는 안내 문구만 보입니다.";
+  if (isInvestorFlow(spec)) return "주식·ETF 일봉 이상(일·주·월·분기·연봉)의 투자자별 순매수 자료입니다. 억 원 단위는 일별 순매수 주수에 종가를 곱한 추정치이며, 분봉이나 지수에서는 설정을 보존하고 안내 문구만 보입니다.";
+  if (isProgramFlow(spec)) return "주식·ETF 분봉(0w 수집·실시간)과 일봉 이상(일별 수집 집계)의 프로그램 순매수 자료입니다. 지수에서는 안내 문구만 보입니다.";
+  if (isTickCvd(spec)) return "주식·ETF 분봉의 체결 수급 자료입니다. 일봉 이상이나 지수에서는 안내 문구만 보입니다.";
   return null;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import type { MaMethod } from "../../api/generated/MaMethod";
-import { INDICATOR_COLORS, indicatorCssColor, KINDS, type IndicatorColor, type IndicatorToken } from "../../chart/indicators/kinds";
+import { INDICATOR_COLORS, indicatorCssColor, isFlow, KINDS, type IndicatorColor, type IndicatorToken } from "../../chart/indicators/kinds";
 import { loadValidator } from "../../chart/indicators/validate";
 import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, DEFAULT_ICHIMOKU_STYLE, ICHIMOKU_CLOUD_OPACITY_MAX, ICHIMOKU_CLOUD_OPACITY_MIN, type IchimokuStyle, type LineWidth } from "../../chart/settings";
 import { isHexColor, type HexColor } from "../../lib/colors";
@@ -141,9 +141,10 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
             );
           }
           if (f.type === "choice") {
+            const disabled = isFlow(KINDS[kind].defaults) && f.key === "aggregation" && draft.form.text.displayMode === "both";
             return (
               <Row key={f.key} label={f.label}>
-                <Segment label={f.label} options={f.options} value={text} onChange={(v) => setText(f.key, v)} />
+                <Segment label={f.label} options={f.options} value={text} disabled={disabled} onChange={(v) => setText(f.key, v)} />
                 <Errors id={errorId} messages={errors} />
               </Row>
             );
@@ -226,7 +227,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
           </button>
           <p id={`${ids}-overlay`} className="text-xs text-text-3">거래량을 봉 아래쪽에 겹쳐 그립니다. 끄면 별도 패널</p>
         </Row>}
-        {hasBarOpacity(kind) && <Row label="막대 불투명도" labelFor={`${ids}-opacity`}>
+        {hasBarOpacity(draft.form) && <Row label="막대 불투명도" labelFor={`${ids}-opacity`}>
           <span className="flex min-h-[30px] min-w-0 items-center gap-2">
             <input id={`${ids}-opacity`} type="range" min={BAR_OPACITY_MIN * 100} max={BAR_OPACITY_MAX * 100} step={1} value={percent(draft.barOpacity)} aria-valuetext={`${percent(draft.barOpacity)}%`} className="min-w-0 flex-1 accent-[var(--accent)]" onChange={(e) => onChange({ ...draft, barOpacity: Number(e.target.value) / 100 })} />
             <output htmlFor={`${ids}-opacity`} className="w-10 flex-none text-right text-s tabular-nums text-text-2">{percent(draft.barOpacity)}%</output>
@@ -309,7 +310,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
               theme={THEME_SWATCHES}
               width={draft.width}
               size="lg"
-              opacity={hasBarOpacity(kind) ? { value: draft.barOpacity, min: BAR_OPACITY_MIN, max: BAR_OPACITY_MAX, onChange: (barOpacity) => onChange({ ...draft, barOpacity }) } : undefined}
+              opacity={hasBarOpacity(draft.form) ? { value: draft.barOpacity, min: BAR_OPACITY_MIN, max: BAR_OPACITY_MAX, onChange: (barOpacity) => onChange({ ...draft, barOpacity }) } : undefined}
               onColorChange={(next) => onChange({ ...draft, color: next })}
               onWidthChange={(width) => onChange({ ...draft, width })}
             />

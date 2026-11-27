@@ -17,7 +17,9 @@ import { AXIS_WIDTH, axisPriceFormat, invalidateAxisMeasureCache, priceAxisWidth
 import type { LastPriceHost } from "./lastPriceTag";
 import { fetchBarsPage, fetchJumpPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
+import type { DayHistory } from "../api/generated/DayHistory";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
+import type { InvestorNetSharesDay } from "../api/generated/InvestorNetSharesDay";
 import type { KstDate } from "../api/generated/KstDate";
 import type { Period } from "../api/generated/Period";
 import type { ProgramSeriesPage } from "../api/generated/ProgramSeriesPage";
@@ -156,6 +158,7 @@ export interface ControllerDeps {
   fetchQuoteDepth?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
   fetchTickCvd?: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<TickCvdPage>;
   fetchProgramSeries?: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<ProgramSeriesPage>;
+  fetchInvestorNetShares?: (symbol: SymbolCode, from: KstDate, to: KstDate, signal: AbortSignal) => Promise<DayHistory<InvestorNetSharesDay>>;
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
@@ -309,6 +312,7 @@ export class ChartController {
       deps.indicators ?? openIndicatorPort,
       { fetchQuoteTotals: deps.fetchQuoteTotals, fetchQuoteDepth: deps.fetchQuoteDepth, now: nowSeconds },
       { fetchTickCvd: deps.fetchTickCvd, fetchProgramSeries: deps.fetchProgramSeries },
+      { fetchInvestorNetShares: deps.fetchInvestorNetShares },
     );
     this.indicators.attachMainSeries(this.main.api);
     this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor) => deps.onIndicatorCommand?.(id, command, anchor), () => this.legend.fit("content"));
@@ -466,6 +470,7 @@ export class ChartController {
     if (targetChanged) {
       this.indicators.setQuoteTarget({ symbol: next.symbol, venue: next.venue, period: next.period }, !configsChanged);
       this.indicators.setMicroTarget({ symbol: next.symbol, period: next.period }, !configsChanged);
+      this.indicators.setInvestorTarget({ symbol: next.symbol, period: next.period }, !configsChanged);
     }
     if (configsChanged) {
       this.paneLayoutDirty = true;

@@ -18,7 +18,7 @@ use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::stream::KiwoomStream;
 use server::micro_series::aggregate_tick_cvd_day;
-use server::shared_data::{CollectorPaths, FlowDescription, FlowRow, FlowWriter, flow_links_path, flow_path};
+use server::shared_data::{CollectorPaths, FlowDescription, FlowRow, FlowWriter, daily_micro_path, flow_links_path, flow_path};
 use server::symbols::SymbolDirectory;
 use support::ScriptedTransport;
 use tower::ServiceExt;
@@ -139,12 +139,34 @@ impl Harness {
         let data = tmp.path().join("hoga");
         if enabled {
             state.collector_paths.configure(CollectorPaths::hoga_only(data.clone()));
+            state.screener.read_daily_micro(data.join("shared"));
         }
         Harness { app: router(state), clock, data, _tmp: tmp }
     }
 
     fn shared(&self) -> PathBuf {
         self.data.join("shared")
+    }
+
+    fn write_daily_micro(&self, date: u32, rows: &[(&str, i64, i32)]) {
+        let path = daily_micro_path(&self.shared(), date);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "SET threads = 1;
+             CREATE TABLE tmp_micro (date INTEGER, symbol VARCHAR, whale_net_won BIGINT, program_net_won BIGINT, program_share_bps INTEGER, foreign_est_net_qty BIGINT, spoof_cancel_rate_bps INTEGER, vi_count INTEGER, vwap_close_gap_bps INTEGER);",
+        )
+        .unwrap();
+        let mut appender = conn.appender("tmp_micro").unwrap();
+        for &(symbol, program_net_won, program_share_bps) in rows {
+            appender
+                .append_row(duckdb::params![date as i32, symbol, 0i64, program_net_won, program_share_bps, 0i64, 0i32, 0i32, 0i32])
+                .unwrap();
+        }
+        appender.flush().unwrap();
+        drop(appender);
+        let escaped = path.to_string_lossy().replace('\'', "''");
+        conn.execute_batch(&format!("COPY tmp_micro TO '{escaped}' (FORMAT parquet);")).unwrap();
     }
 
     fn write_flow<K: CollectedKind>(&self, date: &str, key: &str, rows: &[FlowRow]) {
@@ -176,11 +198,15 @@ async fn rejects_bad_symbol_index_and_non_intraday_periods() {
         "/api/symbols/bad/tick-cvd?period=1m",
         "/api/symbols/IDX:001/tick-cvd?period=1m",
         "/api/symbols/005930/tick-cvd?period=D",
+        "/api/symbols/005930/tick-cvd?period=W",
         "/api/symbols/005930/tick-cvd?period=2m",
         "/api/symbols/005930/tick-cvd",
         "/api/symbols/005930/tick-cvd?period=1m&from=200&to=100",
         "/api/symbols/IDX:001/program-series?period=5m",
-        "/api/symbols/005930/program-series?period=W",
+        "/api/symbols/IDX:001/program-series?period=D",
+        "/api/symbols/005930/program-series?period=2m",
+        "/api/symbols/005930/program-series",
+        "/api/symbols/005930/program-series?period=D&from=200&to=100",
     ] {
         let (status, body) = h.get(path).await;
         assert_eq!(status, 400, "{path}: {body}");
@@ -194,6 +220,8 @@ async fn disabled_and_not_collected_states_return_cleanly() {
     for path in [
         "/api/symbols/005930/tick-cvd?period=1m",
         "/api/symbols/005930/program-series?period=1m",
+        "/api/symbols/005930/program-series?period=D",
+        "/api/symbols/005930/program-series?period=W",
     ] {
         let (status, body) = disabled.get(path).await;
         assert_eq!(status, 200, "{path}: {body}");
@@ -205,6 +233,8 @@ async fn disabled_and_not_collected_states_return_cleanly() {
     for path in [
         "/api/symbols/000660/tick-cvd?period=1m",
         "/api/symbols/000660/program-series?period=5m",
+        "/api/symbols/000660/program-series?period=D",
+        "/api/symbols/000660/program-series?period=M",
     ] {
         let (status, body) = enabled.get(path).await;
         assert_eq!(status, 200, "{path}: {body}");
@@ -543,4 +573,124 @@ async fn watch_micro_returns_disabled_or_batch_totals_and_validates_limit() {
     let too_many = (0..201).map(|i| format!("{i:06}")).collect::<Vec<_>>().join(",");
     let (status, _) = harness.get(&format!("/api/watch/micro?symbols={too_many}")).await;
     assert_eq!(status, 400);
+}
+
+#[tokio::test]
+async fn program_series_daily_and_higher_rollups_span_multi_year_daily_micro() {
+    let h = Harness::start(true).await;
+    h.write_daily_micro(20_251_230, &[("005930", -100_000_000, 0)]);
+    h.write_daily_micro(20_261_102, &[("005930", 150_000_000, 1_200)]);
+    h.write_daily_micro(20_261_104, &[("005930", 50_000_000, 2_800)]);
+    h.write_daily_micro(20_261_110, &[("005930", -25_000_000, 1_000)]);
+
+    let from = kst(KstDate::new(2025, 1, 1).unwrap(), 0, 0, 0).unix();
+    let to = kst(KstDate::new(2026, 11, 20).unwrap(), 0, 0, 0).unix();
+
+    let (status, daily) = h.get(&format!("/api/symbols/005930/program-series?period=D&from={from}&to={to}")).await;
+    assert_eq!(status, 200, "{daily}");
+    assert_eq!(daily["state"], "ready");
+    assert_eq!(daily["period"], "D");
+    let pts = daily["points"].as_array().unwrap();
+    assert_eq!(pts.len(), 4, "{daily}");
+    assert_eq!(pts[0]["t"], kst(KstDate::new(2025, 12, 30).unwrap(), 0, 0, 0).unix());
+    assert!((pts[0]["netBuyAmountMillionWon"].as_f64().unwrap() - (-100.0)).abs() < 1e-6);
+    assert!(pts[0]["programSharePct"].is_null());
+    assert_eq!(pts[1]["t"], kst(KstDate::new(2026, 11, 2).unwrap(), 0, 0, 0).unix());
+    assert!((pts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 150.0).abs() < 1e-6);
+    assert!((pts[1]["programSharePct"].as_f64().unwrap() - 12.0).abs() < 1e-6);
+
+    let (sw, weekly) = h.get(&format!("/api/symbols/005930/program-series?period=W&from={from}&to={to}")).await;
+    assert_eq!(sw, 200, "{weekly}");
+    let wpts = weekly["points"].as_array().unwrap();
+    assert_eq!(wpts.len(), 3, "{weekly}");
+    assert_eq!(wpts[0]["t"], kst(KstDate::new(2025, 12, 29).unwrap(), 0, 0, 0).unix());
+    assert!((wpts[0]["netBuyAmountMillionWon"].as_f64().unwrap() - (-100.0)).abs() < 1e-6);
+    assert_eq!(wpts[1]["t"], kst(KstDate::new(2026, 11, 2).unwrap(), 0, 0, 0).unix());
+    assert!((wpts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 200.0).abs() < 1e-6);
+    assert!((wpts[1]["programSharePct"].as_f64().unwrap() - 20.0).abs() < 1e-6);
+    assert_eq!(wpts[2]["t"], kst(KstDate::new(2026, 11, 9).unwrap(), 0, 0, 0).unix());
+    assert!((wpts[2]["netBuyAmountMillionWon"].as_f64().unwrap() - (-25.0)).abs() < 1e-6);
+    assert!((wpts[2]["programSharePct"].as_f64().unwrap() - 10.0).abs() < 1e-6);
+
+    let (sm, monthly) = h.get(&format!("/api/symbols/005930/program-series?period=M&from={from}&to={to}")).await;
+    assert_eq!(sm, 200, "{monthly}");
+    let mpts = monthly["points"].as_array().unwrap();
+    assert_eq!(mpts.len(), 2, "{monthly}");
+    assert_eq!(mpts[0]["t"], kst(KstDate::new(2025, 12, 1).unwrap(), 0, 0, 0).unix());
+    assert_eq!(mpts[1]["t"], kst(KstDate::new(2026, 11, 1).unwrap(), 0, 0, 0).unix());
+    assert!((mpts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 175.0).abs() < 1e-6);
+
+    let (sq, quarterly) = h.get(&format!("/api/symbols/005930/program-series?period=Q&from={from}&to={to}")).await;
+    assert_eq!(sq, 200, "{quarterly}");
+    let qpts = quarterly["points"].as_array().unwrap();
+    assert_eq!(qpts.len(), 2, "{quarterly}");
+    assert_eq!(qpts[0]["t"], kst(KstDate::new(2025, 10, 1).unwrap(), 0, 0, 0).unix());
+    assert_eq!(qpts[1]["t"], kst(KstDate::new(2026, 10, 1).unwrap(), 0, 0, 0).unix());
+
+    let (sy, yearly) = h.get(&format!("/api/symbols/005930/program-series?period=Y&from={from}&to={to}")).await;
+    assert_eq!(sy, 200, "{yearly}");
+    let ypts = yearly["points"].as_array().unwrap();
+    assert_eq!(ypts.len(), 2, "{yearly}");
+    assert_eq!(ypts[0]["t"], kst(KstDate::new(2025, 1, 1).unwrap(), 0, 0, 0).unix());
+    assert_eq!(ypts[1]["t"], kst(KstDate::new(2026, 1, 1).unwrap(), 0, 0, 0).unix());
+
+    let empty_from = kst(KstDate::new(2026, 5, 1).unwrap(), 0, 0, 0).unix();
+    let empty_to = kst(KstDate::new(2026, 5, 10).unwrap(), 0, 0, 0).unix();
+    let (se, empty_page) = h.get(&format!("/api/symbols/005930/program-series?period=D&from={empty_from}&to={empty_to}")).await;
+    assert_eq!(se, 200, "{empty_page}");
+    assert_eq!(empty_page["state"], "ready");
+    assert_eq!(empty_page["points"], json!([]));
+}
+
+#[tokio::test]
+async fn program_series_daily_merges_today_live_flow_until_finalized_in_daily_micro() {
+    let h = Harness::start(true).await;
+    h.write_daily_micro(20_261_123, &[("005930", 120_000_000, 1_500)]);
+    h.write_links(TODAY, "collect-01", &[(at_sec(24, 9, 0, 0), "connected")]);
+    h.write_flow::<ProgramFlow>(
+        TODAY,
+        "collect-01",
+        &[program_flow_row(at_sec(24, 9, 5, 0) * 1000, "090500", 20, 80, 600, 60)],
+    );
+    h.write_flow::<TradeTicks>(
+        TODAY,
+        "collect-01",
+        &[tick_flow_row(at_sec(24, 9, 5, 0) * 1000, "090500", 100_000, 2_000)],
+    );
+
+    let (sd, daily) = h.get("/api/symbols/005930/program-series?period=D").await;
+    assert_eq!(sd, 200, "{daily}");
+    assert_eq!(daily["state"], "ready");
+    let pts = daily["points"].as_array().unwrap();
+    assert_eq!(pts.len(), 2, "{daily}");
+    assert_eq!(pts[0]["t"], at_sec(23, 0, 0, 0));
+    assert!((pts[0]["netBuyAmountMillionWon"].as_f64().unwrap() - 120.0).abs() < 1e-6);
+    assert!((pts[0]["programSharePct"].as_f64().unwrap() - 15.0).abs() < 1e-6);
+    assert_eq!(pts[1]["t"], at_sec(24, 0, 0, 0));
+    assert!((pts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 60.0).abs() < 1e-6);
+    assert_eq!(pts[1]["netBuyQty"], 600);
+    assert!((pts[1]["buyAmountMillionWon"].as_f64().unwrap() - 80.0).abs() < 1e-6);
+    assert!((pts[1]["sellAmountMillionWon"].as_f64().unwrap() - 20.0).abs() < 1e-6);
+    assert!((pts[1]["programSharePct"].as_f64().unwrap() - 50.0).abs() < 1e-6);
+    assert!((pts[1]["dayTradedMillionWon"].as_f64().unwrap() - 200.0).abs() < 1e-6);
+
+    let week_start = at_sec(23, 0, 0, 0);
+    let (sw, weekly) = h.get(&format!("/api/symbols/005930/program-series?period=W&from={week_start}&to={week_start}")).await;
+    assert_eq!(sw, 200, "{weekly}");
+    let wpts = weekly["points"].as_array().unwrap();
+    assert_eq!(wpts.len(), 1, "{weekly}");
+    assert_eq!(wpts[0]["t"], week_start);
+    assert!((wpts[0]["netBuyAmountMillionWon"].as_f64().unwrap() - 180.0).abs() < 1e-6);
+    assert!((wpts[0]["programSharePct"].as_f64().unwrap() - 32.5).abs() < 1e-6);
+
+    h.write_daily_micro(20_261_124, &[("005930", 75_000_000, 2_500)]);
+    let (sf, finalized) = h.get("/api/symbols/005930/program-series?period=D").await;
+    assert_eq!(sf, 200, "{finalized}");
+    let fpts = finalized["points"].as_array().unwrap();
+    assert_eq!(fpts.len(), 2, "{finalized}");
+    assert_eq!(fpts[1]["t"], at_sec(24, 0, 0, 0));
+    assert!((fpts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 75.0).abs() < 1e-6);
+    assert_eq!(fpts[1]["netBuyQty"], 0);
+    assert!((fpts[1]["programSharePct"].as_f64().unwrap() - 25.0).abs() < 1e-6);
+    assert!(fpts[1].get("dayTradedMillionWon").is_none());
 }

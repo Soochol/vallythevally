@@ -1031,7 +1031,7 @@ test("계층별 CVD의 모든 계층이 꺼져도 빈 패널의 pane 자리를 �
   };
   const program: IndicatorConfig = {
     id: "prog",
-    spec: { kind: "programFlow", showShare: false },
+    spec: { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: false },
     panel: "p-prog",
     visible: true,
     style: { colors: ["ind-2"], width: 1 },

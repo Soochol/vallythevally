@@ -763,8 +763,13 @@ impl MarketHub {
                 Venue::Nxt if tick.exchange != Some(Exchange::Nxt) => None,
                 Venue::Nxt => venue_volumes.map(|v| v.nxt),
             };
+            let traded_million_won = match venue {
+                Venue::Combined => day.traded_million_won,
+                Venue::Krx if !nxt_enabled => day.traded_million_won,
+                _ => None,
+            };
             if let Some(volume) = volume {
-                c.outbox.set_quote(quotes::realtime(symbol, venue, tick.price, base_centi, volume, at));
+                c.outbox.set_quote(quotes::realtime(symbol, venue, tick.price, base_centi, volume, traded_million_won, at));
                 sent_volume[venue_slot(venue)] = Some(volume);
             }
         }
@@ -1867,7 +1872,7 @@ mod tests {
         let StreamEvent::Tick { mut tick, received_at } = trade(h, hhmmss, price, 1, Some(exchange)) else {
             unreachable!("trade는 Tick이다")
         };
-        tick.day = Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative) });
+        tick.day = Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative), traded_million_won: None });
         StreamEvent::Tick { tick, received_at }
     }
 
@@ -3305,7 +3310,7 @@ mod tests {
             unreachable!("trade는 Tick이다")
         };
         tick.symbol = Symbol::parse(code).unwrap();
-        tick.day = Some(DayTotals { change_centi: day.0 * 100, cumulative: Volume(day.1) });
+        tick.day = Some(DayTotals { change_centi: day.0 * 100, cumulative: Volume(day.1), traded_million_won: None });
         StreamEvent::Tick { tick, received_at }
     }
 
@@ -3329,6 +3334,29 @@ mod tests {
 
     fn quote_messages(msgs: Vec<ServerMessage>) -> Vec<ServerMessage> {
         msgs.into_iter().filter(|m| matches!(m, ServerMessage::Quotes { .. })).collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn realtime_quote_forwards_traded_million_won_for_combined_only() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Combined);
+        settle().await;
+        let _ = take(&out).await;
+
+        let StreamEvent::Tick { mut tick, received_at } = trade(&h, (9, 0, 51), 71_000, 10, Some(Exchange::Krx)) else {
+            unreachable!("trade는 Tick이다")
+        };
+        tick.day = Some(DayTotals { change_centi: 100_000, cumulative: Volume(1_000), traded_million_won: Some(71) });
+        h.events.send(StreamEvent::Tick { tick, received_at }).await.unwrap();
+
+        let quotes = quote_messages(take(&out).await);
+        assert_eq!(quotes.len(), 1);
+        let ServerMessage::Quotes { quotes, .. } = &quotes[0] else {
+            unreachable!()
+        };
+        assert_eq!(quotes[0].traded_million_won, Some(71));
     }
 
     fn samsung_code(venue: Venue) -> String {

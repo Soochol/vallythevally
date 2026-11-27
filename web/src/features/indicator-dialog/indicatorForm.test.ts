@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { IndicatorSpec } from "../../api/generated/IndicatorSpec";
-import { colorsFrom, isFinancial, isFinancialBar, isQuote, KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
+import { colorsFrom, isFinancial, isFinancialBar, isFlow, isQuote, KIND_ORDER, KINDS } from "../../chart/indicators/kinds";
 import type { HexColor } from "../../lib/colors";
 import { addIndicator, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../../chart/settings";
 import {
@@ -104,7 +104,14 @@ test("색 견본은 색을 고를 선이 있을 때만 보인다", () => {
   expect(hasColor(volume)).toBe(true);
   expect(hasColor(edit(volume, {}, { maPeriod: false }))).toBe(false);
   expect(hasColor(edit(volume, { maPeriod: "" }))).toBe(true);
-  for (const kind of KIND_ORDER.filter((k) => { const spec = KINDS[k].defaults; return k !== "volume" && !isQuote(spec) && !(isFinancial(spec) && isFinancialBar(spec.kind)); })) expect(hasColor(formFromSpec(KINDS[kind].defaults))).toBe(true);
+  const foreign = formFromSpec(KINDS.foreignFlow.defaults);
+  expect(hasColor(foreign)).toBe(false);
+  expect(hasColor(edit(foreign, { displayMode: "line" }))).toBe(true);
+  expect(hasColor(edit(foreign, { displayMode: "both" }))).toBe(true);
+  const prog = formFromSpec(KINDS.programFlow.defaults);
+  expect(hasColor(prog)).toBe(false);
+  expect(hasColor(edit(prog, { showShare: "true" }))).toBe(true);
+  for (const kind of KIND_ORDER.filter((k) => { const spec = KINDS[k].defaults; return k !== "volume" && !isQuote(spec) && !isFlow(spec) && !(isFinancial(spec) && isFinancialBar(spec.kind)); })) expect(hasColor(formFromSpec(KINDS[kind].defaults))).toBe(true);
 });
 
 test("주 버튼은 무엇이 추가될지를 말하고, 편집이면 변경 적용이다", () => {
@@ -137,12 +144,18 @@ test("편집은 그 지표의 설정과 모양으로, 추가는 기본값과 자
   expect(startDraft(null, "ma")).toMatchObject({ placement: "price" });
 });
 
-test("막대 불투명도는 거래량 스타일에만 담고, 겹치기는 거래량만 고를 수 있다", () => {
+test("막대 불투명도는 거래량과 수급 막대 스타일에만 담고, 겹치기는 거래량만 고를 수 있다", () => {
   const volume = { ...startDraft(null, "volume"), barOpacity: 0.55 };
   expect(draftStyle(volume, ["ind-1"])).toEqual({ colors: ["ind-1"], width: 1, barOpacity: 0.55 });
   expect(draftStyle({ ...startDraft(null, "macd"), barOpacity: 0.55 }, ["ind-1"])).toEqual({ colors: ["ind-1"], width: 1 });
+  const foreignDraft = startDraft(null, "foreignFlow");
+  expect(foreignDraft.barOpacity).toBe(0.72);
+  expect(draftStyle(foreignDraft, ["ind-1"])).toEqual({ colors: ["ind-1"], width: 1, barOpacity: 0.72 });
+  expect(hasBarOpacity(foreignDraft.form)).toBe(true);
+  expect(hasBarOpacity(edit(foreignDraft.form, { displayMode: "line" }))).toBe(false);
+  expect(draftStyle({ ...foreignDraft, form: edit(foreignDraft.form, { displayMode: "line" }) }, ["ind-1"])).toEqual({ colors: ["ind-1"], width: 1 });
   expect(KIND_ORDER.filter(canOverlayPrice)).toEqual(["volume"]);
-  expect(KIND_ORDER.filter(hasBarOpacity)).toEqual(["volume"]);
+  expect(KIND_ORDER.filter(hasBarOpacity)).toEqual(["volume", "programFlow", "foreignFlow", "institutionFlow"]);
 });
 
 test("새 지표의 색은 이 칸에서 아직 쓰지 않은 첫 색이다", () => {
@@ -173,12 +186,15 @@ test("히트맵 설정 양식은 값을 그대로 오간다", () => {
   expect(checkForm({ ...form, text: { ...form.text, maxOpacity: "19" } }, null).errors.map((error) => error.field)).toEqual(["maxOpacity"]);
 });
 
-test("재무·호가 지표만 주기 안내 문구를 돌려준다", () => {
+test("재무·호가·수급 지표만 주기 안내 문구를 돌려준다", () => {
   expect(indicatorPeriodNotice("revenue")).toContain("분기봉·연봉");
   expect(indicatorPeriodNotice("quoteTotals")).toContain("주식·ETF 분봉");
   expect(indicatorPeriodNotice("quoteDepth")).toContain("주식·ETF 분봉");
   expect(indicatorPeriodNotice("tickCvd")).toContain("주식·ETF 분봉");
   expect(indicatorPeriodNotice("programFlow")).toContain("주식·ETF 분봉");
+  expect(indicatorPeriodNotice("programFlow")).toContain("일봉 이상");
+  expect(indicatorPeriodNotice("foreignFlow")).toContain("일봉 이상");
+  expect(indicatorPeriodNotice("institutionFlow")).toContain("일봉 이상");
   expect(indicatorPeriodNotice("ma")).toBeNull();
   expect(indicatorPeriodNotice("rsi")).toBeNull();
 });
