@@ -23,6 +23,12 @@ const phoneTabs = (page: Page) => page.getByRole("navigation", { name: "휴대�
 const openPhoneScreener = (page: Page) => phoneTabs(page).getByRole("button", { name: "스크리너" }).click();
 
 async function runSeededScreen(scenario: Scenario, page: Page, openPanel: (page: Page) => Promise<void>) {
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({
+    ...layout,
+    revision: layout.revision + 1,
+    windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "screener" ? { ...w, link: "a" } : w)),
+  });
   scenario.documents.saveScreens({ screens: [SEEDED_SCREEN], revision: 1 });
   await page.goto("/");
   await openPanel(page);
@@ -48,6 +54,12 @@ async function holdSymbolInfo(scenario: Scenario, page: Page, code: string) {
 }
 
 test("업데이트 상태와 조건식 결과를 표시하고 종목을 칸의 거래소와 봉 주기대로 열며, 자료 부족을 안내하고 조건식을 고치고 지운다", async ({ scenario, screener, page }) => {
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({
+    ...layout,
+    revision: layout.revision + 1,
+    windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "screener" ? { ...w, link: "a" } : w)),
+  });
   const barRequests: string[] = [];
   page.on("request", (req) => {
     const url = new URL(req.url());

@@ -70,7 +70,7 @@ function setupPreMarketMocks(scenario: Scenario) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
-    ...layout.windows.filter((w) => w.kind !== "chart"),
+    ...layout.windows.filter((w) => w.kind !== "chart").map((w) => (w.kind === "watchlist" ? { ...w, link: "a" as const } : w)),
   ];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
 
@@ -245,7 +245,7 @@ test("실시간 flow 모드에서는 비교 자료를 주기적으로 갱신하�
   const windows: LayoutWindow[] = [
     { id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
     { id: "premarket", link: "a", kind: "premarket" },
-    ...layout.windows.filter((w) => w.kind !== "chart"),
+    ...layout.windows.filter((w) => w.kind !== "chart").map((w) => (w.kind === "watchlist" ? { ...w, link: "a" as const } : w)),
   ];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   const wl = scenario.documents.watchlists();

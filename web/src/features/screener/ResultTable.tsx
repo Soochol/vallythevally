@@ -80,9 +80,10 @@ interface Props {
   sort: ResultSort;
   onSort(sort: ResultSort): void;
   onSelect(code: SymbolCode): void;
+  onOpenInCell(code: SymbolCode): void;
 }
 
-export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSelect }: Props) {
+export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSelect, onOpenInCell }: Props) {
   const table = useRef<HTMLTableElement>(null);
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const [menu, setMenu] = useState<ResultMenuState | null>(null);
@@ -277,7 +278,7 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
       </tr>;
     })}</tbody>
   </table>
-  {menu && menuRow && <ResultRowMenu row={menuRow} menu={menu} root={table} onOpen={() => onSelect(menu.code)}
+  {menu && menuRow && <ResultRowMenu row={menuRow} menu={menu} root={table} onOpen={() => onOpenInCell(menu.code)}
     onWatchlists={() => { table.current?.querySelector<HTMLButtonElement>(`tr[data-code="${menu.code}"] button`)?.focus(); setMenu({ ...menu, kind: "watchlists" }); }}
     onClose={() => setMenu((current) => current === menu ? null : current)} />}
   </>;

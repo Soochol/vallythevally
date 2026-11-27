@@ -61,6 +61,37 @@ export function createRowPreviewStore(): RowPreviewStore {
   };
 }
 
+export function createRowSelectionStore(): RowPreviewStore {
+  let current: string | null = null;
+  const listeners = new Map<string, Set<() => void>>();
+  const notifyKey = (key: string) => {
+    const bucket = listeners.get(key);
+    if (bucket) for (const listener of bucket) listener();
+  };
+  return {
+    get: () => current,
+    set: (next) => {
+      if (next === current) return;
+      const previous = current;
+      current = next;
+      if (previous !== null) notifyKey(previous);
+      if (next !== null) notifyKey(next);
+    },
+    subscribe: (key, listener) => {
+      let bucket = listeners.get(key);
+      if (!bucket) {
+        bucket = new Set();
+        listeners.set(key, bucket);
+      }
+      bucket.add(listener);
+      return () => {
+        bucket.delete(listener);
+        if (bucket.size === 0) listeners.delete(key);
+      };
+    },
+  };
+}
+
 export function visibleWatchRows(list: Watchlist, collapsed: readonly string[]): WatchRowRef[] {
   const hidden = new Set(collapsed);
   const rows: WatchRowRef[] = [];

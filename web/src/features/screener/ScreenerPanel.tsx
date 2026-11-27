@@ -56,7 +56,7 @@ import { ownsChartKeyboard } from "../overlay/topLayer";
 import { DataAgeNote } from "../data-age/DataAgeNote";
 import { RESULT_KEYS_HINT, ResultTable } from "./ResultTable";
 import { ScreenerColumnPicker } from "./ScreenerColumnPicker";
-import { dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
+import { dropPendingOpen, openResult, openResultInCell, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
 import { nextResult, resultKeyAction } from "./results";
 
 const PANEL_POLL_MS = 1_000;
@@ -184,6 +184,7 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
   const active = useWatchedSymbol(id);
   const [editing, setEditing] = useState(false);
   const select = (code: SymbolCode) => void openResult(queryClient, code, id);
+  const openInCell = (code: SymbolCode) => void openResultInCell(queryClient, code, id);
   const execute = () => {
     void screenEditing.run().then((outcome) => {
       if (outcome.kind === "invalid" && desktop) setEditing(true);
@@ -236,7 +237,7 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           {screen ? (
-            <Results screen={screen} run={run} rows={rows} filteredRows={filteredRows} filter={resultFilter} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : () => openDialog(id)} selected={active} onSelect={select} />
+            <Results screen={screen} run={run} rows={rows} filteredRows={filteredRows} filter={resultFilter} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : () => openDialog(id)} selected={active} onSelect={select} onOpenInCell={openInCell} />
           ) : (
             <NoScreen query={screens} onCreate={createScreen} onPreset={createPreset} />
           )}
@@ -503,9 +504,10 @@ interface ResultsProps {
   onEdit(): void;
   selected: SymbolCode | null;
   onSelect(code: SymbolCode): void;
+  onOpenInCell(code: SymbolCode): void;
 }
 
-function Results({ screen, run, rows, filteredRows, filter, status, block, onRun, onEdit, selected, onSelect }: ResultsProps) {
+function Results({ screen, run, rows, filteredRows, filter, status, block, onRun, onEdit, selected, onSelect, onOpenInCell }: ResultsProps) {
   const result = shownResult(run);
   const storeVersion = useScreenerStore((s) => s.storeVersion);
   const rerun = block === null ? rerunReason(run, storeVersion, status) : null;
@@ -524,7 +526,7 @@ function Results({ screen, run, rows, filteredRows, filter, status, block, onRun
           <RetryButton disabled={block !== null} onClick={onRun} />
         </div>
       )}
-      <ResultList screen={screen} result={result} rows={rows} filteredRows={filteredRows} filter={filter} running={run?.kind === "running"} rerun={rerun} onRun={onRun} onEdit={onEdit} selected={selected} onSelect={onSelect} />
+      <ResultList screen={screen} result={result} rows={rows} filteredRows={filteredRows} filter={filter} running={run?.kind === "running"} rerun={rerun} onRun={onRun} onEdit={onEdit} selected={selected} onSelect={onSelect} onOpenInCell={onOpenInCell} />
     </>
   );
   if (failure) return (
@@ -601,7 +603,7 @@ function ResultInfo({ result }: { result: ScreenerResult }) {
   );
 }
 
-function ResultList({ screen, result, rows, filteredRows, filter, running, rerun, onRun, onEdit, selected, onSelect }: ResultListProps) {
+function ResultList({ screen, result, rows, filteredRows, filter, running, rerun, onRun, onEdit, selected, onSelect, onOpenInCell }: ResultListProps) {
   const sort = useScreenerStore((s) => s.sort);
   const left = result.excluded.listedTooShort + result.excluded.historyShort;
   const hasFilter = filter.query.trim() !== "" || filter.onlyRising || filter.onlyBothBuy;
@@ -696,7 +698,7 @@ function ResultList({ screen, result, rows, filteredRows, filter, running, rerun
           검색어나 필터를 풀면 결과를 다시 볼 수 있습니다.
         </StatePanel>
       ) : (
-        <ResultTable screen={screen} asOf={result.asOf} rows={filteredRows} selected={selected} sort={sort} onSort={useScreenerStore.getState().setSort} onSelect={onSelect} />
+        <ResultTable screen={screen} asOf={result.asOf} rows={filteredRows} selected={selected} sort={sort} onSort={useScreenerStore.getState().setSort} onSelect={onSelect} onOpenInCell={onOpenInCell} />
       )}
     </section>
   );

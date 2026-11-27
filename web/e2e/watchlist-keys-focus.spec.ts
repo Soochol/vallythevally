@@ -28,6 +28,12 @@ const pressHead = (page: Page, count: number, id = "watchlist") => watchPanel(pa
 const showsSymbol = (page: Page, name: string) => expect(cell(page)).toHaveAttribute("aria-label", new RegExp(`^칸 1: ${name} `));
 
 function seedWatchlist(scenario: Scenario, symbols: string[]) {
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({
+    ...layout,
+    revision: layout.revision + 1,
+    windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "watchlist" ? { ...w, link: "a" } : w)),
+  });
   scenario.documents.saveWatchlists({ revision: 100, lists: [{ id: "L", name: "기본", symbols, groups: [] }] });
 }
 
@@ -133,10 +139,10 @@ test("관심종목 창이 둘이면 마지막으로 누른 창의 목록만 움�
   screener.showResult(result);
 
   const layout = scenario.documents.layout();
-  const chart = layout.windows.find((w) => w.kind === "chart")!;
-  const screen = layout.windows.find((w) => w.kind === "screener")!;
-  const watch1: LayoutWindow = { id: "watchlist", link: null, kind: "watchlist", list: "L1" };
-  const watch2: LayoutWindow = { id: "watchlist-2", link: null, kind: "watchlist", list: "L2" };
+  const chart: LayoutWindow = { ...layout.windows.find((w) => w.kind === "chart")!, link: "a" };
+  const screen: LayoutWindow = { ...layout.windows.find((w) => w.kind === "screener")!, link: "a" };
+  const watch1: LayoutWindow = { id: "watchlist", link: "a", kind: "watchlist", list: "L1" };
+  const watch2: LayoutWindow = { id: "watchlist-2", link: "a", kind: "watchlist", list: "L2" };
   scenario.documents.saveLayout({
     ...layout,
     revision: layout.revision + 1,

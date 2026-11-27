@@ -16,6 +16,7 @@ interface Props {
   cursor: SymbolCode | null;
   watched: SymbolCode | null;
   onChoose(row: RankingRow): void;
+  onOpenInCell(row: RankingRow): void;
   onCursor(code: SymbolCode): void;
   onNearEnd(): void;
   scroller: React.RefObject<HTMLDivElement | null>;
@@ -31,7 +32,7 @@ function ValueCell({ column, row }: { column: Column; row: RankingRow }) {
   return <>{cell.text}</>;
 }
 
-export function RankingTable({ ranking, rows, cursor, watched, onChoose, onCursor, onNearEnd, scroller }: Props) {
+export function RankingTable({ ranking, rows, cursor, watched, onChoose, onOpenInCell, onCursor, onNearEnd, scroller }: Props) {
   const all = useMemo(() => columnsFor(ranking), [ranking]);
   const fit = useCallback((chosen: readonly Column[], width: number) => fitRankingColumns(ranking.kind, chosen, width), [ranking.kind]);
   const columns = useFitted(scroller, all, fit);
@@ -129,7 +130,7 @@ export function RankingTable({ ranking, rows, cursor, watched, onChoose, onCurso
           })}
         </tbody>
       </table>
-      {menu && menuRow && <RankingRowMenu row={menuRow} menu={menu} root={table} onOpen={() => onChoose(menuRow)}
+      {menu && menuRow && <RankingRowMenu row={menuRow} menu={menu} root={table} onOpen={() => onOpenInCell(menuRow)}
         onWatchlists={() => setMenu({ ...menu, kind: "watchlists" })}
         onClose={() => setMenu((current) => current === menu ? null : current)} />}
     </div>

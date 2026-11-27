@@ -38,7 +38,7 @@ import { GroupHead, type HeadDrop, REFUSAL_NOTE, UngroupedHead } from "./GroupHe
 import { type GroupNaming, setCollapsed, startGroup } from "./groupActions";
 import { WatchColumnPicker } from "./WatchColumnPicker";
 import { type RowDrag, WatchRow } from "./WatchRow";
-import { createRowPreviewStore, useWatchKeys } from "./watchKeys";
+import { createRowPreviewStore, createRowSelectionStore, useWatchKeys } from "./watchKeys";
 import { useFitted } from "../list/useFitted";
 import { useBeforeConnect } from "../status/beforeConnect";
 
@@ -274,6 +274,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
   const scroller = useRef<HTMLElement>(null);
   const [focusRow, setFocusRow] = useState<WatchRowRef | null>(null);
   const preview = useMemo(() => createRowPreviewStore(), []);
+  const selection = useMemo(() => createRowSelectionStore(), []);
   const template = useMemo(() => ({ gridTemplateColumns: columnTemplate(variant, columns) }), [variant, columns]);
   const sections = watchSections(list);
 
@@ -400,7 +401,6 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
       drop: (e) => dropOn(e, { groupId, before: null }, null),
     };
   };
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const grouped = list.groups.length > 0;
   const rows = (section: WatchSection) => {
     const sectionId = section.group?.id ?? null;
@@ -421,8 +421,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
           variant={variant}
           sender={sender}
           preview={variant === "desktop" ? preview : null}
-          selectedKey={selectedKey}
-          onSelect={setSelectedKey}
+          selection={selection}
           editing={editing}
           dropBefore={sameSection ? here : joins}
           dragging={dragged !== null && dragged.code === code && dragged.groupId === sectionId}

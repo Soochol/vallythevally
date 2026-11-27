@@ -54,7 +54,7 @@ test("Ctrl+Enter는 실행, ↑↓는 이동이고 Enter 단독·다른 조합�
 });
 
 test("결과 표는 세 열과 정렬·선택 상태, 오래된 일봉·잠정 정보를 읽을 수 있게 표시한다", () => {
-  const html = renderToStaticMarkup(createElement(ResultTable, { screen, rows, asOf: "2026-11-12", selected: "000660", sort: nextSort(DEFAULT_SORT, "close"), onSort: () => {}, onSelect: () => {} }));
+  const html = renderToStaticMarkup(createElement(ResultTable, { screen, rows, asOf: "2026-11-12", selected: "000660", sort: nextSort(DEFAULT_SORT, "close"), onSort: () => {}, onSelect: () => {}, onOpenInCell: () => {} }));
   expect(html.match(/scope="col"/g)).toHaveLength(3);
   expect(html).toContain('aria-sort="descending"');
   expect(html).toContain('aria-label="현재가 순으로 정렬"');
@@ -77,7 +77,7 @@ test("미시 수급 값이 있으면 프로그램·고래·VI 열을 함께 표�
   expect(sortRows(microRows, { key: "programNetMillionWon", descending: true }).map((r) => r.symbol)).toEqual(["005930", "000660"]);
   expect(sortRows(microRows, { key: "whaleNetMillionWon", descending: true }).map((r) => r.symbol)).toEqual(["000660", "005930"]);
   expect(sortRows(microRows, { key: "viCount", descending: true }).map((r) => r.symbol)).toEqual(["005930", "000660"]);
-  const html = renderToStaticMarkup(createElement(ResultTable, { screen, rows: microRows, asOf: "2026-11-12", selected: "005930", sort: nextSort(DEFAULT_SORT, "programNetMillionWon"), onSort: () => {}, onSelect: () => {} }));
+  const html = renderToStaticMarkup(createElement(ResultTable, { screen, rows: microRows, asOf: "2026-11-12", selected: "005930", sort: nextSort(DEFAULT_SORT, "programNetMillionWon"), onSort: () => {}, onSelect: () => {}, onOpenInCell: () => {} }));
   expect(html.match(/scope="col"/g)).toHaveLength(6);
   expect(html).toContain('aria-label="프로그램 순으로 정렬"');
   expect(html).toContain('aria-label="고래 순으로 정렬"');

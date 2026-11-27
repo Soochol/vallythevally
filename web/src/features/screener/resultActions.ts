@@ -51,6 +51,12 @@ export async function openResult(queryClient: QueryClient, code: SymbolCode, sen
   useSelectionStore.getState().setPhoneTab("chart");
 }
 
+export function openResultInCell(queryClient: QueryClient, code: SymbolCode, sender: WindowId | null): Promise<void> {
+  const layout = useLayoutStore.getState().layout;
+  const senderWindow = sender === null ? undefined : layout.windows.find((w) => w.id === sender);
+  return openResult(queryClient, code, senderWindow && senderWindow.link === null ? null : sender);
+}
+
 export function sendToWatchlist(listId: string, codes: readonly SymbolCode[]) {
   const store = useWatchlistStore.getState();
   const list = store.lists.find((list) => list.id === listId);

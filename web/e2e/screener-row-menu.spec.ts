@@ -15,6 +15,12 @@ const toast = (page: Page) => page.locator(".ui-toast").last();
 const compareOf = async (scenario: Scenario) => (firstChart(await scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings as { compare: string[] }).compare;
 
 test.beforeEach(async ({ scenario, screener, page }) => {
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({
+    ...layout,
+    revision: layout.revision + 1,
+    windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "screener" ? { ...w, link: "a" } : w)),
+  });
   scenario.documents.saveScreens({ revision: 1, screens: [{ id: "all", name: "모든 종목", markets: [], exclude: [], conditions: [] }] });
   scenario.documents.saveWatchlists({ revision: 100, lists: [
     { id: "base", name: "기본", symbols: [first!.symbol] },
