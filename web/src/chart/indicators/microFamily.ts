@@ -10,14 +10,30 @@ import type { TickCvdPage } from "../../api/generated/TickCvdPage";
 import type { TickCvdPoint } from "../../api/generated/TickCvdPoint";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { fetchProgramSeries, fetchTickCvd, type MicroRange } from "../../api/microSeries";
-import { MINUS } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import { kstDateOf } from "../barJump";
-import { type DateRange, mergeRanges, missingFromRanges, rangesContain } from "../quotes/coverage";
+import { type DateRange, mergeRanges, missingFromRanges, missingUnchunked, rangesContain } from "../quotes/coverage";
 import type { IndicatorConfig } from "../settings";
 import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { isIntraday } from "../time";
-import { isProgramFlow, isTickCvd, LINE_LABEL, lineColor, type PlotLineId, specLines, specName } from "./kinds";
+import {
+  bucketInclusiveEndDate,
+  buildProgramFlowSeries,
+  formatFlowValue,
+  formatMillionWonValue,
+  type ProgramFlowSeriesData,
+} from "./flowSeries";
+import {
+  colorLine,
+  isProgramFlow,
+  isTickCvd,
+  LINE_LABEL,
+  lineColor,
+  type PlotLineId,
+  type ProgramFlowSpec,
+  specLines,
+  specName,
+} from "./kinds";
 import type { IndicatorRow, LegendValue } from "./layer";
 
 export const MID_MIN_WON = 5_000_000;
@@ -178,18 +194,10 @@ export function applyLiveProgramToPoints(
   return next;
 }
 
-const intFmt = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
 const dec1Fmt = new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const dec2Fmt = new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function formatMillionWon(value: number): string {
-  if (!Number.isFinite(value)) return "—";
-  const sign = value > 0 ? "+" : value < 0 ? MINUS : "";
-  const abs = Math.abs(value);
-  if (abs >= 100) return `${sign}${dec2Fmt.format(abs / 100)}억`;
-  if (abs === 0) return "0백만";
-  if (Math.abs(abs - Math.round(abs)) < 0.05) return `${sign}${intFmt.format(Math.round(abs))}백만`;
-  return `${sign}${dec1Fmt.format(abs)}백만`;
+  return formatMillionWonValue(value);
 }
 
 export function formatSharePct(pct: number | null): string {
@@ -206,8 +214,19 @@ const MICRO_STATE_TEXT: Readonly<Partial<Record<MicroFeedState, string>>> = {
   failed: "수급 자료 조회 실패",
 };
 
+const PROGRAM_STATE_TEXT: Readonly<Partial<Record<MicroFeedState, string>>> = {
+  disabled: "수집 폴더 미설정",
+  not_collected: "수집하지 않는 종목",
+  unsupported: "주식·ETF 전용",
+  failed: "수급 자료 조회 실패",
+};
+
 export function microStateMessage(state: MicroFeedState): string | null {
   return MICRO_STATE_TEXT[state] ?? null;
+}
+
+export function programStateMessage(state: MicroFeedState): string | null {
+  return PROGRAM_STATE_TEXT[state] ?? null;
 }
 
 export function tickCvdLineValue(lineId: PlotLineId, point: TickCvdPoint): number {
@@ -294,11 +313,21 @@ function targetKey(target: MicroTarget): string {
   return `${target.symbol}:${target.period}`;
 }
 
+interface ProgramSeriesCacheEntry {
+  readonly rev: number;
+  readonly bars: readonly Bar[];
+  readonly period: Period;
+  readonly spec: ProgramFlowSpec;
+  readonly data: ProgramFlowSeriesData;
+}
+
 export class MicroIndicatorController {
   private readonly fetchCvd: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<TickCvdPage>;
   private readonly fetchProgram: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<ProgramSeriesPage>;
   private readonly cvd = emptyStore<TickCvdPoint, FeedTrade>();
   private readonly program = emptyStore<ProgramSeriesPoint, FeedProgramRow>();
+  private readonly programSeriesCache = new Map<string, ProgramSeriesCacheEntry>();
+  private programRev = 0;
   private readonly httpDayTradedWon = new Map<string, { t: UnixSeconds; won: number }>();
   private readonly liveDayTradedWon = new Map<string, number>();
   private target: MicroTarget | null = null;
@@ -332,6 +361,7 @@ export class MicroIndicatorController {
       this.cvd.pendingLive = [];
       this.program.liveLatestT = null;
       this.program.pendingLive = [];
+      this.programRev++;
       this.liveDayTradedWon.clear();
     }
   }
@@ -340,22 +370,26 @@ export class MicroIndicatorController {
     this.httpDayTradedWon.clear();
     this.liveDayTradedWon.clear();
     if (this.cvdActive && this.cvd.key !== null) resetStore(this.cvd, this.cvd.key, "loading");
-    if (this.programActive && this.program.key !== null) resetStore(this.program, this.program.key, "loading");
+    if (this.programActive && this.program.key !== null) {
+      resetStore(this.program, this.program.key, "loading");
+      this.programRev++;
+    }
   }
 
   syncFeeds(): void {
     const target = this.target;
     const configs = this.host.configs();
-    const eligible = target !== null && !isIndexCode(target.symbol) && isIntraday(target.period);
+    const programEligible = target !== null && !isIndexCode(target.symbol);
+    const cvdEligible = programEligible && isIntraday(target.period);
     const hasCvd = configs.some((c) => isTickCvd(c.spec) && c.visible);
     const hasProgram = configs.some((c) => isProgramFlow(c.spec) && c.visible);
     const hasProgramShare = configs.some((c) => isProgramFlow(c.spec) && c.visible && c.spec.showShare);
     const prevShareActive = this.programShareActive;
 
-    this.cvdActive = eligible && hasCvd;
+    this.cvdActive = cvdEligible && hasCvd;
     if (!hasCvd) {
       if (this.cvd.key !== null || this.cvd.points.size > 0) resetStore(this.cvd, null, "loading");
-    } else if (!eligible) {
+    } else if (!cvdEligible) {
       if (this.cvd.state !== "unsupported" || this.cvd.key !== null) {
         resetStore(this.cvd, null, "unsupported");
         this.host.onTickCvdChanged(null);
@@ -368,14 +402,18 @@ export class MicroIndicatorController {
       }
     }
 
-    this.programActive = eligible && hasProgram;
-    this.programShareActive = eligible && hasProgramShare;
+    this.programActive = programEligible && hasProgram;
+    this.programShareActive = cvdEligible && hasProgramShare;
     if (!hasProgram) {
-      if (this.program.key !== null || this.program.points.size > 0) resetStore(this.program, null, "loading");
+      if (this.program.key !== null || this.program.points.size > 0) {
+        resetStore(this.program, null, "loading");
+        this.programRev++;
+      }
       this.httpDayTradedWon.clear();
-    } else if (!eligible) {
+    } else if (!programEligible) {
       if (this.program.state !== "unsupported" || this.program.key !== null) {
         resetStore(this.program, null, "unsupported");
+        this.programRev++;
         this.httpDayTradedWon.clear();
         this.host.onProgramChanged(null);
       }
@@ -383,10 +421,12 @@ export class MicroIndicatorController {
       const key = targetKey(target);
       if (this.program.key !== key) {
         resetStore(this.program, key, "loading");
+        this.programRev++;
         this.httpDayTradedWon.clear();
         this.host.onProgramChanged(null);
       } else if (!prevShareActive && this.programShareActive && !this.cvdActive && this.program.have.length > 0) {
         resetStore(this.program, key, "loading");
+        this.programRev++;
         this.httpDayTradedWon.clear();
         this.liveDayTradedWon.clear();
       }
@@ -402,9 +442,13 @@ export class MicroIndicatorController {
     if (!first || !last) return;
     const fromDate = kstDateOf(first.t);
     const toDate = kstDateOf(last.t);
-    const need: DateRange = fromDate <= toDate ? { from: fromDate, to: toDate } : { from: toDate, to: fromDate };
-    if (this.cvdActive) this.coverCvd(this.target, need);
-    if (this.programActive) this.coverProgram(this.target, need);
+    const cvdNeed: DateRange = fromDate <= toDate ? { from: fromDate, to: toDate } : { from: toDate, to: fromDate };
+    if (this.cvdActive) this.coverCvd(this.target, cvdNeed);
+    if (this.programActive) {
+      const programTo = isIntraday(this.target.period) ? toDate : bucketInclusiveEndDate(last.t, this.target.period);
+      const programNeed: DateRange = fromDate <= programTo ? { from: fromDate, to: programTo } : { from: programTo, to: fromDate };
+      this.coverProgram(this.target, programNeed);
+    }
   }
 
   applyLiveTrade(symbol: SymbolCode, tick: FeedTrade): boolean {
@@ -439,6 +483,7 @@ export class MicroIndicatorController {
     if (!updated) return false;
     if (this.program.state !== "ready") this.program.state = "ready";
     if (this.program.liveLatestT === null || updated.t > this.program.liveLatestT) this.program.liveLatestT = updated.t;
+    this.programRev++;
     this.host.onProgramChanged(updated.t);
     return true;
   }
@@ -491,36 +536,86 @@ export class MicroIndicatorController {
     return { id: config.id, name: specName(config.spec), color: primary, values, state: "ok", panel };
   }
 
+  programSeriesFor(config: IndicatorConfig): ProgramFlowSeriesData {
+    if (!isProgramFlow(config.spec)) {
+      return { bar: [], line: [], cum: [], share: [], byTime: new Map() };
+    }
+    const bars = this.host.bars();
+    const period = this.target?.period ?? "1m";
+    const cached = this.programSeriesCache.get(config.id);
+    if (
+      cached
+      && cached.rev === this.programRev
+      && cached.bars === bars
+      && cached.period === period
+      && cached.spec === config.spec
+    ) {
+      return cached.data;
+    }
+    const data = buildProgramFlowSeries(bars, period, this.program.points, this.program.liveLatestT, config.spec);
+    this.programSeriesCache.set(config.id, { rev: this.programRev, bars, period, spec: config.spec, data });
+    return data;
+  }
+
   programFlowRow(
     config: IndicatorConfig,
     time: UnixSeconds | null,
     tokens: ThemeTokens,
     panel: IndicatorRow["panel"],
   ): IndicatorRow {
-    const lines = specLines(config.spec);
-    const primary = lines.length > 0 ? indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, 0)) : tokens.text2;
-    if (!config.visible) return { id: config.id, name: specName(config.spec), color: primary, values: [], state: "hidden", panel };
+    if (!isProgramFlow(config.spec)) {
+      return { id: config.id, name: specName(config.spec), color: tokens.text2, values: [], state: "ok", panel };
+    }
+    const spec = config.spec;
+    const lines = specLines(spec);
+    const primaryIdx = colorLine(spec);
+    const primary = primaryIdx !== null
+      ? indicatorColorValue(tokens, lineColor(spec, config.style.colors, primaryIdx))
+      : tokens.text2;
+    if (!config.visible) return { id: config.id, name: specName(spec), color: primary, values: [], state: "hidden", panel };
     const state = this.program.state;
-    const pt = this.resolvePoint(this.program, time);
-    if (state === "loading" && !pt) return { id: config.id, name: specName(config.spec), color: primary, values: [], state: "pending", panel };
-    const statusText = microStateMessage(state);
+    const series = this.programSeriesFor(config);
+    const lastBarT = this.host.bars().at(-1)?.t ?? null;
+    const resolvedTime =
+      time !== null && lastBarT !== null && time === lastBarT && this.program.liveLatestT !== null && this.program.liveLatestT > time && series.byTime.has(this.program.liveLatestT)
+        ? this.program.liveLatestT
+        : time;
+    const entry = resolvedTime !== null ? series.byTime.get(resolvedTime) : undefined;
+    if (state === "loading" && !entry) return { id: config.id, name: specName(spec), color: primary, values: [], state: "pending", panel };
+    const statusText = programStateMessage(state);
     if (statusText !== null) {
-      return { id: config.id, name: specName(config.spec), color: primary, values: [{ text: statusText, color: tokens.text2 }], state: "ok", panel };
+      return { id: config.id, name: specName(spec), color: primary, values: [{ text: statusText, color: tokens.text2 }], state: "ok", panel };
     }
     const values: LegendValue[] = lines.map((lineId, i) => {
-      const color = indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, i));
-      const formatted = pt
-        ? (lineId === "programShare" ? formatSharePct(pt.programSharePct) : formatMillionWon(pt.netBuyAmountMillionWon))
-        : "—";
-      return { text: `${LINE_LABEL[lineId]} ${formatted}`, color };
+      if (lineId === "programShare") {
+        const color = indicatorColorValue(tokens, lineColor(spec, config.style.colors, i));
+        return { text: `${LINE_LABEL[lineId]} ${entry ? formatSharePct(entry.sharePct) : "—"}`, color };
+      }
+      if (lineId === "flowBar") {
+        const val = entry
+          ? (spec.displayMode === "both" ? entry.bar : spec.aggregation === "cumulative" ? entry.cum : entry.bar)
+          : null;
+        const color = val === null || val === 0 ? tokens.text2 : val > 0 ? tokens.up : tokens.down;
+        return { text: `${LINE_LABEL[lineId]} ${val === null ? "—" : formatFlowValue(val, spec.unit)}`, color };
+      }
+      const color = indicatorColorValue(tokens, lineColor(spec, config.style.colors, i));
+      const val = !entry
+        ? null
+        : lineId === "flowCum"
+          ? entry.cum
+          : spec.aggregation === "cumulative"
+            ? entry.cum
+            : entry.bar;
+      return { text: `${LINE_LABEL[lineId]} ${val === null ? "—" : formatFlowValue(val, spec.unit)}`, color };
     });
-    return { id: config.id, name: specName(config.spec), color: primary, values, state: "ok", panel };
+    return { id: config.id, name: specName(spec), color: primary, values, state: "ok", panel };
   }
 
   dispose(): void {
     this.disposed = true;
     resetStore(this.cvd, null, "loading");
     resetStore(this.program, null, "loading");
+    this.programSeriesCache.clear();
     this.httpDayTradedWon.clear();
     this.liveDayTradedWon.clear();
   }
@@ -605,7 +700,9 @@ export class MicroIndicatorController {
   private pumpProgram(target: MicroTarget): void {
     const store = this.program;
     if (this.disposed || !this.programActive || store.fetching || !store.need) return;
-    const chunks = missingFromRanges(store.need, store.have);
+    const chunks = isIntraday(target.period)
+      ? missingFromRanges(store.need, store.have)
+      : missingUnchunked(store.need, store.have);
     if (chunks.length === 0) return;
     const chunk = chunks[0]!;
     const gen = store.gen;
@@ -646,6 +743,7 @@ export class MicroIndicatorController {
         }
         if (store.points.size > 0) store.state = "ready";
         else store.state = page.state;
+        this.programRev++;
         this.host.onProgramChanged(null);
         if (store.points.size > 0 || (page.state !== "disabled" && page.state !== "not_collected")) {
           this.pumpProgram(target);
@@ -657,6 +755,7 @@ export class MicroIndicatorController {
         store.abort = null;
         if (store.points.size === 0 && store.state === "loading") {
           store.state = "failed";
+          this.programRev++;
           this.host.onProgramChanged(null);
         }
       },

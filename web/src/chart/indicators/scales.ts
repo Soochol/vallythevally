@@ -1,11 +1,14 @@
 import type { IndicatorConfig, IndicatorAxis, Panel } from "../settings";
-import { isFinancial, isFinancialBar, type IndicatorSpec } from "./kinds";
+import { isFinancial, isFinancialBar, isFlow, type IndicatorSpec } from "./kinds";
 
 export type ScaleDomain =
   | "bound_0_100"
   | "volume"
   | "oscillator_zero"
   | "flow_won"
+  | "flow_won_cum"
+  | "flow_shares"
+  | "flow_shares_cum"
   | "percent"
   | "financial_won"
   | "financial_per_share";
@@ -19,6 +22,11 @@ export interface ResolvedScale {
 }
 
 export function scaleDomainOf(spec: IndicatorSpec): ScaleDomain {
+  if (isFlow(spec)) {
+    const isCum = spec.displayMode !== "both" && spec.aggregation === "cumulative";
+    if (spec.unit === "shares") return isCum ? "flow_shares_cum" : "flow_shares";
+    return isCum ? "flow_won_cum" : "flow_won";
+  }
   switch (spec.kind) {
     case "rsi":
     case "stochSlow":
@@ -29,8 +37,7 @@ export function scaleDomainOf(spec: IndicatorSpec): ScaleDomain {
     case "macd":
       return "oscillator_zero";
     case "tickCvd":
-    case "programFlow":
-      return "flow_won";
+      return "flow_won_cum";
     case "dps":
       return "financial_per_share";
     default:

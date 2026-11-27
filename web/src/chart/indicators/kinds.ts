@@ -27,12 +27,33 @@ export type TickCvdSpec = {
   showMid: boolean;
   showRetail: boolean;
 };
+export type FlowDisplayMode = "histogram" | "line" | "both";
+export type FlowAggregation = "bar" | "cumulative";
+export type FlowUnit = "eok" | "shares";
+
+export type ForeignFlowSpec = {
+  kind: "foreignFlow";
+  displayMode: FlowDisplayMode;
+  aggregation: FlowAggregation;
+  unit: FlowUnit;
+};
+export type InstitutionFlowSpec = {
+  kind: "institutionFlow";
+  displayMode: FlowDisplayMode;
+  aggregation: FlowAggregation;
+  unit: FlowUnit;
+};
 export type ProgramFlowSpec = {
   kind: "programFlow";
+  displayMode: FlowDisplayMode;
+  aggregation: FlowAggregation;
+  unit: FlowUnit;
   showShare: boolean;
 };
+export type InvestorFlowSpec = ForeignFlowSpec | InstitutionFlowSpec;
+export type FlowSpec = InvestorFlowSpec | ProgramFlowSpec;
 export type MicroSpec = TickCvdSpec | ProgramFlowSpec;
-export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec | MicroSpec;
+export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec | MicroSpec | InvestorFlowSpec;
 export type FinancialSpec = Extract<IndicatorSpec, { kind: FinancialMetric }>;
 export const FINANCIAL_LABEL: Record<FinancialMetric, string> = { revenue: "매출액", operating_income: "영업이익", owner_roe: "지배주주 ROE", investing_cash_flow: "투자활동 현금흐름", dps: "DPS", debt_ratio: "부채비율" };
 export const isFinancial = (spec: IndicatorSpec): spec is FinancialSpec => spec.kind in FINANCIAL_LABEL;
@@ -41,8 +62,12 @@ export const isQuoteDepth = (spec: IndicatorSpec): spec is QuoteDepthSpec => spe
 export const isQuote = (spec: IndicatorSpec): spec is QuoteSpec => isQuoteTotals(spec) || isQuoteDepth(spec);
 export const isTickCvd = (spec: IndicatorSpec): spec is TickCvdSpec => spec.kind === "tickCvd";
 export const isProgramFlow = (spec: IndicatorSpec): spec is ProgramFlowSpec => spec.kind === "programFlow";
+export const isForeignFlow = (spec: IndicatorSpec): spec is ForeignFlowSpec => spec.kind === "foreignFlow";
+export const isInstitutionFlow = (spec: IndicatorSpec): spec is InstitutionFlowSpec => spec.kind === "institutionFlow";
+export const isInvestorFlow = (spec: IndicatorSpec): spec is InvestorFlowSpec => isForeignFlow(spec) || isInstitutionFlow(spec);
+export const isFlow = (spec: IndicatorSpec): spec is FlowSpec => isInvestorFlow(spec) || isProgramFlow(spec);
 export const isMicro = (spec: IndicatorSpec): spec is MicroSpec => isTickCvd(spec) || isProgramFlow(spec);
-export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec) && !isMicro(spec);
+export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec) && !isMicro(spec) && !isInvestorFlow(spec);
 export const isFinancialBar = (kind: FinancialMetric) => kind !== "owner_roe" && kind !== "debt_ratio";
 export type PlotLineId =
   | LineId
@@ -53,7 +78,9 @@ export type PlotLineId =
   | "cvdLarge"
   | "cvdMid"
   | "cvdRetail"
-  | "programNet"
+  | "flowBar"
+  | "flowLine"
+  | "flowCum"
   | "programShare";
 
 export type IndicatorKind = IndicatorSpec["kind"];
@@ -88,6 +115,22 @@ interface KindInfo<K extends IndicatorKind> {
 }
 
 type Registry = { [K in IndicatorKind]: KindInfo<K> };
+
+const FLOW_FIELDS: SpecField[] = [
+  { key: "displayMode", label: "표시 형태", type: "choice", options: [["histogram", "세로 바"], ["line", "라인"], ["both", "바+누적선"]] },
+  { key: "aggregation", label: "집계 방식", type: "choice", options: [["bar", "봉별"], ["cumulative", "누적"]] },
+  { key: "unit", label: "단위", type: "choice", options: [["eok", "억 원"], ["shares", "주"]] },
+];
+
+export function flowLines(spec: FlowSpec): PlotLineId[] {
+  const base: PlotLineId[] =
+    spec.displayMode === "histogram"
+      ? ["flowBar"]
+      : spec.displayMode === "line"
+        ? ["flowLine"]
+        : ["flowBar", "flowCum"];
+  return isProgramFlow(spec) && spec.showShare ? [...base, "programShare"] : base;
+}
 
 const int = (key: string, label: string, unit?: string): SpecField => ({ key, label, type: "int", unit });
 
@@ -180,10 +223,26 @@ export const KINDS: Registry = {
   programFlow: {
     label: "프로그램 수급",
     place: "panel",
-    defaults: { kind: "programFlow", showShare: false },
-    fields: [{ key: "showShare", label: "프로그램 비중(%) 표시", type: "flag" }],
+    defaults: { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: false },
+    fields: [...FLOW_FIELDS, { key: "showShare", label: "프로그램 비중(%) 표시", type: "flag" }],
     name: () => "프로그램 수급",
-    lines: (s) => (s.showShare ? ["programNet", "programShare"] : ["programNet"]),
+    lines: flowLines,
+  },
+  foreignFlow: {
+    label: "외국인 순매수",
+    place: "panel",
+    defaults: { kind: "foreignFlow", displayMode: "histogram", aggregation: "bar", unit: "eok" },
+    fields: FLOW_FIELDS,
+    name: () => "외국인 순매수",
+    lines: flowLines,
+  },
+  institutionFlow: {
+    label: "기관 순매수",
+    place: "panel",
+    defaults: { kind: "institutionFlow", displayMode: "histogram", aggregation: "bar", unit: "eok" },
+    fields: FLOW_FIELDS,
+    name: () => "기관 순매수",
+    lines: flowLines,
   },
   quoteTotals: {
     label: "총잔량",
@@ -213,7 +272,7 @@ export const KINDS: Registry = {
   },
 };
 
-export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "tickCvd", "programFlow", "quoteTotals", "quoteDepth", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
+export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "tickCvd", "programFlow", "foreignFlow", "institutionFlow", "quoteTotals", "quoteDepth", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
 
 const kindInfo = <K extends IndicatorKind>(kind: K): KindInfo<K> => KINDS[kind];
 
@@ -231,7 +290,7 @@ export function placementOf(spec: IndicatorSpec): Placement {
 
 export const placementsOf = (kind: IndicatorKind): readonly Placement[] => KINDS[kind].overPrice ? ["panel", "price"] : [KINDS[kind].place];
 
-export const isBarLine = (line: PlotLineId): boolean => line === "volume" || line === "histogram";
+export const isBarLine = (line: PlotLineId): boolean => line === "volume" || line === "histogram" || line === "flowBar";
 
 export const LINE_LABEL: Record<PlotLineId, string> = {
   financial: "재무지표",
@@ -257,7 +316,9 @@ export const LINE_LABEL: Record<PlotLineId, string> = {
   cvdLarge: "대형",
   cvdMid: "중형",
   cvdRetail: "소형",
-  programNet: "순매수",
+  flowBar: "순매수",
+  flowLine: "순매수",
+  flowCum: "누적",
   programShare: "비중",
 };
 
