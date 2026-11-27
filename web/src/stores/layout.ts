@@ -564,8 +564,9 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     },
     sendSymbol: (sender, cellId, target) => {
       const { layout } = get();
+      if (sender === null) return get().setSymbol(cellId, target);
       const link = senderLink(layout, sender);
-      if (link === null) return get().setSymbol(cellId, target);
+      if (link === null) return { changed: [], notice: null };
       if (!layout.windows.some((w) => w.link === link && isFollowsWindow(w))) return { changed: [], notice: null };
       return get().sendSymbolToLink(link, cellId, target);
     },

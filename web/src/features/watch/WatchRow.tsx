@@ -38,6 +38,8 @@ interface RowProps {
   variant: WatchVariant;
   sender: WindowId | null;
   preview: RowPreviewStore | null;
+  selectedKey: string | null;
+  onSelect(key: string): void;
   editing: boolean;
   dropBefore: boolean;
   dragging: boolean;
@@ -46,7 +48,7 @@ interface RowProps {
   drag: RowDrag;
 }
 
-function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, preview: RowPreviewStore | null): boolean {
+function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, preview: RowPreviewStore | null, selectedKey: string | null): boolean {
   const subscribe = useCallback((listener: () => void) => {
     const stopLayout = useLayoutStore.subscribe(listener);
     const stopSelection = useSelectionStore.subscribe(listener);
@@ -61,16 +63,20 @@ function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, 
     const pending = preview?.get() ?? null;
     if (pending !== null) return pending === key;
     const layoutState = useLayoutStore.getState();
+    if (sender !== null) {
+      const win = layoutState.layout.windows.find((w) => w.id === sender);
+      if (win && win.link === null) return selectedKey === key;
+    }
     return watchedSymbol(layoutState.layout, sender, useSelectionStore.getState().activeCell, layoutState.groupSymbols) === code;
   });
 }
 
 const NO_OTHER_LISTS: readonly Watchlist[] = [];
 
-function WatchRowFrame({ list, code, groupId, index, last, columns, template, variant, sender, preview, editing, dropBefore, dragging, onMoved, onNaming, drag }: RowProps) {
+function WatchRowFrame({ list, code, groupId, index, last, columns, template, variant, sender, preview, selectedKey, onSelect, editing, dropBefore, dragging, onMoved, onNaming, drag }: RowProps) {
   const row: WatchRowRef = { code, groupId };
   const key = rowKey(row);
-  const active = useIsActiveRow(sender, code, key, preview);
+  const active = useIsActiveRow(sender, code, key, preview, selectedKey);
   const [menu, setMenu] = useState<{ kind: "actions" | "transfer" | "group" | "addGroup"; x: number; y: number } | null>(null);
   const root = useRef<HTMLLIElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -83,6 +89,7 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
   const grouped = list.groups.length > 0;
 
   const open = () => {
+    onSelect(key);
     const cellId = useSelectionStore.getState().activeCell;
     const { notice } = useLayoutStore.getState().sendSymbol(sender, cellId, info ?? { code });
     if (notice) useSelectionStore.getState().showToast(notice);
