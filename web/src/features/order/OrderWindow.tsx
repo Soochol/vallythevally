@@ -63,8 +63,6 @@ function OrderBody({
   balance,
   accountPanel,
   onAccountPanelChange,
-  selectedFillKey,
-  onSelectFillKey,
 }: {
   id: WindowId;
   code: SymbolCode;
@@ -74,8 +72,6 @@ function OrderBody({
   balance: TradingBalance | null;
   accountPanel: AccountPanelKind | null;
   onAccountPanelChange: (next: AccountPanelKind | null) => void;
-  selectedFillKey: string | null;
-  onSelectFillKey: (next: string | null) => void;
 }) {
   const mock = useMockEnvironment();
   const settings = useOrderSettings();
@@ -214,14 +210,11 @@ function OrderBody({
         balance={data.balance}
         holding={holding}
         executions={data.executions}
-        ordersOpen={access.open}
         writable={writable}
         mock={mock}
         onCancel={commands.cancelOne}
         panel={accountPanel}
         onPanelChange={onAccountPanelChange}
-        selectedFillKey={selectedFillKey}
-        onSelectFillKey={onSelectFillKey}
         trailing={settingsPopover}
       />
       <HoldingSummary account={accountRef} holding={holding} orderable={data.orderable} buyableProblem={data.buyableProblem} sellOrdered={sellOrdered} unit={profitUnit} onUnit={toggleProfitUnit} onFill={changeInput} />
@@ -275,7 +268,6 @@ function OrderStockWindow({ id, code, infoPager }: { id: WindowId; code: SymbolC
   const access = useOrderAccess(choice);
   const balance = useAccountBalance(choice.current?.ref ?? null, access.open);
   const [accountPanel, setAccountPanel] = useState<AccountPanelKind | null>(null);
-  const [selectedFillKey, setSelectedFillKey] = useState<string | null>(null);
   return (
     <OrderBody
       key={code}
@@ -287,8 +279,6 @@ function OrderStockWindow({ id, code, infoPager }: { id: WindowId; code: SymbolC
       balance={balance}
       accountPanel={accountPanel}
       onAccountPanelChange={setAccountPanel}
-      selectedFillKey={selectedFillKey}
-      onSelectFillKey={setSelectedFillKey}
     />
   );
 }
