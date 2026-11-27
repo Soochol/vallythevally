@@ -5,6 +5,12 @@
 
 .mw-strip { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s4); padding:var(--s3) var(--s4); border-bottom:var(--size-1) solid var(--line); color:var(--text-3); font-size:var(--fs-xs); }
 .mw-strip[data-divided] { border-top:var(--size-1) solid var(--line); border-bottom:0; }
+.mw-strip[data-compact] { position:relative; box-sizing:border-box; flex:none; height:var(--size-24); padding:var(--size-2) var(--s4) 0; border-top:0; gap:var(--s2); font-variant-numeric:tabular-nums; }
+.mw-strip-ratio { position:absolute; top:0; left:0; right:0; display:flex; height:var(--size-2); background:var(--line); pointer-events:none; }
+.mw-strip-ratio-ask { height:100%; background:var(--down); transition:width .25s ease; }
+.mw-strip-ratio-bid { height:100%; background:var(--up); transition:width .25s ease; }
+.mw-strip-ratio-btn { flex:none; height:var(--size-18); padding:0 var(--s2); border:0; border-radius:var(--r-s); background:transparent; color:var(--text-3); font-size:var(--fs-xs); font-weight:500; font-variant-numeric:tabular-nums; white-space:nowrap; cursor:pointer; transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.mw-strip-ratio-btn:hover { background:var(--hover); color:var(--text); }
 .mw-strip b { color:var(--text); font-size:var(--fs-s); font-weight:600; }
 
 .mw-ratio { position:relative; flex:1; min-width:var(--size-60); height:var(--size-2); overflow:hidden; border-radius:0; background:var(--line); }
@@ -116,7 +122,7 @@ button.mw-card-row:focus-visible { outline:var(--size-1) solid var(--accent); ou
   .bk .od-head { gap:var(--s2); padding-inline:var(--s2); }
   .bk .od-head-price { margin-left:0; }
   .bk[data-rate-hidden] > * { --mw-price-col:var(--size-84); }
-  .bk[data-rate-hidden] :is(.mw-qty-change, .mw-info-layer, .mw-strip-name) { display:none; }
+  .bk[data-rate-hidden] :is(.mw-qty-change, .mw-info-layer, .mw-strip-name, .mw-strip-ratio-btn) { display:none; }
   .bk[data-rate-hidden] :is(.mw-lr, .mw-lhead, .mw-box-layer) { padding-inline:var(--s2); }
   .bk[data-rate-hidden] .mw-qty-value { padding:0 var(--s2); font-size:var(--fs-xs); }
 }

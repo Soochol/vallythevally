@@ -574,7 +574,7 @@ test("주문 입력은 한 줄로 사다리 위에, 총잔량 띠와 그 위 접
   expect((await topOf(firstRow)) - (columnHead.y + columnHead.height)).toBeLessThan(8);
   expect(await topOf(page.getByTestId("order-total-ask"))).toBeGreaterThanOrEqual(ladderBottom);
   expect(await topOf(page.getByTestId("order-total-sell"))).toBeGreaterThanOrEqual(ladderBottom);
-  expect(await topOf(page.getByTestId("order-total-sell"))).toBeLessThan(await topOf(page.getByTestId("order-total-ask")));
+  expect(Math.abs((await topOf(page.getByTestId("order-total-sell"))) - (await topOf(page.getByTestId("order-total-ask"))))).toBeLessThanOrEqual(6);
   await expect(page.getByTestId("order-tape")).toHaveCount(0);
   await expect(page.getByTestId("order-quote")).toHaveCount(0);
 });
