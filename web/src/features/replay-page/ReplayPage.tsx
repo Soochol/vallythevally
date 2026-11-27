@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
 import { useCanvasPalette } from "./canvasTheme";
 import { ReplayCharts } from "./ReplayCharts";
+import { ReplayDatePicker } from "./ReplayDatePicker";
 import { type LoopRange, ReplayDeck, type TimelineZoom } from "./ReplayDeck";
 import { ReplayLadder } from "./ReplayLadder";
 import {
@@ -35,7 +36,6 @@ import { useReplayData } from "./useReplayData";
 import "./replayPage.css";
 
 const DEFAULT_SYMBOL: SymbolCode = "005930";
-const MAX_VISIBLE_DATES = 6;
 const DEFAULT_MODE: PlaybackMode = { kind: "time", speed: 1, skipIdleMs: null };
 
 function initialSymbol(param: string | null): SymbolCode {
@@ -313,7 +313,6 @@ export function ReplayPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [engine, symbolDialogOpen, togglePlay, stepTick, stepSec, addBookmark, toggleLoop, showToast]);
 
-  const recentDates = useMemo(() => data.days.slice(-MAX_VISIBLE_DATES).reverse(), [data.days]);
   const symbolName = data.symbolInfo?.name ?? code;
   const prevClose = session?.previousClose ?? null;
   const resolution = engine?.getResolution() ?? "minute_only";
@@ -426,21 +425,11 @@ export function ReplayPage() {
             <kbd>/</kbd>
           </button>
 
-          {recentDates.length > 0 && (
-            <div className="rp-date-pills" role="group" aria-label="관측일 선택" data-testid="replay-date-pills">
-              {recentDates.map((day) => (
-                <button
-                  key={day}
-                  type="button"
-                  className="rp-date-pill rp-mono"
-                  aria-pressed={day === data.activeDate}
-                  onClick={() => updateDate(day)}
-                >
-                  {formatShortDay(day)}
-                </button>
-              ))}
-            </div>
-          )}
+          <ReplayDatePicker
+            days={data.days}
+            activeDate={data.activeDate}
+            onSelect={updateDate}
+          />
 
           {session && (
             <div className="rp-head-quote rp-mono">

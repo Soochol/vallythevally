@@ -85,5 +85,12 @@ test("minute_only 해상도 폴백, 종목 전환 대화상자, 블라인드·�
   const dialog = await screen.findByTestId("replay-symbol-dialog");
   fireEvent.click(within(dialog).getByRole("button", { name: "닫기" }));
   expect(screen.queryByTestId("replay-symbol-dialog")).toBeNull();
+
+  fireEvent.click(screen.getByTestId("replay-date-trigger"));
+  const popover = await screen.findByTestId("replay-date-popover");
+  expect(within(popover).getByRole("button", { name: "25" }).getAttribute("data-available")).toBe("true");
+  expect(within(popover).getByRole("button", { name: "24" }).getAttribute("data-available")).toBe("false");
+  fireEvent.click(within(popover).getByRole("button", { name: "25" }));
+  expect(screen.queryByTestId("replay-date-popover")).toBeNull();
   client.clear();
 });
