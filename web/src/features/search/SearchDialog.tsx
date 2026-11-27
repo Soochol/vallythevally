@@ -100,6 +100,9 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   ];
   const activeWinLocked = activeWin !== undefined && isWindowLocked(activeWin, lockedWindows) && !unlockOnApply;
   const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
   const pillRef = useRef<HTMLButtonElement>(null);
   const putGroup = purpose === "watch" && putTarget?.listId === watchlist.id ? watchlist.groups.find((g) => g.id === putTarget.groupId) ?? null : null;
   const putName = putGroup?.name ?? watchlist.name;
