@@ -5,7 +5,7 @@ import { useStoreValue, type ValueStore } from "../../lib/valueStore";
 import type { LadderRow } from "../market-window/ladder";
 import { type DayPrices, ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
-import { type BuyingPower, buyPreview, groupKey, orderQuantityForPrice, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
+import { type BuyingPower, buyPreview, type BuyRatioPercent, groupKey, orderQuantityForPrice, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
 import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
@@ -30,7 +30,7 @@ interface Props {
   readonly groups: ReadonlyMap<string, PriceGroup>;
   readonly writable: boolean;
   readonly previewQuantity: number;
-  readonly buyFull?: boolean;
+  readonly buyRatio?: BuyRatioPercent | null;
   readonly buying: BuyingPower | null;
   readonly hover: ValueStore<HoverCell | null>;
   readonly actions: LadderActions;
@@ -83,7 +83,7 @@ interface CellProps {
   readonly group: PriceGroup | undefined;
   readonly writable: boolean;
   readonly previewQuantity: number;
-  readonly buyFull: boolean;
+  readonly buyRatio: BuyRatioPercent | null;
   readonly buying: BuyingPower | null;
   readonly api: CellApi;
 }
@@ -117,7 +117,7 @@ const centerRowOffset = (element: HTMLElement, fallbackToBid: boolean): number |
   return Math.max(0, rowCenter - head - (element.clientHeight - head) / 2);
 };
 
-const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, previewQuantity, buyFull, buying, api }: CellProps) {
+const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, previewQuantity, buyRatio, buying, api }: CellProps) {
   const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.rowKey === rowKey);
   const targeted = useStoreValue(api.drag.views, (view) =>
     view?.target.kind === "cell"
@@ -126,11 +126,11 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
     && (view.target.rowKey === undefined || view.target.rowKey === rowKey),
   );
   const chipDragging = useStoreValue(api.drag.views, (view) => group !== undefined && view?.source.kind === "chip" && view.source.group === group);
-  const cellQuantity = orderQuantityForPrice(side, price, previewQuantity, buying, buyFull);
-  const buyExceedsAll = side === "buy" && buyFull && buying !== null && cellQuantity === 0;
-  const showsPreview = hovered && writable && group === undefined && (cellQuantity > 0 || buyExceedsAll);
+  const cellQuantity = orderQuantityForPrice(side, price, previewQuantity, buying, buyRatio);
+  const buyRatioZero = side === "buy" && buyRatio !== null && buying !== null && cellQuantity === 0;
+  const showsPreview = hovered && writable && group === undefined && (cellQuantity > 0 || buyRatioZero);
   const previewTone = showsPreview && side === "buy"
-    ? (buyExceedsAll ? "over" : buyPreview(price, cellQuantity, buying))
+    ? (buyRatioZero ? "over" : buyPreview(price, cellQuantity, buying))
     : null;
   return (
     <div
@@ -159,7 +159,7 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice, headerOverlay }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyRatio = null, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice, headerOverlay }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
@@ -231,7 +231,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     const side = SIDE_OF_SLOT[slot];
     if (row.price === null) return <div className="od-cell" data-empty="" data-side={side} />;
     const group = chipVisible(side, row, repeated) ? groups.get(groupKey(side, row.price)) : undefined;
-    return <OrderCell rowKey={row.key} side={side} price={row.price} group={group} writable={writable} previewQuantity={previewQuantity} buyFull={buyFull} buying={buying} api={api} />;
+    return <OrderCell rowKey={row.key} side={side} price={row.price} group={group} writable={writable} previewQuantity={previewQuantity} buyRatio={buyRatio} buying={buying} api={api} />;
   };
   const slots = { left: cell("left"), right: cell("right") };
 

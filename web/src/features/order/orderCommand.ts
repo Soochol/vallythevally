@@ -11,6 +11,8 @@ import { withDirectionJosa } from "./josa";
 import { accountNumberText, type CurrentAccount } from "./orderAccount";
 import {
   buyBlock,
+  buyRatioLabel,
+  type BuyRatioPercent,
   type Capacity,
   capacityProblem,
   type DragOutcome,
@@ -38,7 +40,7 @@ export interface OrderCommandContext {
   readonly nxtNotTraded: boolean;
   readonly replayLocked: boolean;
   readonly quantity: number;
-  readonly buyFull?: boolean;
+  readonly buyRatio?: BuyRatioPercent | null;
   readonly keepLastEntry: boolean;
   readonly capacity: Capacity;
   readonly groups: ReadonlyMap<string, PriceGroup>;
@@ -53,6 +55,7 @@ export interface OrderCommandSink {
   readonly say: (status: OrderStatus) => void;
   readonly setConfirm: (request: HighValueRequest) => void;
   readonly rememberEntry: (quantity: number, usedAt: number) => void;
+  readonly clearBuyRatio: () => void;
   readonly readPending: () => readonly PendingWrite[];
   readonly nowMs: () => number;
 }
@@ -84,7 +87,7 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
     mock: ctx.mock,
   });
 
-  const submit = (ctx: OrderCommandContext, side: OrderSide, price: number, quantity: number) => {
+  const submit = (ctx: OrderCommandContext, side: OrderSide, price: number, quantity: number, usedBuyRatio: boolean) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), ctx.capacity.buying) : 0;
     const send = (confirmHighValue: boolean) => {
       guardReplayLock(() => {
@@ -92,7 +95,8 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
         const listedWhenIn =
           side === "sell" ? sellQuantityAtPrice(latest.groups, sink.readPending(), latest.code, price, latest.openOrdersListedAt) + quantity : 0;
         sink.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn });
-        if (latest.keepLastEntry) sink.rememberEntry(quantity, sink.nowMs());
+        if (usedBuyRatio) sink.clearBuyRatio();
+        else if (latest.keepLastEntry) sink.rememberEntry(quantity, sink.nowMs());
       });
     };
     if (needsHighValueConfirm(price, quantity)) {
@@ -120,14 +124,17 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
         sink.say({ tone: "error", text: ETF_ETN_AFTER_HOURS_TEXT });
         return;
       }
-      const dynamicBuyFull = cappedQuantity === undefined && side === "buy" && ctx.buyFull === true && ctx.capacity.buying !== null;
-      const orderQuantity = cappedQuantity ?? orderQuantityForPrice(side, price, ctx.quantity, ctx.capacity.buying, ctx.buyFull === true);
-      if (dynamicBuyFull && orderQuantity === 0) {
+      const activeBuyRatio = cappedQuantity === undefined && side === "buy" ? (ctx.buyRatio ?? null) : null;
+      const dynamicBuyRatio = activeBuyRatio !== null && ctx.capacity.buying !== null;
+      const orderQuantity = cappedQuantity ?? orderQuantityForPrice(side, price, ctx.quantity, ctx.capacity.buying, activeBuyRatio);
+      if (dynamicBuyRatio && orderQuantity === 0) {
         const block = buyBlock(price, 1, ctx.capacity.buying);
         if (block) {
           sink.say({ tone: "error", text: block.text });
           return;
         }
+        sink.say({ tone: "error", text: `${buyRatioLabel(activeBuyRatio)} 계산 결과가 1주 미만입니다` });
+        return;
       }
       const problem = capacityProblem(side, orderQuantity, ctx.capacity);
       if (problem) {
@@ -143,7 +150,7 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
         });
         return;
       }
-      submit(ctx, side, price, orderQuantity);
+      submit(ctx, side, price, orderQuantity, dynamicBuyRatio);
     });
   };
 

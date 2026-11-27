@@ -132,7 +132,16 @@ describe("ReplayPaperEngine", () => {
       }),
     ).toBe(true);
 
-    expect(resolvePaperBuyQuantity(71_500, 10_000_000, false, 50, 999)).toBe(Math.floor((Math.floor(10_000_000 / 71_500) * 50) / 100));
+    expect(resolvePaperBuyQuantity(70_000, 10_000_000, false, 25, 999)).toBe(35);
+    expect(resolvePaperBuyQuantity(70_000, 10_000_000, false, 50, 999)).toBe(71);
+    expect(resolvePaperBuyQuantity(70_000, 10_000_000, false, 75, 999)).toBe(107);
+    expect(resolvePaperBuyQuantity(70_000, 10_000_000, false, 100, 999)).toBe(142);
+    expect(resolvePaperBuyQuantity(71_500, 10_000_000, false, 50, 999)).toBe(69);
+    const fee75 = resolvePaperBuyQuantity(70_000, 10_000_000, true, 75, 999);
+    expect(fee75).toBe(affordableMaxBuyQuantity(70_000, 7_500_000, true));
+    expect(fee75 * 70_000 + Math.round(fee75 * 70_000 * PAPER_FEE_RATE)).toBeLessThanOrEqual(7_500_000);
+    expect(resolvePaperBuyQuantity(0, 10_000_000, false, 50, 25)).toBe(0);
+    expect(resolvePaperBuyQuantity(70_000, 0, false, 50, 25)).toBe(0);
     expect(resolvePaperBuyQuantity(71_500, 10_000_000, false, null, 25)).toBe(25);
   });
 });

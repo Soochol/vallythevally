@@ -183,6 +183,19 @@ export const RATIO_PRESETS = [
   { percent: 100, label: "전량" },
 ] as const;
 
+export type BuyRatioPercent = (typeof RATIO_PRESETS)[number]["percent"];
+
+const BUY_RATIO_LABEL: Readonly<Record<BuyRatioPercent, string>> = {
+  25: "25%",
+  50: "50%",
+  75: "75%",
+  100: "전량",
+};
+
+export function buyRatioLabel(percent: BuyRatioPercent): string {
+  return BUY_RATIO_LABEL[percent];
+}
+
 export function quantityForRatio(baseQuantity: number, percent: number): number {
   const whole = Math.floor(baseQuantity);
   if (!(whole > 0) || !(percent > 0)) return 0;
@@ -205,14 +218,20 @@ export const buyingPowerOf = (orderable: TradingOrderable | null): BuyingPower |
 
 export const maxBuyQuantity = (price: number, amount: number): number => (price > 0 ? Math.floor(amount / price) : 0);
 
+export function buyQuantityForRatio(price: number, amount: number, percent: number): number {
+  if (!(price > 0) || !(amount > 0) || !(percent > 0)) return 0;
+  const budget = percent >= 100 ? amount : Math.floor((amount * percent) / 100);
+  return maxBuyQuantity(price, budget);
+}
+
 export function orderQuantityForPrice(
   side: OrderSide,
   price: number,
   quantity: number,
   buying: BuyingPower | null,
-  buyFull: boolean,
+  buyRatio: BuyRatioPercent | null,
 ): number {
-  if (side === "buy" && buyFull && buying !== null) return maxBuyQuantity(price, buying.amount);
+  if (side === "buy" && buyRatio !== null && buying !== null) return buyQuantityForRatio(price, buying.amount, buyRatio);
   return quantity;
 }
 

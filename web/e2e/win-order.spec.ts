@@ -980,3 +980,58 @@ test.describe("주문 후속", () => {
     expect(second!.account ?? ACCOUNT).toBe(ACCOUNT);
   });
 });
+
+test("매수 비율 토글 모드는 입력 수량을 유지하고 호가별 수량을 미리보여 주며 1회 주문 또는 수량 수정 시 즉시 해제된다", async ({ page, scenario }) => {
+  ordersOn(scenario);
+  const api = tradingApi(scenario);
+  api.orderable = { cashAmount: 7_000_000, cashQuantity: 100, marginAmount: 14_000_000, marginQuantity: 200 };
+  await openOrderWindow(page, scenario);
+
+  const qtyInput = page.getByRole("textbox", { name: "수량", exact: true });
+  await qtyInput.fill("15");
+
+  const row = page.getByTestId("order-quantity-row");
+  await row.getByRole("group", { name: "프리셋 기준" }).getByRole("button", { name: "매수", exact: true }).click();
+  const buyPresets = row.getByRole("group", { name: "매수 비율 프리셋" });
+  const btn50 = buyPresets.getByRole("button", { name: "50%", exact: true });
+  const btn25 = buyPresets.getByRole("button", { name: "25%", exact: true });
+
+  await expect(btn50).toBeEnabled();
+  await expect(btn50).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveValue("15");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
+
+  await cellAt(page, "buy", 70_000).hover();
+  await expect(cellAt(page, "buy", 70_000).getByTestId("order-preview")).toHaveText("매수 50");
+  await cellAt(page, "buy", 70_100).hover();
+  await expect(cellAt(page, "buy", 70_100).getByTestId("order-preview")).toHaveText("매수 49");
+
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await cellAt(page, "buy", 70_100).hover();
+  await expect(cellAt(page, "buy", 70_100).getByTestId("order-preview")).toHaveText("매수 15");
+
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "true");
+  await cellAt(page, "buy", 70_100).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(1);
+  expect(writesTo(api, "place")[0]!.body).toMatchObject({ side: "buy", price: 70_100, quantity: 49 });
+  await expect(btn50).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await expect(qtyInput).toHaveValue("15");
+
+  await btn25.click();
+  await expect(btn25).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
+  await qtyInput.fill("8");
+  await expect(btn25).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await cellAt(page, "buy", 70_000).dblclick();
+  await pollSaved(() => writesTo(api, "place")).toHaveLength(2);
+  expect(writesTo(api, "place")[1]!.body).toMatchObject({ side: "buy", price: 70_000, quantity: 8 });
+});
