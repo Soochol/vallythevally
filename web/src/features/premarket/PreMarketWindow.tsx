@@ -182,7 +182,7 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
               )}
               <span className="pm-badge" data-tone="ext" data-testid="premarket-pending-badge">
                 <span className="pm-live-dot" aria-hidden="true" />
-                <span>08:30 대기 중</span>
+                <span>08:50 대기 중</span>
               </span>
             </div>
           ) : null}
