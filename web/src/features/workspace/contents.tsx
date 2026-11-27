@@ -7,7 +7,10 @@ import { IndicatorInspector } from "../indicator-inspector/IndicatorInspector";
 import { PreMarketWindow } from "../premarket/PreMarketWindow";
 import { ProgramWindow } from "../program/ProgramWindow";
 import { RankingWindow } from "../ranking/RankingWindow";
+import { ScannerWindow } from "../scanner/ScannerWindow";
 import { ScreenerPanel } from "../screener/ScreenerPanel";
+import { TapeMatrixWindow } from "../tape-matrix/TapeMatrixWindow";
+import { ThemesWindow } from "../themes/ThemesWindow";
 import { TradesWindow } from "../trades/TradesWindow";
 import { WatchPanel } from "../watch/Watchlist";
 import { ChartWindow } from "./ChartWindow";
@@ -26,4 +29,7 @@ export const WINDOW_CONTENT: { readonly [K in WindowKind]: WindowContent } = {
   order: { Content: OrderWindow, overflow: "hidden" },
   ranking: { Content: RankingWindow, overflow: "hidden" },
   premarket: { Content: PreMarketWindow, overflow: "hidden" },
+  scanner: { Content: ScannerWindow, overflow: "hidden" },
+  themes: { Content: ThemesWindow, overflow: "hidden" },
+  tape_matrix: { Content: TapeMatrixWindow, overflow: "hidden" },
 };

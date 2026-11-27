@@ -256,7 +256,12 @@ fn check_window_state(w: &api::LayoutWindow) -> Result<(), Refusal> {
         }
         WindowContent::Watchlist { list } => (None, list.as_deref(), None),
         WindowContent::Screener { screen } => (None, None, screen.as_deref()),
-        WindowContent::Chart { .. } | WindowContent::Indicators | WindowContent::Ranking { .. } => return Ok(()),
+        WindowContent::Chart { .. }
+        | WindowContent::Indicators
+        | WindowContent::Ranking { .. }
+        | WindowContent::Scanner
+        | WindowContent::Themes
+        | WindowContent::TapeMatrix => return Ok(()),
     };
     if let Some(symbol) = symbol.filter(|s| domain::StockCode::parse(&s.0).is_err()) {
         return Err(invalid(format!("창 {}의 고정 종목은 주식 코드여야 합니다: {}", w.id.as_str(), symbol.0)));

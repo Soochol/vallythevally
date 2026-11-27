@@ -1,0 +1,210 @@
+.jrn-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.jrn-head {
+  box-sizing: border-box;
+  height: var(--size-38);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--s5);
+  border-bottom: var(--size-1) solid var(--line);
+  background: var(--surface);
+}
+.jrn-title {
+  font-size: var(--fs-m);
+  font-weight: 700;
+}
+.jrn-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-1);
+  padding: var(--size-2);
+  border-radius: var(--r-m);
+  background: var(--raised);
+}
+.jrn-seg-btn {
+  height: var(--ctl-xs);
+  padding: 0 var(--s3);
+  border-radius: var(--r-s);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.jrn-seg-btn[aria-pressed="true"] {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 700;
+}
+.jrn-spacer {
+  flex: 1;
+}
+.jrn-date {
+  height: var(--size-24);
+  padding: 0 var(--s2);
+  border: var(--size-1) solid var(--line-strong);
+  border-radius: var(--r-s);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+}
+.jrn-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s4) var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+.jrn-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--s3);
+}
+@media (max-width: 900px) {
+  .jrn-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.jrn-kpi {
+  border: var(--size-1) solid var(--line);
+  background: var(--surface);
+  padding: var(--s3) var(--s4);
+}
+.jrn-kpi-label {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.jrn-kpi-val {
+  font-size: var(--fs-l);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.jrn-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: var(--s3);
+}
+@media (max-width: 960px) {
+  .jrn-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.jrn-card {
+  border: var(--size-1) solid var(--line);
+  background: var(--surface);
+  padding: var(--s3) var(--s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+.jrn-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-s);
+  font-weight: 700;
+}
+.jrn-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s2);
+}
+.jrn-metric {
+  border: var(--size-1) solid var(--line-subtle);
+  background: var(--bg);
+  padding: var(--s2) var(--s3);
+}
+.jrn-table {
+  border: var(--size-1) solid var(--line);
+  background: var(--surface);
+}
+.jrn-thead,
+.jrn-trow {
+  display: grid;
+  grid-template-columns: 72px 120px 52px 84px 68px 68px 68px 1fr;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 var(--s3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.jrn-thead {
+  height: 28px;
+  border-bottom: var(--size-1) solid var(--line);
+  color: var(--text-3);
+  font-weight: 600;
+}
+.jrn-trow {
+  width: 100%;
+  height: 32px;
+  border-bottom: var(--size-1) solid var(--line-subtle);
+  text-align: left;
+}
+.jrn-trow:hover {
+  background: var(--hover);
+}
+.jrn-trow[data-selected="true"] {
+  background: var(--accent-soft);
+}
+.jrn-num {
+  text-align: right;
+  font-family: var(--font-mono);
+}
+.jrn-up {
+  color: var(--up);
+}
+.jrn-down {
+  color: var(--down);
+}
+.jrn-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-s);
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--raised);
+  color: var(--text-2);
+}
+.jrn-tag[data-tone="good"] {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.jrn-tag[data-tone="bad"] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.jrn-buckets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.jrn-bucket-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 70px;
+  align-items: center;
+  gap: var(--s3);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+}
+.jrn-bucket-track {
+  height: 10px;
+  background: var(--bg);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.jrn-bucket-fill {
+  height: 100%;
+  background: var(--accent);
+}

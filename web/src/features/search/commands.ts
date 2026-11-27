@@ -43,9 +43,10 @@ export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<Scre
 const WINDOW_ICONS: Record<WindowKind, CommandIcon> = {
   chart: ChartIcon, watchlist: ListIcon, screener: FunnelIcon, indicators: IndicatorIcon, trades: TradesIcon,
   book: BookIcon, program: ProgramIcon, brokers: BrokersIcon, order: OrderIcon, ranking: RankingIcon, premarket: PreMarketIcon,
+  scanner: RankingIcon, themes: ListIcon, tape_matrix: BookIcon,
 };
 
-const PAGE_ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon, replay: ClockIcon } as const;
+const PAGE_ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon, replay: ClockIcon, journal: TradesIcon } as const;
 
 const addWindowCommands = (): readonly SearchCommand[] => WINDOW_KIND_LIST.map((kind): SearchCommand => ({
   id: `add-window-${kind}`,

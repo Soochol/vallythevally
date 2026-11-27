@@ -17,6 +17,9 @@ export const DEFAULT_WINDOW_SIZE: Readonly<Record<WindowKind, Size>> = Object.fr
   order: { w: 440, h: 660 },
   ranking: { w: 460, h: 520 },
   premarket: { w: 740, h: 480 },
+  scanner: { w: 440, h: 460 },
+  themes: { w: 440, h: 480 },
+  tape_matrix: { w: 720, h: 500 },
 });
 
 const sameSpot = (a: Rect, b: Rect): boolean => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1;
