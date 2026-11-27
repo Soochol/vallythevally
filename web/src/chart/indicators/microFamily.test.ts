@@ -29,6 +29,7 @@ const TOKENS = {
   line: "#333333",
   grid: "#222222",
   gridH: "#222222",
+  daySeparator: "rgba(255, 255, 255, 0.15)",
   raised: "#111111",
   onData: "#ffffff",
   accent: "#00ff00",
