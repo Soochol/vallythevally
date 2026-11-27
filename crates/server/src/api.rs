@@ -618,6 +618,14 @@ pub struct FeedBrokers {
     pub t: UnixSeconds,
     pub sells: Vec<FeedBroker>,
     pub buys: Vec<FeedBroker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "number")]
+    pub foreign_est_net_qty: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "number")]
+    pub foreign_est_net_change: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

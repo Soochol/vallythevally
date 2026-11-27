@@ -1689,7 +1689,13 @@ fn feed_program(row: &RealProgramTrade, received_at: KstTime) -> api::FeedProgra
 
 fn feed_brokers(snapshot: &BrokerSnapshot, at: KstTime) -> api::FeedBrokers {
     let side = |entries: &[BrokerEntry]| entries.iter().map(|e| api::FeedBroker { code: e.member_code.clone(), name: e.member_name.clone(), qty: e.cumulative_qty.0, qty_change: e.change_qty }).collect();
-    api::FeedBrokers { t: UnixSeconds(at.unix()), sells: side(&snapshot.sells), buys: side(&snapshot.buys) }
+    api::FeedBrokers {
+        t: UnixSeconds(at.unix()),
+        sells: side(&snapshot.sells),
+        buys: side(&snapshot.buys),
+        foreign_est_net_qty: snapshot.foreign_est_net_qty,
+        foreign_est_net_change: snapshot.foreign_est_net_change,
+    }
 }
 
 fn cell_of(h: Holder) -> Option<(ConnId, SubId)> {
@@ -3706,7 +3712,7 @@ mod tests {
 
     fn broker_event(h: &Harness, cumulative: u64) -> StreamEvent {
         let sells = vec![BrokerEntry { member_code: "001".into(), member_name: "키움".into(), cumulative_qty: Volume(cumulative), change_qty: -3 }];
-        StreamEvent::Broker { snapshot: BrokerSnapshot { symbol: samsung_symbol(), sells, buys: Vec::new() }, received_at: h.clock.now() }
+        StreamEvent::Broker { snapshot: BrokerSnapshot { symbol: samsung_symbol(), sells, buys: Vec::new(), foreign_est_net_qty: None, foreign_est_net_change: None }, received_at: h.clock.now() }
     }
 
     fn program_event(h: &Harness, net: i64) -> StreamEvent {

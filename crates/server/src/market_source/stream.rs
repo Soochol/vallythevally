@@ -101,6 +101,8 @@ pub struct BrokerSnapshot {
     pub symbol: Symbol,
     pub sells: Vec<BrokerEntry>,
     pub buys: Vec<BrokerEntry>,
+    pub foreign_est_net_qty: Option<i64>,
+    pub foreign_est_net_change: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

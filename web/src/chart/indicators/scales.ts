@@ -38,6 +38,10 @@ export function scaleDomainOf(spec: IndicatorSpec): ScaleDomain {
       return "oscillator_zero";
     case "tickCvd":
       return "flow_won_cum";
+    case "tapeVelocity":
+      return spec.metric === "buyRatio" ? "bound_0_100" : "volume";
+    case "foreignBrokerFlow":
+      return "flow_shares_cum";
     case "dps":
       return "financial_per_share";
     default:

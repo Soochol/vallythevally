@@ -2,4 +2,4 @@
 import type { FeedBroker } from "./FeedBroker";
 import type { UnixSeconds } from "./UnixSeconds";
 
-export type FeedBrokers = { t: UnixSeconds, sells: Array<FeedBroker>, buys: Array<FeedBroker>, };
+export type FeedBrokers = { t: UnixSeconds, sells: Array<FeedBroker>, buys: Array<FeedBroker>, foreignEstNetQty?: number, foreignEstNetChange?: number, };

@@ -6,11 +6,15 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "ma", method: "sma", period: 20 },
     { kind: "bollinger", period: 20, k: 2 },
     { kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 },
+    { kind: "anchoredVwap", priceSource: "hlc3", showBands: true, anchorPreset: "open", anchorTime: null },
+    { kind: "volumeProfile", mode: "vrvp", bins: 32, showDelta: true, valueAreaPct: 70 },
     { kind: "volume", maPeriod: 20 },
     { kind: "rsi", period: 14, signal: null },
     { kind: "macd", fast: 12, slow: 26, signal: 9 },
     { kind: "stochSlow", k: 5, d: 3, smooth: 3 },
     { kind: "tickCvd", showWhale: true, showLarge: false, showMid: false, showRetail: true },
+    { kind: "tapeVelocity", metric: "tps", showStrength: true },
+    { kind: "foreignBrokerFlow", source: "auto", displayMode: "both" },
     { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: false },
     { kind: "foreignFlow", displayMode: "histogram", aggregation: "bar", unit: "eok" },
     { kind: "institutionFlow", displayMode: "histogram", aggregation: "bar", unit: "eok" },
@@ -18,7 +22,7 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" },
     ...["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"].map((kind) => ({ kind })),
   ]);
-  expect(KIND_ORDER.filter((k) => KINDS[k].place === "price")).toEqual(["ma", "bollinger", "ichimoku", "quoteDepth"]);
+  expect(KIND_ORDER.filter((k) => KINDS[k].place === "price")).toEqual(["ma", "bollinger", "ichimoku", "anchoredVwap", "volumeProfile", "quoteDepth"]);
 });
 
 test("이름에 설정값을 붙인다", () => {

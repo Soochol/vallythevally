@@ -621,6 +621,8 @@ fn broker(record: &Record, received_at: KstTime) -> Option<StreamEvent> {
         symbol: stock_symbol(record)?,
         sells: broker_side(record, 1, 11, 31, 51),
         buys: broker_side(record, 6, 16, 36, 56),
+        foreign_est_net_qty: None,
+        foreign_est_net_change: None,
     };
     Some(StreamEvent::Broker { snapshot, received_at })
 }

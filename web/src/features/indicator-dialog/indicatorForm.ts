@@ -108,7 +108,7 @@ export function startDraft(editing: IndicatorConfig | null, kind: IndicatorKind)
 const INT = /^\d+$/;
 
 function readForm(form: SpecForm): { spec: IndicatorSpec | null; errors: FieldError[] } {
-  const raw: Record<string, unknown> = { kind: form.kind };
+  const raw: Record<string, unknown> = { ...KINDS[form.kind].defaults, kind: form.kind };
   const errors: FieldError[] = [];
   for (const f of KINDS[form.kind].fields) {
     const t = (form.text[f.key] ?? "").trim();

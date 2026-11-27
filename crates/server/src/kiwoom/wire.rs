@@ -2607,10 +2607,19 @@ fn parse_broker(item: &str, values: &Value) -> Result<BrokerSnapshot, WireError>
     if !values.is_object() {
         return Err(WireError(format!("0F {item}: values가 객체가 아닙니다")));
     }
+    let parse_opt_i64 = |fid: &str| {
+        values.get(fid).and_then(|v| match v {
+            Value::String(s) => s.trim().replace(',', "").parse::<i64>().ok(),
+            Value::Number(n) => n.as_i64(),
+            _ => None,
+        })
+    };
     Ok(BrokerSnapshot {
         symbol: combined_stock("0F", item)?,
         sells: broker_side(values, 145, 140, 160, 165)?,
         buys: broker_side(values, 155, 150, 170, 175)?,
+        foreign_est_net_qty: parse_opt_i64("267"),
+        foreign_est_net_change: parse_opt_i64("268"),
     })
 }
 
