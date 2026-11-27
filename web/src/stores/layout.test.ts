@@ -24,7 +24,7 @@ const shownTab = (kind: string) => {
 
 beforeEach(() => {
   resetActiveWindow();
-  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], redos: [], lastUsedLink: null });
+  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], redos: [], lastUsedLink: null, groupSymbols: {} });
 });
 
 const room = { area: { w: 1256, h: 684 }, gap: 6 };
@@ -471,7 +471,7 @@ test("창이 상한 50개라 지표 창을 더하지 못하면 인스펙터 요�
 test("같은 종류 창 더하기는 kind-2 id로 둘째 창을 만들고 그 탭을 고른다", () => {
   state().openWindow("trades");
   expect(state().openWindow("trades")).toBe("trades-2");
-  expect(state().layout.windows.filter((w) => w.kind === "trades")).toEqual([{ id: "trades", link: "a", kind: "trades" }, { id: "trades-2", link: "a", kind: "trades" }]);
+  expect(state().layout.windows.filter((w) => w.kind === "trades")).toEqual([{ id: "trades", link: null, kind: "trades" }, { id: "trades-2", link: null, kind: "trades" }]);
   expect(groupOfWindow(state().layout.placement.dock!.root, windowId("trades-2"))?.active).toBe("trades-2");
   expect(state().openWindow("watchlist")).toBe("watchlist-2");
   expect(state().layout.windows.filter((w) => w.kind === "watchlist")).toHaveLength(2);
@@ -544,8 +544,8 @@ test("창별 상태 setter 셋은 그 종류의 창에만 값을 쓰고 null이�
   expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: "a", kind: "watchlist", list: "L-반도체" });
   expect(find("watchlist")).toEqual({ id: "watchlist", link: null, kind: "watchlist" });
   expect(find("screener")).toEqual({ id: "screener", link: null, kind: "screener", screen: "S-고가" });
-  expect(find("trades")).toEqual({ id: "trades", link: "a", kind: "trades", symbol: "005930" });
-  expect(find("order")).toEqual({ id: "order", link: "a", kind: "order", venue: "krx", symbol: "000660" });
+  expect(find("trades")).toEqual({ id: "trades", link: null, kind: "trades", symbol: "005930" });
+  expect(find("order")).toEqual({ id: "order", link: null, kind: "order", venue: "krx", symbol: "000660" });
   const revision = state().revision;
   state().setWindowList(windowId("watchlist-2"), "L-반도체");
   expect(state().revision).toBe(revision);
@@ -554,7 +554,7 @@ test("창별 상태 setter 셋은 그 종류의 창에만 값을 쓰고 null이�
   state().pinSymbol(windowId("trades"), null);
   expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: "a", kind: "watchlist" });
   expect(find("screener")).toEqual({ id: "screener", link: null, kind: "screener" });
-  expect(find("trades")).toEqual({ id: "trades", link: "a", kind: "trades" });
+  expect(find("trades")).toEqual({ id: "trades", link: null, kind: "trades" });
 });
 
 test("창별 상태 setter는 다른 종류의 창 id와 없는 id에는 아무것도 바꾸지 않고, 고정 종목은 지수를 받지 않는다", () => {
@@ -682,12 +682,15 @@ test("새 창은 활성 창의 연동 색을 상속하고, 활성 창이 무그�
   state().setLink(tradesId, null);
   touchWindow(tradesId);
   const orderId = state().openWindow("order")!;
-  expect(state().layout.windows.find((w) => w.id === orderId)?.link).toBe("c");
+  expect(state().layout.windows.find((w) => w.id === orderId)?.link).toBeNull();
+  expect(linkedWindowSymbol(state().layout, orderId, windowId("a1"), state().groupSymbols)).toBe("005930");
 
   resetActiveWindow();
-  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), lastUsedLink: null });
+  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), lastUsedLink: null, groupSymbols: {} });
   const fallbackId = state().openWindow("premarket")!;
-  expect(state().layout.windows.find((w) => w.id === fallbackId)?.link).toBe(DEFAULT_LINK_COLOR);
+  expect(state().layout.windows.find((w) => w.id === fallbackId)?.link).toBeNull();
+  const senderFallbackId = state().openWindow("ranking")!;
+  expect(state().layout.windows.find((w) => w.id === senderFallbackId)?.link).toBe(DEFAULT_LINK_COLOR);
 });
 
 test("새 차트는 활성 창의 연동 색을 상속해 그 그룹의 현재 종목을 따르고, 지표와 명시적 null은 무그룹을 유지한다", () => {
@@ -880,6 +883,261 @@ test("되돌린 호가주문창의 기억은 다시 하기로 새 창이 받을 
   state().undoArrangement();
   state().undoArrangement();
   expect(useUiStore.getState().prefs.orderEntries[key]).toEqual(closedEntry);
+});
+
+test("종목 원천이 없는 그룹에서는 새 추종 창에 고아 연동 색을 부여하지 않고 활성 칸을 따르게 한다", () => {
+  const layout = structuredClone(DEFAULT_LAYOUT);
+  layout.windows = layout.windows.map((w) => (w.kind === "chart" ? { ...w, symbol: "005930" } : w));
+  useLayoutStore.setState({ layout, lastUsedLink: null, groupSymbols: {} });
+
+  const programId = state().openWindow("program")!;
+  expect(state().layout.windows.find((w) => w.id === programId)).toEqual({ id: programId, link: null, kind: "program" });
+  expect(linkedWindowSymbol(state().layout, programId, firstChart().id, state().groupSymbols)).toBe("005930");
+  expect(state().lastUsedLink).toBeNull();
+
+  const rankingId = state().openWindow("ranking")!;
+  expect(state().layout.windows.find((w) => w.id === rankingId)?.link).toBe(DEFAULT_LINK_COLOR);
+  touchWindow(rankingId);
+  const tradesId = state().openWindow("trades")!;
+  expect(state().layout.windows.find((w) => w.id === tradesId)?.link).toBeNull();
+  expect(linkedWindowSymbol(state().layout, tradesId, firstChart().id, state().groupSymbols)).toBe("005930");
+
+  state().setLink(tradesId, "c");
+  state().sendSymbolToLink("c", firstChart().id, SK);
+  touchWindow(tradesId);
+  const bookId = state().openWindow("book")!;
+  expect(state().layout.windows.find((w) => w.id === bookId)?.link).toBe("c");
+  expect(linkedWindowSymbol(state().layout, bookId, firstChart().id, state().groupSymbols)).toBe("000660");
+});
+
+test("연동 그룹의 마지막 추종 창이 해제되거나 닫히면 남은 groupSymbols를 정리해 새 추종 창이 고아 색을 받지 않는다", () => {
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", "a", "005930", "D"),
+      { id: windowId("watchlist"), link: null, kind: "watchlist" },
+    ],
+  });
+  state().setLink(windowId("cell-0"), null);
+  state().setSymbol(windowId("cell-0"), SK);
+  const afterUnlink = state().openWindow("program")!;
+  expect(state().layout.windows.find((w) => w.id === afterUnlink)?.link).toBeNull();
+  expect(linkedWindowSymbol(state().layout, afterUnlink, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      chart("cell-1", "b", "000660", "D"),
+    ],
+  });
+  touchWindow(windowId("cell-1"));
+  expect(state().closeWindow(windowId("cell-1"))).toBe(true);
+  const afterCloseChart = state().openWindow("program")!;
+  expect(state().layout.windows.find((w) => w.id === afterCloseChart)?.link).toBeNull();
+  expect(linkedWindowSymbol(state().layout, afterCloseChart, windowId("cell-0"), state().groupSymbols)).toBe("005930");
+
+  const addedChart = state().addChart(windowId("cell-0"), room)!;
+  state().setSymbol(addedChart, SK);
+  expect(state().closeWindow(addedChart)).toBe(true);
+  const afterCloseAdded = state().openWindow("trades")!;
+  expect(state().layout.windows.find((w) => w.id === afterCloseAdded)?.link).toBeNull();
+  expect(linkedWindowSymbol(state().layout, afterCloseAdded, windowId("cell-0"), state().groupSymbols)).toBe("005930");
+
+  const tempTrades = state().openWindow("trades", undefined, { link: "c" })!;
+  state().sendSymbolToLink("c", windowId("cell-0"), SK);
+  expect(state().closeWindow(tempTrades)).toBe(true);
+  const afterCloseChartless = state().openWindow("book")!;
+  expect(state().layout.windows.find((w) => w.id === afterCloseChartless)?.link).toBeNull();
+  expect(linkedWindowSymbol(state().layout, afterCloseChartless, windowId("cell-0"), state().groupSymbols)).toBe("005930");
+});
+
+test("차트 없는 연동 그룹의 추종 창을 닫거나 되돌린 뒤 복원하면 groupSymbols와 연동 상속이 함께 돌아온다", () => {
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [chart("cell-0", null, "005930", "D")],
+  });
+  const tradesId = state().openWindow("trades", undefined, { link: "c" })!;
+  state().sendSymbolToLink("c", windowId("cell-0"), SK);
+  expect(state().closeWindow(tradesId)).toBe(true);
+  expect(state().groupSymbols.c).toBeUndefined();
+
+  state().undoArrangement();
+  expect(linkedWindowSymbol(state().layout, tradesId, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+  touchWindow(tradesId);
+  const bookId = state().openWindow("book")!;
+  expect(state().layout.windows.find((w) => w.id === bookId)?.link).toBe("c");
+  expect(linkedWindowSymbol(state().layout, bookId, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [chart("cell-0", null, "005930", "D")],
+  });
+  const reopened = state().openWindow("trades", undefined, { link: "c" })!;
+  state().sendSymbolToLink("c", windowId("cell-0"), SK);
+  state().undoArrangement();
+  expect(state().groupSymbols.c).toBeUndefined();
+  state().redoArrangement();
+  expect(linkedWindowSymbol(state().layout, reopened, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+  touchWindow(reopened);
+  const programId = state().openWindow("program")!;
+  expect(state().layout.windows.find((w) => w.id === programId)?.link).toBe("c");
+  expect(linkedWindowSymbol(state().layout, programId, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+});
+
+test("되돌리기·다시 하기는 라이브 차트 그룹이나 비운 그룹에 과거 groupSymbols를 덮어쓰지 않는다", () => {
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", "a", "005930", "D"),
+      chart("cell-1", null, "035420", "D"),
+    ],
+  });
+  expect(state().closeWindow(windowId("cell-0"))).toBe(true);
+  state().setLink(windowId("cell-1"), "a");
+  state().undoArrangement();
+  touchWindow(windowId("cell-1"));
+  const afterRelinkUndo = state().openWindow("program")!;
+  expect(linkedWindowSymbol(state().layout, afterRelinkUndo, windowId("cell-1"), state().groupSymbols)).toBe("035420");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [chart("cell-0", null, "005930", "D")],
+  });
+  const tradesId = state().openWindow("trades", undefined, { link: "c" })!;
+  state().sendSymbolToLink("c", windowId("cell-0"), SK);
+  expect(state().closeWindow(tradesId)).toBe(true);
+  state().setLink(windowId("cell-0"), "c");
+  state().undoArrangement();
+  expect(linkedWindowSymbol(state().layout, tradesId, windowId("cell-0"), state().groupSymbols)).toBe("005930");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [chart("cell-0", null, "005930", "D")],
+  });
+  const redoTrades = state().openWindow("trades", undefined, { link: "c" })!;
+  state().sendSymbolToLink("c", windowId("cell-0"), SK);
+  state().undoArrangement();
+  state().setLink(windowId("cell-0"), "c");
+  state().redoArrangement();
+  expect(linkedWindowSymbol(state().layout, redoTrades, windowId("cell-0"), state().groupSymbols)).toBe("005930");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [chart("cell-0", "a", "000660", "D")],
+  });
+  state().openWindow("indicators");
+  state().setLink(windowId("cell-0"), null);
+  state().setSymbol(windowId("cell-0"), SAMSUNG);
+  state().setLink(windowId("cell-0"), "a");
+  state().undoArrangement();
+  touchWindow(windowId("cell-0"));
+  const afterUnrelatedUndo = state().openWindow("program")!;
+  expect(linkedWindowSymbol(state().layout, afterUnrelatedUndo, windowId("cell-0"), state().groupSymbols)).toBe("005930");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      { id: windowId("book"), link: null, kind: "book" },
+    ],
+  });
+  const chartlessTrades = state().openWindow("trades", undefined, { link: "c" })!;
+  state().sendSymbolToLink("c", windowId("cell-0"), SK);
+  state().openWindow("indicators");
+  state().setLink(chartlessTrades, null);
+  state().setLink(windowId("book"), "c");
+  state().undoArrangement();
+  expect(state().groupSymbols.c).toBeUndefined();
+  expect(linkedWindowSymbol(state().layout, windowId("book"), windowId("cell-0"), state().groupSymbols)).toBeNull();
+  touchWindow(windowId("book"));
+  const afterEmptyUndo = state().openWindow("program")!;
+  expect(state().layout.windows.find((w) => w.id === afterEmptyUndo)?.link).toBeNull();
+});
+
+test("차트 복원·잠금 차트 복원·재연동 시 groupSymbols가 손실되지 않고 다중 창 arrange 되돌리기도 보존한다", () => {
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      { id: windowId("trades"), link: "c", kind: "trades" },
+    ],
+  });
+  state().sendSymbolToLink("c", windowId("cell-0"), SK);
+  state().arrange({
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      chart("cell-1", "c", "035420", "D"),
+    ],
+    placement: { v: 1, dock: null, canvas: null },
+  });
+  useLayoutStore.setState({ groupSymbols: {} });
+  state().undoArrangement();
+  expect(state().groupSymbols.c).toBe("000660");
+  expect(linkedWindowSymbol(state().layout, windowId("trades"), windowId("cell-0"), state().groupSymbols)).toBe("000660");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      chart("cell-1", "a", "000660", "D"),
+    ],
+  });
+  expect(state().closeWindow(windowId("cell-1"))).toBe(true);
+  state().undoArrangement();
+  touchWindow(windowId("cell-1"));
+  const programId = state().openWindow("program")!;
+  expect(state().closeWindow(windowId("cell-1"))).toBe(true);
+  expect(linkedWindowSymbol(state().layout, programId, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+  touchWindow(programId);
+  const bookId = state().openWindow("book")!;
+  expect(state().layout.windows.find((w) => w.id === bookId)?.link).toBe("a");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      chart("cell-1", "a", "005930", "D"),
+    ],
+  });
+  state().toggleWindowLock(windowId("cell-1"), windowId("cell-0"));
+  state().sendSymbolToLink("a", windowId("cell-0"), SK);
+  expect(state().closeWindow(windowId("cell-1"))).toBe(true);
+  state().undoArrangement();
+  touchWindow(windowId("cell-1"));
+  const lockedGroupProgram = state().openWindow("program")!;
+  expect(linkedWindowSymbol(state().layout, lockedGroupProgram, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      chart("cell-1", "a", "000660", "D"),
+    ],
+  });
+  state().setLink(windowId("cell-1"), null);
+  state().setLink(windowId("cell-1"), "a");
+  touchWindow(windowId("cell-1"));
+  const relinkedProgram = state().openWindow("program")!;
+  expect(state().closeWindow(windowId("cell-1"))).toBe(true);
+  expect(linkedWindowSymbol(state().layout, relinkedProgram, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+
+  state().load({
+    ...structuredClone(DEFAULT_LAYOUT),
+    windows: [
+      chart("cell-0", null, "005930", "D"),
+      chart("cell-1", "a", "000660", "D"),
+    ],
+  });
+  state().setLink(windowId("cell-1"), null);
+  const added = state().addChart(windowId("cell-1"), room)!;
+  touchWindow(added);
+  const addedProgram = state().openWindow("program")!;
+  expect(state().closeWindow(added)).toBe(true);
+  expect(linkedWindowSymbol(state().layout, addedProgram, windowId("cell-0"), state().groupSymbols)).toBe("000660");
+  touchWindow(addedProgram);
+  const addedBook = state().openWindow("book")!;
+  expect(state().layout.windows.find((w) => w.id === addedBook)?.link).toBe("a");
 });
 
 test("정규장만 보기 설정은 값이 바뀔 때만 차트 설정과 저장 순서를 바꾼다", () => {
