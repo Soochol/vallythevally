@@ -4,7 +4,7 @@ import type { BarsPage } from "../src/api/generated/BarsPage";
 import type { BrokerDay } from "../src/api/generated/BrokerDay";
 import type { FeedBrokers } from "../src/api/generated/FeedBrokers";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, SEARCH_BUTTON_TITLE, test, windowTabs, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const TODAY = "20261109";
@@ -290,4 +290,104 @@ test("이동 보기는 추정 물량 이동과 이벤트를 보이고 새로고�
   await page.reload();
   await expect(win.getByRole("group", { name: "보기" }).getByRole("button", { name: "이동", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(win.getByTestId("broker-transfer-view")).toBeVisible();
+});
+
+async function switchSymbol(page: Page, code: string) {
+  await page.getByTitle(SEARCH_BUTTON_TITLE).click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill(code);
+  const option = dialog.getByRole("option").filter({ hasText: code });
+  await expect(option).toHaveAttribute("aria-disabled", "false");
+  await option.click();
+  await expect(dialog).toBeHidden();
+}
+
+test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새로고침 뒤에도 유지된다", async ({ page, scenario }) => {
+  scenario.on((url) => /^\/api\/symbols\/(005930|000660)\/brokers$/.test(url.pathname), (request) => {
+    const url = new URL(request.url());
+    const symbol = url.pathname.split("/")[3]!;
+    const after = url.searchParams.get("after");
+    if (after === null) {
+      return { body: brokerDay({ symbol, source: "flow", snapshots: [...TRANSFER_SNAPSHOTS], cursor: "f:1:7" }) };
+    }
+    return { body: brokerDay({ symbol, source: "flow", cursor: "f:1:7", reset: false }) };
+  });
+  scenario.on((url) => url.pathname === "/api/bars" && url.searchParams.get("period") === "1m", (request) => {
+    const symbol = new URL(request.url()).searchParams.get("symbol") ?? "005930";
+    const body: BarsPage = {
+      symbol,
+      venue: "combined",
+      period: "1m",
+      bars: [...TRANSFER_BARS],
+      current: null,
+      nextBefore: null,
+      seq: null,
+    };
+    return { body };
+  });
+
+  await openBrokersWindow(page, scenario);
+  const win = window_(page);
+  const viewGroup = win.getByRole("group", { name: "보기" });
+  await viewGroup.getByRole("button", { name: "이동", exact: true }).click();
+  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  const levelGroup = win.getByRole("group", { name: "집계 단위" });
+  const modeGroup = win.getByRole("group", { name: "계산 모드" });
+  const toggleOther = win.getByTestId("broker-transfer-toggle-other");
+  const detailsToggle = win.getByTestId("broker-transfer-details-toggle");
+  const syncButton = win.getByTestId("brokers-chart-sync");
+
+  await levelGroup.getByRole("button", { name: "주체 그룹", exact: true }).click();
+  await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
+  await toggleOther.click();
+  await win.getByTestId("broker-transfer-preset-last10").click();
+  await detailsToggle.click();
+  await syncButton.click();
+
+  const assertOptions = async (presetTestId: string) => {
+    await expect(levelGroup.getByRole("button", { name: "주체 그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(modeGroup.getByRole("button", { name: "총량", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(toggleOther).toHaveAttribute("aria-pressed", "false");
+    await expect(win.getByTestId(presetTestId)).toHaveAttribute("aria-pressed", "true");
+    await expect(detailsToggle).toHaveAttribute("aria-expanded", "true");
+    await expect(win.getByTestId("broker-transfer-pairs")).toBeVisible();
+    await expect(syncButton).toHaveAttribute("aria-pressed", "true");
+  };
+
+  await assertOptions("broker-transfer-preset-last10");
+
+  await viewGroup.getByRole("button", { name: "입체", exact: true }).click();
+  await expect(win.getByTestId("broker-card").first()).toBeVisible();
+  await viewGroup.getByRole("button", { name: "거래원", exact: true }).click();
+  await expect(win.getByTestId("broker-row").first()).toBeVisible();
+  await viewGroup.getByRole("button", { name: "기본", exact: true }).click();
+  await expect(win.getByTestId("broker-table")).toBeVisible();
+  await viewGroup.getByRole("button", { name: "이동", exact: true }).click();
+  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  await assertOptions("broker-transfer-preset-last10");
+
+  await switchSymbol(page, "000660");
+  await expect(win).toHaveAttribute("data-symbol", "000660");
+  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await assertOptions("broker-transfer-preset-last10");
+
+  await win.getByTestId("broker-transfer-preset-peak").click();
+  await assertOptions("broker-transfer-preset-peak");
+
+  await pollSaved(() => scenario.documents.uiPrefs().brokers).toMatchObject({
+    transferLevel: "group",
+    transferMode: "gross",
+    transferShowOther: false,
+    transferRangePreset: "peak",
+    transferDetailsOpen: true,
+    chartSync: true,
+  });
+
+  await page.reload();
+  await expect(win).toHaveAttribute("data-symbol", "000660");
+  await expect(viewGroup.getByRole("button", { name: "이동", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await assertOptions("broker-transfer-preset-peak");
 });

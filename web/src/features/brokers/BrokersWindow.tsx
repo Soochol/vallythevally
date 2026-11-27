@@ -6,6 +6,7 @@ import type { WindowId } from "../../layout/kinds";
 import { formatPrice } from "../../lib/format";
 import { type BrokerCards, type BrokerView, useLayoutStore } from "../../stores/layout";
 import { serverNow, useServerClock } from "../../stores/serverClock";
+import { useUiStore } from "../../stores/ui";
 import { SyncIcon } from "../icons";
 import { MarketSymbolName } from "../market-window/MarketHead";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
@@ -58,7 +59,8 @@ export function BrokersWindow({ id }: { id: WindowId }) {
 }
 
 function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
-  const [chartSync, setChartSync] = useState(false);
+  const chartSync = useUiStore((s) => s.prefs.brokers.chartSync);
+  const setBrokerPrefs = useUiStore((s) => s.setBrokerPrefs);
   const [localCursor, setLocalCursor] = useState<UnixSeconds | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState(0);
@@ -137,7 +139,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   };
 
   const toggleChartSync = () => {
-    setChartSync((current) => !current);
+    setBrokerPrefs({ chartSync: !chartSync });
     setLocalCursor(null);
   };
 

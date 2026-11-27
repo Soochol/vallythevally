@@ -4,7 +4,9 @@ import { beforeEach, expect, test } from "vitest";
 import type { BookReplayDay } from "../../api/generated/BookReplayDay";
 import type { BookReplayMeta } from "../../api/generated/BookReplayMeta";
 import { useServerModeStore } from "../../public-mode/serverMode";
+import { DEFAULT_UI_PREFS } from "../../persist/uiState";
 import { useSelectionStore } from "../../stores/selection";
+import { useUiStore } from "../../stores/ui";
 import { renderWithProviders, stubFetch } from "../../test/domHarness";
 import { resetDomAfterEach } from "../../test/domSetup";
 import { ReplayPage } from "./ReplayPage";
@@ -39,6 +41,7 @@ const FALLBACK_DAY: BookReplayDay = {
 beforeEach(() => {
   useServerModeStore.setState({ kind: "local" });
   useSelectionStore.setState({ dialog: null, toasts: [], toast: null });
+  useUiStore.getState().load(DEFAULT_UI_PREFS, {});
 });
 
 resetDomAfterEach();

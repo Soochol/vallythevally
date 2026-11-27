@@ -10,6 +10,7 @@ import { NO_HOTKEY_OVERRIDES, parseHotkeys, type HotkeyOverrides } from "../lib/
 import { DEFAULT_DRAWING_PREFS, parseDrawingPrefs, type DrawingPrefs } from "../chart/drawings/prefs";
 
 import type { LayoutMode } from "../layout/modes";
+import { DEFAULT_BROKER_PREFS, parseBrokerPrefs, type BrokerPrefs } from "../features/brokers/prefs";
 import { NO_ORDER_ENTRIES, parseOrderEntries, type OrderEntries } from "../features/order/orderEntries";
 import { DEFAULT_ORDER_SETTINGS, parseOrderSettings, type OrderSettings } from "../features/order/orderSettings";
 
@@ -36,6 +37,7 @@ export interface UiPrefs {
   hotkeys: HotkeyOverrides;
   pageLink: LinkColor | null;
   bookReplay: boolean;
+  brokers: BrokerPrefs;
 }
 
 export type UiExtra = Record<string, unknown>;
@@ -57,6 +59,7 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   hotkeys: NO_HOTKEY_OVERRIDES,
   pageLink: "a",
   bookReplay: false,
+  brokers: DEFAULT_BROKER_PREFS,
 };
 
 const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((s) => typeof s === "string");
@@ -68,7 +71,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, orderEntries, hotkeys, pageLink, bookReplay, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, orderEntries, hotkeys, pageLink, bookReplay, brokers, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -94,6 +97,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     hotkeys: parsedHotkeys.hotkeys,
     pageLink: pick("pageLink", pageLink, (x): x is LinkColor | null => x === null || (typeof x === "string" && (LINK_COLORS as string[]).includes(x)), DEFAULT_UI_PREFS.pageLink, true),
     bookReplay: pick("bookReplay", bookReplay, (x): x is boolean => typeof x === "boolean", DEFAULT_UI_PREFS.bookReplay, true),
+    brokers: parseBrokerPrefs(brokers),
     lastMinute: pick("lastMinute", lastMinute, (x): x is MinutePeriod => typeof x === "string" && isMinutePeriod(x), DEFAULT_UI_PREFS.lastMinute, true),
     collapsedWatchGroups: [...new Set(pick("collapsedWatchGroups", collapsedWatchGroups, isStringArray, [], true))],
   };

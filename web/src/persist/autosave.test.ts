@@ -262,6 +262,7 @@ test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", asyn
         hotkeys: {},
         pageLink: "a",
         bookReplay: false,
+        brokers: DEFAULT_UI_PREFS.brokers,
         revision: expect.any(Number),
       },
       keepalive: false,
