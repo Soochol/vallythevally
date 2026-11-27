@@ -118,3 +118,25 @@ test("관심종목 내부 드래그 순서 변경이 기존대로 동작한다",
     watchPanel(page).locator("li[data-code]").evaluateAll((rows) => rows.map((el) => el.getAttribute("data-code"))),
   ).toEqual(["005935", "005930", "086520"]);
 });
+
+test("연동 끔 상태의 관심종목에서 종목 클릭 시 외부 차트는 바뀌지 않고 내부 행만 선택되며 드래그 앤 드롭으로만 전송된다", async ({ scenario, page }) => {
+  await seedLayout(scenario);
+  const current = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({
+    ...current,
+    revision: current.revision + 1,
+    windows: current.windows.map((w) => (w.id === "watchlist" ? { ...w, link: null } : w)),
+  });
+  await page.goto("/");
+  await expect(watchRow(page, "086520")).toBeVisible();
+
+  await watchRow(page, "086520").locator("button[data-main]").click();
+  await expect(watchRow(page, "086520").locator("button[data-main]")).toHaveAttribute("aria-current", "true");
+  await expect(page.locator("#window-tab-chart-1")).toContainText("삼성전자");
+  await expect(page.locator("#window-tab-chart-2")).toContainText("삼성전자");
+
+  const chartPanel = page.locator('[data-dock-group="g-charts"] .dock-panel');
+  await dragSymbolTo(watchRow(page, "086520"), chartPanel);
+  await expect(page.locator("#window-tab-chart-1")).toContainText("에코프로");
+  await expect(page.locator("#window-tab-chart-2")).toContainText("에코프로");
+});

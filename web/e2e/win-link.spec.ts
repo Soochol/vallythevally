@@ -93,7 +93,7 @@ test("관심종목의 연동 색에 따라 종목을 그 색의 차트, 활성 �
   await page.mouse.click(third!.x + third!.width / 2, third!.y + third!.height / 2);
   await expect(tabOf(page, "cell-2")).toHaveAttribute("data-active-cell", "");
   await row(page, "051910").click();
-  await drawn(cell(page, 3), /^칸 3: LG화학 .* 일$/);
+  await expect(cell(page, 3)).toHaveAttribute("aria-label", /^칸 3: SK하이닉스 /);
   await expect(cell(page, 1)).toHaveAttribute("aria-label", /^칸 1: NAVER /);
   await expect(cell(page, 2)).toHaveAttribute("aria-label", /^칸 2: NAVER /);
   await expect(row(page, "051910")).toHaveAttribute("aria-current", "true");

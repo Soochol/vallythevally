@@ -176,17 +176,18 @@ test("페이지가 색 A로 보내면 A인 차트가 바뀌고, 그 색의 차�
   expect(shown()).toMatchObject({ a1: ["000660", "D"], a2: ["000660", "W"], off: ["005930", "D"], b1: ["005930", "5m"] });
 });
 
-test("색이 꺼진 보내는 창과 휴대폰 목록은 활성 칸을 바꾸고, 활성 칸에 색이 있으면 그 색의 차트도 함께 바꾼다", () => {
+test("색이 꺼진 보내는 창은 외부 창을 바꾸지 않고, 휴대폰 목록(sender=null)만 활성 칸을 바꾼다", () => {
   linked();
-  expect(state().sendSymbol(windowId("watchlist"), windowId("off"), SAMSUNG)).toEqual({ changed: ["off"], notice: null });
-  expect(state().sendSymbol(null, windowId("b1"), SAMSUNG)).toEqual({ changed: ["b1"], notice: null });
-  expect(state().sendSymbol(windowId("screener"), windowId("a2"), SK).changed).toEqual(["a1", "a2"]);
+  expect(state().sendSymbol(windowId("watchlist"), windowId("off"), SAMSUNG)).toEqual({ changed: [], notice: null });
+  expect(state().sendSymbol(windowId("screener"), windowId("a2"), SK)).toEqual({ changed: [], notice: null });
   expect(shown()).toEqual({
-    a1: ["000660", "D"],
-    a2: ["000660", "W"],
-    off: ["005930", "D"],
-    b1: ["005930", "5m"],
+    a1: ["005930", "D"],
+    a2: ["005930", "W"],
+    off: ["000660", "D"],
+    b1: ["035420", "5m"],
   });
+  expect(state().sendSymbol(null, windowId("b1"), SAMSUNG)).toEqual({ changed: ["b1"], notice: null });
+  expect(shown().b1).toEqual(["005930", "5m"]);
 });
 
 test("종목을 바꾸면 그 색의 모든 차트의 종목이 바뀌고 봉 주기는 각자 그대로다", () => {

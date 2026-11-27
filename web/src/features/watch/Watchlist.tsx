@@ -400,6 +400,7 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
       drop: (e) => dropOn(e, { groupId, before: null }, null),
     };
   };
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const grouped = list.groups.length > 0;
   const rows = (section: WatchSection) => {
     const sectionId = section.group?.id ?? null;
@@ -420,6 +421,8 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
           variant={variant}
           sender={sender}
           preview={variant === "desktop" ? preview : null}
+          selectedKey={selectedKey}
+          onSelect={setSelectedKey}
           editing={editing}
           dropBefore={sameSection ? here : joins}
           dragging={dragged !== null && dragged.code === code && dragged.groupId === sectionId}
