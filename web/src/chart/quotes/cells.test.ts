@@ -104,7 +104,7 @@ test("많은 칸도 색 바꾸기와 좌표 변환이 칸 수에 비례하지 �
   }
 });
 
-test("동적 대비는 p95 로그 정규화로 일반 벽을 살리고 초대형 벽에 코어와 경계선을 덧그린다", () => {
+test("동적 대비는 p95 로그 정규화로 일반 벽을 살리고 초대형 벽에 밝은 코어만 덧그린다", () => {
   expect(DYNAMIC_CONTRAST_PERCENTILE).toBe(0.95);
   expect(percentileQty([], 0.95)).toBe(0);
   expect(percentileQty([10, 20, 30, 40, 1000], 0.8)).toBe(1000);
@@ -122,12 +122,11 @@ test("동적 대비는 p95 로그 정규화로 일반 벽을 살리고 초대형
     ),
   );
   const legacy = drawn({ from: 0, to: 11, point: (i) => points[i] }, { ...STYLE, dynamicContrast: false });
-  const dynamic = drawn({ from: 0, to: 11, point: (i) => points[i] }, { ...STYLE, dynamicContrast: true, outlierBorder: hex("#F59E0B") });
+  const dynamic = drawn({ from: 0, to: 11, point: (i) => points[i] }, { ...STYLE, dynamicContrast: true });
 
   const legacyNormal = legacy.rects.find((r) => r.left === 6 && r.top === 1000 - 102.5)!;
   const dynamicNormal = dynamic.rects.find((r) => r.left === 6 && r.top === 1000 - 102.5)!;
   expect(alphaOf(dynamicNormal)).toBeGreaterThan(alphaOf(legacyNormal) * 5);
-  expect(dynamic.rects.length).toBe(legacy.rects.length + 3);
-  expect(dynamic.calls.fillStyle).toBeLessThanOrEqual(2 * ALPHA_STEPS + 3);
-  expect(dynamic.rects.some((r) => colored(r) === "rgba(245, 158, 11")).toBe(true);
+  expect(dynamic.rects.length).toBe(legacy.rects.length + 1);
+  expect(dynamic.calls.fillStyle).toBeLessThanOrEqual(2 * ALPHA_STEPS + 2);
 });
