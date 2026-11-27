@@ -143,9 +143,15 @@
 :is([data-style="bento"], [data-style="carbon"]) .tb-btn[aria-pressed="true"],
 :is([data-style="bento"], [data-style="carbon"]) .desktop-topbar .book-replay-toggle[aria-pressed="true"],
 :is([data-style="bento"], [data-style="carbon"]) .od-tab[aria-expanded="true"],
-:is([data-style="bento"], [data-style="carbon"]) .od-preset[data-picked],
 :is([data-style="bento"], [data-style="carbon"]) .od-colhead-explorer[aria-pressed="true"] {
   border-bottom-color: transparent;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: none;
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .od-preset[data-picked] {
   border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
@@ -158,14 +164,12 @@
 
 :is([data-style="bento"], [data-style="carbon"]) .od-preset[data-side-tone="buy"][data-picked],
 :is([data-style="bento"], [data-style="carbon"]) .od-preset-mode button[data-mode="buy"][aria-pressed="true"] {
-  border-bottom-color: transparent;
   background: var(--up-soft);
   color: var(--up);
 }
 
 :is([data-style="bento"], [data-style="carbon"]) .od-preset[data-side-tone="sell"][data-picked],
 :is([data-style="bento"], [data-style="carbon"]) .od-preset-mode button[data-mode="sell"][aria-pressed="true"] {
-  border-bottom-color: transparent;
   background: var(--down-soft);
   color: var(--down);
 }
@@ -688,13 +692,18 @@
 [data-style="glass"] .tb-btn[aria-pressed="true"],
 [data-style="glass"] .desktop-topbar .book-replay-toggle[aria-pressed="true"],
 [data-style="glass"] .od-tab[aria-expanded="true"],
-[data-style="glass"] .od-preset[data-picked],
 [data-style="glass"] .od-colhead-explorer[aria-pressed="true"] {
   border-bottom-color: transparent;
   border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+[data-style="glass"] .od-preset[data-picked] {
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 [data-style="glass"] .od-tab[aria-expanded="true"] b {
@@ -1063,11 +1072,17 @@
 [data-style="forest"] .tb-btn[aria-pressed="true"],
 [data-style="forest"] .desktop-topbar .book-replay-toggle[aria-pressed="true"],
 [data-style="forest"] .od-tab[aria-expanded="true"],
-[data-style="forest"] .od-preset[data-picked],
 [data-style="forest"] .od-colhead-explorer[aria-pressed="true"],
 [data-style="forest"] .draw-tool[aria-pressed="true"],
 [data-style="forest"] .draw-tool[data-active-tool][aria-pressed="true"] {
   border-bottom-color: transparent;
+  border-radius: var(--r-m);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: none;
+}
+
+[data-style="forest"] .od-preset[data-picked] {
   border-radius: var(--r-m);
   background: var(--accent-soft);
   color: var(--accent);
