@@ -2,11 +2,13 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useId, useMemo, useR
 import type { Bar } from "../../api/generated/Bar";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import { useBrokerPrefs, useUiStore } from "../../stores/ui";
 import { formatClock, formatEokWon, formatQuantity } from "../market-window/format";
 import { Segmented, type SegmentOption } from "../market-window/parts";
 import { EmptyState } from "../overlay/State";
 import type { BoardAxis } from "./board";
 import { axisGapRanges } from "./history";
+import type { TransferRangePreset } from "./prefs";
 import {
   GROUP_LABELS,
   OTHER_BROKER_LABEL,
@@ -32,11 +34,14 @@ export interface TransferViewProps {
   readonly axis: BoardAxis;
 }
 
-type RangePreset = "all" | "last30" | "last10" | "peak";
+interface CustomRangeSelection {
+  readonly range: TransferRange;
+  readonly eventT: UnixSeconds | null;
+}
 
 type RangeSelection =
-  | { readonly kind: "preset"; readonly preset: RangePreset }
-  | { readonly kind: "custom"; readonly range: TransferRange; readonly eventT: UnixSeconds | null };
+  | { readonly kind: "preset"; readonly preset: TransferRangePreset }
+  | ({ readonly kind: "custom" } & CustomRangeSelection);
 
 interface FocusNode {
   readonly side: "src" | "dst";
@@ -75,7 +80,7 @@ const MODE_OPTIONS: readonly SegmentOption<TransferMode>[] = [
   { value: "gross", label: "총량" },
 ];
 
-const PRESET_OPTIONS: readonly { readonly value: RangePreset; readonly label: string }[] = [
+const PRESET_OPTIONS: readonly { readonly value: TransferRangePreset; readonly label: string }[] = [
   { value: "all", label: "전체" },
   { value: "last30", label: "30분" },
   { value: "last10", label: "10분" },
@@ -132,14 +137,21 @@ function clamp(value: number, min: number, max: number): number {
 
 export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: TransferViewProps) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
-  const [level, setLevel] = useState<TransferLevel>("broker");
-  const [mode, setMode] = useState<TransferMode>("net");
-  const [showOther, setShowOther] = useState(true);
-  const [selection, setSelection] = useState<RangeSelection>({ kind: "preset", preset: "all" });
+  const brokerPrefs = useBrokerPrefs();
+  const setBrokerPrefs = useUiStore((s) => s.setBrokerPrefs);
+  const level = brokerPrefs.transferLevel;
+  const mode = brokerPrefs.transferMode;
+  const showOther = brokerPrefs.transferShowOther;
+  const rangePreset = brokerPrefs.transferRangePreset;
+  const detailsOpen = brokerPrefs.transferDetailsOpen;
+  const [customSelection, setCustomSelection] = useState<CustomRangeSelection | null>(null);
   const [focusNode, setFocusNode] = useState<FocusNode | null>(null);
   const [hoveredLink, setHoveredLink] = useState<HoveredLink | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [stageSize, setStageSize] = useState<StageSize>({ width: DEFAULT_STAGE_WIDTH, height: DEFAULT_STAGE_HEIGHT });
+  const selection = useMemo<RangeSelection>(
+    () => (customSelection !== null ? { kind: "custom", ...customSelection } : { kind: "preset", preset: rangePreset }),
+    [customSelection, rangePreset],
+  );
 
   const stageRef = useRef<HTMLDivElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
@@ -309,13 +321,13 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
   }
 
   const handleLevelChange = (next: TransferLevel) => {
-    setLevel(next);
+    setBrokerPrefs({ transferLevel: next });
     setFocusNode(null);
     setHoveredLink(null);
   };
 
   const handleModeChange = (next: TransferMode) => {
-    setMode(next);
+    setBrokerPrefs({ transferMode: next });
     setFocusNode(null);
     setHoveredLink(null);
   };
@@ -325,7 +337,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
   };
 
   const selectEvent = (ev: TransferEvent) => {
-    setSelection({ kind: "custom", range: { from: ev.from, to: ev.to }, eventT: ev.t });
+    setCustomSelection({ range: { from: ev.from, to: ev.to }, eventT: ev.t });
     setFocusNode(null);
   };
 
@@ -359,7 +371,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
     if (kind === "new") {
       const nextFrom = clamp(anchorT, minT, maxT);
       const nextTo = clamp(nextFrom + minWindowSec, nextFrom, maxT);
-      setSelection({ kind: "custom", range: { from: nextFrom, to: nextTo }, eventT: null });
+      setCustomSelection({ range: { from: nextFrom, to: nextTo }, eventT: null });
     }
     wrap.setPointerCapture(event.pointerId);
   };
@@ -378,21 +390,21 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
 
     if (drag.kind === "left") {
       const nextFrom = clamp(drag.origFrom + deltaSec, minT, Math.max(minT, drag.origTo - minWindowSec));
-      setSelection({ kind: "custom", range: { from: nextFrom, to: drag.origTo }, eventT: null });
+      setCustomSelection({ range: { from: nextFrom, to: drag.origTo }, eventT: null });
     } else if (drag.kind === "right") {
       const nextTo = clamp(drag.origTo + deltaSec, Math.min(maxT, drag.origFrom + minWindowSec), maxT);
-      setSelection({ kind: "custom", range: { from: drag.origFrom, to: nextTo }, eventT: null });
+      setCustomSelection({ range: { from: drag.origFrom, to: nextTo }, eventT: null });
     } else if (drag.kind === "move") {
       const widthSec = drag.origTo - drag.origFrom;
       const nextFrom = clamp(drag.origFrom + deltaSec, minT, Math.max(minT, maxT - widthSec));
-      setSelection({ kind: "custom", range: { from: nextFrom, to: nextFrom + widthSec }, eventT: null });
+      setCustomSelection({ range: { from: nextFrom, to: nextFrom + widthSec }, eventT: null });
     } else {
       const currentT = clientXToTime(event.clientX);
       const rawFrom = Math.min(drag.anchorT, currentT);
       const rawTo = Math.max(drag.anchorT, currentT);
       const nextFrom = clamp(rawFrom, minT, maxT);
       const nextTo = clamp(Math.max(rawTo, nextFrom + minWindowSec), nextFrom, maxT);
-      setSelection({ kind: "custom", range: { from: nextFrom, to: nextTo }, eventT: null });
+      setCustomSelection({ range: { from: nextFrom, to: nextTo }, eventT: null });
     }
   };
 
@@ -453,7 +465,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
             data-testid="broker-transfer-toggle-other"
             aria-pressed={showOther}
             title={honestyNote}
-            onClick={() => setShowOther((current) => !current)}
+            onClick={() => setBrokerPrefs({ transferShowOther: !showOther })}
           >
             {OTHER_BROKER_LABEL}
           </button>
@@ -467,7 +479,8 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
                 aria-pressed={selection.kind === "preset" && selection.preset === option.value}
                 disabled={option.value === "peak" && peakEvent === null}
                 onClick={() => {
-                  setSelection({ kind: "preset", preset: option.value });
+                  setCustomSelection(null);
+                  setBrokerPrefs({ transferRangePreset: option.value });
                   setFocusNode(null);
                 }}
               >
@@ -894,7 +907,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
             className="br-tr-drawer-btn"
             data-testid="broker-transfer-details-toggle"
             aria-expanded={detailsOpen}
-            onClick={() => setDetailsOpen((current) => !current)}
+            onClick={() => setBrokerPrefs({ transferDetailsOpen: !detailsOpen })}
           >
             {detailsOpen ? "경로 접기" : `경로 ${topPairs.length}`}
           </button>

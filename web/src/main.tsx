@@ -7,7 +7,7 @@ import { retryDelay, shouldRetry } from "./api/retry";
 import { ChartRoute } from "./App";
 import { CollectorPage } from "./features/collector-board/CollectorPage";
 import { takeLoginFailure } from "./features/account/loginFailure";
-import { ALL_PAGES } from "./features/page-rail/pages";
+import { ALL_PAGES, JOURNAL_ANALYTICS_PATH } from "./features/page-rail/pages";
 import { ShellErrorBoundary } from "./features/shell/ShellErrorBoundary";
 import { start } from "./persist/start";
 import { useAccountStore } from "./stores/account";
@@ -37,7 +37,10 @@ void start();
 if (serverMode === "local") marketSocket.start();
 
 const router = createBrowserRouter([
-  { element: <ShellErrorBoundary><ChartRoute /></ShellErrorBoundary>, children: ALL_PAGES.map(({ path }) => ({ path })) },
+  {
+    element: <ShellErrorBoundary><ChartRoute /></ShellErrorBoundary>,
+    children: [...ALL_PAGES.map(({ path }) => ({ path })), { path: JOURNAL_ANALYTICS_PATH }],
+  },
   { path: "/collector", element: <CollectorPage /> },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);

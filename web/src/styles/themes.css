@@ -333,7 +333,7 @@
 }
 
 :is([data-style="bento"], [data-style="carbon"]) .rp-workspace {
-  gap: var(--island-gap);
+  gap: 0;
   background: transparent;
 }
 
@@ -526,9 +526,13 @@
   --strip-bg: transparent;
 }
 
-[data-style="glass"] .rp-stage,
-[data-style="glass"] .rp-workspace {
+[data-style="glass"] .rp-stage {
   gap: var(--island-gap);
+  background: transparent;
+}
+
+[data-style="glass"] .rp-workspace {
+  gap: 0;
   background: transparent;
 }
 

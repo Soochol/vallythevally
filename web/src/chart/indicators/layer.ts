@@ -107,6 +107,9 @@ export interface LayerHost {
   isPercentScale?(): boolean;
   period(): Period;
   regularHoursOnly?(): boolean;
+  candlesOnTop?(): boolean;
+  scalePriceOnly?(): boolean;
+  priceAxisGeometry?(): AxisGeometry;
   requestFrame(): void;
   axisFormatted(pane: ReturnType<IChartApi["panes"]>[number], side?: "right" | "left"): void;
   axisCoordinates(pane: ReturnType<IChartApi["panes"]>[number], side?: "right" | "left"): number[];
@@ -146,6 +149,8 @@ const transferOf = (c: Columns) => [c.t.buffer, c.o.buffer, c.h.buffer, c.l.buff
 const isVolumeOverPrice = (config: IndicatorConfig) => config.panel === "price" && config.spec.kind === "volume";
 const isOverlay = (config: IndicatorConfig, id: LineId) => config.panel === "price" && !isBarLine(id) && !isVolumeOverPrice(config);
 const VOLUME_OVER_PRICE_MARGINS = { top: 0.8, bottom: 0 };
+const EXCLUDE_AUTOSCALE = () => null;
+type OrderedSeries = Pick<ISeriesApi<SeriesType, Time>, "seriesOrder" | "setSeriesOrder">;
 
 function withAlpha(hex: string, alpha: number): string {
   const channel = (i: number) => Number.parseInt(hex.slice(i, i + 2), 16);
@@ -194,13 +199,50 @@ export class IndicatorLayer {
   private readonly quotes: QuoteIndicatorController;
   private readonly micro: MicroIndicatorController;
   private readonly investors: InvestorFlowController;
+  private mainSeries: ISeriesApi<SeriesType, Time> | null = null;
 
   attachMainSeries(series: ISeriesApi<SeriesType, Time>): void {
+    this.mainSeries = series;
     this.quotes.attachMainSeries(series);
+    this.syncPriceOrder();
   }
 
   detachMainSeries(series: ISeriesApi<SeriesType, Time>): void {
+    if (this.mainSeries === series) this.mainSeries = null;
     this.quotes.detachMainSeries(series);
+  }
+
+  syncPriceOrder(): void {
+    if (!this.mainSeries) return;
+    const background: OrderedSeries[] = [];
+    const overlays: OrderedSeries[] = [];
+    for (const config of this.configs) {
+      if (config.panel !== "price") continue;
+      const s = this.shown.get(config.id);
+      if (!s) continue;
+      if (s.cloud) background.push(s.cloud);
+      for (const line of s.lines) {
+        if (isVolumeOverPrice(config) && line.id === "volume") background.push(line.series);
+        else overlays.push(line.series);
+      }
+    }
+    const ordered: OrderedSeries[] = this.host.candlesOnTop?.()
+      ? [...background, ...overlays, this.mainSeries]
+      : [...background, this.mainSeries, ...overlays];
+    ordered.forEach((series, idx) => {
+      if (series.seriesOrder() !== idx) series.setSeriesOrder(idx);
+    });
+  }
+
+  syncPriceScale(): void {
+    const autoscaleInfoProvider = this.host.scalePriceOnly?.() ? EXCLUDE_AUTOSCALE : undefined;
+    for (const s of this.shown.values()) {
+      if (s.config.panel !== "price" || isVolumeOverPrice(s.config)) continue;
+      for (const line of s.lines) {
+        if (line.priceOverlay) line.series.applyOptions({ autoscaleInfoProvider });
+      }
+      if (s.cloud) s.cloud.applyOptions({ autoscaleInfoProvider });
+    }
   }
 
   setQuoteTarget(target: QuoteTarget | null, sync = true): void {
@@ -475,6 +517,7 @@ export class IndicatorLayer {
         this.syncProIndicator(s);
       }
     }
+    this.syncPriceOrder();
   }
 
   private canPatchSeries(
@@ -751,9 +794,12 @@ export class IndicatorLayer {
   }
 
   refreshPriceFormat(): void {
-    for (const s of this.shown.values()) for (const line of s.lines) {
-      line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
-      line.legendDirty = true;
+    for (const s of this.shown.values()) {
+      for (const line of s.lines) {
+        line.series.applyOptions({ priceFormat: this.priceFormat(s.config) });
+        line.legendDirty = true;
+      }
+      if (s.cloud) s.cloud.applyOptions({ priceFormat: this.priceFormat(s.config) });
     }
   }
 
@@ -1209,6 +1255,7 @@ export class IndicatorLayer {
       bearColor: palette.spanB,
       opacity: style.cloudOpacity,
       priceFormat: this.priceFormat(config),
+      autoscaleInfoProvider: this.host.scalePriceOnly?.() ? EXCLUDE_AUTOSCALE : undefined,
     };
   }
 
@@ -1280,14 +1327,15 @@ export class IndicatorLayer {
       const color = id === "quoteAsk" ? this.host.tokens().down : this.host.tokens().up;
       return { ...common, color, lineWidth: 2 as const, crosshairMarkerVisible: false };
     }
+    const autoscaleInfoProvider = this.host.scalePriceOnly?.() ? EXCLUDE_AUTOSCALE : undefined;
     if (config.spec.kind === "ichimoku") {
       const ichi = this.ichimokuLineStyle(config, id);
-      if (ichi) return { ...common, ...ichi, halo: config.id === this.previewId };
+      if (ichi) return { ...common, ...ichi, halo: config.id === this.previewId, ...(isOverlay(config, id) ? { autoscaleInfoProvider } : {}) };
     }
     const color = indicatorColorValue(this.host.tokens(), lineColor(config.spec, config.style.colors, i));
     if (isBarLine(id) || (isFinancial(config.spec) && isFinancialBar(config.spec.kind))) return common;
     const line = { ...common, color, lineWidth: config.style.width, lineStyle: "solid" as const, opacity: 1 };
-    return isOverlay(config, id) ? { ...line, halo: config.id === this.previewId } : { ...line, crosshairMarkerVisible: false };
+    return isOverlay(config, id) ? { ...line, halo: config.id === this.previewId, autoscaleInfoProvider } : { ...line, crosshairMarkerVisible: false };
   }
 
   private isAxisLeader(config: IndicatorConfig): boolean {
@@ -1312,6 +1360,9 @@ export class IndicatorLayer {
     if (financialFormat !== null) return financialFormat;
     if (isFlow(config.spec)) {
       return axisPriceFormat(config.spec.unit, config.spec.unit === "shares" ? 1 : 0.01, this.axisGeometry(config));
+    }
+    if (config.panel === "price" && !isVolumeOverPrice(config)) {
+      return axisPriceFormat(this.host.isIndex() ? "index" : "price", this.host.isIndex() ? 0.01 : 1, this.host.priceAxisGeometry?.() ?? this.axisGeometry(config));
     }
     const unit = config.spec.kind === "volume" || isQuoteTotals(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || isMicro(config.spec) || this.host.isIndex() ? "index" : "price";
     return axisPriceFormat(unit, 0.01, this.axisGeometry(config));

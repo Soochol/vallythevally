@@ -3,7 +3,7 @@ import type { BookReplayMeta } from "../src/api/generated/BookReplayMeta";
 import type { BrokerDay } from "../src/api/generated/BrokerDay";
 import type { ProgramSeriesPage } from "../src/api/generated/ProgramSeriesPage";
 import { encodeHogaSpan } from "../src/features/replay-page/hogaDecode";
-import { expect, type Scenario, test } from "./harness";
+import { expect, pollSaved, type Scenario, test } from "./harness";
 
 test.use({ clockStart: "20261126160000", viewport: { width: 1440, height: 900 } });
 
@@ -212,7 +212,7 @@ function seedTickReplay(scenario: Scenario) {
   );
 }
 
-test("/replay는 틱 복기 메타·바이너리 청크·4대 보조지표·10호가·거래원을 한 화면에 보이고 이벤트 버튼이 없다", async ({ page, scenario }) => {
+test("/replay는 test2 풀폭 배치·4대 보조지표·체결·프로그램·10호가·거래원(이동/숫자)을 보이고 상단 종목찾기·연동색이 없다", async ({ page, scenario }) => {
   seedTickReplay(scenario);
   await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
 
@@ -222,17 +222,49 @@ test("/replay는 틱 복기 메타·바이너리 청크·4대 보조지표·10�
   await expect(page.getByTestId("replay-total-ask")).toHaveText("7,600");
   await expect(page.getByTestId("replay-total-bid")).toHaveText("4,200");
 
+  const topbar = page.getByRole("toolbar", { name: "페이지 도구 막대" });
+  await expect(topbar.getByRole("button", { name: "종목 찾기" })).toHaveCount(0);
+  await expect(topbar.getByRole("button", { name: /^보낼 연동 색/ })).toHaveCount(0);
+  await expect(page.locator(".page-frame[data-full-width]")).toBeVisible();
+
   const subs = page.getByTestId("replay-sub-indicators");
   await expect(subs.locator('[data-indicator="totals"]')).toContainText("총잔량");
   await expect(subs.locator('[data-indicator="obi"]')).toContainText("호가 잔량비");
   await expect(subs.locator('[data-indicator="strength"]')).toContainText("체결강도");
   await expect(subs.locator('[data-indicator="program"]')).toContainText("프로그램 누적");
 
+  await expect(page.getByTestId("replay-trades-pane")).toBeVisible();
+  await expect(page.getByTestId("replay-program-pane")).toBeVisible();
+  await expect(page.getByTestId("replay-program-net-qty")).toContainText("+1,200");
+  await expect(page.getByTestId("replay-program-row")).toHaveCount(1);
+
+  const progChangeHead = page.getByTestId("replay-program-pane").getByRole("columnheader", { name: "순매수 증감" });
+  expect((await progChangeHead.boundingBox())!.height).toBeLessThanOrEqual(24);
+
+  const spreadBadge = page.getByTestId("replay-spread");
+  await expect(spreadBadge).toHaveText("스프레드 1틱 (100원)");
+  const spreadClipped = await spreadBadge.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+  expect(spreadClipped).toBe(false);
+
+  const ladderBox = (await page.locator(".rp-order-ladder").boundingBox())!;
+  const bestAskBox = (await page.locator('[data-testid="replay-sim-buy-cell"][data-price="71100"]').boundingBox())!;
+  const bestBidBox = (await page.locator('[data-testid="replay-sim-buy-cell"][data-price="71000"]').boundingBox())!;
+  expect(bestAskBox.y).toBeGreaterThanOrEqual(ladderBox.y - 1);
+  expect(bestBidBox.y + bestBidBox.height).toBeLessThanOrEqual(ladderBox.y + ladderBox.height + 1);
+
+  const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");
+  await expect(brokersPane.getByTestId("replay-broker-view-transfer")).toHaveAttribute("aria-pressed", "true");
+  await expect(brokers.getByTestId("broker-transfer-view")).toBeVisible();
+
+  await brokersPane.getByTestId("replay-broker-view-board").click();
+  await expect(brokersPane.getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "숫자", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(brokers.getByTestId("broker-card")).toHaveCount(2);
+  await expect(brokers.getByTestId("broker-numbers").first()).toHaveAttribute("data-mode", "numbers");
   await brokers.getByTestId("broker-card").first().click();
   await expect(brokers.getByTestId("broker-detail")).toBeVisible();
-  await brokers.getByRole("button", { name: "거래원", exact: true }).click();
+
+  await brokersPane.getByTestId("replay-broker-view-list").click();
   await expect(brokers.getByTestId("broker-row")).toHaveCount(2);
   await expect(brokers.getByTestId("broker-foreign-sum")).toBeVisible();
 
@@ -261,7 +293,16 @@ test("시간 단위·틱 단위 모드 전환과 밀리초 1틱 이동·체결 �
   await expect(page.getByTestId("replay-total-ask")).toHaveText("7,800");
   await expect(page.getByTestId("replay-tape-row")).toHaveCount(2);
 
-  await page.getByRole("group", { name: "체결 금액 필터" }).getByRole("button", { name: "5천만+", exact: true }).click();
+  const firstTradeRow = page.getByTestId("replay-tape-row").first();
+  const tradeTime = firstTradeRow.locator(".tr-time");
+  const tradePrice = firstTradeRow.locator(".tr-price");
+  await expect(tradeTime).toHaveText("09:00:45");
+  await expect(tradeTime).toHaveAttribute("title", "09:00:45.120");
+  const timeBox = (await tradeTime.boundingBox())!;
+  const priceBox = (await tradePrice.boundingBox())!;
+  expect(timeBox.x + timeBox.width).toBeLessThanOrEqual(priceBox.x + 1);
+
+  await page.getByRole("group", { name: "체결 금액 필터" }).getByRole("button", { name: "3천만", exact: true }).click();
   await expect(page.getByTestId("replay-tape-row")).toHaveCount(1);
 
   await page.getByTestId("replay-bookmark-btn").click();
@@ -348,8 +389,9 @@ test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 �
   await expect(page.getByTestId("replay-sim-qty")).toHaveText("420주");
   await expect(page.getByTestId("replay-sim-status")).toHaveAttribute("data-tone", "ok");
 
+  const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");
-  await brokers.getByTestId("replay-broker-view-table").click();
+  await brokersPane.getByTestId("replay-broker-view-table").click();
   await expect(brokers.getByTestId("replay-broker-table")).toBeVisible();
   await expect(brokers.getByTestId("replay-broker-table-row")).toHaveCount(5);
   await expect(brokers.getByTestId("replay-broker-table-stamp")).toContainText("첫 스냅샷");
@@ -386,4 +428,138 @@ test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 �
     return val;
   });
   expect(playBg).not.toBe(raisedBg);
+});
+
+test("종목 클릭 시 기존 SearchDialog로 종목을 전환하고, 스플리터 크기 조절과 하단 데크 중앙 배치가 동작한다", async ({ page, scenario }) => {
+  seedTickReplay(scenario);
+  scenario.reply("/api/symbols/000660/book-replay/days", { body: { symbol: "000660", days: [] } });
+  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
+
+  await expect(page.getByTestId("replay-page")).toBeVisible();
+  await expect(page.getByTestId("replay-workspace")).toBeVisible();
+
+  const deckBox = (await page.getByTestId("replay-deck").boundingBox())!;
+  const centerBox = (await page.getByTestId("replay-deck-center").boundingBox())!;
+  const deckMid = deckBox.x + deckBox.width / 2;
+  const centerMid = centerBox.x + centerBox.width / 2;
+  expect(Math.abs(deckMid - centerMid)).toBeLessThan(80);
+
+  const chartBefore = (await page.getByTestId("replay-slot-chart").boundingBox())!;
+  const ladderBefore = (await page.getByTestId("replay-slot-ladder").boundingBox())!;
+
+  const mainSplitter = (await page.getByTestId("replay-splitter-main").boundingBox())!;
+  await page.mouse.move(mainSplitter.x + mainSplitter.width / 2, mainSplitter.y + mainSplitter.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(mainSplitter.x - 80, mainSplitter.y + mainSplitter.height / 2, { steps: 4 });
+  await page.mouse.up();
+
+  const chartAfter = (await page.getByTestId("replay-slot-chart").boundingBox())!;
+  expect(chartAfter.width).toBeLessThan(chartBefore.width - 20);
+
+  const rightSplitter = (await page.getByTestId("replay-splitter-right").boundingBox())!;
+  await page.mouse.move(rightSplitter.x + rightSplitter.width / 2, rightSplitter.y + rightSplitter.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(rightSplitter.x + rightSplitter.width / 2, rightSplitter.y + 60, { steps: 4 });
+  await page.mouse.up();
+
+  const ladderAfter = (await page.getByTestId("replay-slot-ladder").boundingBox())!;
+  expect(ladderAfter.height).toBeGreaterThan(ladderBefore.height + 30);
+
+  await page.getByTestId("replay-symbol-picker").click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("search-target-bar")).toHaveCount(0);
+  await expect(dialog.getByRole("group", { name: "시장 필터" })).toBeVisible();
+  const input = dialog.getByRole("combobox", { name: "종목 검색" });
+  await input.fill("000660");
+  const hynix = dialog.getByRole("option").filter({ hasText: "000660" });
+  await expect(hynix).toHaveAttribute("aria-disabled", "false");
+  await hynix.click();
+  await expect(dialog).toBeHidden();
+  await expect(page).toHaveURL(/\/replay\?symbol=000660/);
+  await expect(page.getByTestId("replay-symbol-picker")).toContainText("000660");
+});
+
+test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵션은 탭 전환·종목 변경·새로고침 뒤에도 유지된다", async ({ page, scenario }) => {
+  seedTickReplay(scenario);
+  const altCode = "000660";
+  scenario.reply(`/api/symbols/${altCode}/book-replay/days`, { body: { symbol: altCode, days: [DATE] } });
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/book-replay/meta` && url.searchParams.get("date") === DATE,
+    { body: { ...REPLAY_META_TICK, symbol: altCode } },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/book-replay/span` && url.searchParams.get("date") === DATE && url.searchParams.get("startMinute") === "540",
+    { body: SPAN_540_BYTES },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/brokers` && url.searchParams.get("date") === DATE,
+    { body: { ...BROKER_DAY, symbol: altCode } },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/program-series`,
+    { body: { ...PROGRAM_PAGE, symbol: altCode } },
+  );
+
+  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
+
+  const brokersPane = page.getByTestId("replay-brokers-pane");
+  const brokers = page.getByTestId("replay-brokers");
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  const levelGroup = brokers.getByRole("group", { name: "집계 단위" });
+  const modeGroup = brokers.getByRole("group", { name: "계산 모드" });
+  const toggleOther = brokers.getByTestId("broker-transfer-toggle-other");
+  const preset30 = brokers.getByTestId("broker-transfer-preset-last30");
+
+  await levelGroup.getByRole("button", { name: "주체 그룹", exact: true }).click();
+  await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
+  await toggleOther.click();
+  await preset30.click();
+
+  await brokersPane.getByTestId("replay-tab-journal").click();
+  await expect(brokersPane.getByTestId("replay-sim-journal")).toBeVisible();
+  await brokersPane.getByTestId("replay-tab-brokers").click();
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  await brokersPane.getByTestId("replay-broker-view-board").click();
+  await brokersPane.getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "복합", exact: true }).click();
+  await brokersPane.getByTestId("replay-broker-view-transfer").click();
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  const assertTransferOptions = async () => {
+    await expect(levelGroup.getByRole("button", { name: "주체 그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(modeGroup.getByRole("button", { name: "총량", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(toggleOther).toHaveAttribute("aria-pressed", "false");
+    await expect(preset30).toHaveAttribute("aria-pressed", "true");
+  };
+
+  await assertTransferOptions();
+
+  await page.getByTestId("replay-symbol-picker").click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill(altCode);
+  const hynix = dialog.getByRole("option").filter({ hasText: altCode });
+  await expect(hynix).toHaveAttribute("aria-disabled", "false");
+  await hynix.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("replay-symbol-picker")).toContainText(altCode);
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await assertTransferOptions();
+
+  await pollSaved(() => scenario.documents.uiPrefs().brokers).toMatchObject({
+    transferLevel: "group",
+    transferMode: "gross",
+    transferShowOther: false,
+    transferRangePreset: "last30",
+    replayView: "transfer",
+    replayCards: "both",
+  });
+
+  await page.reload();
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await assertTransferOptions();
+
+  await brokersPane.getByTestId("replay-broker-view-board").click();
+  await expect(brokersPane.getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "복합", exact: true })).toHaveAttribute("aria-pressed", "true");
 });

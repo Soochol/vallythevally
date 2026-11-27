@@ -19,7 +19,7 @@ export const MAX_TOASTS = 3;
 
 const isUndo = (value: ToastUndo | ToastOptions): value is ToastUndo => "run" in value;
 
-export type SearchPurpose = "open" | "watch" | "page";
+export type SearchPurpose = "open" | "watch" | "page" | "replay";
 export interface PutTarget { listId: string; groupId: string | null }
 export type IndicatorCommandMode = "current" | "add" | "compare";
 export type ChartPanelMode = IndicatorCommandMode | "settings";

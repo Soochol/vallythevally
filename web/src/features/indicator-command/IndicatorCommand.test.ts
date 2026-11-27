@@ -4,11 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { IndicatorConfig } from "../../chart/settings";
 import { chartWindows, DEFAULT_LAYOUT } from "../../stores/layout";
-import type { IndicatorCommandMode } from "../../stores/selection";
+import type { ChartPanelMode } from "../../stores/selection";
 import { MaGroupEditorView } from "../indicator-dialog/MaGroupEditor";
 import { IndicatorCommandBody } from "./IndicatorCommand";
 
-function markup(mode: IndicatorCommandMode) {
+function markup(mode: ChartPanelMode) {
   const first = chartWindows(DEFAULT_LAYOUT)[0]!;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const html = renderToStaticMarkup(createElement(QueryClientProvider, { client }, createElement(IndicatorCommandBody, { cellId: first.id, initialMode: mode })));
@@ -82,4 +82,17 @@ test("비교 모드로 열면 탭 없이 비교 수·가격축을 보이고 하�
   expect(html).not.toContain("비교 종목 추가");
   expect(html).not.toContain("<kbd class=\"ui-kbd \">Tab</kbd>");
   expect(html).toContain('data-chart-control=""');
+});
+
+test("모달 상단 영역 탭은 지표 · 차트 · 비교 순서이고 차트 설정은 통합 그리드 푸터와 그룹 메뉴를 보인다", () => {
+  const html = markup("settings");
+  const segMatch = html.match(/aria-label="차트 설정 영역"[^>]*>([\s\S]*?)<\/div>/);
+  expect(segMatch).not.toBeNull();
+  const labels = [...segMatch![1]!.matchAll(/<button[^>]*>([^<]+)<\/button>/g)].map((m) => m[1]);
+  expect(labels).toEqual(["지표", "차트", "비교"]);
+  expect(segMatch![1]).toContain('aria-label="차트 설정"');
+  expect(html).toContain("이 칸 설정");
+  expect(html).toContain("공통 설정");
+  expect(html).toContain("cs-foot-bar");
+  expect(html).not.toContain("cs-sidebar-foot");
 });

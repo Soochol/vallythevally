@@ -7,7 +7,7 @@ import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { compareRefusal } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
-import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
+import { isIndexCode, KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
 import { activeWindowId } from "../../stores/activeWindow";
 import { chartWindows, DEFAULT_LINK_COLOR, isFollowsWindow, isWindowLocked, linkLabel, useLayoutStore, windowName, type WindowState } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
@@ -115,8 +115,12 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const ids = useId();
   const symbolList = searchList(query, { watch, recent }, search.data, filters);
   const rows: ResultRow[] = [
-    ...(mode.kind === "symbols" ? symbolList.rows.filter((row) => (query !== "" || matchesMarket(row.info, market))).map((row): ResultRow => ({ kind: "symbol", ...row })) : []),
-    ...(query === "" || mode.kind === "commands" ? commandRowsOf(commands, query, mode.kind === "commands") : []),
+    ...(mode.kind === "symbols"
+      ? symbolList.rows
+          .filter((row) => (purpose !== "replay" || !isIndexCode(row.info.code)) && (query !== "" || matchesMarket(row.info, market)))
+          .map((row): ResultRow => ({ kind: "symbol", ...row }))
+      : []),
+    ...(purpose !== "replay" && (query === "" || mode.kind === "commands") ? commandRowsOf(commands, query, mode.kind === "commands") : []),
   ];
   const selectable = mode.kind === "commands" || (!offline && symbolList.selectable);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
@@ -142,7 +146,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       useSelectionStore.getState().showToast(`${watchlist.name}에서 뺐습니다: ${info.name}`);
     } else put(info);
   };
-  const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare" | "page") => {
+  const chooseSymbol = (info: SymbolInfo, action: "open" | "watch" | "toggleWatch" | "compare" | "page" | "replay") => {
     queryClient.setQueryData(["symbol", info.code], info);
     const selection = useSelectionStore.getState();
     if (action === "compare") {
@@ -161,6 +165,9 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
         inputRef.current?.focus();
         return;
       }
+    } else if (action === "replay") {
+      useUiStore.getState().pushRecent(info.code);
+      navigate(`/replay?symbol=${encodeURIComponent(info.code)}`, { replace: true });
     } else if (purpose === "page") {
       sendToLinkedChart(info);
     } else {
@@ -175,7 +182,14 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   };
   const choose = (row: ResultRow, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => {
     if (!selectable) return;
-    if (row.kind === "symbol") return chooseSymbol(row.info, (modifiers.ctrlKey || modifiers.metaKey) ? "toggleWatch" : modifiers.shiftKey ? "compare" : purpose);
+    if (row.kind === "symbol") {
+      const action = (modifiers.ctrlKey || modifiers.metaKey)
+        ? "toggleWatch"
+        : modifiers.shiftKey && purpose !== "replay"
+          ? "compare"
+          : purpose;
+      return chooseSymbol(row.info, action);
+    }
     close();
     try {
       void Promise.resolve(row.command.run({ cellId, queryClient, navigate })).catch((error: unknown) => useSelectionStore.getState().showToast(error instanceof Error ? error.message : "명령을 실행하지 못했습니다"));
@@ -216,7 +230,9 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     ? <><Hint keys={["↵"]}>실행</Hint><Hint keys={["Esc"]}>닫기</Hint></>
     : purpose === "watch"
       ? <><Hint keys={["↵"]}>넣기</Hint><Hint keys={["Tab"]}>넣을 곳</Hint><Hint keys={["Esc"]}>닫기</Hint></>
-      : <><Hint keys={["↑", "↓"]}>고르기</Hint><Hint keys={["↵"]}>{purpose === "page" ? "보낼 연동 색 차트에 열기" : "열기"}</Hint><Hint keys={["☆", "Ctrl+↵"]} joiner="·">관심종목</Hint><Hint keys={["Shift+↵"]}>비교</Hint><Hint keys={["Esc"]}>닫기</Hint></>;
+      : purpose === "replay"
+        ? <><Hint keys={["↑", "↓"]}>고르기</Hint><Hint keys={["↵"]}>호가 복기 열기</Hint><Hint keys={["☆", "Ctrl+↵"]} joiner="·">관심종목</Hint><Hint keys={["Esc"]}>닫기</Hint></>
+        : <><Hint keys={["↑", "↓"]}>고르기</Hint><Hint keys={["↵"]}>{purpose === "page" ? "보낼 연동 색 차트에 열기" : "열기"}</Hint><Hint keys={["☆", "Ctrl+↵"]} joiner="·">관심종목</Hint><Hint keys={["Shift+↵"]}>비교</Hint><Hint keys={["Esc"]}>닫기</Hint></>;
 
   return <CommandFrame solid labelledBy={`${ids}-title`} onClose={close} width="h-[min(640px,80dvh)] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
     <div className="flex min-h-0 flex-1 flex-col">

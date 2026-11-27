@@ -55,6 +55,8 @@ const rsi: ChartSettings = {
   showHorzGrid: false,
   showVertGrid: false,
   regularHoursOnly: true,
+  candlesOnTop: true,
+  scalePriceOnly: true,
 };
 
 test("맞는 v2 모양은 그대로 읽는다", () => {
@@ -107,6 +109,14 @@ test("정규장만 보기 켜짐이 없는 저장값은 끔으로 읽고 v1의 �
   const v1 = { v: 1, style: "bar", scale: "log", indicators: [], compare: [], panels: [] };
   expect(parseChartSettings(v1)).toMatchObject({ regularHoursOnly: false });
   expect(parseChartSettings({ ...v1, regularHoursOnly: true })).toMatchObject({ regularHoursOnly: true });
+});
+
+test("캔들을 지표 위에·가격만 축에 맞춤이 없는 저장값은 끔으로 읽고 v1의 유효한 불리언은 유지한다", () => {
+  const { candlesOnTop: _top, scalePriceOnly: _scale, ...older } = rsi;
+  expect(parseChartSettings(older)).toEqual({ ...rsi, candlesOnTop: false, scalePriceOnly: false });
+  const v1 = { v: 1, style: "bar", scale: "log", indicators: [], compare: [], panels: [] };
+  expect(parseChartSettings(v1)).toMatchObject({ candlesOnTop: false, scalePriceOnly: false });
+  expect(parseChartSettings({ ...v1, candlesOnTop: true, scalePriceOnly: true })).toMatchObject({ candlesOnTop: true, scalePriceOnly: true });
 });
 
 test("자동 봉 수와 경계의 봉 수는 그대로 읽는다", () => {
@@ -169,6 +179,12 @@ test.each([
   ["정규장만 보기 켜짐이 문자열", { ...rsi, regularHoursOnly: "true" }],
   ["정규장만 보기 켜짐이 숫자", { ...rsi, regularHoursOnly: 1 }],
   ["정규장만 보기 켜짐이 null", { ...rsi, regularHoursOnly: null }],
+  ["캔들을 지표 위에 켜짐이 문자열", { ...rsi, candlesOnTop: "true" }],
+  ["캔들을 지표 위에 켜짐이 숫자", { ...rsi, candlesOnTop: 1 }],
+  ["캔들을 지표 위에 켜짐이 null", { ...rsi, candlesOnTop: null }],
+  ["가격만 축에 맞춤 켜짐이 문자열", { ...rsi, scalePriceOnly: "true" }],
+  ["가격만 축에 맞춤 켜짐이 숫자", { ...rsi, scalePriceOnly: 1 }],
+  ["가격만 축에 맞춤 켜짐이 null", { ...rsi, scalePriceOnly: null }],
   ["최고·최저 등락률 기준이 null", { ...rsi, extremeBasis: null }],
   ["v1인데 범례 켜짐이 문자열", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], showLegend: "true" }],
   ["v1인데 봉 수가 틀림", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], visibleBars: 0 }],

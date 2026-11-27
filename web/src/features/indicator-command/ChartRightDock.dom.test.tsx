@@ -42,3 +42,19 @@ test("우측 도킹은 통합 트리에서 자식 인스턴스 편집과 부모 
   expect(screen.getByRole("button", { name: "이동평균 단순 20 추가" })).toBeTruthy();
   client.clear();
 });
+
+test("우측 도킹 상단 탭은 지표 · 차트 · 비교 순서이고 차트 버튼의 접근성 이름은 차트 설정이다", () => {
+  const cellId = firstCellId();
+  const host = document.createElement("div");
+  Object.defineProperty(host, "clientWidth", { value: 900, configurable: true });
+  const hostRef = createRef<HTMLElement | null>();
+  hostRef.current = host;
+
+  const { client } = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={hostRef} />, { withToast: false });
+
+  const seg = screen.getByRole("group", { name: "차트 설정 영역" });
+  const buttons = Array.from(seg.querySelectorAll("button"));
+  expect(buttons.map((b) => b.textContent)).toEqual(["지표", "차트", "비교"]);
+  expect(buttons[1]?.getAttribute("aria-label")).toBe("차트 설정");
+  client.clear();
+});

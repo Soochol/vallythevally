@@ -4,7 +4,9 @@ import { beforeEach, expect, test } from "vitest";
 import type { BookReplayDay } from "../../api/generated/BookReplayDay";
 import type { BookReplayMeta } from "../../api/generated/BookReplayMeta";
 import { useServerModeStore } from "../../public-mode/serverMode";
+import { DEFAULT_UI_PREFS } from "../../persist/uiState";
 import { useSelectionStore } from "../../stores/selection";
+import { useUiStore } from "../../stores/ui";
 import { renderWithProviders, stubFetch } from "../../test/domHarness";
 import { resetDomAfterEach } from "../../test/domSetup";
 import { ReplayPage } from "./ReplayPage";
@@ -39,6 +41,7 @@ const FALLBACK_DAY: BookReplayDay = {
 beforeEach(() => {
   useServerModeStore.setState({ kind: "local" });
   useSelectionStore.setState({ dialog: null, toasts: [], toast: null });
+  useUiStore.getState().load(DEFAULT_UI_PREFS, {});
 });
 
 resetDomAfterEach();
@@ -82,9 +85,9 @@ test("minute_only 해상도 폴백, 종목 전환 대화상자, 블라인드·�
   expect(screen.getByTestId("replay-blind-btn").getAttribute("aria-pressed")).toBe("true");
 
   fireEvent.click(screen.getByTestId("replay-symbol-picker"));
-  const dialog = await screen.findByTestId("replay-symbol-dialog");
-  fireEvent.click(within(dialog).getByRole("button", { name: "닫기" }));
-  expect(screen.queryByTestId("replay-symbol-dialog")).toBeNull();
+  expect(useSelectionStore.getState().dialog).toEqual({ kind: "search", purpose: "replay" });
+  useSelectionStore.getState().closeDialog();
+  expect(useSelectionStore.getState().dialog).toBeNull();
 
   fireEvent.click(screen.getByTestId("replay-date-trigger"));
   const popover = await screen.findByTestId("replay-date-popover");

@@ -1,18 +1,19 @@
-import { type ReactNode, useId, useState } from "react";
+import { Fragment, type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { CHART_STYLE_LABEL, type ChartSettings, type ChartStyle, clampVisibleBars, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type PriceScale, shownScale, VISIBLE_BARS_MAX, VISIBLE_BARS_MIN } from "../../chart/settings";
 import type { IndicatorWindow } from "../../persist/uiState";
 import { chartWindow, useCell, useLayoutStore } from "../../stores/layout";
 import { useUiStore } from "../../stores/ui";
 import { CloseIcon } from "../icons";
-import { AXIS_LOCKED, LOG_LOCKED, pressScale } from "../indicator-dialog/compareForm";
+import { AXIS_LOCKED, LOG_LOCKED, pressScale, stepIndex } from "../indicator-dialog/compareForm";
 import { useShownIndicatorWindow } from "../indicator-command/open";
 import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { DialogFrame } from "../dialog/DialogParts";
 import { Badge } from "../ui/Badge";
+import { Kbd } from "../ui/Kbd";
 import { Segmented, type SegmentedOption } from "../ui/Segmented";
 import type { WindowId } from "../../layout/kinds";
-import { CHART_SETTINGS_SECTIONS, type ChartSettingsSectionId, SCOPE_LABEL, scopeTitle } from "./menus";
+import { CHART_SETTINGS_SECTIONS, type ChartSettingsScope, type ChartSettingsSectionId, SCOPE_LABEL, scopeTitle } from "./menus";
 
 const BAR_PRESETS = [null, 60, 120, 240, 480] as const;
 const STYLE_OPTIONS = (Object.entries(CHART_STYLE_LABEL) as [ChartStyle, string][]).map(([value, label]): SegmentedOption<ChartStyle> => ({ value, label }));
@@ -37,13 +38,15 @@ function isSectionModified(sectionId: ChartSettingsSectionId, settings: ChartSet
     return settings.style !== DEFAULT_CHART_SETTINGS.style
       || settings.scale !== DEFAULT_CHART_SETTINGS.scale
       || settings.visibleBars !== DEFAULT_CHART_SETTINGS.visibleBars
-      || settings.regularHoursOnly !== DEFAULT_CHART_SETTINGS.regularHoursOnly;
+      || settings.regularHoursOnly !== DEFAULT_CHART_SETTINGS.regularHoursOnly
+      || settings.scalePriceOnly !== DEFAULT_CHART_SETTINGS.scalePriceOnly;
   }
   if (sectionId === "display") {
     return settings.showLegend !== DEFAULT_CHART_SETTINGS.showLegend
       || settings.showOhlcChange !== DEFAULT_CHART_SETTINGS.showOhlcChange
       || settings.showExtremes !== DEFAULT_CHART_SETTINGS.showExtremes
-      || settings.extremeBasis !== DEFAULT_CHART_SETTINGS.extremeBasis;
+      || settings.extremeBasis !== DEFAULT_CHART_SETTINGS.extremeBasis
+      || settings.candlesOnTop !== DEFAULT_CHART_SETTINGS.candlesOnTop;
   }
   if (sectionId === "grid") {
     return settings.showHorzGrid !== DEFAULT_CHART_SETTINGS.showHorzGrid
@@ -53,35 +56,32 @@ function isSectionModified(sectionId: ChartSettingsSectionId, settings: ChartSet
   return indicatorWindow !== DEFAULT_INDICATOR_WINDOW;
 }
 
-function SectionIcon({ sectionId }: { sectionId: ChartSettingsSectionId }) {
+const SCALE_LABEL: Record<PriceScale, string> = { normal: "일반", log: "로그", percent: "%" };
+const SECTION_GROUPS = [
+  { scope: "cell", label: "이 칸 설정" },
+  { scope: "all", label: "공통 설정" },
+] as const satisfies readonly { scope: ChartSettingsScope; label: string }[];
+
+function sectionSummary(sectionId: ChartSettingsSectionId, settings: ChartSettings, indicatorWindow: IndicatorWindow): string {
   if (sectionId === "bars") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-        <path d="M4.5 2.5v11M3 5.5h3v4H3zM11.5 3.5v9M10 6h3v4.5h-3z" />
-      </svg>
-    );
+    const scale = settings.compare.length > 0 ? "% 고정" : SCALE_LABEL[shownScale(settings)];
+    const bars = settings.visibleBars === null ? "자동" : `${settings.visibleBars}봉`;
+    return `${CHART_STYLE_LABEL[settings.style]} · ${scale} · ${bars}`;
   }
   if (sectionId === "display") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z" />
-        <circle cx="8" cy="8" r="2" />
-      </svg>
-    );
+    const parts = [settings.showLegend ? "범례 켜짐" : "범례 꺼짐"];
+    if (settings.showOhlcChange) parts.push("등락률");
+    if (settings.showExtremes) parts.push("최고·최저");
+    return parts.join(" · ");
   }
   if (sectionId === "grid") {
-    return (
-      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-        <path d="M2 5.5h12M2 10.5h12M5.5 2v12M10.5 2v12" />
-      </svg>
-    );
+    const parts: string[] = [];
+    if (settings.showHorzGrid) parts.push("가로");
+    if (settings.showVertGrid) parts.push("세로");
+    if (settings.showDaySeparators) parts.push("날짜선");
+    return parts.length > 0 ? `${parts.join("·")} 켜짐` : "모두 꺼짐";
   }
-  return (
-    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
-      <rect x="2" y="2.5" width="12" height="11" rx="2" />
-      <path d="M9.5 2.5v11" />
-    </svg>
-  );
+  return indicatorWindow === "dialog" ? "가운데 창" : "차트 옆";
 }
 
 export function ChartSettingsSections({ cellId, compact = false }: { cellId: WindowId; compact?: boolean }) {
@@ -90,7 +90,7 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
   const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
   const cellName = `${name} · ${PERIOD_LABEL[cell.period]}`;
   const indicatorWindow = useShownIndicatorWindow();
-  const { setChartSettings, setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setShowHorzGrid, setShowVertGrid, setRegularHoursOnly, setStyle, setScale } = useLayoutStore.getState();
+  const { setChartSettings, setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setShowHorzGrid, setShowVertGrid, setRegularHoursOnly, setCandlesOnTop, setScalePriceOnly, setStyle, setScale } = useLayoutStore.getState();
   const [activeSection, setActiveSection] = useState<ChartSettingsSectionId>("bars");
   const [draft, setDraft] = useState<string | null>(null);
   const id = useId();
@@ -125,6 +125,8 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
       showVertGrid: DEFAULT_CHART_SETTINGS.showVertGrid,
       showDaySeparators: DEFAULT_CHART_SETTINGS.showDaySeparators,
       regularHoursOnly: DEFAULT_CHART_SETTINGS.regularHoursOnly,
+      candlesOnTop: DEFAULT_CHART_SETTINGS.candlesOnTop,
+      scalePriceOnly: DEFAULT_CHART_SETTINGS.scalePriceOnly,
     });
     useUiStore.getState().setIndicatorWindow(DEFAULT_INDICATOR_WINDOW);
   };
@@ -140,6 +142,7 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
               options={SCALES.map(({ value, label, title }): SegmentedOption<PriceScale> => ({ value, label, disabled: locked, title: locked ? (value === "log" ? LOG_LOCKED : AXIS_LOCKED) : title }))} />
           </div>
           {locked && <p className="cs-note">{AXIS_LOCKED}</p>}
+          <SettingSwitch label="가격만 축에 맞춤" detail="가격 패널 지표를 제외하고 캔들 가격만으로 Y축 자동 범위를 맞춤" checked={settings.scalePriceOnly} onChange={(on) => setScalePriceOnly(cellId, on)} />
           <div className="cs-divider" />
           <div className="cs-row">
             <span className="cs-name">화면에 보이는 봉</span>
@@ -167,6 +170,8 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
             <span className="cs-name">최고·최저 등락률</span>
             <Segmented mode="pressed" label="최고·최저 등락률" options={EXTREME_BASES.map((option): SegmentedOption<ExtremeBasis> => ({ ...option, disabled: !settings.showExtremes }))} value={settings.extremeBasis} onChange={(basis) => setExtremeBasis(cellId, basis)} />
           </div>
+          <div className="cs-divider" />
+          <SettingSwitch label="캔들을 지표 위에" detail="이동평균·볼린저·일목 등 가격 패널 지표 위에 캔들을 그림" checked={settings.candlesOnTop} onChange={(on) => setCandlesOnTop(cellId, on)} />
         </div>
       );
     }
@@ -190,6 +195,17 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
     );
   };
 
+  const tabId = (sectionId: ChartSettingsSectionId) => `${id}-tab-${sectionId}`;
+  const handleNavKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const currentIndex = CHART_SETTINGS_SECTIONS.findIndex((s) => s.id === activeSection);
+    const next = CHART_SETTINGS_SECTIONS[stepIndex(currentIndex, event.key === "ArrowDown" ? 1 : -1, CHART_SETTINGS_SECTIONS.length)];
+    if (!next) return;
+    setActiveSection(next.id);
+    document.getElementById(tabId(next.id))?.focus();
+  };
+
   const panelContent = (
     <section role="region" aria-labelledby={`${id}-${activeSection}`} className="cs-content">
       <div className="cs-pane-scroll">
@@ -204,16 +220,6 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
         </header>
         {renderForm()}
       </div>
-      <footer className="cs-foot-bar">
-        {compact ? (
-          <>
-            <button type="button" className="cs-reset-btn cs-reset-compact" disabled={!anyModified} onClick={resetDefaults}>기본값 복원</button>
-            <span className="cs-foot">자동 저장</span>
-          </>
-        ) : (
-          <p className="cs-foot">자동 저장 · Esc로 되돌리고 닫기</p>
-        )}
-      </footer>
     </section>
   );
 
@@ -237,6 +243,10 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
           ))}
         </nav>
         {panelContent}
+        <footer className="cs-foot-bar">
+          <button type="button" className="cs-reset-btn cs-reset-compact" disabled={!anyModified} onClick={resetDefaults}>기본값 복원</button>
+          <span className="cs-foot">자동 저장</span>
+        </footer>
       </div>
     );
   }
@@ -244,34 +254,51 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
   return (
     <div className="cs-layout">
       <aside className="cs-sidebar" aria-label="차트 설정 메뉴">
-        <nav className="cs-nav" role="tablist" aria-orientation="vertical" aria-label="차트 설정 메뉴">
-          {CHART_SETTINGS_SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              role="tab"
-              aria-selected={activeSection === s.id}
-              data-modified={isSectionModified(s.id, settings, indicatorWindow) ? "true" : undefined}
-              className="cs-nav-item"
-              onClick={() => setActiveSection(s.id)}
-            >
-              <span className="cs-nav-icon"><SectionIcon sectionId={s.id} /></span>
-              <span className="cs-nav-label">{s.label}</span>
-              <span aria-hidden="true" className="cs-mod-dot" />
-            </button>
-          ))}
+        <nav className="cs-nav" role="tablist" aria-orientation="vertical" aria-label="차트 설정 메뉴" onKeyDown={handleNavKeyDown}>
+          {SECTION_GROUPS.map((group) => {
+            const items = CHART_SETTINGS_SECTIONS.filter((s) => s.scope === group.scope);
+            return (
+              <Fragment key={group.scope}>
+                <div className="cs-nav-group"><span>{group.label}</span><span>{items.length}</span></div>
+                {items.map((s) => (
+                  <button
+                    key={s.id}
+                    id={tabId(s.id)}
+                    type="button"
+                    role="tab"
+                    aria-label={s.label}
+                    aria-selected={activeSection === s.id}
+                    data-modified={isSectionModified(s.id, settings, indicatorWindow) ? "true" : undefined}
+                    className="cs-nav-item"
+                    onClick={() => setActiveSection(s.id)}
+                  >
+                    <span className="cs-nav-text">
+                      <span className="cs-nav-label">{s.label}</span>
+                      <span aria-hidden="true" className="cs-nav-sub">{sectionSummary(s.id, settings, indicatorWindow)}</span>
+                    </span>
+                    <span aria-hidden="true" className="cs-mod-dot" />
+                  </button>
+                ))}
+              </Fragment>
+            );
+          })}
         </nav>
-        <div className="cs-sidebar-foot">
-          <button type="button" className="cs-reset-btn" disabled={!anyModified} onClick={resetDefaults}>
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M2.5 8a5.5 5.5 0 1 0 1.4-3.7L2.5 5.5" />
-              <path d="M2.5 2.5v3h3" />
-            </svg>
-            <span>기본값 복원</span>
-          </button>
-        </div>
       </aside>
       {panelContent}
+      <footer className="cs-foot-bar">
+        <span className="ic-hints">
+          <span><Kbd>↑↓</Kbd> 고르기</span>
+          <span><Kbd>Esc</Kbd> 되돌리고 닫기</span>
+          <span>자동 저장</span>
+        </span>
+        <button type="button" className="cs-reset-btn" disabled={!anyModified} onClick={resetDefaults}>
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M2.5 8a5.5 5.5 0 1 0 1.4-3.7L2.5 5.5" />
+            <path d="M2.5 2.5v3h3" />
+          </svg>
+          <span>기본값 복원</span>
+        </button>
+      </footer>
     </div>
   );
 }

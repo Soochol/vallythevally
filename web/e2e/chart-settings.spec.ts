@@ -53,8 +53,17 @@ test("위 막대의 차트 설정 버튼은 화면 가운데에 통합 차트 �
     await expect(popover(page).getByRole("tab", { name, exact: true })).toBeVisible();
   }
   await expect(section(page, "봉 · 축")).toBeVisible();
-  await expect(popover(page).getByRole("group", { name: "차트 설정 영역", exact: true }).getByRole("button", { name: "차트 설정", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const pillButtons = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "차트 개별 설정", exact: true }).locator("button");
+  await expect(pillButtons).toHaveCount(3);
+  expect(await pillButtons.evaluateAll((buttons) => buttons.map((button) => button.querySelector(".topbar-label-lg")?.textContent))).toEqual(["지표", "차트", "비교"]);
+  const sectionGroup = popover(page).getByRole("group", { name: "차트 설정 영역", exact: true });
+  expect(await sectionGroup.locator("button").allTextContents()).toEqual(["지표", "차트", "비교"]);
+  await expect(sectionGroup.getByRole("button", { name: "차트 설정", exact: true })).toHaveAttribute("aria-pressed", "true");
   const box = (await popover(page).boundingBox())!;
+  const sidebarBox = (await popover(page).locator(".cs-sidebar").boundingBox())!;
+  const footerBox = (await popover(page).locator(".cs-foot-bar").boundingBox())!;
+  expect(Math.round(sidebarBox.width)).toBe(240);
+  expect(Math.abs(footerBox.width - (box.width - 2))).toBeLessThanOrEqual(2);
   expect(box.width).toBeLessThanOrEqual(760);
   expect(Math.abs(box.x + box.width / 2 - 1440 / 2)).toBeLessThanOrEqual(2);
   expect(Math.abs(box.y + box.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
@@ -119,11 +128,12 @@ test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async (
   const bars = section(page, "봉 · 축");
   for (const name of ["봉 모양", "가격 축", "화면에 보이는 봉"]) await expect(bars.getByRole("group", { name })).toBeVisible();
   await expect(bars.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
+  await expect(bars.getByRole("switch", { name: /^가격만 축에 맞춤/ })).toBeVisible();
   await expect(bars.getByRole("switch", { name: /^정규장만 보기/ })).toBeVisible();
 
   await chooseSettingsMenu(page, "범례 · 표시");
   const display = section(page, "범례 · 표시");
-  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "캔들을 지표 위에"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
   await expect(display.getByRole("group", { name: "최고·최저 등락률" })).toBeVisible();
   await expect(display.getByRole("group", { name: "봉 모양" })).toHaveCount(0);
 

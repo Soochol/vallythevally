@@ -10,10 +10,14 @@ import { useUiStore } from "../../stores/ui";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
 import { useCanvasPalette } from "./canvasTheme";
+import { ReplayBrokersPane } from "./ReplayBrokersPane";
 import { ReplayCharts } from "./ReplayCharts";
 import { ReplayDatePicker } from "./ReplayDatePicker";
 import { type LoopRange, ReplayDeck, type TimelineZoom } from "./ReplayDeck";
 import { ReplayLadder } from "./ReplayLadder";
+import { ReplayProgramPane } from "./ReplayProgramPane";
+import { ReplaySplitter } from "./ReplaySplitter";
+import { ReplayTradesPane } from "./ReplayTradesPane";
 import {
   type PlaybackMode,
   ReplayEngine,
@@ -30,13 +34,15 @@ import {
   formatWonCompact,
 } from "./replayModel";
 import { ReplayPaperEngine } from "./replayPaperEngine";
-import { ReplaySymbolDialog } from "./ReplaySymbolDialog";
-import { ReplayTapeAndBrokers } from "./ReplayTapeAndBrokers";
 import { useReplayData } from "./useReplayData";
 import "./replayPage.css";
 
 const DEFAULT_SYMBOL: SymbolCode = "005930";
 const DEFAULT_MODE: PlaybackMode = { kind: "time", speed: 1, skipIdleMs: null };
+const DEFAULT_LEFT_SHARE = 0.742;
+const DEFAULT_CHART_SHARE = 0.668;
+const DEFAULT_TRADES_SHARE = 0.46;
+const DEFAULT_LADDER_SHARE = 0.537;
 
 function initialSymbol(param: string | null): SymbolCode {
   if (param && !isIndexCode(param)) return param;
@@ -53,12 +59,18 @@ function setText(el: HTMLElement | null, value: string): void {
 
 export function ReplayPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [code, setCode] = useState<SymbolCode>(() => initialSymbol(searchParams.get("symbol")));
-  const [requestedDate, setRequestedDate] = useState<string | null>(() => {
-    const raw = searchParams.get("date");
-    return raw && /^\d{8}$/.test(raw) ? raw : null;
-  });
-  const [symbolDialogOpen, setSymbolDialogOpen] = useState(false);
+  const paramSymbol = searchParams.get("symbol");
+  const paramDate = searchParams.get("date");
+
+  const [code, setCode] = useState<SymbolCode>(() => initialSymbol(paramSymbol));
+  const [requestedDate, setRequestedDate] = useState<string | null>(() =>
+    paramDate && /^\d{8}$/.test(paramDate) ? paramDate : null,
+  );
+
+  const [leftShare, setLeftShare] = useState(DEFAULT_LEFT_SHARE);
+  const [chartShare, setChartShare] = useState(DEFAULT_CHART_SHARE);
+  const [tradesShare, setTradesShare] = useState(DEFAULT_TRADES_SHARE);
+  const [ladderShare, setLadderShare] = useState(DEFAULT_LADDER_SHARE);
 
   const [deltaMode, setDeltaMode] = useState<DeltaMode>("tick");
   const [tapeMinWon, setTapeMinWon] = useState(0);
@@ -74,13 +86,27 @@ export function ReplayPage() {
     loadedSpanCount: 0,
   });
 
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const leftGroupRef = useRef<HTMLDivElement>(null);
+  const tapeGroupRef = useRef<HTMLDivElement>(null);
+  const rightGroupRef = useRef<HTMLDivElement>(null);
   const headPriceRef = useRef<HTMLSpanElement>(null);
   const headDiffRef = useRef<HTMLSpanElement>(null);
   const headValRef = useRef<HTMLElement>(null);
   const skipSeekSyncRef = useRef(false);
 
-  const palette = useCanvasPalette();
+  const searchDialogOpen = useSelectionStore((s) => s.dialog?.kind === "search");
+  const openSearch = useSelectionStore((s) => s.openSearch);
   const showToast = useSelectionStore((s) => s.showToast);
+
+  useEffect(() => {
+    if (paramSymbol && !isIndexCode(paramSymbol) && paramSymbol !== code) {
+      setCode(paramSymbol);
+      setRequestedDate(paramDate && /^\d{8}$/.test(paramDate) ? paramDate : null);
+    }
+  }, [paramSymbol, paramDate, code]);
+
+  const palette = useCanvasPalette();
   const data = useReplayData(code, requestedDate);
   const session = data.session;
   const replayMeta = data.replayMeta;
@@ -170,15 +196,6 @@ export function ReplayPage() {
     return engine.subscribeFrame(applyHead);
   }, [engine, session]);
 
-  const updateSymbol = useCallback(
-    (nextCode: SymbolCode) => {
-      setCode(nextCode);
-      setRequestedDate(null);
-      setSearchParams({ symbol: nextCode }, { replace: true });
-    },
-    [setSearchParams],
-  );
-
   const updateDate = useCallback(
     (nextDate: string) => {
       setRequestedDate(nextDate);
@@ -243,15 +260,21 @@ export function ReplayPage() {
     }
   }, [engine, paper]);
 
+  const jumpMs = useCallback((ms: number) => {
+    if (!engine) return;
+    engine.setPlaying(false);
+    engine.seekMs(ms);
+  }, [engine]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (isTypingTarget(event.target)) return;
-      if (symbolDialogOpen) return;
+      if (searchDialogOpen) return;
 
       if (event.key === "/") {
         event.preventDefault();
-        setSymbolDialogOpen(true);
+        openSearch("replay");
         return;
       }
       if (!engine) return;
@@ -311,7 +334,7 @@ export function ReplayPage() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [engine, symbolDialogOpen, togglePlay, stepTick, stepSec, addBookmark, toggleLoop, showToast]);
+  }, [engine, searchDialogOpen, openSearch, togglePlay, stepTick, stepSec, addBookmark, toggleLoop, showToast]);
 
   const symbolName = data.symbolInfo?.name ?? code;
   const prevClose = session?.previousClose ?? null;
@@ -349,40 +372,147 @@ export function ReplayPage() {
 
     return (
       <div className="rp-stage">
-        <div className="rp-workspace">
-          <ReplayCharts
-            session={session}
-            engine={engine}
-            paper={paper}
-            blindMode={blindMode}
-            bookmarks={bookmarks}
-            palette={palette}
-            onScrub={scrubSec}
+        <div ref={workspaceRef} className="rp-workspace" data-testid="replay-workspace">
+          <div
+            ref={leftGroupRef}
+            className="rp-split-row rp-left-group"
+            style={{ flexGrow: leftShare, flexShrink: 1, flexBasis: 0 }}
+          >
+            <div
+              className="rp-pane-slot"
+              data-testid="replay-slot-chart"
+              style={{ flexGrow: chartShare, flexShrink: 1, flexBasis: 0 }}
+            >
+              <ReplayCharts
+                session={session}
+                engine={engine}
+                paper={paper}
+                blindMode={blindMode}
+                bookmarks={bookmarks}
+                palette={palette}
+                onScrub={scrubSec}
+              />
+            </div>
+
+            <ReplaySplitter
+              orientation="vertical"
+              value={chartShare}
+              min={0.3}
+              max={0.82}
+              defaultValue={DEFAULT_CHART_SHARE}
+              containerRef={leftGroupRef}
+              label="차트와 체결 영역 너비 조절"
+              testId="replay-splitter-chart"
+              onChange={setChartShare}
+            />
+
+            <div
+              ref={tapeGroupRef}
+              className="rp-split-row rp-tape-group"
+              style={{ flexGrow: 1 - chartShare, flexShrink: 1, flexBasis: 0 }}
+            >
+              <div
+                className="rp-pane-slot"
+                data-testid="replay-slot-trades"
+                style={{ flexGrow: tradesShare, flexShrink: 1, flexBasis: 0 }}
+              >
+                <ReplayTradesPane
+                  engine={engine}
+                  previousClose={session.previousClose}
+                  tapeMinWon={tapeMinWon}
+                  onTapeMinWon={setTapeMinWon}
+                  onJumpMs={jumpMs}
+                />
+              </div>
+
+              <ReplaySplitter
+                orientation="vertical"
+                value={tradesShare}
+                min={0.25}
+                max={0.75}
+                defaultValue={DEFAULT_TRADES_SHARE}
+                containerRef={tapeGroupRef}
+                label="체결창과 프로그램 체결창 너비 조절"
+                testId="replay-splitter-tape"
+                onChange={setTradesShare}
+              />
+
+              <div
+                className="rp-pane-slot"
+                data-testid="replay-slot-program"
+                style={{ flexGrow: 1 - tradesShare, flexShrink: 1, flexBasis: 0 }}
+              >
+                <ReplayProgramPane
+                  engine={engine}
+                  previousClose={session.previousClose}
+                  onJumpMs={jumpMs}
+                />
+              </div>
+            </div>
+          </div>
+
+          <ReplaySplitter
+            orientation="vertical"
+            value={leftShare}
+            min={0.45}
+            max={0.84}
+            defaultValue={DEFAULT_LEFT_SHARE}
+            containerRef={workspaceRef}
+            label="좌측 영역과 우측 영역 너비 조절"
+            testId="replay-splitter-main"
+            onChange={setLeftShare}
           />
-          <ReplayLadder
-            engine={engine}
-            paper={paper}
-            previousClose={session.previousClose}
-            tickStepOf={session.tickStepOf}
-            deltaMode={deltaMode}
-            onDeltaMode={setDeltaMode}
-            onUndoRewind={handleUndoRewind}
-          />
-          <ReplayTapeAndBrokers
-            engine={engine}
-            paper={paper}
-            previousClose={session.previousClose}
-            dayStartUnix={session.dayStartUnix}
-            activeSecond={control.activeSecond}
-            tapeMinWon={tapeMinWon}
-            onTapeMinWon={setTapeMinWon}
-            onJumpMs={(ms) => {
-              engine.setPlaying(false);
-              engine.seekMs(ms);
-            }}
-            brokerDay={data.brokerDay}
-            bars1m={data.bars1m}
-          />
+
+          <div
+            ref={rightGroupRef}
+            className="rp-split-col rp-right-group"
+            style={{ flexGrow: 1 - leftShare, flexShrink: 1, flexBasis: 0 }}
+          >
+            <div
+              className="rp-pane-slot"
+              data-testid="replay-slot-ladder"
+              style={{ flexGrow: ladderShare, flexShrink: 1, flexBasis: 0 }}
+            >
+              <ReplayLadder
+                engine={engine}
+                paper={paper}
+                previousClose={session.previousClose}
+                tickStepOf={session.tickStepOf}
+                deltaMode={deltaMode}
+                onDeltaMode={setDeltaMode}
+                onUndoRewind={handleUndoRewind}
+              />
+            </div>
+
+            <ReplaySplitter
+              orientation="horizontal"
+              value={ladderShare}
+              min={0.28}
+              max={0.76}
+              defaultValue={DEFAULT_LADDER_SHARE}
+              containerRef={rightGroupRef}
+              label="호가주문창과 거래원 높이 조절"
+              testId="replay-splitter-right"
+              onChange={setLadderShare}
+            />
+
+            <div
+              className="rp-pane-slot"
+              data-testid="replay-slot-brokers"
+              style={{ flexGrow: 1 - ladderShare, flexShrink: 1, flexBasis: 0 }}
+            >
+              <ReplayBrokersPane
+                engine={engine}
+                paper={paper}
+                dayStartUnix={session.dayStartUnix}
+                activeSecond={control.activeSecond}
+                blindMode={blindMode}
+                onJumpMs={jumpMs}
+                brokerDay={data.brokerDay}
+                bars1m={data.bars1m}
+              />
+            </div>
+          </div>
         </div>
 
         <ReplayDeck
@@ -410,15 +540,16 @@ export function ReplayPage() {
   })();
 
   return (
-    <PageFrame title="호가 복기">
+    <PageFrame title="호가 복기" fullWidth hideLinkColorPicker>
       <div className="rp-root" data-testid="replay-page">
         <div className="rp-context-bar">
           <button
             type="button"
             className="rp-symbol-btn"
             data-testid="replay-symbol-picker"
+            aria-haspopup="dialog"
             title="복기 종목 전환 (/)"
-            onClick={() => setSymbolDialogOpen(true)}
+            onClick={() => openSearch("replay")}
           >
             <span className="rp-symbol-name">{symbolName}</span>
             <span className="rp-symbol-code rp-mono">{code}</span>
@@ -465,13 +596,6 @@ export function ReplayPage() {
 
         <div className="rp-body">{body}</div>
       </div>
-
-      <ReplaySymbolDialog
-        open={symbolDialogOpen}
-        currentCode={code}
-        onSelect={updateSymbol}
-        onClose={() => setSymbolDialogOpen(false)}
-      />
     </PageFrame>
   );
 }

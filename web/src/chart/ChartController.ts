@@ -305,6 +305,9 @@ export class ChartController {
         isPercentScale: () => this.view !== null && shownScale(this.view.settings) === "percent",
         period: () => this.period(),
         regularHoursOnly: () => this.regularFilterActive(),
+        candlesOnTop: () => this.view?.settings.candlesOnTop ?? false,
+        scalePriceOnly: () => this.view?.settings.scalePriceOnly ?? false,
+        priceAxisGeometry: () => this.priceAxisGeometry(),
         requestFrame: () => this.requestLegendSources("indicators"),
         guard: (draw) => this.withDataGuard(draw),
         axisFormatted: (pane, side) => this.axisLabels.record(pane, side),
@@ -486,6 +489,8 @@ export class ChartController {
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), next.period, this.pendingScroll, () => this.indicators.setConfigs(configs, panels)));
       this.syncLeftPriceScale();
     }
+    if (prev !== null && prev.settings.candlesOnTop !== next.settings.candlesOnTop) this.indicators.syncPriceOrder();
+    if (prev !== null && prev.settings.scalePriceOnly !== next.settings.scalePriceOnly) this.indicators.syncPriceScale();
     if (targetChanged || configsChanged) this.syncMicroFeeds();
     if (!targetChanged && prev !== null && prev.settings.regularHoursOnly !== next.settings.regularHoursOnly && isIntraday(next.period) && this.rawHistory !== null) {
       this.reapplyHistory();
@@ -838,7 +843,6 @@ export class ChartController {
       const replaced = this.main;
       this.indicators.detachMainSeries(replaced.api);
       this.main = addMainSeries(this.chart, this.view?.settings.style ?? "candle", this.tokens, isIndex, this.lastPriceHost, this.priceAxisGeometry());
-      this.main.api.setSeriesOrder(replaced.api.seriesOrder());
       this.chart.removeSeries(replaced.api);
       this.indicators.attachMainSeries(this.main.api);
       this.extensions.forEach((ext) => ext.reattach());
