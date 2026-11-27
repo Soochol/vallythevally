@@ -1,4 +1,4 @@
-import type { IChartApi } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, SeriesType, Time } from "lightweight-charts";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { FinancialsPage } from "../../api/generated/FinancialsPage";
 import type { FinancialPoint } from "../../api/generated/FinancialPoint";
@@ -75,6 +75,11 @@ class FakeSeries {
   }
   createPriceLine() {
     return { applyOptions() {} };
+  }
+  attachPrimitive() {}
+  detachPrimitive() {}
+  seriesOrder(): number {
+    return this.order ?? -1;
   }
   setSeriesOrder(order: number) {
     this.order = order;
@@ -1153,4 +1158,165 @@ test("일목균형표 style.ichimoku 토글과 구름 불투명도 변경은 시
   f.layer.setConfigs([cloudOff], []);
   expect(LINES.map((id) => optionOf(f.line(id), "visible"))).toEqual([false, false, false, false, false]);
   expect(optionOf(cloud, "visible")).toBe(false);
+});
+
+test("candlesOnTop 설정은 거래량 겹침·일목 구름을 캔들 뒤에 두고 나머지 가격 패널 지표와 캔들의 순서를 바꾼다", () => {
+  let candlesOnTop = false;
+  const active: FakeSeries[] = [];
+  const add = (_definition: unknown, options: object, pane = 0) => {
+    const s = new FakeSeries();
+    s.pane = pane;
+    s.applyOptions(options);
+    active.push(s);
+    return s;
+  };
+  const chart = {
+    addSeries: add,
+    addCustomSeries: add,
+    removeSeries: (s: FakeSeries) => {
+      const idx = active.indexOf(s);
+      if (idx >= 0) active.splice(idx, 1);
+    },
+    panes: () => [],
+  };
+  const layer = new IndicatorLayer(
+    {
+      chart: chart as unknown as IChartApi,
+      tokens: () => TOKENS,
+      isIndex: () => false,
+      period: () => "D",
+      candlesOnTop: () => candlesOnTop,
+      requestFrame: () => {},
+      axisFormatted: () => {},
+      axisCoordinates: () => [],
+      axisFailed: () => {},
+      guard: (draw) => draw(),
+    },
+    () => ({ chart: 1, post: () => {}, close: () => {} }),
+  );
+  const volOverPrice: IndicatorConfig = { id: "vol", spec: { kind: "volume", maPeriod: 20 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } };
+  const ma5: IndicatorConfig = { id: "ma5", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
+  const ma20: IndicatorConfig = { id: "ma20", spec: { kind: "ma", method: "sma", period: 20 }, panel: "price", visible: true, style: { colors: ["ind-3"], width: 1 } };
+  const main = new FakeSeries();
+  layer.attachMainSeries(main as unknown as ISeriesApi<SeriesType, Time>);
+  layer.setConfigs([volOverPrice, ICHIMOKU, ma5], []);
+
+  const [volBars, volMa, ...rest] = active;
+  const ichiLines = rest.slice(0, LINES.length);
+  const ichiCloud = rest[LINES.length]!;
+  const ma5Line = rest[LINES.length + 1]!;
+  const overlays = [volMa!, ...ichiLines, ma5Line];
+
+  expect(volBars!.order).toBeLessThan(main.order!);
+  expect(ichiCloud.order).toBeLessThan(main.order!);
+  for (const overlay of overlays) expect(overlay.order).toBeGreaterThan(main.order!);
+
+  candlesOnTop = true;
+  layer.syncPriceOrder();
+  expect(volBars!.order).toBeLessThan(main.order!);
+  expect(ichiCloud.order).toBeLessThan(main.order!);
+  for (const overlay of overlays) expect(overlay.order).toBeLessThan(main.order!);
+  expect(main.order).toBe(overlays.length + 2);
+
+  layer.setConfigs([volOverPrice, ICHIMOKU, ma5, ma20], []);
+  const ma20Line = active.at(-1)!;
+  expect(ma20Line.order).toBeLessThan(main.order!);
+  expect(main.order).toBe(overlays.length + 3);
+
+  const main2 = new FakeSeries();
+  layer.detachMainSeries(main as unknown as ISeriesApi<SeriesType, Time>);
+  layer.attachMainSeries(main2 as unknown as ISeriesApi<SeriesType, Time>);
+  expect(main2.order).toBe(overlays.length + 3);
+  expect(ma20Line.order).toBeLessThan(main2.order!);
+
+  candlesOnTop = false;
+  layer.syncPriceOrder();
+  expect(volBars!.order).toBeLessThan(main2.order!);
+  expect(ichiCloud.order).toBeLessThan(main2.order!);
+  for (const overlay of [...overlays, ma20Line]) expect(overlay.order).toBeGreaterThan(main2.order!);
+  layer.dispose();
+});
+
+test("scalePriceOnly 설정은 가격 패널 지표와 일목 구름에만 autoscaleInfoProvider를 적용하고 거래량 겹침·하단 패널은 건드리지 않는다", () => {
+  let scalePriceOnly = false;
+  const active: FakeSeries[] = [];
+  const add = (_definition: unknown, options: object, pane = 0) => {
+    const s = new FakeSeries();
+    s.pane = pane;
+    s.applyOptions(options);
+    active.push(s);
+    return s;
+  };
+  const chart = {
+    addSeries: add,
+    addCustomSeries: add,
+    removeSeries: (s: FakeSeries) => {
+      const idx = active.indexOf(s);
+      if (idx >= 0) active.splice(idx, 1);
+    },
+    panes: () => [],
+  };
+  const layer = new IndicatorLayer(
+    {
+      chart: chart as unknown as IChartApi,
+      tokens: () => TOKENS,
+      isIndex: () => false,
+      period: () => "D",
+      scalePriceOnly: () => scalePriceOnly,
+      requestFrame: () => {},
+      axisFormatted: () => {},
+      axisCoordinates: () => [],
+      axisFailed: () => {},
+      guard: (draw) => draw(),
+    },
+    () => ({ chart: 1, post: () => {}, close: () => {} }),
+  );
+  const ma5: IndicatorConfig = { id: "ma5", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } };
+  const bb: IndicatorConfig = { id: "bb", spec: { kind: "bollinger", period: 20, k: 2 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
+  const volOverPrice: IndicatorConfig = { id: "vol", spec: { kind: "volume", maPeriod: 20 }, panel: "price", visible: true, style: { colors: ["ind-3"], width: 1 } };
+  const panels: Panel[] = [{ id: "r", stretch: 0.25 }];
+  layer.setConfigs([ma5, bb, ICHIMOKU, volOverPrice, RSI], panels);
+
+  const ma5Line = active[0]!;
+  const bbLines = active.slice(1, 4);
+  const ichiLines = active.slice(4, 4 + LINES.length);
+  const ichiCloud = active[4 + LINES.length]!;
+  const volBars = active[5 + LINES.length]!;
+  const volMa = active[6 + LINES.length]!;
+  const rsiLine = active[7 + LINES.length]!;
+  const priceOverlays = [ma5Line, ...bbLines, ...ichiLines, ichiCloud];
+  const unaffected = [volBars, volMa, rsiLine];
+
+  for (const s of priceOverlays) expect(optionOf(s, "autoscaleInfoProvider")).toBeUndefined();
+  for (const s of unaffected) expect(s.options.some((o) => "autoscaleInfoProvider" in o)).toBe(false);
+
+  scalePriceOnly = true;
+  layer.syncPriceScale();
+  for (const s of priceOverlays) {
+    const provider = optionOf(s, "autoscaleInfoProvider");
+    expect(typeof provider).toBe("function");
+    expect((provider as () => unknown)()).toBeNull();
+  }
+  for (const s of unaffected) expect(s.options.some((o) => "autoscaleInfoProvider" in o)).toBe(false);
+
+  const ma20: IndicatorConfig = { id: "ma20", spec: { kind: "ma", method: "sma", period: 20 }, panel: "price", visible: true, style: { colors: ["ind-4"], width: 1 } };
+  layer.setConfigs([ma5, bb, ICHIMOKU, volOverPrice, ma20, RSI], panels);
+  const rebuiltOverlays = [...active.slice(0, 5 + LINES.length), active[7 + LINES.length]!];
+  const rebuiltUnaffected = [active[5 + LINES.length]!, active[6 + LINES.length]!, active[8 + LINES.length]!];
+  const rebuiltCloud = active[4 + LINES.length]!;
+  for (const s of rebuiltOverlays) {
+    const provider = optionOf(s, "autoscaleInfoProvider");
+    expect(typeof provider).toBe("function");
+    expect((provider as () => unknown)()).toBeNull();
+  }
+  for (const s of rebuiltUnaffected) expect(s.options.some((o) => "autoscaleInfoProvider" in o)).toBe(false);
+
+  scalePriceOnly = false;
+  layer.syncPriceScale();
+  for (const s of rebuiltOverlays) expect(optionOf(s, "autoscaleInfoProvider")).toBeUndefined();
+  for (const s of rebuiltUnaffected) expect(s.options.some((o) => "autoscaleInfoProvider" in o)).toBe(false);
+
+  layer.refreshPriceFormat();
+  expect(optionOf(rebuiltCloud, "priceFormat")).toBeDefined();
+  layer.dispose();
 });

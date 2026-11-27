@@ -897,3 +897,28 @@ test("정규장만 보기 설정은 값이 바뀔 때만 차트 설정과 저장
   expect(chartWindow(state().layout, id).chartSettings.regularHoursOnly).toBe(false);
   expect(state().revision).toBe(startRevision + 2);
 });
+
+test("캔들을 지표 위에·가격만 축에 맞춤 설정은 값이 바뀔 때만 차트 설정과 저장 순서를 바꾼다", () => {
+  const id = firstChart().id;
+  const startRevision = state().revision;
+  expect(chartWindow(state().layout, id).chartSettings.candlesOnTop).toBe(false);
+  expect(chartWindow(state().layout, id).chartSettings.scalePriceOnly).toBe(false);
+  state().setCandlesOnTop(id, false);
+  state().setScalePriceOnly(id, false);
+  expect(state().revision).toBe(startRevision);
+  state().setCandlesOnTop(id, true);
+  expect(chartWindow(state().layout, id).chartSettings.candlesOnTop).toBe(true);
+  expect(state().revision).toBe(startRevision + 1);
+  state().setCandlesOnTop(id, true);
+  expect(state().revision).toBe(startRevision + 1);
+  state().setScalePriceOnly(id, true);
+  expect(chartWindow(state().layout, id).chartSettings.scalePriceOnly).toBe(true);
+  expect(state().revision).toBe(startRevision + 2);
+  state().setScalePriceOnly(id, true);
+  expect(state().revision).toBe(startRevision + 2);
+  state().setCandlesOnTop(id, false);
+  state().setScalePriceOnly(id, false);
+  expect(chartWindow(state().layout, id).chartSettings.candlesOnTop).toBe(false);
+  expect(chartWindow(state().layout, id).chartSettings.scalePriceOnly).toBe(false);
+  expect(state().revision).toBe(startRevision + 4);
+});

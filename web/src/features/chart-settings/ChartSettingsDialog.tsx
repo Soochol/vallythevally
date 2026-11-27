@@ -38,13 +38,15 @@ function isSectionModified(sectionId: ChartSettingsSectionId, settings: ChartSet
     return settings.style !== DEFAULT_CHART_SETTINGS.style
       || settings.scale !== DEFAULT_CHART_SETTINGS.scale
       || settings.visibleBars !== DEFAULT_CHART_SETTINGS.visibleBars
-      || settings.regularHoursOnly !== DEFAULT_CHART_SETTINGS.regularHoursOnly;
+      || settings.regularHoursOnly !== DEFAULT_CHART_SETTINGS.regularHoursOnly
+      || settings.scalePriceOnly !== DEFAULT_CHART_SETTINGS.scalePriceOnly;
   }
   if (sectionId === "display") {
     return settings.showLegend !== DEFAULT_CHART_SETTINGS.showLegend
       || settings.showOhlcChange !== DEFAULT_CHART_SETTINGS.showOhlcChange
       || settings.showExtremes !== DEFAULT_CHART_SETTINGS.showExtremes
-      || settings.extremeBasis !== DEFAULT_CHART_SETTINGS.extremeBasis;
+      || settings.extremeBasis !== DEFAULT_CHART_SETTINGS.extremeBasis
+      || settings.candlesOnTop !== DEFAULT_CHART_SETTINGS.candlesOnTop;
   }
   if (sectionId === "grid") {
     return settings.showHorzGrid !== DEFAULT_CHART_SETTINGS.showHorzGrid
@@ -88,7 +90,7 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
   const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
   const cellName = `${name} · ${PERIOD_LABEL[cell.period]}`;
   const indicatorWindow = useShownIndicatorWindow();
-  const { setChartSettings, setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setShowHorzGrid, setShowVertGrid, setRegularHoursOnly, setStyle, setScale } = useLayoutStore.getState();
+  const { setChartSettings, setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setShowHorzGrid, setShowVertGrid, setRegularHoursOnly, setCandlesOnTop, setScalePriceOnly, setStyle, setScale } = useLayoutStore.getState();
   const [activeSection, setActiveSection] = useState<ChartSettingsSectionId>("bars");
   const [draft, setDraft] = useState<string | null>(null);
   const id = useId();
@@ -123,6 +125,8 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
       showVertGrid: DEFAULT_CHART_SETTINGS.showVertGrid,
       showDaySeparators: DEFAULT_CHART_SETTINGS.showDaySeparators,
       regularHoursOnly: DEFAULT_CHART_SETTINGS.regularHoursOnly,
+      candlesOnTop: DEFAULT_CHART_SETTINGS.candlesOnTop,
+      scalePriceOnly: DEFAULT_CHART_SETTINGS.scalePriceOnly,
     });
     useUiStore.getState().setIndicatorWindow(DEFAULT_INDICATOR_WINDOW);
   };
@@ -138,6 +142,7 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
               options={SCALES.map(({ value, label, title }): SegmentedOption<PriceScale> => ({ value, label, disabled: locked, title: locked ? (value === "log" ? LOG_LOCKED : AXIS_LOCKED) : title }))} />
           </div>
           {locked && <p className="cs-note">{AXIS_LOCKED}</p>}
+          <SettingSwitch label="가격만 축에 맞춤" detail="가격 패널 지표를 제외하고 캔들 가격만으로 Y축 자동 범위를 맞춤" checked={settings.scalePriceOnly} onChange={(on) => setScalePriceOnly(cellId, on)} />
           <div className="cs-divider" />
           <div className="cs-row">
             <span className="cs-name">화면에 보이는 봉</span>
@@ -165,6 +170,8 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
             <span className="cs-name">최고·최저 등락률</span>
             <Segmented mode="pressed" label="최고·최저 등락률" options={EXTREME_BASES.map((option): SegmentedOption<ExtremeBasis> => ({ ...option, disabled: !settings.showExtremes }))} value={settings.extremeBasis} onChange={(basis) => setExtremeBasis(cellId, basis)} />
           </div>
+          <div className="cs-divider" />
+          <SettingSwitch label="캔들을 지표 위에" detail="이동평균·볼린저·일목 등 가격 패널 지표 위에 캔들을 그림" checked={settings.candlesOnTop} onChange={(on) => setCandlesOnTop(cellId, on)} />
         </div>
       );
     }
