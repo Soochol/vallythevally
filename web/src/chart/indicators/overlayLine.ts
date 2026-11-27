@@ -12,7 +12,6 @@ import {
   type Time,
   type WhitespaceData,
 } from "lightweight-charts";
-import type { LineWidth } from "../settings";
 
 export interface OverlayPoint extends CustomData<Time> {
   value?: number;
@@ -24,9 +23,13 @@ export interface OverlayPoint extends CustomData<Time> {
 const HALO_WIDTH = 8;
 const HALO_ALPHA = 0.18;
 
+export type OverlayLineStyle = "solid" | "dashed";
+
 export interface OverlayOptions extends CustomSeriesOptions {
-  lineWidth: LineWidth;
+  lineWidth: number;
   halo: boolean;
+  lineStyle: OverlayLineStyle;
+  opacity: number;
 }
 
 export type OverlaySeries = ISeriesApi<"Custom", Time, OverlayPoint | WhitespaceData<Time>, OverlayOptions>;
@@ -60,9 +63,11 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
               ctx.moveTo(bar.x, y);
             }
           }
+          ctx.save();
           ctx.strokeStyle = options.color;
           ctx.lineJoin = "round";
           ctx.lineCap = "butt";
+          ctx.setLineDash?.(options.lineStyle === "dashed" ? [4, 3] : []);
           if (options.halo) {
             ctx.save();
             ctx.globalAlpha = HALO_ALPHA;
@@ -70,8 +75,10 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
             ctx.stroke();
             ctx.restore();
           }
+          ctx.globalAlpha = options.opacity;
           ctx.lineWidth = options.lineWidth;
           ctx.stroke();
+          ctx.restore();
         }),
     };
   }
@@ -92,7 +99,7 @@ export class OverlayLineView implements ICustomSeriesPaneView<Time, OverlayPoint
   }
 
   defaultOptions(): OverlayOptions {
-    return { ...customSeriesDefaultOptions, lineWidth: 1, halo: false };
+    return { ...customSeriesDefaultOptions, lineWidth: 1, halo: false, lineStyle: "solid", opacity: 1 };
   }
 }
 

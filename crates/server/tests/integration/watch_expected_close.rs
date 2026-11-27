@@ -104,7 +104,7 @@ fn fill(code: &str, hms: (u32, u32, u32), price_won: u64, exchange: Exchange, ch
         price: Price::from_centi(price_won * 100).unwrap(),
         qty: Volume(1),
         exchange: Some(exchange),
-        day: Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative) }),
+        day: Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative), traded_million_won: None }),
         strength_centi: None,
         same_time_ratio_centi: None,
         side: None,

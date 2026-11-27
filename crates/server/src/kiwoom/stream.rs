@@ -763,7 +763,7 @@ impl Session {
                 Ok(RealItem::Index { index, hhmmss, price, cumulative, change_centi }) => {
                     let before = conn.index_cumulative.insert(index, cumulative);
                     let qty = before.map_or(0, |b| cumulative.saturating_sub(b));
-                    let day = change_centi.map(|change_centi| DayTotals { change_centi, cumulative: Volume(cumulative) });
+                    let day = change_centi.map(|change_centi| DayTotals { change_centi, cumulative: Volume(cumulative), traded_million_won: None });
                     let tick = RealTick { symbol: Symbol::Index(index), hhmmss, price, qty: Volume(qty), exchange: None, day, strength_centi: None, same_time_ratio_centi: None, side: None };
                     StreamEvent::Tick { tick, received_at }
                 }

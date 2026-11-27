@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
 import type { WindowId } from "../../layout/kinds";
@@ -6,19 +6,15 @@ import { formatDecimal } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { useVenue } from "../../stores/ui";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { MarketHead, useDayQuote } from "../market-window/MarketHead";
+import { MarketSymbolName, useDayQuote } from "../market-window/MarketHead";
 import { Notice } from "../ui/Notice";
-import { RatioBar, Segmented, Strip } from "../market-window/parts";
+import { RatioBar, Segmented } from "../market-window/parts";
 import { formatQuantity } from "../market-window/format";
 import { useWindowedRows } from "../market-window/useWindowedRows";
 import { TradeRow } from "./TradeRow";
-import type { TradeRow as TradeRowData } from "./tape";
 import { cumulativeQuantity, formatSecond, MIN_AMOUNT_OPTIONS, minAmountWon, recentBuySell, visibleEntries, type MinAmountKey } from "./tape";
-import { useBelowHeight } from "./useBelowHeight";
 import { useTradeTape } from "./useTradeTape";
 import "./trades.css";
-
-const COMPACT_STRIPS_BELOW_HEIGHT_PX = 260;
 
 export function TradesWindow({ id }: { id: WindowId }) {
   const venue = useVenue();
@@ -26,8 +22,6 @@ export function TradesWindow({ id }: { id: WindowId }) {
 }
 
 function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
-  const frame = useRef<HTMLDivElement>(null);
-  const compactStrips = useBelowHeight(frame, COMPACT_STRIPS_BELOW_HEIGHT_PX);
   const { state, history, feedError, retry } = useTradeTape(marketSocket, code, venue);
   const quote = useDayQuote(code, venue);
   const previousClose = quote.previousClose;
@@ -38,21 +32,21 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
   const windowed = useWindowedRows(view.entries.length);
   const integratedOnly = state.historyVenue === "combined" && venue !== "combined";
   const empty = view.entries.length === 0;
-  const lastPrice = view.entries.find((entry): entry is TradeRowData => entry.kind === "trade")?.price ?? null;
   return (
-    <div ref={frame} className="tr-window" data-testid="trades-window" data-symbol={code} data-compact-strips={compactStrips ? "" : undefined}>
-      <MarketHead code={code} venue={venue} lastPrice={lastPrice} previousClose={previousClose} />
-      <div className="tr-strips">
-      <Strip>
-        <span className="tr-figure" data-figure="strength" title="체결강도"><span className="tr-name">체결강도 </span><b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
-        <RatioBar buy={split.buy} sell={split.sell} label="최근 체결의 매수·매도 비율" />
-        <span className="tr-figure" data-figure="cumulative" title="누적"><span className="tr-name">누적 </span><b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
-      </Strip>
-      <Strip>
-        <span className="tr-name">최소 금액</span>
-        <Segmented<MinAmountKey> label="최소 체결 금액" options={MIN_AMOUNT_OPTIONS} value={minKey} onChange={setMinKey} />
-        {integratedOnly && <span className="mw-integrated" data-testid="trade-integrated-only" title="이 종목은 선택한 거래소로 조회되지 않아 통합 값을 보입니다"><span>통합</span><span className="tr-detail"> 기준</span></span>}
-      </Strip>
+    <div className="tr-window" data-testid="trades-window" data-symbol={code}>
+      <div className="mw-head tr-strips">
+        <MarketSymbolName code={code} />
+        <span className="mw-head-div" aria-hidden="true" />
+        <div className="tr-strip-metrics">
+          <span className="tr-figure" data-figure="strength" title="체결강도"><span className="tr-name">강도</span><b data-testid="trade-strength">{state.strength === null ? "—" : `${formatDecimal(state.strength)}%`}</b></span>
+          <RatioBar buy={split.buy} sell={split.sell} label="최근 체결의 매수·매도 비율" />
+          <span className="tr-figure" data-figure="cumulative" title="누적"><span className="tr-name">누적</span><b data-testid="trade-cumulative">{formatQuantity(cumulativeQuantity(state, effectiveVenue))}</b></span>
+        </div>
+        <div className="tr-strip-controls">
+          <span className="tr-name tr-min-label">최소 금액</span>
+          <Segmented<MinAmountKey> label="최소 체결 금액" options={MIN_AMOUNT_OPTIONS} value={minKey} onChange={setMinKey} />
+          {integratedOnly && <span className="mw-integrated" data-testid="trade-integrated-only" title="이 종목은 선택한 거래소로 조회되지 않아 통합 값을 보입니다"><span>통합</span><span className="tr-detail"> 기준</span></span>}
+        </div>
       </div>
       {feedError !== null && <Notice tone="danger" className="mw-notice">실시간 체결을 받지 못합니다</Notice>}
       {history === "failed" && <Notice tone="danger" className="mw-notice" action={{ label: "다시 시도", onClick: retry }}>당일 체결을 불러오지 못했습니다</Notice>}

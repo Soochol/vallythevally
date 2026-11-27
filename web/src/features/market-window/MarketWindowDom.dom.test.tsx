@@ -2,6 +2,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { windowId } from "../../layout/kinds";
+import { useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
 import { renderWithProviders } from "../../test/domHarness";
 import { resetDomAfterEach } from "../../test/domSetup";
@@ -130,4 +131,96 @@ test("정규장 VI 발동 시 예상체결 두 칸과 사다리 강조가 보이
   expect(offEnv.daySummaryCalls("krx")).toBe(0);
   offView.client.clear();
   offView.unmount();
+});
+
+test("10호가창과 호가주문창은 종목을 바꿨다 돌아와도 VI 예상체결 히스토리와 서버 스냅샷을 유지하고 해제 시 즉시 숨긴다", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const regMs = Date.parse("2026-11-09T10:00:00+09:00");
+  vi.setSystemTime(regMs);
+  const regSec = Math.floor(regMs / 1000);
+  const triggeredAt = regSec - 20;
+
+  const env = setupOrderEnv();
+  const view = renderWithProviders(<BookWindow id={windowId("book")} />);
+  await screen.findByTestId("price-ladder");
+  await waitFor(() => expect(env.socket.subsOf("book", CODE).length).toBeGreaterThan(0));
+
+  await act(async () => {
+    env.socket.emit({ type: "vi_snapshot", states: [] });
+    env.socket.emit({
+      type: "vi_update",
+      state: { symbol: CODE, market: "krx", active: true, direction: "up", triggerPrice: 77_000, base: 70_000, triggeredAt, releasedAt: null },
+    });
+    for (const sub of env.socket.subsOf("book", CODE)) {
+      env.socket.emit({
+        type: "feed_book",
+        sub,
+        book: { t: triggeredAt + 5, asks: [{ price: BASE + 100, qty: 50 }], bids: [{ price: BASE, qty: 80 }], totalAskQty: 50, totalBidQty: 80, expected: { price: 77_200, qty: 300 } },
+      });
+    }
+  });
+  await waitFor(() => expect(screen.getByTestId("order-vi-top")).toBeTruthy());
+  expect(screen.queryByTestId("order-vi-bottom")).toBeNull();
+  await waitFor(() => expect(screen.getByTestId("order-vi-sparkline").querySelectorAll("rect.od-vi-spark-bar")).toHaveLength(1));
+
+  await act(async () => {
+    for (const sub of env.socket.subsOf("book", CODE)) {
+      env.socket.emit({
+        type: "feed_book",
+        sub,
+        book: { t: triggeredAt + 10, asks: [{ price: BASE + 100, qty: 50 }], bids: [{ price: BASE, qty: 80 }], totalAskQty: 50, totalBidQty: 80, expected: { price: 77_500, qty: 450 } },
+      });
+    }
+  });
+  await waitFor(() => expect(screen.getByTestId("order-vi-sparkline").querySelectorAll("rect.od-vi-spark-bar")).toHaveLength(2));
+
+  await act(async () => {
+    useLayoutStore.setState((s) => ({
+      ...s,
+      layout: {
+        ...s.layout,
+        windows: s.layout.windows.map((w) => (w.kind === "chart" ? { ...w, symbol: "000660" } : w)),
+      },
+    }));
+  });
+  await waitFor(() => expect(screen.queryByTestId("order-vi-top")).toBeNull());
+
+  await act(async () => {
+    useLayoutStore.setState((s) => ({
+      ...s,
+      layout: {
+        ...s.layout,
+        windows: s.layout.windows.map((w) => (w.kind === "chart" ? { ...w, symbol: CODE } : w)),
+      },
+    }));
+  });
+  await waitFor(() => expect(screen.getByTestId("order-vi-top")).toBeTruthy());
+  expect(screen.getByTestId("order-vi-sparkline").querySelectorAll("rect.od-vi-spark-bar")).toHaveLength(2);
+
+  await act(async () => {
+    env.socket.emit({
+      type: "vi_expected_snapshot",
+      symbol: CODE,
+      market: "krx",
+      triggeredAt,
+      points: [
+        { t: triggeredAt + 5, price: 77_200, qty: 300 },
+        { t: triggeredAt + 10, price: 77_500, qty: 450 },
+        { t: triggeredAt + 16, price: 77_900, qty: 600 },
+      ],
+    });
+  });
+  await waitFor(() => expect(screen.getByTestId("order-vi-sparkline").querySelectorAll("rect.od-vi-spark-bar")).toHaveLength(3));
+  expect(screen.getByTestId("order-vi-expected-latest").textContent).toContain("77,900");
+
+  await act(async () => {
+    env.socket.emit({
+      type: "vi_update",
+      state: { symbol: CODE, market: "krx", active: false, direction: "up", triggerPrice: 77_000, base: null, triggeredAt, releasedAt: regSec },
+    });
+  });
+  await waitFor(() => expect(screen.queryByTestId("order-vi-top")).toBeNull());
+
+  view.client.clear();
+  view.unmount();
 });

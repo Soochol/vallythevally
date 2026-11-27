@@ -8,7 +8,7 @@ import type { SymbolCode } from "./generated/SymbolCode";
 import { getJson } from "./http";
 
 const STALE_MS = 30_000;
-const GC_TIME_MS = 30 * 60 * 1000;
+const GC_TIME_MS = 5 * 60 * 1000;
 const LIVE_FLOW_POLL_MS = 5_000;
 const DAYS_BOUNDARY_POLL_MS = 20_000;
 const KST_OFFSET_MS = 9 * 3600 * 1000;

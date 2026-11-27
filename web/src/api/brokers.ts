@@ -6,7 +6,7 @@ import type { SymbolCode } from "./generated/SymbolCode";
 import { getJson } from "./http";
 
 const DAYS_STALE_MS = 60_000;
-const GC_TIME_MS = 30 * 60 * 1000;
+const GC_TIME_MS = 5 * 60 * 1000;
 
 export type { BrokerDay, BrokerDays };
 
