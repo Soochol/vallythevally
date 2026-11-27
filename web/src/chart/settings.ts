@@ -277,6 +277,7 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
         && isOptionalBool(r.showSpoof)
         && isOptionalBool(r.showIceberg)
         && isOptionalMicroMode(r.microLabelMode)
+        && isOptionalBool(r.dynamicContrast)
         ? {
             kind: "quoteDepth",
             source: r.source,
@@ -288,6 +289,7 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
             ...(r.showSpoof !== undefined ? { showSpoof: r.showSpoof } : {}),
             ...(r.showIceberg !== undefined ? { showIceberg: r.showIceberg } : {}),
             ...(r.microLabelMode !== undefined ? { microLabelMode: r.microLabelMode } : {}),
+            ...(r.dynamicContrast !== undefined ? { dynamicContrast: r.dynamicContrast } : {}),
           }
         : null;
     case "ma":

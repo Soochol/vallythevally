@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { QuoteDepthPoint } from "../../api/generated/QuoteDepthPoint";
 import { normalizeHex, type HexColor } from "../../lib/colors";
-import { ALPHA_STEPS, DEPTH_GAMMA, drawDepth, halfStep, levelAlpha, topLevels, visibleMax, type DepthFrame, type DepthStyle } from "./cells";
+import { ALPHA_STEPS, DEPTH_GAMMA, DYNAMIC_CONTRAST_PERCENTILE, drawDepth, halfStep, levelAlpha, levelAlphaLog, percentileQty, topLevels, visibleMax, type DepthFrame, type DepthStyle } from "./cells";
 
 type Levels = [number, number][];
 
@@ -102,4 +102,32 @@ test("많은 칸도 색 바꾸기와 좌표 변환이 칸 수에 비례하지 �
     expect(calls.y).toBeLessThanOrEqual(prices.size + 1);
     expect(calls.x.size).toBe(600);
   }
+});
+
+test("동적 대비는 p95 로그 정규화로 일반 벽을 살리고 초대형 벽에 코어와 경계선을 덧그린다", () => {
+  expect(DYNAMIC_CONTRAST_PERCENTILE).toBe(0.95);
+  expect(percentileQty([], 0.95)).toBe(0);
+  expect(percentileQty([10, 20, 30, 40, 1000], 0.8)).toBe(1000);
+  expect(percentileQty(Array.from({ length: 20 }, (_, i) => (i === 19 ? 100_000 : 1_000)), 0.95)).toBe(100_000);
+  expect(levelAlphaLog(0, 1000, 0.7)).toBe(0);
+  expect(levelAlphaLog(1000, 1000, 0.7)).toBeCloseTo(0.7, 10);
+  expect(levelAlphaLog(50_000, 1000, 0.7)).toBeCloseTo(0.7, 10);
+  expect(levelAlphaLog(100, 1000, 0.7)).toBeGreaterThan(levelAlpha(100, 100_000, 0.7));
+
+  const points = Array.from({ length: 12 }, (_, i) =>
+    point(
+      i,
+      [[102, 2_000], [101, 1_500]],
+      [[100, i === 6 ? 500_000 : 1_500], [99, 1_000]],
+    ),
+  );
+  const legacy = drawn({ from: 0, to: 11, point: (i) => points[i] }, { ...STYLE, dynamicContrast: false });
+  const dynamic = drawn({ from: 0, to: 11, point: (i) => points[i] }, { ...STYLE, dynamicContrast: true, outlierBorder: hex("#F59E0B") });
+
+  const legacyNormal = legacy.rects.find((r) => r.left === 6 && r.top === 1000 - 102.5)!;
+  const dynamicNormal = dynamic.rects.find((r) => r.left === 6 && r.top === 1000 - 102.5)!;
+  expect(alphaOf(dynamicNormal)).toBeGreaterThan(alphaOf(legacyNormal) * 5);
+  expect(dynamic.rects.length).toBe(legacy.rects.length + 3);
+  expect(dynamic.calls.fillStyle).toBeLessThanOrEqual(2 * ALPHA_STEPS + 3);
+  expect(dynamic.rects.some((r) => colored(r) === "rgba(245, 158, 11")).toBe(true);
 });

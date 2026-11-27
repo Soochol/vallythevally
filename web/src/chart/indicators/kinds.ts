@@ -18,6 +18,7 @@ export type QuoteDepthSpec = {
   showSpoof?: boolean;
   showIceberg?: boolean;
   microLabelMode?: MicroLabelMode;
+  dynamicContrast?: boolean;
 };
 export type QuoteSpec = { kind: "quoteTotals" } | QuoteDepthSpec;
 export type TickCvdSpec = {
@@ -295,11 +296,12 @@ export const KINDS: Registry = {
   quoteDepth: {
     label: "호가 잔량 히트맵",
     place: "price",
-    defaults: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" },
+    defaults: { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean", dynamicContrast: true },
     fields: [
       { key: "source", label: "잔량 기준", type: "choice", options: [["priceMax", "가격대마다 최댓값"], ["peak", "총잔량 최대 순간"], ["close", "종가 호가"]] },
       { key: "topLevels", label: "가격대 수", type: "optionalInt", unit: "개", toggle: "최대 잔량 가격대만", start: 1, max: 5 },
       { key: "maxOpacity", label: "최대 불투명도", type: "percent", min: 20, max: 100, step: 5 },
+      { key: "dynamicContrast", label: "동적 대비 (Log + p95)", type: "flag" },
       { key: "aboveBars", label: "봉 앞에 그리기", type: "flag" },
       { key: "showSpoof", label: "허수 취소 표시", type: "flag" },
       { key: "showIceberg", label: "아이스버그 흡수 표시", type: "flag" },
