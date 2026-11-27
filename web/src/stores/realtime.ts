@@ -8,11 +8,13 @@ import { QuoteBook } from "./quoteBook";
 import { receiveSetupChanged } from "./setupChange";
 import { useUiStore } from "./ui";
 import { ViBook } from "./viBook";
+import { ViExpectedStore } from "./viExpectedStore";
 
 export const marketSocket = new MarketSocket({ url: () => sameOriginWsUrl(location), onKiwoomLink: receiveKiwoomLinkPush, onMarketSource: receiveMarketSourcePush, onAccount: receiveAccountPush, onSetupChanged: receiveSetupChanged, onCollectorDaemon: receiveCollectorDaemon });
 
 export const quoteBook = new QuoteBook({ socket: marketSocket, fetchQuotes });
 export const viBook = new ViBook(marketSocket);
+export const viExpectedStore = new ViExpectedStore(marketSocket, viBook);
 
 quoteBook.setVenue(useUiStore.getState().prefs.venue);
 useUiStore.subscribe((state) => quoteBook.setVenue(state.prefs.venue));
