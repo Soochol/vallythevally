@@ -194,8 +194,16 @@ export class IndicatorLayer {
     this.micro.setLiveEnabled(enabled);
   }
 
+  setActive(active: boolean): void {
+    this.quotes.setActive(active);
+  }
+
   applyLiveTrade(symbol: SymbolCode, tick: FeedTrade): boolean {
     return this.micro.applyLiveTrade(symbol, tick);
+  }
+
+  applyLiveTrades(symbol: SymbolCode, ticks: readonly FeedTrade[]): boolean {
+    return this.micro.applyLiveTrades(symbol, ticks);
   }
 
   applyLiveProgram(symbol: SymbolCode, row: FeedProgramRow): boolean {

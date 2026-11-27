@@ -18,11 +18,11 @@ import {
   type TodayBrokerFeedDeps,
 } from "./dayFeed";
 import { dayBars, formatIsoDate, kstDayBounds } from "./history";
-import { appendSnapshots, type BrokerState, EMPTY_BROKER_STATE } from "./model";
+import { appendSnapshots, type BrokerState, compactBrokerState, EMPTY_BROKER_STATE } from "./model";
 
 const BARS_REFETCH_MS = 60_000;
-const BARS_GC_MS = 30 * 60 * 1000;
-const PAST_DAY_GC_MS = 30 * 60 * 1000;
+const BARS_GC_MS = 5 * 60 * 1000;
+const PAST_DAY_GC_MS = 5 * 60 * 1000;
 const PAST_DAY_DEBOUNCE_MS = 120;
 const MAX_BAR_PAGES = 3;
 
@@ -65,7 +65,7 @@ function toCachedPastDay(reply: BrokerDay): CachedPastDay {
   return {
     date: reply.date,
     source: reply.source,
-    state: appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps),
+    state: compactBrokerState(appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps)),
     gaps: reply.gaps,
   };
 }

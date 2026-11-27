@@ -8,7 +8,7 @@ import type { BookReplayMeta } from "./generated/BookReplayMeta";
 import type { SymbolCode } from "./generated/SymbolCode";
 import { getJson } from "./http";
 
-const GC_TIME_MS = 30 * 60 * 1000;
+const GC_TIME_MS = 5 * 60 * 1000;
 const DAYS_STALE_MS = 60_000;
 const DAYS_REFETCH_MS = 60_000;
 export const TODAY_REFETCH_MS = 20_000;

@@ -9,12 +9,19 @@ const GLOW_FADE_MS = 600;
 
 const reducesMotion = (): boolean => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function replay(element: Element | null, frames: Keyframe[], duration: number, playsWhenReduced: boolean): void {
+function replay(element: Element | null, frames: Keyframe[], duration: number, playsWhenReduced: boolean, hideOnFinish: boolean): void {
   if (element === null || typeof element.animate !== "function" || (reducesMotion() && !playsWhenReduced)) return;
   element.getAnimations().forEach((animation) => animation.cancel());
-  element.animate(frames, { duration, fill: "forwards" });
+  const styled = hideOnFinish && element instanceof HTMLElement ? element : null;
+  if (styled) styled.style.opacity = "";
+  const animation = element.animate(frames, { duration });
+  if (styled) {
+    animation.onfinish = () => {
+      styled.style.opacity = "0";
+    };
+  }
 }
 
-export const replayChangeFade = (element: Element | null): void => replay(element, CHANGE_FADE, CHANGE_FADE_MS, true);
+export const replayChangeFade = (element: Element | null): void => replay(element, CHANGE_FADE, CHANGE_FADE_MS, true, true);
 
-export const replayGlow = (element: Element | null): void => replay(element, GLOW_FADE, GLOW_FADE_MS, false);
+export const replayGlow = (element: Element | null): void => replay(element, GLOW_FADE, GLOW_FADE_MS, false, false);

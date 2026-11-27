@@ -24,7 +24,7 @@ import {
   resolvePreviousClose,
 } from "./replayModel";
 
-const GC_TIME_MS = 30 * 60 * 1000;
+const GC_TIME_MS = 5 * 60 * 1000;
 const EMPTY_BARS: readonly Bar[] = [];
 
 export function useReplayData(code: SymbolCode, requestedDate: string | null) {

@@ -5,6 +5,7 @@ import { useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
 import { isIndexCode } from "../../lib/symbol";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
+import { useWindowVisible } from "../workspace/windowVisibility";
 import { DateListPane } from "./DateListPane";
 import {
   computeHistoricalBand,
@@ -39,7 +40,8 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
   const [pinnedBySymbol, setPinnedBySymbol] = useState<{ readonly symbol: SymbolCode; readonly dates: readonly string[] } | null>(null);
   const [spotDate, setSpotDate] = useState<string | null>(null);
 
-  const daysQuery = usePreMarketDays(stockSymbol);
+  const windowVisible = useWindowVisible();
+  const daysQuery = usePreMarketDays(stockSymbol, windowVisible);
   const availableDays = daysQuery.data?.days ?? [];
 
   const rangeDates = useMemo(
@@ -47,7 +49,7 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
     [stockSymbol, availableDays, range],
   );
 
-  const compareQuery = usePreMarketCompare(stockSymbol, rangeDates);
+  const compareQuery = usePreMarketCompare(stockSymbol, rangeDates, windowVisible);
   const series = compareQuery.data?.series ?? [];
 
   const focusDate = useMemo(() => {

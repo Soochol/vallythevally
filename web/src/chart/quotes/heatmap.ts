@@ -225,8 +225,25 @@ function shortMicroBadge(event: MicroEvent): string {
   return `흡수 ${(event.ratioBps / 10_000).toFixed(1)}x`;
 }
 
+function lowerBoundEventMs(events: readonly MicroEvent[], targetMs: number): number {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (events[mid]!.recvMs < targetMs) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 export function drawMicroMarkers(ctx: CanvasRenderingContext2D, args: MicroMarkerArgs): void {
   const { bars, from, to, periodSec, events, showSpoof, showIceberg, verbose, spoofColor, icebergColor, bgColor, textColor, fontFamily, horizontalPixelRatio, verticalPixelRatio } = args;
+  if (events.length === 0 || from > to || bars.length === 0) return;
+  const span = Math.max(1, periodSec);
+  const startMs = bars[from]!.t * 1000;
+  const endMs = (bars[to]!.t + span) * 1000;
+  const startIdx = lowerBoundEventMs(events, startMs);
+  if (startIdx >= events.length || events[startIdx]!.recvMs >= endMs) return;
   const radius = Math.max(2.5, 3.5 * horizontalPixelRatio);
   const strokeWidth = Math.max(1, 1.25 * horizontalPixelRatio);
   const fontSize = Math.max(9, Math.round(10 * verticalPixelRatio));
@@ -236,8 +253,9 @@ export function drawMicroMarkers(ctx: CanvasRenderingContext2D, args: MicroMarke
     ctx.font = `600 ${fontSize}px ${fontFamily}`;
     ctx.textBaseline = "middle";
   }
-  for (let i = 0; i < events.length; i++) {
+  for (let i = startIdx; i < events.length; i++) {
     const event = events[i]!;
+    if (event.recvMs >= endMs) break;
     if (event.kind === "spoof_cancel" && !showSpoof) continue;
     if (event.kind === "iceberg_absorb" && !showIceberg) continue;
     const sec = Math.floor(event.recvMs / 1000);

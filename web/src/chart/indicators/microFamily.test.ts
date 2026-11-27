@@ -561,4 +561,38 @@ describe("MicroIndicatorController", () => {
       validateNonTechnicalSpec({ kind: "tickCvd", showWhale: false, showLarge: false, showMid: false, showRetail: true }).ok,
     ).toBe(true);
   });
+
+  test("applyLiveTrades batches notifications and stops buffering pendingLive after fetch failure", async () => {
+    const t0 = Math.floor(Date.parse("2026-11-24T09:05:00+09:00") / 1000);
+    const bars: Bar[] = [{ t: t0, o: 100, h: 101, l: 99, c: 100, v: 1000 }];
+    let cvdChangedCalls = 0;
+    const ctl = new MicroIndicatorController(
+      {
+        bars: () => bars,
+        tokens: () => TOKENS,
+        configs: () => [CVD_CONFIG],
+        onTickCvdChanged: () => { cvdChangedCalls++; },
+        onProgramChanged: () => {},
+      },
+      {
+        fetchTickCvd: async () => Promise.reject(new Error("boom")),
+      },
+    );
+
+    ctl.setTarget({ symbol: "005930", period: "1m" });
+    await Promise.resolve();
+    await Promise.resolve();
+    cvdChangedCalls = 0;
+
+    const ok = ctl.applyLiveTrades("005930", [
+      { t: t0 + 1, price: 100_000, qty: 1_200, venue: "krx", strength: null },
+      { t: t0 + 2, price: 100_000, qty: 1_500, venue: "krx", strength: null },
+      { t: t0 + 61, price: 100_000, qty: 1_000, venue: "krx", strength: null },
+    ]);
+    expect(ok).toBe(true);
+    expect(cvdChangedCalls).toBe(1);
+    expect(ctl.cvdPointAt(t0)?.whaleNetMillionWon).toBeCloseTo(270, 5);
+    expect(ctl.cvdPointAt(t0 + 60)?.whaleNetMillionWon).toBeCloseTo(370, 5);
+    ctl.dispose();
+  });
 });
