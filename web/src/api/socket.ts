@@ -24,7 +24,7 @@ export type FeedEvent =
   | Extract<ServerMessage, { type: "feed_subscribed" | "feed_trades" | "feed_book" | "feed_after_hours" | "feed_program" | "feed_brokers" | "feed_micro" | "feed_ofi" | "feed_link" | "sub_error" }>
   | { type: "resync" };
 
-export type ViEvent = Extract<ServerMessage, { type: "vi_snapshot" | "vi_update" }>;
+export type ViEvent = Extract<ServerMessage, { type: "vi_snapshot" | "vi_update" | "vi_expected_snapshot" }>;
 
 export type TradingAccountChange = Extract<ServerMessage, { type: "trading_account_changed" }>;
 
@@ -249,6 +249,7 @@ export class MarketSocket implements MarketSocketLike {
         return this.emitQuotes(m);
       case "vi_snapshot":
       case "vi_update":
+      case "vi_expected_snapshot":
         return this.emitVi(m);
       case "kiwoom_link":
         return this.opts.onKiwoomLink?.(m.status);

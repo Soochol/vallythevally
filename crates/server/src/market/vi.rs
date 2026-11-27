@@ -1,11 +1,13 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 
-use domain::{KstTime, Price, StockCode, Symbol};
+use domain::{KstTime, Price, StockCode, Symbol, Venue, Volume};
 
 use crate::api::{self, UnixSeconds};
 use crate::market_source::vi::{ViAlert, ViDirection, ViMarket, ViReading, ViTurn, vi_session_open, vi_triggers_at};
 
 const ACTIVE_LIMIT_SECS: i64 = 5 * 60;
+pub const MAX_EXPECTED_POINTS: usize = 240;
+const MAX_EXPECTED_SESSIONS: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaseAfterRelease {
@@ -58,11 +60,20 @@ fn won(price: Price) -> f64 {
     price.centi() as f64 / 100.0
 }
 
+#[derive(Debug, Clone)]
+struct ViExpectedSession {
+    triggered_at: Option<KstTime>,
+    points: VecDeque<api::ViExpectedPoint>,
+    last_touch: u64,
+}
+
 #[derive(Debug, Default)]
 pub struct ViBoard {
     rows: BTreeMap<(StockCode, ViMarket), ViRow>,
     active_until: HashMap<(StockCode, ViMarket), KstTime>,
     awaiting_base: HashMap<(StockCode, ViMarket), KstTime>,
+    expected_sessions: HashMap<(StockCode, ViMarket), ViExpectedSession>,
+    touch_seq: u64,
 }
 
 impl ViBoard {
@@ -95,6 +106,9 @@ impl ViBoard {
         self.awaiting_base.remove(&key);
         if active {
             self.active_until.insert(key, active_until);
+            if self.expected_sessions.get(&key).is_some_and(|session| session.triggered_at != Some(triggered_at)) {
+                self.expected_sessions.remove(&key);
+            }
         }
         if let Some(released_at) = released_at
             && alert.market == ViMarket::Krx
@@ -117,6 +131,9 @@ impl ViBoard {
                 next.triggered_at = Some(now);
                 next.released_at = None;
                 self.active_until.insert(key, now.plus_secs(ACTIVE_LIMIT_SECS));
+                if self.expected_sessions.get(&key).is_some_and(|session| session.triggered_at != Some(now)) {
+                    self.expected_sessions.remove(&key);
+                }
             }
             Some(ViTurn::Off) if row.active => {
                 next.active = false;
@@ -186,6 +203,102 @@ impl ViBoard {
 
     pub fn states(&self) -> Vec<api::ViState> {
         self.rows.iter().map(|((code, market), row)| row.state(*code, *market)).collect()
+    }
+
+    pub fn is_active(&self, code: StockCode, market: ViMarket) -> bool {
+        self.rows.get(&(code, market)).is_some_and(|row| row.active)
+    }
+
+    pub fn active_keys(&self) -> BTreeSet<(StockCode, ViMarket)> {
+        self.rows.iter().filter(|(_, row)| row.active).map(|(&key, _)| key).collect()
+    }
+
+    pub fn active_accepts_expected(&self, code: StockCode, venue: Venue, at: KstTime) -> bool {
+        markets_for_venue(venue).iter().any(|&market| {
+            self.rows.get(&(code, market)).is_some_and(|row| row.active && row.triggered_at.is_none_or(|triggered| at >= triggered))
+        })
+    }
+
+    pub fn record_expected(&mut self, code: StockCode, market: ViMarket, price: Price, qty: Volume, at: KstTime) -> bool {
+        if price.centi() == 0 {
+            return false;
+        }
+        let key = (code, market);
+        let Some(row) = self.rows.get(&key).copied().filter(|row| row.active) else {
+            return false;
+        };
+        if row.triggered_at.is_some_and(|triggered| at < triggered) {
+            return false;
+        }
+        let point = api::ViExpectedPoint { t: UnixSeconds(at.unix()), price: won(price), qty: qty.0 };
+        self.touch_seq += 1;
+        let touch = self.touch_seq;
+        let session = self.expected_sessions.entry(key).or_insert_with(|| ViExpectedSession {
+            triggered_at: row.triggered_at,
+            points: VecDeque::new(),
+            last_touch: touch,
+        });
+        if session.triggered_at != row.triggered_at {
+            session.triggered_at = row.triggered_at;
+            session.points.clear();
+        }
+        if let Some(last) = session.points.back() {
+            if point.t.0 < last.t.0 {
+                return false;
+            }
+            if last.price == point.price && last.qty == point.qty {
+                return false;
+            }
+        }
+        session.points.push_back(point);
+        if session.points.len() > MAX_EXPECTED_POINTS {
+            session.points.pop_front();
+        }
+        session.last_touch = touch;
+        self.evict_expected_sessions();
+        true
+    }
+
+    pub fn expected_snapshots(&self, code: StockCode, venue: Venue) -> Vec<(ViMarket, Option<UnixSeconds>, Vec<api::ViExpectedPoint>)> {
+        let mut out = Vec::new();
+        for &market in markets_for_venue(venue) {
+            let key = (code, market);
+            let Some(row) = self.rows.get(&key).filter(|row| row.active) else {
+                continue;
+            };
+            let Some(session) = self.expected_sessions.get(&key) else {
+                continue;
+            };
+            if session.triggered_at != row.triggered_at || session.points.is_empty() {
+                continue;
+            }
+            out.push((market, row.triggered_at.map(|at| UnixSeconds(at.unix())), session.points.iter().copied().collect()));
+        }
+        out
+    }
+
+    fn evict_expected_sessions(&mut self) {
+        while self.expected_sessions.len() > MAX_EXPECTED_SESSIONS {
+            let victim = self
+                .expected_sessions
+                .iter()
+                .min_by_key(|(key, session)| (self.rows.get(key).is_some_and(|row| row.active), session.last_touch))
+                .map(|(&key, _)| key);
+            match victim {
+                Some(key) => {
+                    self.expected_sessions.remove(&key);
+                }
+                None => break,
+            }
+        }
+    }
+}
+
+fn markets_for_venue(venue: Venue) -> &'static [ViMarket] {
+    match venue {
+        Venue::Krx => &[ViMarket::Krx],
+        Venue::Nxt => &[ViMarket::Nxt],
+        Venue::Combined => &[ViMarket::Krx, ViMarket::Nxt],
     }
 }
 
@@ -359,5 +472,47 @@ mod tests {
         let state = board.state(code(SAMSUNG), ViMarket::Krx).unwrap();
         assert_eq!((state.active, state.base, state.released_at), (false, Some(884_000.0), None), "기준가만 바뀌면 꺼진 VI를 다시 켜지 않는다");
         assert!(!board.apply_reading(&reading(Some(884_000), true), at(15, 20, 0)), "정규장 밖의 발동 표시는 쓰지 않는다");
+    }
+
+    #[test]
+    fn expected_history_accumulates_deduplicates_separates_retriggers_and_clears() {
+        let mut board = triggered_board();
+        assert!(!board.record_expected(code(SAMSUNG), ViMarket::Krx, price(881_000), Volume(100), at(9, 29, 59)));
+        assert!(board.record_expected(code(SAMSUNG), ViMarket::Krx, price(881_000), Volume(100), at(9, 30, 5)));
+        assert!(!board.record_expected(code(SAMSUNG), ViMarket::Krx, price(881_000), Volume(100), at(9, 30, 6)));
+        assert!(!board.record_expected(code(SAMSUNG), ViMarket::Krx, price(882_000), Volume(150), at(9, 30, 4)));
+        assert!(board.record_expected(code(SAMSUNG), ViMarket::Krx, price(882_000), Volume(150), at(9, 30, 10)));
+
+        let snaps = board.expected_snapshots(code(SAMSUNG), Venue::Combined);
+        assert_eq!(snaps.len(), 1);
+        assert_eq!(snaps[0].0, ViMarket::Krx);
+        assert_eq!(snaps[0].1, Some(UnixSeconds(at(9, 30, 0).unix())));
+        assert_eq!(
+            snaps[0].2,
+            vec![
+                api::ViExpectedPoint { t: UnixSeconds(at(9, 30, 5).unix()), price: 881_000.0, qty: 100 },
+                api::ViExpectedPoint { t: UnixSeconds(at(9, 30, 10).unix()), price: 882_000.0, qty: 150 },
+            ]
+        );
+        assert!(board.expected_snapshots(code(SAMSUNG), Venue::Nxt).is_empty());
+
+        for i in 0..MAX_EXPECTED_POINTS + 10 {
+            let secs = 20 + i as i64;
+            let point_time = at(9, 30, 0).plus_secs(secs);
+            board.record_expected(code(SAMSUNG), ViMarket::Krx, price(883_000 + i as u64 * 100), Volume(200 + i as u64), point_time);
+        }
+        assert_eq!(board.expected_snapshots(code(SAMSUNG), Venue::Krx)[0].2.len(), MAX_EXPECTED_POINTS);
+
+        assert!(board.apply_alert(&samsung(Some(time(9, 32, 14))), at(9, 32, 14), BaseAfterRelease::FirstKrxTrade));
+        assert!(board.expected_snapshots(code(SAMSUNG), Venue::Krx).is_empty());
+        assert!(!board.record_expected(code(SAMSUNG), ViMarket::Krx, price(885_000), Volume(300), at(9, 32, 20)));
+
+        assert!(board.apply_alert(&alert(SAMSUNG, time(10, 0, 0), None), at(10, 0, 0), BaseAfterRelease::FirstKrxTrade));
+        assert!(board.expected_snapshots(code(SAMSUNG), Venue::Krx).is_empty());
+        assert!(board.record_expected(code(SAMSUNG), ViMarket::Krx, price(900_000), Volume(50), at(10, 0, 3)));
+        assert_eq!(board.expected_snapshots(code(SAMSUNG), Venue::Krx)[0].2.len(), 1);
+
+        board.clear();
+        assert!(board.expected_snapshots(code(SAMSUNG), Venue::Combined).is_empty());
     }
 }

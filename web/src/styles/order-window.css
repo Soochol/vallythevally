@@ -315,7 +315,7 @@ button.od-cellbtn:not(:disabled) small span { text-decoration:underline dotted; 
 .od-confirm-check { display:flex; align-items:center; gap:var(--s3); margin-top:var(--s5); font-size:var(--fs-s); }
 .od-confirm-actions { display:flex; justify-content:flex-end; gap:var(--s3); padding:var(--s3) var(--s5) var(--s5); }
 
-.od-vi-top, .od-vi-bottom { flex:none; box-sizing:border-box; width:100%; max-width:var(--od-ladder-max); padding:var(--s2) var(--s4); background:var(--surface); font-variant-numeric:tabular-nums; }
+.od-vi-top, .od-vi-bottom { flex:none; box-sizing:border-box; width:100%; max-width:var(--od-ladder-max, none); padding:var(--s2) var(--s4); background:var(--surface); font-variant-numeric:tabular-nums; }
 .od-vi-top { display:flex; flex-direction:column; gap:var(--s2); border-bottom:var(--size-1) solid var(--line-strong); }
 .od-vi-top-row { display:flex; align-items:center; gap:var(--s2); min-height:var(--size-20); font-size:var(--fs-xs); }
 .od-vi-badge { display:inline-flex; align-items:center; height:var(--size-18); padding:0 var(--s2); border-radius:var(--r-s); font-weight:700; white-space:nowrap; }
