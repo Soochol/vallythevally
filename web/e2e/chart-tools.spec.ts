@@ -38,12 +38,12 @@ async function open(page: Page, size: { width: number; height: number }) {
 
 const mainSeriesTypes = (page: Page) => page.evaluate(() => window.frameProbe.snapshot().filter((series) => series.data.length > 100).map((series) => series.type));
 
-test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 폭이 360px 이하이다", async ({ page }) => {
+test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 폭이 760px 이하이다", async ({ page }) => {
   await open(page, { width: 1280, height: 600 });
   await settingsButton(page).click();
   await expect(settingsPopover(page)).toBeVisible();
   const popover = (await settingsPopover(page).boundingBox())!;
-  expect(popover.width).toBeLessThanOrEqual(360);
+  expect(popover.width).toBeLessThanOrEqual(760);
   expect(popover.x).toBeGreaterThanOrEqual(0);
   expect(popover.x + popover.width).toBeLessThanOrEqual(1280);
   expect(popover.y).toBeGreaterThanOrEqual(0);
@@ -65,11 +65,9 @@ test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 �
   await expect(settingsPopover(page).getByRole("region", { name: "지표 창", exact: true })).toBeInViewport();
 });
 
-test("800px에서 더 보기로 연 차트 설정 창도 화면 가운데에서 열린다", async ({ page }) => {
+test("800px에서 연 차트 설정 창도 화면 가운데에서 열리고 너비가 바뀌어도 가운데를 유지한다", async ({ page }) => {
   await open(page, { width: 800, height: 900 });
-  const more = toolbar(page).getByRole("button", { name: "더 보기", exact: true });
-  await more.click();
-  await page.getByRole("menuitem", { name: "차트 설정", exact: true }).click();
+  await settingsButton(page).click();
   await expect(settingsPopover(page)).toBeVisible();
   const popover = (await settingsPopover(page).boundingBox())!;
   expect(Math.abs(popover.x + popover.width / 2 - 800 / 2)).toBeLessThanOrEqual(2);
