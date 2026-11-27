@@ -21,8 +21,11 @@ export const ALL_PAGES: readonly PageEntry[] = [...RAIL_PAGES, HOME_PAGE];
 
 export const SHORTCUT_PAGES = RAIL_PAGES.filter((page) => page.id !== "workspace");
 
+export const JOURNAL_ANALYTICS_PATH = "/journal/analytics";
+
 export function pageOfPath(pathname: string): PageId | null {
   const path = pathname.replace(/\/+$/, "") || "/";
+  if (path === JOURNAL_ANALYTICS_PATH) return "journal";
   return ALL_PAGES.find((page) => page.path === path)?.id ?? null;
 }
 
