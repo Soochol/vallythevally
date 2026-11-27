@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, Query, State};
@@ -13,6 +13,7 @@ use crate::api::{self, ApiErrorCode, BrokerDaySource, SymbolCode, UnixSeconds};
 use crate::collected::kind::{CollectedProgramRow, CollectedTradeTick};
 use crate::http::{ApiFailure, AppState};
 use crate::market_source::stream::TradeSide;
+use crate::screener::store::DailyMicroProgramRow;
 use crate::shared_data::CollectorPaths;
 
 pub const MID_MIN_WON: u64 = 5_000_000;
@@ -424,6 +425,108 @@ pub fn aggregate_program_day(
     rollup_program_day(&program_minutes, &tick_minutes, period_secs, from, to)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DailyProgramInput {
+    pub date: KstDate,
+    pub net_buy_amount_million_won: f64,
+    pub net_buy_qty: i64,
+    pub buy_amount_million_won: f64,
+    pub sell_amount_million_won: f64,
+    pub program_share_pct: Option<f64>,
+    pub day_traded_million_won: Option<f64>,
+}
+
+impl DailyProgramInput {
+    pub fn from_daily_micro(row: DailyMicroProgramRow) -> Self {
+        let program_share_pct = (row.program_share_bps > 0)
+            .then(|| (f64::from(row.program_share_bps) / 100.0).clamp(0.0, 100.0));
+        Self {
+            date: row.date,
+            net_buy_amount_million_won: row.program_net_won as f64 / WON_PER_MILLION,
+            net_buy_qty: 0,
+            buy_amount_million_won: 0.0,
+            sell_amount_million_won: 0.0,
+            program_share_pct,
+            day_traded_million_won: None,
+        }
+    }
+
+    pub fn from_live_day(
+        date: KstDate,
+        program_minutes: &[ProgramMinuteBucket],
+        tick_minutes: &[TickMinuteBucket],
+    ) -> Option<Self> {
+        let last = program_minutes.last()?;
+        let buy_million = last.buy_amount_million_won as f64;
+        let sell_million = last.sell_amount_million_won as f64;
+        let total_traded_won: u128 = tick_minutes.iter().map(|bucket| bucket.total_traded_won).sum();
+        let (program_share_pct, day_traded_million_won) = if total_traded_won > 0 {
+            let total_million = total_traded_won as f64 / WON_PER_MILLION;
+            let share = (((buy_million + sell_million) / total_million) * 100.0).clamp(0.0, 100.0);
+            (Some(share), Some(total_million))
+        } else {
+            (None, None)
+        };
+        Some(Self {
+            date,
+            net_buy_amount_million_won: last.net_buy_amount_million_won as f64,
+            net_buy_qty: last.net_buy_qty,
+            buy_amount_million_won: buy_million,
+            sell_amount_million_won: sell_million,
+            program_share_pct,
+            day_traded_million_won,
+        })
+    }
+}
+
+#[derive(Default)]
+struct DailyBucketAcc {
+    net_buy_amount_million_won: f64,
+    net_buy_qty: i64,
+    buy_amount_million_won: f64,
+    sell_amount_million_won: f64,
+    share_pct_sum: f64,
+    share_pct_count: u32,
+    day_traded_sum: f64,
+    has_day_traded: bool,
+}
+
+pub fn rollup_program_daily_bars(rows: &[DailyProgramInput], period: Period) -> Vec<ProgramSeriesPoint> {
+    if rows.is_empty() || period.is_intraday() {
+        return Vec::new();
+    }
+    let mut buckets: BTreeMap<i64, DailyBucketAcc> = BTreeMap::new();
+    for row in rows {
+        let bucket_t = period.bucket(KstTime::from_kst_civil(row.date, TimeOfDay::MIDNIGHT)).start().unix();
+        let entry = buckets.entry(bucket_t).or_default();
+        entry.net_buy_amount_million_won += row.net_buy_amount_million_won;
+        entry.net_buy_qty += row.net_buy_qty;
+        entry.buy_amount_million_won += row.buy_amount_million_won;
+        entry.sell_amount_million_won += row.sell_amount_million_won;
+        if let Some(pct) = row.program_share_pct {
+            entry.share_pct_sum += pct;
+            entry.share_pct_count += 1;
+        }
+        if let Some(traded) = row.day_traded_million_won {
+            entry.day_traded_sum += traded;
+            entry.has_day_traded = true;
+        }
+    }
+    buckets
+        .into_iter()
+        .map(|(bucket_t, acc)| ProgramSeriesPoint {
+            t: UnixSeconds(bucket_t),
+            net_buy_amount_million_won: acc.net_buy_amount_million_won,
+            net_buy_qty: acc.net_buy_qty,
+            buy_amount_million_won: acc.buy_amount_million_won,
+            sell_amount_million_won: acc.sell_amount_million_won,
+            program_share_pct: (acc.share_pct_count > 0)
+                .then(|| (acc.share_pct_sum / f64::from(acc.share_pct_count)).clamp(0.0, 100.0)),
+            day_traded_million_won: acc.has_day_traded.then_some(acc.day_traded_sum),
+        })
+        .collect()
+}
+
 type CacheKey = (String, String);
 
 struct CachedDay<V> {
@@ -557,22 +660,37 @@ struct MicroQuery {
     to: Option<i64>,
 }
 
-fn parse_query(code: &str, q: &HashMap<String, String>) -> Result<MicroQuery, ApiFailure> {
+enum ProgramPeriod {
+    Intraday { period: Period, period_secs: i64 },
+    DailyOrHigher(Period),
+}
+
+struct ProgramQuery {
+    stock: StockCode,
+    period: ProgramPeriod,
+    from: Option<i64>,
+    to: Option<i64>,
+}
+
+fn parse_stock_and_period(code: &str, q: &HashMap<String, String>) -> Result<(StockCode, Period, Option<i64>, Option<i64>), ApiFailure> {
     let symbol = Symbol::parse(code).map_err(|e| ApiFailure::bad_request(format!("{e}: {code}")))?;
     let Symbol::Stock(stock) = symbol else {
         return Err(ApiFailure::bad_request(format!("지수는 미세 수급 지표를 지원하지 않습니다: {code}")));
     };
     let period_raw = q.get("period").ok_or_else(|| ApiFailure::bad_request("period가 필요합니다"))?;
     let period = Period::parse(period_raw).map_err(|e| ApiFailure::bad_request(e.to_string()))?;
-    let Some(period_secs) = period_seconds(period) else {
-        return Err(ApiFailure::bad_request(format!("분봉 주기만 지원합니다: {period_raw}")));
-    };
     let from = parse_optional_unix(q, "from")?;
     let to = parse_optional_unix(q, "to")?;
+    if let (Some(start), Some(end)) = (from, to)
+        && start > end
+    {
+        return Err(ApiFailure::bad_request("from은 to보다 늦을 수 없습니다"));
+    }
+    Ok((stock, period, from, to))
+}
+
+fn validate_intraday_span(from: Option<i64>, to: Option<i64>) -> Result<(), ApiFailure> {
     if let (Some(start), Some(end)) = (from, to) {
-        if start > end {
-            return Err(ApiFailure::bad_request("from은 to보다 늦을 수 없습니다"));
-        }
         let from_date = KstTime::from_unix(start).kst_date();
         let to_date = KstTime::from_unix(end).kst_date();
         let span = to_date.days_since_epoch() - from_date.days_since_epoch() + 1;
@@ -580,7 +698,35 @@ fn parse_query(code: &str, q: &HashMap<String, String>) -> Result<MicroQuery, Ap
             return Err(ApiFailure::bad_request(format!("조회 범위는 {MAX_RANGE_DAYS}일까지입니다")));
         }
     }
+    Ok(())
+}
+
+fn parse_query(code: &str, q: &HashMap<String, String>) -> Result<MicroQuery, ApiFailure> {
+    let (stock, period, from, to) = parse_stock_and_period(code, q)?;
+    let Some(period_secs) = period_seconds(period) else {
+        let period_raw = q.get("period").map(String::as_str).unwrap_or("");
+        return Err(ApiFailure::bad_request(format!("분봉 주기만 지원합니다: {period_raw}")));
+    };
+    validate_intraday_span(from, to)?;
     Ok(MicroQuery { stock, period, period_secs, from, to })
+}
+
+fn parse_program_query(code: &str, q: &HashMap<String, String>) -> Result<ProgramQuery, ApiFailure> {
+    let (stock, period, from, to) = parse_stock_and_period(code, q)?;
+    let period = match period_seconds(period) {
+        Some(period_secs) => {
+            validate_intraday_span(from, to)?;
+            ProgramPeriod::Intraday { period, period_secs }
+        }
+        None => ProgramPeriod::DailyOrHigher(period),
+    };
+    Ok(ProgramQuery { stock, period, from, to })
+}
+
+fn daily_date_bounds(period: Period, from: Option<i64>, to: Option<i64>) -> (Option<KstDate>, Option<KstDate>) {
+    let from_date = from.map(|s| period.bucket(KstTime::from_unix(s)).start().kst_date());
+    let to_date = to.map(|s| period.bucket(KstTime::from_unix(s)).end().kst_date().add_days(-1));
+    (from_date, to_date)
 }
 
 fn parse_optional_unix(q: &HashMap<String, String>, name: &str) -> Result<Option<i64>, ApiFailure> {
@@ -710,7 +856,22 @@ async fn program_series(
     Path(code): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Result<Json<ProgramSeriesPage>, ApiFailure> {
-    let query = parse_query(&code, &q)?;
+    let query = parse_program_query(&code, &q)?;
+    match query.period {
+        ProgramPeriod::Intraday { period, period_secs } => {
+            program_series_intraday(&st, &cache, MicroQuery { stock: query.stock, period, period_secs, from: query.from, to: query.to }).await
+        }
+        ProgramPeriod::DailyOrHigher(period) => {
+            program_series_daily(&st, &cache, query.stock, period, query.from, query.to).await
+        }
+    }
+}
+
+async fn program_series_intraday(
+    st: &AppState,
+    cache: &MicroSeriesCache,
+    query: MicroQuery,
+) -> Result<Json<ProgramSeriesPage>, ApiFailure> {
     let paths = st.collector_paths.snapshot();
     if !paths_enabled(&paths) {
         return Ok(Json(ProgramSeriesPage {
@@ -748,13 +909,13 @@ async fn program_series(
     for date in dates {
         let date_str = format_yyyymmdd(date);
         let (collected, program_minutes) = cache
-            .load_program_minutes(&st, paths.clone(), query.stock, date, &date_str, now)
+            .load_program_minutes(st, paths.clone(), query.stock, date, &date_str, now)
             .await
             .map_err(|e| internal_error("수집 프로그램 자료를 읽지 못했습니다", e))?;
         if collected {
             any_collected = true;
             let (_, tick_minutes) = cache
-                .load_tick_minutes(&st, paths.clone(), query.stock, date, &date_str, now)
+                .load_tick_minutes(st, paths.clone(), query.stock, date, &date_str, now)
                 .await
                 .map_err(|e| internal_error("수집 체결 자료를 읽지 못했습니다", e))?;
             points.extend(rollup_program_day(&program_minutes, &tick_minutes, query.period_secs, query.from, query.to));
@@ -778,6 +939,73 @@ async fn program_series(
         symbol: symbol_code(query.stock),
         period: query.period.into(),
         state: MicroSeriesState::Ready,
+        points,
+    }))
+}
+
+async fn program_series_daily(
+    st: &AppState,
+    cache: &MicroSeriesCache,
+    stock: StockCode,
+    period: Period,
+    from: Option<i64>,
+    to: Option<i64>,
+) -> Result<Json<ProgramSeriesPage>, ApiFailure> {
+    let paths = st.collector_paths.snapshot();
+    let paths_active = paths_enabled(&paths);
+    let daily_micro_configured = st.screener.has_daily_micro_dir();
+    let (from_date, to_date) = daily_date_bounds(period, from, to);
+    let (has_any_daily_micro, micro_rows) = st
+        .screener
+        .daily_micro_program_series(stock, from_date, to_date)
+        .await
+        .map_err(|e| internal_error("일별 프로그램 자료를 읽지 못했습니다", e))?;
+    if !paths_active && !daily_micro_configured && !has_any_daily_micro {
+        return Ok(Json(ProgramSeriesPage {
+            symbol: symbol_code(stock),
+            period: period.into(),
+            state: MicroSeriesState::Disabled,
+            points: Vec::new(),
+        }));
+    }
+    let now = st.clock.now();
+    let today = now.kst_date();
+    let today_in_range = from_date.is_none_or(|start| today >= start) && to_date.is_none_or(|end| today <= end);
+    let has_today_in_micro = micro_rows.iter().any(|row| row.date == today);
+    let mut inputs: Vec<DailyProgramInput> = micro_rows.into_iter().map(DailyProgramInput::from_daily_micro).collect();
+    if paths_active && today_in_range && !has_today_in_micro {
+        let today_str = format_yyyymmdd(today);
+        let (collected, program_minutes) = cache
+            .load_program_minutes(st, paths.clone(), stock, today, &today_str, now)
+            .await
+            .map_err(|e| internal_error("수집 프로그램 자료를 읽지 못했습니다", e))?;
+        if collected && !program_minutes.is_empty() {
+            let (_, tick_minutes) = cache
+                .load_tick_minutes(st, paths.clone(), stock, today, &today_str, now)
+                .await
+                .map_err(|e| internal_error("수집 체결 자료를 읽지 못했습니다", e))?;
+            if let Some(today_input) = DailyProgramInput::from_live_day(today, &program_minutes, &tick_minutes) {
+                inputs.push(today_input);
+            }
+        }
+    }
+    let points = rollup_program_daily_bars(&inputs, period);
+    let state = if !points.is_empty() || has_any_daily_micro {
+        MicroSeriesState::Ready
+    } else if paths_active {
+        let available = st
+            .collected
+            .program_days(paths, stock, now)
+            .await
+            .map_err(|e| internal_error("프로그램 수집 날짜 목록을 읽지 못했습니다", e))?;
+        if available.is_empty() { MicroSeriesState::NotCollected } else { MicroSeriesState::Ready }
+    } else {
+        MicroSeriesState::NotCollected
+    };
+    Ok(Json(ProgramSeriesPage {
+        symbol: symbol_code(stock),
+        period: period.into(),
+        state,
         points,
     }))
 }
@@ -1080,5 +1308,118 @@ mod tests {
         assert_eq!(merged_prog.len(), 1);
         assert_eq!(merged_prog[0].minute_unix, KstTime::from_kst_civil(day, TimeOfDay::hms(19, 59, 0).unwrap()).unix());
         assert_eq!(merged_prog[0].net_buy_amount_million_won, 90);
+    }
+
+    #[test]
+    fn rollup_program_daily_bars_aligns_buckets_and_averages_share_pct() {
+        let d_oct30 = KstDate::new(2026, 10, 30).unwrap();
+        let d_nov02 = KstDate::new(2026, 11, 2).unwrap();
+        let d_nov04 = KstDate::new(2026, 11, 4).unwrap();
+        let d_nov09 = KstDate::new(2026, 11, 9).unwrap();
+
+        let rows = vec![
+            DailyProgramInput::from_daily_micro(DailyMicroProgramRow {
+                date: d_oct30,
+                program_net_won: -50_000_000,
+                program_share_bps: 0,
+            }),
+            DailyProgramInput::from_daily_micro(DailyMicroProgramRow {
+                date: d_nov02,
+                program_net_won: 120_000_000,
+                program_share_bps: 1_000,
+            }),
+            DailyProgramInput::from_daily_micro(DailyMicroProgramRow {
+                date: d_nov04,
+                program_net_won: 80_000_000,
+                program_share_bps: 12_500,
+            }),
+            DailyProgramInput::from_daily_micro(DailyMicroProgramRow {
+                date: d_nov09,
+                program_net_won: -25_000_000,
+                program_share_bps: 0,
+            }),
+        ];
+
+        let daily = rollup_program_daily_bars(&rows, Period::Day);
+        assert_eq!(daily.len(), 4);
+        assert_eq!(daily[0].t.0, KstTime::from_kst_civil(d_oct30, TimeOfDay::MIDNIGHT).unix());
+        assert!((daily[0].net_buy_amount_million_won - (-50.0)).abs() < 1e-9);
+        assert_eq!(daily[0].program_share_pct, None);
+        assert_eq!(daily[1].t.0, KstTime::from_kst_civil(d_nov02, TimeOfDay::MIDNIGHT).unix());
+        assert!((daily[1].program_share_pct.unwrap() - 10.0).abs() < 1e-9);
+        assert!((daily[2].program_share_pct.unwrap() - 100.0).abs() < 1e-9);
+
+        let weekly = rollup_program_daily_bars(&rows, Period::Week);
+        assert_eq!(weekly.len(), 3);
+        assert_eq!(weekly[0].t.0, KstTime::from_kst_civil(KstDate::new(2026, 10, 26).unwrap(), TimeOfDay::MIDNIGHT).unix());
+        assert!((weekly[0].net_buy_amount_million_won - (-50.0)).abs() < 1e-9);
+        assert_eq!(weekly[0].program_share_pct, None);
+        assert_eq!(weekly[1].t.0, KstTime::from_kst_civil(d_nov02, TimeOfDay::MIDNIGHT).unix());
+        assert!((weekly[1].net_buy_amount_million_won - 200.0).abs() < 1e-9);
+        assert!((weekly[1].program_share_pct.unwrap() - 55.0).abs() < 1e-9);
+        assert_eq!(weekly[2].t.0, KstTime::from_kst_civil(d_nov09, TimeOfDay::MIDNIGHT).unix());
+        assert!((weekly[2].net_buy_amount_million_won - (-25.0)).abs() < 1e-9);
+        assert_eq!(weekly[2].program_share_pct, None);
+
+        let monthly = rollup_program_daily_bars(&rows, Period::Month);
+        assert_eq!(monthly.len(), 2);
+        assert_eq!(monthly[0].t.0, KstTime::from_kst_civil(KstDate::new(2026, 10, 1).unwrap(), TimeOfDay::MIDNIGHT).unix());
+        assert!((monthly[0].net_buy_amount_million_won - (-50.0)).abs() < 1e-9);
+        assert_eq!(monthly[0].program_share_pct, None);
+        assert_eq!(monthly[1].t.0, KstTime::from_kst_civil(KstDate::new(2026, 11, 1).unwrap(), TimeOfDay::MIDNIGHT).unix());
+        assert!((monthly[1].net_buy_amount_million_won - 175.0).abs() < 1e-9);
+        assert!((monthly[1].program_share_pct.unwrap() - 55.0).abs() < 1e-9);
+
+        let quarterly = rollup_program_daily_bars(&rows, Period::Quarter);
+        assert_eq!(quarterly.len(), 1);
+        assert_eq!(quarterly[0].t.0, KstTime::from_kst_civil(KstDate::new(2026, 10, 1).unwrap(), TimeOfDay::MIDNIGHT).unix());
+        assert!((quarterly[0].net_buy_amount_million_won - 125.0).abs() < 1e-9);
+
+        let yearly = rollup_program_daily_bars(&rows, Period::Year);
+        assert_eq!(yearly.len(), 1);
+        assert_eq!(yearly[0].t.0, KstTime::from_kst_civil(KstDate::new(2026, 1, 1).unwrap(), TimeOfDay::MIDNIGHT).unix());
+        assert!((yearly[0].net_buy_amount_million_won - 125.0).abs() < 1e-9);
+
+        assert!(rollup_program_daily_bars(&rows, Period::M5).is_empty());
+    }
+
+    #[test]
+    fn rollup_program_daily_bars_merges_live_day_fields() {
+        let mon = KstDate::new(2026, 11, 23).unwrap();
+        let tue = KstDate::new(2026, 11, 24).unwrap();
+        let prog_rows = vec![program(9, 10, 0, 60, 600, 90, 30)];
+        let tick_rows = vec![tick(9, 10, 0, 100_000, 3_000)];
+        let live = DailyProgramInput::from_live_day(
+            tue,
+            &bucket_program_by_minute(tue, &prog_rows),
+            &bucket_ticks_by_minute(tue, &tick_rows),
+        )
+        .unwrap();
+        let inputs = vec![
+            DailyProgramInput::from_daily_micro(DailyMicroProgramRow {
+                date: mon,
+                program_net_won: 40_000_000,
+                program_share_bps: 2_000,
+            }),
+            live,
+        ];
+
+        let daily = rollup_program_daily_bars(&inputs, Period::Day);
+        assert_eq!(daily.len(), 2);
+        assert_eq!(daily[1].net_buy_qty, 600);
+        assert!((daily[1].buy_amount_million_won - 90.0).abs() < 1e-9);
+        assert!((daily[1].sell_amount_million_won - 30.0).abs() < 1e-9);
+        assert!((daily[1].program_share_pct.unwrap() - 40.0).abs() < 1e-9);
+        assert!((daily[1].day_traded_million_won.unwrap() - 300.0).abs() < 1e-9);
+
+        let weekly = rollup_program_daily_bars(&inputs, Period::Week);
+        assert_eq!(weekly.len(), 1);
+        assert_eq!(weekly[0].t.0, KstTime::from_kst_civil(mon, TimeOfDay::MIDNIGHT).unix());
+        assert!((weekly[0].net_buy_amount_million_won - 100.0).abs() < 1e-9);
+        assert_eq!(weekly[0].net_buy_qty, 600);
+        assert!((weekly[0].buy_amount_million_won - 90.0).abs() < 1e-9);
+        assert!((weekly[0].sell_amount_million_won - 30.0).abs() < 1e-9);
+        assert!((weekly[0].program_share_pct.unwrap() - 30.0).abs() < 1e-9);
+        assert!((weekly[0].day_traded_million_won.unwrap() - 300.0).abs() < 1e-9);
     }
 }

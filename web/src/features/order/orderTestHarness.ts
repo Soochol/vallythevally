@@ -19,7 +19,7 @@ import { DEFAULT_CHART_SETTINGS } from "../../chart/settings";
 import { windowId } from "../../layout/kinds";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
-import { marketSocket } from "../../stores/realtime";
+import { marketSocket, viExpectedStore } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { DEFAULT_UI_PREFS } from "../../persist/uiState";
 import { useUiStore } from "../../stores/ui";
@@ -121,6 +121,7 @@ export interface OrderTestEnv {
 
 export function resetOrderStores(envType: "real" | "mock" = "real", accounts?: OrdersAccount[]) {
   pendingWrites.clear();
+  viExpectedStore.clear();
   const link = connectedKiwoom(envType);
   const source: MarketSourceStatus = {
     broker: "kiwoom",

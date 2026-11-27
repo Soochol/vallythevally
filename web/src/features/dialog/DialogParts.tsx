@@ -88,11 +88,13 @@ export function Segment<T extends string | number>({
   label,
   options,
   value,
+  disabled = false,
   onChange,
 }: {
   label: string;
   options: readonly (readonly [T, string])[];
   value: T | string;
+  disabled?: boolean;
   onChange(v: T): void;
 }) {
   return (
@@ -102,8 +104,9 @@ export function Segment<T extends string | number>({
           key={v}
           type="button"
           aria-pressed={v === value}
+          disabled={disabled}
           onClick={() => onChange(v)}
-          className="inline-flex h-7 items-center justify-center rounded-s px-3 text-s font-medium text-text-3 transition-colors hover:text-text aria-pressed:bg-raised aria-pressed:font-semibold aria-pressed:text-accent"
+          className="inline-flex h-7 items-center justify-center rounded-s px-3 text-s font-medium text-text-3 transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-50 aria-pressed:bg-raised aria-pressed:font-semibold aria-pressed:text-accent"
         >
           {text}
         </button>

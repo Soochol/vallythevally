@@ -153,13 +153,12 @@ test("첫 쪽을 받은 뒤 종목을 바꾸면 앞 종목의 전체 응답이 �
   scenario.reply((url) => url.pathname === "/api/symbols/000660/trades", { body: { symbol: "000660", venue: "combined", trades: [print("10:00:01", 190_000, 5, "krx")], skippedRows: 0 } });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chart = (id: string, symbol: string): LayoutWindow => ({ id, link: null, kind: "chart", symbol, venue: "combined", period: "D", chartSettings: SETTINGS });
-  const windows: LayoutWindow[] = [chart("cell-0", "005930"), chart("cell-1", "000660"), ...layout.windows.filter((w) => w.kind !== "chart")];
+  const windows: LayoutWindow[] = [chart("cell-0", "005930"), chart("cell-1", "000660"), ...layout.windows.filter((w) => w.kind !== "chart"), { id: "trades", link: null, kind: "trades" }];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await addButton(page).click();
-  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^체결/ }).click();
+  await windowTabs(page).getByRole("tab", { name: /^체결/ }).click();
   await expect(page.getByTestId("trades-window")).toHaveAttribute("data-symbol", "005930");
   await expect(rows(page)).toHaveCount(2);
   await full.received;
@@ -188,10 +187,10 @@ test("체결창은 /api/quotes 대신 당일 요약을 한 번 읽고 10초가 �
 });
 
 test.describe("체결 창 띠 반응형", () => {
-  const TRADES_STRIP_ROW_HEIGHT = 24;
+  const TRADES_STRIP_ROW_HEIGHT = 32;
   const SHORT_WINDOW_HEIGHT = 250;
   const TALL_WINDOW_HEIGHT = 320;
-  const NARROW_STRIP_WIDTHS = [220, 300, 330];
+  const NARROW_STRIP_WIDTHS = [240, 300, 330];
   const LONG_STRENGTH = 123.45;
   const LONG_QUANTITY = 12_000_000;
   const printOf = (second: number): TradePrint => ({ time: `10:00:${String(second).padStart(2, "0")}`, price: 71_000 + 100 * second, quantity: 10 + second, exchange: "krx" });
@@ -228,10 +227,10 @@ test.describe("체결 창 띠 반응형", () => {
     expect(short.body, `${where} ${JSON.stringify(short)}`).toBeGreaterThan(0);
     expect(short.visibleRows, `${where} ${JSON.stringify(short)}`).toBeGreaterThan(0);
     await resize(TALL_WINDOW_HEIGHT);
-    await expect.poll(async () => (await tradesLayout(page)).strips, { message: `${where} ${TALL_WINDOW_HEIGHT}px` }).toBeGreaterThanOrEqual(2 * TRADES_STRIP_ROW_HEIGHT);
+    await expect.poll(async () => (await tradesLayout(page)).strips, { message: `${where} ${TALL_WINDOW_HEIGHT}px` }).toBe(TRADES_STRIP_ROW_HEIGHT);
   }
 
-  test("체결 창 높이 260px 아래에서는 띠가 한 줄이다", async ({ page, scenario }) => {
+  test("체결 창 상단 헤더는 높이와 무관하게 32px 한 줄이다", async ({ page, scenario }) => {
     await openStripTradesWindow(page, scenario);
     const group = page.locator("[data-dock-group]").filter({ has: page.getByTestId("trades-window") });
     await expectStripsAt(page, (height) => group.evaluate((element, value) => {
@@ -251,8 +250,7 @@ test.describe("체결 창 띠 반응형", () => {
       const strips = window.querySelector<HTMLElement>(".tr-strips")!.getBoundingClientRect();
       const inside = (element: HTMLElement) => {
         const box = element.getBoundingClientRect();
-        const owner = element.closest<HTMLElement>(".mw-strip")!.getBoundingClientRect();
-        return box.width > 0 && box.left >= strips.left - 0.5 && box.right <= strips.right + 0.5 && box.right <= owner.right + 0.5 && box.left >= owner.left - 0.5;
+        return box.width > 0 && box.left >= strips.left - 0.5 && box.right <= strips.right + 0.5;
       };
       const one = (selector: string) => window.querySelector<HTMLElement>(selector);
       const strength = one("[data-testid=trade-strength]");
@@ -262,7 +260,6 @@ test.describe("체결 창 띠 반응형", () => {
       const names = [...window.querySelectorAll<HTMLElement>(".tr-strips .tr-name")];
       return {
         stripsHeight: strips.height,
-        stripWidths: [...window.querySelectorAll<HTMLElement>(".tr-strips > .mw-strip")].map((strip) => Math.round(strip.getBoundingClientRect().width)),
         figureWidths: [strength, cumulative].map((figure) => (figure === null ? null : [Math.round(figure.clientWidth), figure.scrollWidth])),
         strengthText: strength?.textContent ?? null,
         cumulativeText: cumulative?.textContent ?? null,

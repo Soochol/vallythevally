@@ -77,7 +77,8 @@ test("창 더하기에서 차트를 고르면 활성 칸을 복사한 둘째 차
   const layout = saved(scenario);
   expectServerRules(layout);
   const [source, copy] = layout.windows.filter((w) => w.kind === "chart");
-  expect({ ...copy, id: source!.id }).toEqual(source);
+  expect(copy!.link).toBe("a");
+  expect({ ...copy, id: source!.id, link: source!.link }).toEqual(source);
 
   await page.reload();
   await expect(cell(page, 2)).toBeVisible();

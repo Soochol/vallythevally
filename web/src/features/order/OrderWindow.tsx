@@ -190,7 +190,7 @@ function OrderBody({
   const sellOrdered = sellOrderQuantity(data.groups, data.pending, code, data.openOrdersListedAt);
   const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
-  const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", !explorerOn && shownLadder);
+  const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", !explorerOn && shownLadder, market.liveView?.t ?? null, true);
 
   const rowHeightPx = ladderRowHeightPx(settings.ladderDensity);
 

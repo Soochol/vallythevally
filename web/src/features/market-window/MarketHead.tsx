@@ -20,6 +20,12 @@ interface Props {
   readonly trailing?: ReactNode;
 }
 
+export function MarketSymbolName({ code }: { readonly code: SymbolCode }) {
+  const info = useSymbolInfo(code).data;
+  const name = info?.name ?? null;
+  return <b className="mw-head-name" data-testid="market-symbol-name" title={name ?? undefined}>{name ?? code}</b>;
+}
+
 export function MarketHead({ code, venue, lastPrice, previousClose, nxtBadge = false, trailing }: Props) {
   const info = useSymbolInfo(code).data;
   const quote = useDayQuote(code, venue);

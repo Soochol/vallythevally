@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
-import { isFinancial, isMicro, isQuote, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
+import { isFinancial, isInvestorFlow, isQuote, isTickCvd, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { symbolSub } from "../../lib/symbol";
@@ -48,7 +48,8 @@ function specSummary(spec: IndicatorConfig["spec"]): string {
 function periodBadge(kind: IndicatorKind): string | null {
   const spec = KINDS[kind].defaults;
   if (isFinancial(spec)) return "분기·연";
-  if (isQuote(spec) || isMicro(spec)) return "분봉";
+  if (isInvestorFlow(spec)) return "일봉+";
+  if (isQuote(spec) || isTickCvd(spec)) return "분봉";
   return null;
 }
 

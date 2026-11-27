@@ -3,6 +3,7 @@ import { workArea } from "../../layout/canvas/geometry";
 import { windowId } from "../../layout/kinds";
 import { placementForMode } from "../../layout/modes";
 import { DEFAULT_UI_PREFS } from "../../persist/uiState";
+import { resetActiveWindow, touchWindow } from "../../stores/activeWindow";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore, windowRefs } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
@@ -14,20 +15,25 @@ const active = () => useSelectionStore.getState().activeCell;
 const charts = () => chartWindows(layout()).map((w) => w.id);
 
 beforeEach(() => {
-  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], canvasArea: null });
+  resetActiveWindow();
+  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], canvasArea: null, lastUsedLink: null });
   useSelectionStore.setState({ activeCell: chartWindows(DEFAULT_LAYOUT)[0]!.id, toast: null });
   useUiStore.getState().load(DEFAULT_UI_PREFS, {});
 });
 
-test("차트 창을 더하면 활성 칸의 내용과 연동 색을 복사한 새 창이 활성 칸이 된다", () => {
+test("차트 창을 더하면 활성 칸의 내용과 상속한 연동 색을 가진 새 창이 활성 칸이 된다", () => {
   const source = chartWindows(layout())[0]!;
   useLayoutStore.getState().setPeriod(source.id, "W");
   addWindow("chart", room);
   const added = chartWindows(layout()).at(-1)!;
   expect(active()).toBe(added.id);
-  expect(added).toEqual({ ...chartWindows(layout())[0]!, id: added.id });
+  expect(added).toEqual({ ...chartWindows(layout())[0]!, id: added.id, link: "a" });
+  useLayoutStore.getState().setLink(added.id, "b");
+  touchWindow(added.id);
   addWindow("chart", room);
-  expect(chartWindows(layout()).at(-1)!.id).toBe(active());
+  const third = chartWindows(layout()).at(-1)!;
+  expect(third.id).toBe(active());
+  expect(third.link).toBe("b");
 });
 
 test("하나만 두는 종류를 다시 더하면 창 수가 그대로이고 그 탭을 고른다", () => {

@@ -141,6 +141,30 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
       },
     );
     scenario.on(
+      (url) => /^\/api\/symbols\/[^/]+\/investor-net-shares$/.test(url.pathname),
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const url = new URL(request.url());
+        const symbol = decodeURIComponent(url.pathname.split("/")[3] ?? "");
+        const from = url.searchParams.get("from") ?? "";
+        const to = url.searchParams.get("to") ?? "";
+        return {
+          body: {
+            symbol,
+            from,
+            to,
+            coverage: { kind: "whole_range" },
+            days: [],
+            source: "kiwoom",
+            skippedDays: [],
+            undatedRows: [],
+          },
+        };
+      },
+    );
+    scenario.on(
       (url) => url.pathname === "/api/watch/micro",
       () => {
         if (scenario.publicMode.kind === "public") {

@@ -257,7 +257,7 @@ describe("QuoteBook", () => {
     await settle();
     fetches[0]!.reject(new ApiRequestError("network", "서버에 연결하지 못했습니다"));
     await settle();
-    realtime(quote("005930", 71_000));
+    realtime({ ...quote("005930", 71_000), tradedMillionWon: 500 });
     release();
     book.lease(["005930", "000660"]);
     await vi.advanceTimersByTimeAsync(1_000);
@@ -503,6 +503,46 @@ describe("QuoteBook", () => {
       book.lease(["000660"], { front: true });
       await settle();
       expect(fetches.map((f) => f.symbols)).toEqual([["000660"], ["000660"]]);
+    });
+  });
+
+  describe("거래대금 백필", () => {
+    test("REST 응답 전 실시간 틱이 먼저 도착해도 뒤늦게 온 REST 거래대금을 백필하고 이후 틱에서 누적한다", async () => {
+      const { book, fetches, realtime } = setup();
+      book.lease(["005930"]);
+      await settle();
+
+      realtime({ ...quote("005930", 70_000, "realtime"), volume: 1_200 });
+      expect(book.get("005930").quote?.tradedMillionWon).toBeUndefined();
+
+      fetches[0]!.resolve([{ ...quote("005930", 69_000, "polled"), volume: 1_000, tradedMillionWon: 500 }]);
+      await settle();
+
+      const afterBackfill = book.get("005930").quote;
+      expect(afterBackfill?.price).toBe(70_000);
+      expect(afterBackfill?.volume).toBe(1_200);
+      expect(afterBackfill?.tradedMillionWon).toBe(514);
+
+      realtime({ ...quote("005930", 70_000, "realtime"), volume: 1_300 });
+      expect(book.get("005930").quote?.tradedMillionWon).toBe(521);
+    });
+
+    test("REST 재시도 대기 중 거래대금 없는 실시간 틱이 와도 주식은 재시도해 거래대금을 채우고 지수는 제외한다", async () => {
+      const { book, fetches, realtime } = setup();
+      book.lease(["005930", "IDX:001"]);
+      await settle();
+
+      fetches[0]!.reject(new ApiRequestError("network", "offline"));
+      await settle();
+
+      realtime({ ...quote("005930", 70_000, "realtime"), volume: 1_000 }, { ...quote("IDX:001", 2_600, "realtime"), venue: null, volume: 500 });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(fetches).toHaveLength(2);
+      expect(fetches[1]!.symbols).toEqual(["005930"]);
+      fetches[1]!.resolve([{ ...quote("005930", 70_000, "polled"), volume: 1_000, tradedMillionWon: 800 }]);
+      await settle();
+      expect(book.get("005930").quote?.tradedMillionWon).toBe(800);
     });
   });
 });
