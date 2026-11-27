@@ -35,7 +35,7 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
 
   const [range, setRange] = useState<CompareRange>(10);
   const [unit, setUnit] = useState<VolumeUnit>("qty");
-  const [bgStyle, setBgStyle] = useState<BackgroundStyle>("both");
+  const [bgStyle, setBgStyle] = useState<BackgroundStyle>("band");
   const [focusBySymbol, setFocusBySymbol] = useState<{ readonly symbol: SymbolCode; readonly date: string } | null>(null);
   const [pinnedBySymbol, setPinnedBySymbol] = useState<{ readonly symbol: SymbolCode; readonly dates: readonly string[] } | null>(null);
   const [spotDate, setSpotDate] = useState<string | null>(null);

@@ -84,8 +84,8 @@ export function OverlayChart({
   );
 
   const geom = useMemo(
-    () => buildChartGeometry(series, focusSeries, historicalBand, spotSeries, unit),
-    [series, focusSeries, historicalBand, spotSeries, unit],
+    () => buildChartGeometry(series, focusSeries, historicalBand, spotSeries, unit, pinnedSeries),
+    [series, focusSeries, historicalBand, spotSeries, unit, pinnedSeries],
   );
 
   const focusDeltas = useMemo(
@@ -218,7 +218,7 @@ export function OverlayChart({
     const lx = geom.xOf(lastFocusPt.secOfDay);
     const ly = geom.yOf(lastFocusPt.expectedReturnPct);
     const pillX = Math.min(geom.plotRight - 52, lx + 8);
-    const pillY = Math.max(geom.plotTop + 12, Math.min(geom.plotBottom - 12, ly));
+    const pillY = Math.max(geom.plotTop + 12, Math.min(geom.priceBottom - 12, ly));
     return { lx, ly, pillX, pillY };
   }, [lastFocusPt, geom]);
 
@@ -333,9 +333,9 @@ export function OverlayChart({
             <line
               className="pm-vol-sep"
               x1={geom.plotLeft}
-              y1={geom.volTop}
+              y1={geom.volTop - 8}
               x2={geom.plotRight}
-              y2={geom.volTop}
+              y2={geom.volTop - 8}
             />
 
             {geom.yTicks.map((tick) => {
@@ -406,10 +406,32 @@ export function OverlayChart({
               <polyline className="pm-vol-avg-line" points={volAvgLinePoints} />
             )}
 
-            {spotVolArea !== null && (
+            {pinnedSeries.map((day, idx) => {
+              if (day.points.length < 2) return null;
+              const opacity = spotSeries ? 0.35 : 0.88;
+              const pts = day.points
+                .map((p) => `${geom.xOf(p.secOfDay).toFixed(1)},${geom.yVolOf(pointVolumeValue(p, unit)).toFixed(1)}`)
+                .join(" ");
+              return (
+                <polyline
+                  key={`vol-pin-${day.date}`}
+                  className="pm-vol-pin-line"
+                  data-pin={String(idx)}
+                  data-date={day.date}
+                  style={{ opacity }}
+                  points={pts}
+                />
+              );
+            })}
+
+            {spotVolArea !== null && spotSeries && (
               <g>
                 <polygon points={spotVolArea.poly} fill={`url(#${volSpotGradId})`} />
-                <polyline className="pm-vol-spot-line" points={spotVolArea.contour} />
+                <polyline
+                  className="pm-vol-spot-line"
+                  data-date={spotSeries.date}
+                  points={spotVolArea.contour}
+                />
               </g>
             )}
 
@@ -420,7 +442,7 @@ export function OverlayChart({
               <polyline className="pm-band-median" points={medianLinePoints} />
             )}
 
-            {bgStyle !== "band" &&
+            {(bgStyle !== "band" || pastSeries.length < 2) &&
               bgOnlySeries.map((day, idx) => {
                 if (day.points.length === 0) return null;
                 const recency = (idx + 1) / Math.max(1, bgOnlySeries.length);
