@@ -26,6 +26,8 @@ export type FeedEvent =
 
 export type ViEvent = Extract<ServerMessage, { type: "vi_snapshot" | "vi_update" | "vi_expected_snapshot" }>;
 
+export type WhaleSocketEvent = Extract<ServerMessage, { type: "whale_snapshot" | "whale_tick" }>;
+
 export type TradingAccountChange = Extract<ServerMessage, { type: "trading_account_changed" }>;
 
 export interface FeedRequest {
@@ -110,6 +112,7 @@ export class MarketSocket implements MarketSocketLike {
   private watchVenue: Venue = "combined";
   private readonly quoteHandlers = new Set<(e: QuoteEvent) => void>();
   private readonly viHandlers = new Set<(e: ViEvent) => void>();
+  private readonly whaleHandlers = new Set<(e: WhaleSocketEvent) => void>();
   private readonly feedTaps = new Set<(request: FeedRequest, event: FeedEvent, sub: string) => void>();
   private readonly tradingAccountHandlers = new Set<(change: TradingAccountChange) => void>();
 
@@ -169,6 +172,20 @@ export class MarketSocket implements MarketSocketLike {
   onVi(handler: (e: ViEvent) => void): () => void {
     this.viHandlers.add(handler);
     return () => this.viHandlers.delete(handler);
+  }
+
+  subscribeWhales(handler: (e: WhaleSocketEvent) => void): () => void {
+    const wasEmpty = this.whaleHandlers.size === 0;
+    this.whaleHandlers.add(handler);
+    if (wasEmpty && this.connection.socket === "open") {
+      this.send({ type: "subscribe_whales" });
+    }
+    return () => {
+      this.whaleHandlers.delete(handler);
+      if (this.whaleHandlers.size === 0 && this.connection.socket === "open") {
+        this.send({ type: "unsubscribe_whales" });
+      }
+    };
   }
 
   onFeedTap(handler: (request: FeedRequest, event: FeedEvent, sub: string) => void): () => void {
@@ -251,6 +268,9 @@ export class MarketSocket implements MarketSocketLike {
       case "vi_update":
       case "vi_expected_snapshot":
         return this.emitVi(m);
+      case "whale_snapshot":
+      case "whale_tick":
+        return this.emitWhale(m);
       case "kiwoom_link":
         return this.opts.onKiwoomLink?.(m.status);
       case "market_source":
@@ -279,6 +299,7 @@ export class MarketSocket implements MarketSocketLike {
     for (const [sub, { request }] of feeds) this.sendSubscribeFeed(sub, request);
     for (const [sub, { handler }] of feeds) if (this.feeds.has(sub)) handler({ type: "resync" });
     if (this.watchSymbols.length > 0) this.sendWatch();
+    if (this.whaleHandlers.size > 0) this.send({ type: "subscribe_whales" });
     this.emitQuotes({ type: "resync" });
   }
 
@@ -292,6 +313,10 @@ export class MarketSocket implements MarketSocketLike {
 
   private emitVi(e: ViEvent): void {
     for (const h of this.viHandlers) h(e);
+  }
+
+  private emitWhale(e: WhaleSocketEvent): void {
+    for (const h of this.whaleHandlers) h(e);
   }
 
   private sendSubscribe(sub: string, key: SeriesKey): void {

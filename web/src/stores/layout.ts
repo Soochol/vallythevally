@@ -42,7 +42,7 @@ export type PinnableWindowState = { id: WindowId; link: LinkColor | null; kind: 
 export type BrokersWindowState = { id: WindowId; link: LinkColor | null; kind: "brokers"; symbol?: SymbolCode; view?: BrokerView; cards?: BrokerCards };
 export type OrderWindowState = { id: WindowId; link: LinkColor | null; kind: "order"; venue: Venue; symbol?: SymbolCode };
 export type RankingWindowState = { id: WindowId; link: LinkColor | null; kind: "ranking"; ranking: Ranking };
-export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: "indicators" | "scanner" | "themes" | "tape_matrix" } | WatchlistWindowState | ScreenerWindowState | PinnableWindowState | BrokersWindowState | OrderWindowState | RankingWindowState;
+export type OtherWindowState = { id: WindowId; link: LinkColor | null; kind: "indicators" | "scanner" | "themes" | "tape_matrix" | "whale" } | WatchlistWindowState | ScreenerWindowState | PinnableWindowState | BrokersWindowState | OrderWindowState | RankingWindowState;
 
 export const DEFAULT_ORDER_VENUE: Venue = "krx";
 export const DEFAULT_LINK_COLOR: LinkColor = "a";

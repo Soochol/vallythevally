@@ -192,6 +192,7 @@ function restoreWindow(raw: LayoutWindow): WindowState {
     case "scanner":
     case "themes":
     case "tape_matrix":
+    case "whale":
       return { ...base, kind: raw.kind };
     case "chart":
       break;

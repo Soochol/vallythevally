@@ -238,6 +238,13 @@ export const EtfIcon = ({ size }: P) => (
     <path d="M12 4v8l6 4" />
   </Icon>
 );
+export const WhaleIcon = ({ size }: P) => (
+  <Icon size={size}>
+    <path d="M3 15c2-4 5.5-6 9.5-6 3.2 0 5.8 1.4 7.5 3.8-1.4 2.4-4 4.2-7.5 4.2H6l-3 2v-4z" />
+    <path d="M18 11l3-2.5M18 13.5l3 2" />
+    <circle cx="9.5" cy="12.5" r="0.8" fill="currentColor" stroke="none" />
+  </Icon>
+);
 
 export const WarningIcon = ({ size = 16 }: P) => (
   <Icon size={size}>

@@ -13,6 +13,7 @@ import { TapeMatrixWindow } from "../tape-matrix/TapeMatrixWindow";
 import { ThemesWindow } from "../themes/ThemesWindow";
 import { TradesWindow } from "../trades/TradesWindow";
 import { WatchPanel } from "../watch/Watchlist";
+import { WhaleWindow } from "../whale/WhaleWindow";
 import { ChartWindow } from "./ChartWindow";
 
 export type WindowContent = { readonly Content: ComponentType<{ id: WindowId }>; readonly overflow: "auto" | "hidden" };
@@ -32,4 +33,5 @@ export const WINDOW_CONTENT: { readonly [K in WindowKind]: WindowContent } = {
   scanner: { Content: ScannerWindow, overflow: "hidden" },
   themes: { Content: ThemesWindow, overflow: "hidden" },
   tape_matrix: { Content: TapeMatrixWindow, overflow: "hidden" },
+  whale: { Content: WhaleWindow, overflow: "hidden" },
 };

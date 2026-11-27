@@ -68,6 +68,10 @@ impl SubscriptionManager {
         }
     }
 
+    pub fn admitted_count(&self) -> usize {
+        self.admitted.len()
+    }
+
     pub fn reseat(&mut self, rules: Arc<dyn SeatRules>) {
         self.rules = rules;
         self.admitted.clear();

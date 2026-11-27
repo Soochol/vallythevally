@@ -198,6 +198,8 @@ pub enum ClientMessage {
     /// `venue`는 이 연결의 관심종목 시세 거래소 하나다. 없거나 null이면 통합이다. 같은 목록으로 거래소만 바꿔 다시 보내면
     /// 다음 시세부터 새 거래소 기준이고, 실시간 등록 집합은 바뀌지 않는다.
     Watch { symbols: Vec<SymbolCode>, venue: Option<Venue> },
+    SubscribeWhales,
+    UnsubscribeWhales,
 }
 
 /// `/api/ws` 서버 → 브라우저. `seq`는 (종목, 거래소, 봉 주기) 흐름마다 하나씩 늘어나는 번호다.
@@ -281,6 +283,16 @@ pub enum ServerMessage {
         triggered_at: Option<UnixSeconds>,
         points: Vec<ViExpectedPoint>,
     },
+    WhaleSnapshot {
+        events: Vec<WhaleEvent>,
+        summaries: Vec<WhaleStockSummary>,
+        watched_count: u32,
+    },
+    WhaleTick {
+        event: WhaleEvent,
+        summary: WhaleStockSummary,
+        watched_count: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
@@ -291,6 +303,47 @@ pub struct ViExpectedPoint {
     pub price: f64,
     #[ts(type = "number")]
     pub qty: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WhaleSide {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WhaleEvent {
+    #[ts(type = "number")]
+    pub id: u64,
+    pub at: UnixSeconds,
+    pub symbol: SymbolCode,
+    pub side: WhaleSide,
+    pub price: f64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub amount_won: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct WhaleStockSummary {
+    pub symbol: SymbolCode,
+    pub buy_count: u32,
+    pub sell_count: u32,
+    #[ts(type = "number")]
+    pub buy_won: i64,
+    #[ts(type = "number")]
+    pub sell_won: i64,
+    #[ts(type = "number")]
+    pub net_won: i64,
+    pub last_price: f64,
+    pub last_at: UnixSeconds,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1750,6 +1803,7 @@ pub enum WindowContent {
     Themes,
     #[serde(rename = "tape_matrix")]
     TapeMatrix,
+    Whale,
 }
 
 fn default_order_venue() -> Venue {

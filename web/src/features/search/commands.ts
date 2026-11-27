@@ -7,7 +7,7 @@ import { WINDOW_KIND_LIST, WINDOW_KINDS, type WindowKind } from "../../layout/ki
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import type { CommandIcon, SearchCommand } from "../commands/registry";
-import { BookIcon, BrokersIcon, CameraIcon, ChartIcon, ClockIcon, CopyIcon, EtfIcon, FunnelIcon, GearIcon, HeatmapIcon, IndicatorIcon, KeyboardIcon, ListIcon, LogScaleIcon, MarketIcon, OrderIcon, PreMarketIcon, ProgramIcon, RankingIcon, TradesIcon, UndoIcon, WorkspaceIcon } from "../icons";
+import { BookIcon, BrokersIcon, CameraIcon, ChartIcon, ClockIcon, CopyIcon, EtfIcon, FunnelIcon, GearIcon, HeatmapIcon, IndicatorIcon, KeyboardIcon, ListIcon, LogScaleIcon, MarketIcon, OrderIcon, PreMarketIcon, ProgramIcon, RankingIcon, TradesIcon, UndoIcon, WhaleIcon, WorkspaceIcon } from "../icons";
 import { RAIL_PAGES } from "../page-rail/pages";
 import { CHART_LIMIT_REASON, WINDOW_LIMIT_REASON, addWindow, workspaceRoom } from "../workspace/manage";
 import { openIndicatorCommand } from "../indicator-command/open";
@@ -43,7 +43,7 @@ export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<Scre
 const WINDOW_ICONS: Record<WindowKind, CommandIcon> = {
   chart: ChartIcon, watchlist: ListIcon, screener: FunnelIcon, indicators: IndicatorIcon, trades: TradesIcon,
   book: BookIcon, program: ProgramIcon, brokers: BrokersIcon, order: OrderIcon, ranking: RankingIcon, premarket: PreMarketIcon,
-  scanner: RankingIcon, themes: ListIcon, tape_matrix: BookIcon,
+  scanner: RankingIcon, themes: ListIcon, tape_matrix: BookIcon, whale: WhaleIcon,
 };
 
 const PAGE_ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon, replay: ClockIcon, journal: TradesIcon } as const;

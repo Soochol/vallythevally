@@ -156,6 +156,8 @@ fn on_text(hub: &HubHandle, outbox: &Outbox, conn: ConnId, text: &str) {
         },
         Ok(ClientMessage::Unsubscribe { sub }) => hub.unsubscribe(conn, SubId(sub)),
         Ok(ClientMessage::Watch { symbols, venue }) => hub.watch(conn, watch_symbols(&symbols), venue.map_or(domain::Venue::Combined, Into::into)),
+        Ok(ClientMessage::SubscribeWhales) => hub.subscribe_whales(conn),
+        Ok(ClientMessage::UnsubscribeWhales) => hub.unsubscribe_whales(conn),
         Err(e) => tracing::debug!(error = %e, "읽을 수 없는 브라우저 메시지를 버립니다"),
     }
 }
