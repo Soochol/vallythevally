@@ -371,3 +371,83 @@ async fn live_today_marks_symbol_not_collected_when_only_quote_minutes_live_exis
     let (status, prog) = get(&app, &format!("/api/symbols/035420/book-replay/program?date={DATE}")).await;
     assert_eq!((status, &prog["coverage"]), (200, &json!("symbol_not_collected")), "{prog}");
 }
+
+#[tokio::test]
+async fn live_today_collected_quote_stock_without_flow_reports_collected_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, data) = start(tmp.path()).await;
+    let shared = data.join("shared");
+    let mut writer = LiveQuoteWriter::open(&shared, DATE, "collect-01", 1).unwrap();
+    writer.append_minute("005930", &quote(540, 71_000)).unwrap();
+
+    let (status, prog) = get(&app, &format!("/api/symbols/005930/book-replay/program?date={DATE}")).await;
+    assert_eq!(status, 200, "{prog}");
+    assert_eq!((&prog["coverage"], &prog["rows"]), (&json!("collected"), &json!([])));
+
+    let (status, trades) = get(&app, &format!("/api/symbols/005930/book-replay/trades?date={DATE}&untilSec=32460")).await;
+    assert_eq!(status, 200, "{trades}");
+    assert_eq!((&trades["coverage"], &trades["cumVolume"], &trades["trades"]), (&json!("collected"), &json!(0), &json!([])));
+}
+
+#[tokio::test]
+async fn live_program_replay_orders_rows_monotonically_by_second_of_day() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, data) = start(tmp.path()).await;
+    let shared = data.join("shared");
+    write_links(&shared, "collect-01", &[(at(8, 0, 0), "live"), (at(9, 59, 50), "alive")]);
+    write_links(&shared, "spare-01", &[(at(8, 0, 0), "live"), (at(9, 59, 50), "alive")]);
+    write_program_flow(
+        &shared,
+        "collect-01",
+        "005930",
+        vec![
+            program_flow_row(ProgramFlowSpec {
+                recv_ms: at(9, 0, 31) + 100,
+                hhmmss: "090031",
+                price: Some("71100"),
+                sell_qty: "100",
+                buy_qty: "200",
+                net_qty: "100",
+                net_change: "100",
+                net_amt_million: "7",
+            }),
+            program_flow_row(ProgramFlowSpec {
+                recv_ms: at(9, 0, 31) + 300,
+                hhmmss: "090031",
+                price: Some("71200"),
+                sell_qty: "100",
+                buy_qty: "250",
+                net_qty: "150",
+                net_change: "50",
+                net_amt_million: "10",
+            }),
+        ],
+    );
+    write_program_flow(
+        &shared,
+        "spare-01",
+        "005930",
+        vec![program_flow_row(ProgramFlowSpec {
+            recv_ms: at(9, 0, 31) + 200,
+            hhmmss: "090030",
+            price: Some("71000"),
+            sell_qty: "100",
+            buy_qty: "150",
+            net_qty: "50",
+            net_change: "50",
+            net_amt_million: "3",
+        })],
+    );
+
+    let (status, prog) = get(&app, &format!("/api/symbols/005930/book-replay/program?date={DATE}")).await;
+    assert_eq!(status, 200, "{prog}");
+    assert_eq!(prog["coverage"], json!("collected"));
+    assert_eq!(
+        prog["rows"],
+        json!([
+            {"secondOfDay": 32_430, "price": 71_000, "buyQty": 150, "sellQty": 100, "netQty": 50, "netQtyChange": 50, "netAmountMillionWon": 3},
+            {"secondOfDay": 32_431, "price": 71_100, "buyQty": 200, "sellQty": 100, "netQty": 100, "netQtyChange": 100, "netAmountMillionWon": 7},
+            {"secondOfDay": 32_431, "price": 71_200, "buyQty": 250, "sellQty": 100, "netQty": 150, "netQtyChange": 50, "netAmountMillionWon": 10},
+        ])
+    );
+}

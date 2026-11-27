@@ -308,11 +308,11 @@ async fn closed_day_trades_filter_by_cutoff_venue_min_won_and_limit() {
     let (status, krx) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530&venue=krx").await;
     assert_eq!(status, 200, "{krx}");
     assert_eq!(krx["venue"], json!("krx"));
-    assert_eq!(krx["cumVolume"], json!(1_600));
+    assert_eq!(krx["cumVolume"], json!(1_700));
     assert_eq!(krx["cumBuyQty"], json!(1_100));
     assert_eq!(krx["cumSellQty"], json!(500));
     assert!((krx["strength"].as_f64().unwrap() - 220.0).abs() < 1e-9, "{krx}");
-    assert_eq!(krx["trades"].as_array().unwrap().len(), 2);
+    assert_eq!(krx["trades"].as_array().unwrap().len(), 3);
 
     let (status, nxt) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530&venue=nxt").await;
     assert_eq!(status, 200, "{nxt}");
@@ -442,6 +442,93 @@ async fn trades_and_program_validate_inputs_and_respect_disabled_flag() {
         let (status, body) = on.get(path).await;
         assert_eq!((status, &body["error"]["code"]), (400, &json!("bad_request")), "{path} {body}");
     }
+}
+
+#[tokio::test]
+async fn closed_day_trades_cutoff_aligns_on_hhmmss_despite_recv_skew() {
+    let harness = Harness::start(true).await;
+    let folder = harness.day_folder("20261123");
+    write_complete(&folder, 20_261_123, vec![stock("005930", true, json!([]))]);
+    let trades = vec![
+        detailed_trade_sql("005930_AL", at(9, 1, 0) + 200, "090100", 100_000, 100, true, Some("KRX")),
+        detailed_trade_sql("005930_AL", at(9, 1, 0) + 950, "090101", 100_000, 500, true, Some("KRX")),
+        detailed_trade_sql("005930_AL", at(9, 1, 5) + 400, "090100", 100_000, -200, false, Some("KRX")),
+        detailed_trade_sql("005930_AL", at(9, 1, 6), "090106", 100_000, 900, true, Some("KRX")),
+    ];
+    write_parquet(&folder.join("0B").join(SAMSUNG_BUCKET), &trades);
+
+    let (status, body) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32460").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["cumVolume"], json!(300));
+    assert_eq!(body["cumBuyQty"], json!(100));
+    assert_eq!(body["cumSellQty"], json!(200));
+    assert_eq!(body["strength"], json!(50.0));
+    assert_eq!(
+        body["trades"],
+        json!([
+            {"secondOfDay": 32_460, "price": 100_000, "quantity": 200, "side": "sell", "venue": "krx"},
+            {"secondOfDay": 32_460, "price": 100_000, "quantity": 100, "side": "buy", "venue": "krx"},
+        ])
+    );
+
+    let (status, next) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32461").await;
+    assert_eq!(status, 200, "{next}");
+    assert_eq!(next["cumVolume"], json!(800));
+    assert_eq!(next["cumBuyQty"], json!(600));
+    assert_eq!(next["cumSellQty"], json!(200));
+}
+
+#[tokio::test]
+async fn closed_day_trades_krx_includes_legacy_parquet_without_f9081() {
+    let harness = Harness::start(true).await;
+    harness.symbols.replace(Directory::build(vec![
+        SymbolInfo { symbol: Symbol::parse("005930").unwrap(), name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true },
+    ]));
+    let folder = harness.day_folder("20261123");
+    write_complete(&folder, 20_261_123, vec![stock("005930", true, json!([]))]);
+    let trades = vec![
+        format!(
+            "SELECT '005930_AL' AS symbol, {}::BIGINT AS recv_ms, '090010' AS f20, 71000::BIGINT AS f10, 300::BIGINT AS f15, true::BOOLEAN AS f15_plus",
+            at(9, 0, 10)
+        ),
+        format!(
+            "SELECT '005930_AL' AS symbol, {}::BIGINT AS recv_ms, '090020' AS f20, 71000::BIGINT AS f10, (-100)::BIGINT AS f15, false::BOOLEAN AS f15_plus",
+            at(9, 0, 20)
+        ),
+    ];
+    write_parquet(&folder.join("0B").join(SAMSUNG_BUCKET), &trades);
+
+    let (status, krx) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32430&venue=krx").await;
+    assert_eq!(status, 200, "{krx}");
+    assert_eq!(krx["cumVolume"], json!(400));
+    assert_eq!(krx["cumBuyQty"], json!(300));
+    assert_eq!(krx["cumSellQty"], json!(100));
+    assert_eq!(krx["strength"], json!(300.0));
+    assert_eq!(krx["trades"].as_array().unwrap().len(), 2);
+
+    let (status, nxt) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32430&venue=nxt").await;
+    assert_eq!(status, 200, "{nxt}");
+    assert_eq!(nxt["cumVolume"], json!(0));
+    assert_eq!(nxt["trades"], json!([]));
+}
+
+#[tokio::test]
+async fn brokers_day_reports_coverage_for_collected_missing_symbol_and_missing_day() {
+    let harness = Harness::start(true).await;
+    let folder = harness.day_folder("20261123");
+    write_complete(&folder, 20_261_123, vec![stock("005930", true, json!([])), stock("000660", false, json!([]))]);
+
+    let (status, collected) = harness.get("/api/symbols/005930/brokers?date=20261123").await;
+    assert_eq!(status, 200, "{collected}");
+    assert_eq!((&collected["source"], &collected["coverage"]), (&json!("store"), &json!("collected")));
+
+    let (status, missing_sym) = harness.get("/api/symbols/000660/brokers?date=20261123").await;
+    assert_eq!(status, 200, "{missing_sym}");
+    assert_eq!((&missing_sym["source"], &missing_sym["coverage"]), (&json!("none"), &json!("symbol_not_collected")));
+
+    let (status, missing_day) = harness.get("/api/symbols/005930/brokers?date=20261122").await;
+    assert_eq!(status, 200, "{missing_day}");
+    assert_eq!((&missing_day["source"], &missing_day["coverage"]), (&json!("none"), &json!("day_not_collected")));
 }
 
 fn fnv1a_test_bucket(symbol: &str) -> u64 {

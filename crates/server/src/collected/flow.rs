@@ -123,6 +123,14 @@ pub(super) struct FlowCache<K: CollectedKind> {
     entries: Mutex<FlowEntries<K::View>>,
 }
 
+struct FlowTarget<'a> {
+    shared_dir: &'a Path,
+    date: KstDate,
+    date_str: &'a str,
+    symbol: &'a str,
+    now: KstTime,
+}
+
 impl<K: CollectedKind> FlowCache<K> {
     pub(super) fn new() -> Self {
         Self {
@@ -197,9 +205,10 @@ impl<K: CollectedKind> FlowCache<K> {
             }
             return Ok(None);
         }
+        let target = FlowTarget { shared_dir, date, date_str, symbol, now };
         let needs_reset = !tail.initialized || tail.keys.keys().any(|existing| !discovered.contains_key(existing));
         if needs_reset {
-            self.rebuild_tail(&mut tail, discovered, shared_dir, date, date_str, symbol, now);
+            self.rebuild_tail(&mut tail, discovered, target);
             return Ok(Some(f(&tail)));
         }
         for (key, path) in &discovered {
@@ -207,7 +216,7 @@ impl<K: CollectedKind> FlowCache<K> {
         }
         let (new_rows, restarted) = read_all_keys::<K>(&mut tail.keys, symbol);
         if restarted {
-            self.rebuild_tail(&mut tail, discovered, shared_dir, date, date_str, symbol, now);
+            self.rebuild_tail(&mut tail, discovered, target);
             return Ok(Some(f(&tail)));
         }
         let reordered = merge_into_rows(&mut tail.rows, new_rows);
@@ -221,17 +230,7 @@ impl<K: CollectedKind> FlowCache<K> {
         Ok(Some(f(&tail)))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn rebuild_tail(
-        &self,
-        tail: &mut FlowTail<K::View>,
-        discovered: BTreeMap<String, PathBuf>,
-        shared_dir: &Path,
-        date: KstDate,
-        date_str: &str,
-        symbol: &str,
-        now: KstTime,
-    ) {
+    fn rebuild_tail(&self, tail: &mut FlowTail<K::View>, discovered: BTreeMap<String, PathBuf>, target: FlowTarget<'_>) {
         let generation = self.alloc_generation();
         let mut keys = BTreeMap::new();
         for (key, path) in discovered {
@@ -241,12 +240,12 @@ impl<K: CollectedKind> FlowCache<K> {
         tail.generation = generation;
         tail.keys = keys;
         tail.rows.clear();
-        let (new_rows, _) = read_all_keys::<K>(&mut tail.keys, symbol);
+        let (new_rows, _) = read_all_keys::<K>(&mut tail.keys, target.symbol);
         merge_into_rows(&mut tail.rows, new_rows);
-        let (gaps, live) = compute_links_status(shared_dir, date, date_str, &mut tail.keys, now);
+        let (gaps, live) = compute_links_status(target.shared_dir, target.date, target.date_str, &mut tail.keys, target.now);
         tail.gaps = gaps;
         tail.live = live;
-        tail.last_read = now;
+        tail.last_read = target.now;
     }
 }
 

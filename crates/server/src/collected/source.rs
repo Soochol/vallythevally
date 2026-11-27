@@ -7,7 +7,7 @@ use crate::api;
 use crate::clock::kst;
 use crate::collected_store::{CollectedStore, DayIndexState, FileStamp, StampLru, read_stamp};
 use crate::market_source::stream::{Exchange, TradeSide};
-use crate::shared_data::{CollectorPaths, SYMBOL_FLOW_FOLDER, live_day_dir};
+use crate::shared_data::{CollectorPaths, SYMBOL_FLOW_FOLDER, live_day_dir, live_quote_stock_keys};
 
 use super::flow::{FlowCache, has_symbol_flow};
 use super::kind::{
@@ -18,6 +18,7 @@ use super::store::{StoreDay, read_day};
 
 const MAX_FALLBACK_DAYS: usize = 5;
 const MAX_TRADE_STRENGTH: f64 = 500.0;
+const TRADE_CUTOFF_LOOKAHEAD_MS: i64 = 60_000;
 
 pub struct TradeWindowQuery {
     pub stock: StockCode,
@@ -91,6 +92,7 @@ impl<K: CollectedKind> KindSource<K> {
 
 pub struct DaySlice<V> {
     pub source: api::BrokerDaySource,
+    pub coverage: Option<api::BookReplayCoverage>,
     pub snapshots: Vec<V>,
     pub gaps: Vec<[i64; 2]>,
     pub live: bool,
@@ -99,9 +101,10 @@ pub struct DaySlice<V> {
 }
 
 impl<V> DaySlice<V> {
-    fn none() -> Self {
+    fn none(coverage: api::BookReplayCoverage) -> Self {
         Self {
             source: api::BrokerDaySource::None,
+            coverage: Some(coverage),
             snapshots: Vec::new(),
             gaps: Vec::new(),
             live: false,
@@ -265,10 +268,13 @@ impl Collected {
     }
 
     pub async fn ticks_window_at(self: &Arc<Self>, paths: CollectorPaths, query: TradeWindowQuery) -> Result<TradeWindowSlice, String> {
-        let cutoff_ms = kst(query.date, 0, 0, 0).unix() * 1000 + (i64::from(query.until_sec) + 1) * 1000;
-        let venue = query.venue;
-        let min_won = query.min_won;
-        let limit = query.limit;
+        let params = TradeWindowParams {
+            cutoff_ms: kst(query.date, 0, 0, 0).unix() * 1000 + (i64::from(query.until_sec) + 1) * 1000,
+            until_sec: query.until_sec,
+            venue: query.venue,
+            min_won: query.min_won,
+            limit: query.limit,
+        };
         let key = ReplayDayKey {
             stock: query.stock,
             date: query.date,
@@ -279,8 +285,8 @@ impl Collected {
             |c| &c.ticks,
             paths,
             key,
-            move |day| aggregate_trade_window(&day.snapshots, &day.gaps, cutoff_ms, venue, min_won, limit, |tick| tick),
-            move |rows, gaps| aggregate_trade_window(rows, gaps, cutoff_ms, venue, min_won, limit, |(_, tick)| tick),
+            move |day| aggregate_trade_window(&day.snapshots, &day.gaps, params, |tick| tick),
+            move |rows, gaps| aggregate_trade_window(rows, gaps, params, |(_, tick)| tick),
             TradeWindowSlice::empty,
         )
         .await
@@ -304,16 +310,8 @@ impl Collected {
             |c| &c.program,
             paths,
             key,
-            |day| ProgramDaySlice {
-                coverage: api::BookReplayCoverage::Collected,
-                gaps: day.gaps.clone(),
-                rows: day.snapshots.iter().map(map_program_row).collect(),
-            },
-            |rows, gaps| ProgramDaySlice {
-                coverage: api::BookReplayCoverage::Collected,
-                gaps: gaps.to_vec(),
-                rows: rows.iter().map(|(_, row)| map_program_row(row)).collect(),
-            },
+            |day| map_program_day_slice(&day.gaps, day.snapshots.iter()),
+            |rows, gaps| map_program_day_slice(gaps, rows.iter().map(|(_, row)| row)),
             ProgramDaySlice::empty,
         )
         .await
@@ -398,32 +396,39 @@ impl Collected {
                     .map_err(|e| format!("수집 저장소 조회 작업이 멈췄습니다: {e}"))??;
                     match loaded {
                         StoreLoad::Loaded(loaded) => return Ok(slice_store(&loaded.stamp, &loaded.day, after)),
-                        StoreLoad::SymbolNotCollected | StoreLoad::DayNotCollected | StoreLoad::NoClosedDay => {}
+                        StoreLoad::SymbolNotCollected => return Ok(DaySlice::none(api::BookReplayCoverage::SymbolNotCollected)),
+                        StoreLoad::DayNotCollected => return Ok(DaySlice::none(api::BookReplayCoverage::DayNotCollected)),
+                        StoreLoad::NoClosedDay => {}
                     }
                 }
-                StoreLookup::SymbolNotCollected | StoreLookup::DayNotCollected | StoreLookup::NoClosedDay => {}
+                StoreLookup::SymbolNotCollected => return Ok(DaySlice::none(api::BookReplayCoverage::SymbolNotCollected)),
+                StoreLookup::DayNotCollected => return Ok(DaySlice::none(api::BookReplayCoverage::DayNotCollected)),
+                StoreLookup::NoClosedDay => {}
             }
         }
         if date != now.kst_date() {
-            return Ok(DaySlice::none());
+            return Ok(DaySlice::none(api::BookReplayCoverage::DayNotCollected));
         }
         let Some(shared_dir) = paths.shared_dir().map(Path::to_path_buf) else {
-            return Ok(DaySlice::none());
+            return Ok(DaySlice::none(api::BookReplayCoverage::DayNotCollected));
         };
         let flow_after = parse_flow_cursor(after);
         let collected = Arc::clone(self);
         let date_owned = date_str.to_owned();
         let stock_str = stock.as_str().to_owned();
-        let flow = tokio::task::spawn_blocking(move || {
-            select(&collected).flow.read(&shared_dir, date, &date_owned, &stock_str, now, flow_after)
+        let (flow, missing_coverage) = tokio::task::spawn_blocking(move || {
+            let flow = select(&collected).flow.read(&shared_dir, date, &date_owned, &stock_str, now, flow_after)?;
+            let missing = flow.is_none().then(|| missing_live_coverage::<K>(&shared_dir, &date_owned, &stock_str));
+            Ok::<_, String>((flow, missing))
         })
         .await
         .map_err(|e| format!("수집 흐름 읽기 작업이 멈췄습니다: {e}"))??;
         let Some(flow) = flow else {
-            return Ok(DaySlice::none());
+            return Ok(DaySlice::none(missing_coverage.unwrap_or(api::BookReplayCoverage::DayNotCollected)));
         };
         Ok(DaySlice {
             source: api::BrokerDaySource::Flow,
+            coverage: Some(api::BookReplayCoverage::Collected),
             snapshots: flow.snapshots,
             gaps: flow.gaps,
             live: flow.live,
@@ -505,7 +510,7 @@ impl Collected {
         tokio::task::spawn_blocking(move || {
             match select(&collected).flow.read_with(&shared_dir, date, &date_str, &stock_str, now, on_flow)? {
                 Some(value) => Ok(value),
-                None => Ok(on_empty(missing_live_coverage::<K>(&shared_dir, &date_str))),
+                None => Ok(on_empty(missing_live_coverage::<K>(&shared_dir, &date_str, &stock_str))),
             }
         })
         .await
@@ -550,7 +555,19 @@ struct ReplayDayKey {
     now: KstTime,
 }
 
-fn missing_live_coverage<K: CollectedKind>(shared_dir: &Path, date_str: &str) -> api::BookReplayCoverage {
+#[derive(Clone, Copy)]
+struct TradeWindowParams {
+    cutoff_ms: i64,
+    until_sec: u32,
+    venue: domain::Venue,
+    min_won: u64,
+    limit: usize,
+}
+
+fn missing_live_coverage<K: CollectedKind>(shared_dir: &Path, date_str: &str, stock_str: &str) -> api::BookReplayCoverage {
+    if live_quote_stock_keys(shared_dir, date_str, stock_str).is_ok_and(|keys| !keys.is_empty()) {
+        return api::BookReplayCoverage::Collected;
+    }
     let flow_type_dir = shared_dir.join(SYMBOL_FLOW_FOLDER).join(date_str).join(K::TYPE_CODE);
     if flow_type_dir.is_dir() || live_day_dir(shared_dir, date_str).is_dir() {
         api::BookReplayCoverage::SymbolNotCollected
@@ -562,7 +579,7 @@ fn missing_live_coverage<K: CollectedKind>(shared_dir: &Path, date_str: &str) ->
 fn matches_venue(exchange: Option<Exchange>, venue: domain::Venue) -> bool {
     match venue {
         domain::Venue::Combined => true,
-        domain::Venue::Krx => exchange == Some(Exchange::Krx),
+        domain::Venue::Krx => matches!(exchange, Some(Exchange::Krx) | None),
         domain::Venue::Nxt => exchange == Some(Exchange::Nxt),
     }
 }
@@ -585,19 +602,17 @@ fn map_exchange(exchange: Exchange) -> api::Venue {
 fn aggregate_trade_window<T>(
     rows: &[T],
     gaps: &[[i64; 2]],
-    cutoff_ms: i64,
-    venue: domain::Venue,
-    min_won: u64,
-    limit: usize,
+    params: TradeWindowParams,
     tick_of: impl Fn(&T) -> &CollectedTradeTick,
 ) -> TradeWindowSlice {
-    let end_idx = rows.partition_point(|row| tick_of(row).recv_ms < cutoff_ms);
+    let scan_cutoff_ms = params.cutoff_ms.saturating_add(TRADE_CUTOFF_LOOKAHEAD_MS);
+    let end_idx = rows.partition_point(|row| tick_of(row).recv_ms < scan_cutoff_ms);
     let mut cum_volume: u64 = 0;
     let mut cum_buy_qty: u64 = 0;
     let mut cum_sell_qty: u64 = 0;
     for row in &rows[..end_idx] {
         let tick = tick_of(row);
-        if !matches_venue(tick.exchange, venue) {
+        if tick.hhmmss.secs() > params.until_sec || !matches_venue(tick.exchange, params.venue) {
             continue;
         }
         let qty = tick.qty();
@@ -615,13 +630,13 @@ fn aggregate_trade_window<T>(
     } else {
         None
     };
-    let mut trades = Vec::with_capacity(limit.min(end_idx));
+    let mut trades = Vec::with_capacity(params.limit.min(end_idx));
     for row in rows[..end_idx].iter().rev() {
-        if trades.len() >= limit {
+        if trades.len() >= params.limit {
             break;
         }
         let tick = tick_of(row);
-        if !matches_venue(tick.exchange, venue) || tick.value_won() < min_won {
+        if tick.hhmmss.secs() > params.until_sec || !matches_venue(tick.exchange, params.venue) || tick.value_won() < params.min_won {
             continue;
         }
         trades.push(api::BookReplayTradeRow {
@@ -640,6 +655,16 @@ fn aggregate_trade_window<T>(
         cum_sell_qty,
         strength,
         trades,
+    }
+}
+
+fn map_program_day_slice<'a>(gaps: &[[i64; 2]], rows: impl Iterator<Item = &'a CollectedProgramRow>) -> ProgramDaySlice {
+    let mut mapped: Vec<api::BookReplayProgramRow> = rows.map(map_program_row).collect();
+    mapped.sort_by_key(|row| row.second_of_day);
+    ProgramDaySlice {
+        coverage: api::BookReplayCoverage::Collected,
+        gaps: gaps.to_vec(),
+        rows: mapped,
     }
 }
 
@@ -740,6 +765,7 @@ fn slice_store<V: Clone>(stamp: &FileStamp, day: &StoreDay<V>, after: Option<&st
     {
         return DaySlice {
             source: api::BrokerDaySource::Store,
+            coverage: Some(api::BookReplayCoverage::Collected),
             snapshots: day.snapshots[index..].to_vec(),
             gaps: day.gaps.clone(),
             live: false,
@@ -749,6 +775,7 @@ fn slice_store<V: Clone>(stamp: &FileStamp, day: &StoreDay<V>, after: Option<&st
     }
     DaySlice {
         source: api::BrokerDaySource::Store,
+        coverage: Some(api::BookReplayCoverage::Collected),
         snapshots: day.snapshots.clone(),
         gaps: day.gaps.clone(),
         live: false,

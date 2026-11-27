@@ -349,7 +349,19 @@ async fn day_span(
     let replay = st.book_replay.clone();
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        load_or_cached_span(&replay, &dir, &shared_dir, stock, date, date_u32, &date_str, start_minute, &cache_key)
+        load_or_cached_span(
+            &replay,
+            SpanLookup {
+                dir: &dir,
+                shared_dir: &shared_dir,
+                stock,
+                date,
+                date_u32,
+                date_str: &date_str,
+                start_minute,
+                cache_key: &cache_key,
+            },
+        )
     })
     .await
     .map_err(|e| internal_error("호가 복기 구간 조회 작업이 멈췄습니다", e.to_string()))?
@@ -472,25 +484,33 @@ fn load_or_cached_meta(
     Ok(shared)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn load_or_cached_span(
-    replay: &BookReplay,
-    dir: &std::path::Path,
-    shared_dir: &std::path::Path,
+struct SpanLookup<'a> {
+    dir: &'a std::path::Path,
+    shared_dir: &'a std::path::Path,
     stock: StockCode,
     date: KstDate,
     date_u32: u32,
-    date_str: &str,
+    date_str: &'a str,
     start_minute: u16,
-    cache_key: &(String, String),
-) -> Result<Option<(EncodedSpan, bool)>, String> {
-    if let Some(cached) = cached_span(replay, dir, date_str, cache_key)? {
+    cache_key: &'a (String, String),
+}
+
+fn load_or_cached_span(replay: &BookReplay, lookup: SpanLookup<'_>) -> Result<Option<(EncodedSpan, bool)>, String> {
+    if let Some(cached) = cached_span(replay, lookup.dir, lookup.date_str, lookup.cache_key)? {
         return Ok(Some((cached, true)));
     }
-    let (stamp, state) = replay.store.load_day_index(dir, date_str)?;
+    let (stamp, state) = replay.store.load_day_index(lookup.dir, lookup.date_str)?;
     match state {
         DayIndexState::Missing => {
-            let Some(live_span) = raw_live::read_live_span(dir, shared_dir, date, date_u32, date_str, stock.as_str(), start_minute)? else {
+            let Some(live_span) = raw_live::read_live_span(
+                lookup.dir,
+                lookup.shared_dir,
+                lookup.date,
+                lookup.date_u32,
+                lookup.date_str,
+                lookup.stock.as_str(),
+                lookup.start_minute,
+            )? else {
                 return Ok(None);
             };
             let encoded = encode_span_payload(&live_span)?;
@@ -498,14 +518,22 @@ fn load_or_cached_span(
         }
         DayIndexState::UnsupportedVersion => Ok(None),
         DayIndexState::Ready(index) => {
-            let Some(coverage) = index.stocks.get(stock.as_str()) else {
+            let Some(coverage) = index.stocks.get(lookup.stock.as_str()) else {
                 return Ok(None);
             };
-            let day_dir = dir.join("store").join(date_str);
-            let span_data = span::read_span(&day_dir, date, date_u32, stock.as_str(), index.buckets, coverage, start_minute)?;
+            let day_dir = lookup.dir.join("store").join(lookup.date_str);
+            let span_data = span::read_span(
+                &day_dir,
+                lookup.date,
+                lookup.date_u32,
+                lookup.stock.as_str(),
+                index.buckets,
+                coverage,
+                lookup.start_minute,
+            )?;
             let encoded = encode_span_payload(&span_data)?;
             if let Some(stamp) = stamp {
-                replay.spans.lock().expect("book replay span cache").insert(cache_key.clone(), stamp, encoded.clone());
+                replay.spans.lock().expect("book replay span cache").insert(lookup.cache_key.clone(), stamp, encoded.clone());
             }
             Ok(Some((encoded, true)))
         }
@@ -614,9 +642,21 @@ mod tests {
         let shared = tmp.path().join("shared");
         let stock = StockCode::parse("005930").unwrap();
         let span_key = ("005930:540".to_owned(), "20261123".to_owned());
-        let (encoded, immutable) = load_or_cached_span(&replay, tmp.path(), &shared, stock, date, 20261123, "20261123", 540, &span_key)
-            .unwrap()
-            .unwrap();
+        let (encoded, immutable) = load_or_cached_span(
+            &replay,
+            SpanLookup {
+                dir: tmp.path(),
+                shared_dir: &shared,
+                stock,
+                date,
+                date_u32: 20261123,
+                date_str: "20261123",
+                start_minute: 540,
+                cache_key: &span_key,
+            },
+        )
+        .unwrap()
+        .unwrap();
         assert!(immutable);
         assert!(cached_span(&replay, tmp.path(), "20261123", &span_key).unwrap().is_some());
         let decoded = hoga_format::decode(&encoded.raw).unwrap();

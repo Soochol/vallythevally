@@ -780,6 +780,9 @@ pub struct BrokerDay {
     pub symbol: SymbolCode,
     pub date: String,
     pub source: BrokerDaySource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub coverage: Option<BookReplayCoverage>,
     pub snapshots: Vec<FeedBrokers>,
     #[ts(type = "[number, number][]")]
     pub gaps: Vec<[i64; 2]>,
