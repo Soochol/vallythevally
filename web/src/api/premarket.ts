@@ -10,8 +10,20 @@ import { getJson } from "./http";
 const STALE_MS = 30_000;
 const GC_TIME_MS = 30 * 60 * 1000;
 const LIVE_FLOW_POLL_MS = 5_000;
+const DAYS_BOUNDARY_POLL_MS = 20_000;
+const KST_OFFSET_MS = 9 * 3600 * 1000;
+const DAYS_POLL_START_MIN = 7 * 60 + 55;
+const DAYS_POLL_END_MIN = 9 * 60 + 5;
 
 export type { PreMarketCompare, PreMarketDays, PreMarketSnapshot };
+
+export function isKstPreMarketDaysPollWindow(nowMs = Date.now()): boolean {
+  const kst = new Date(nowMs + KST_OFFSET_MS);
+  const dow = kst.getUTCDay();
+  if (dow === 0 || dow === 6) return false;
+  const minOfDay = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+  return minOfDay >= DAYS_POLL_START_MIN && minOfDay < DAYS_POLL_END_MIN;
+}
 
 export function fetchPreMarketDays(symbol: SymbolCode, signal?: AbortSignal): Promise<PreMarketDays> {
   return getJson<PreMarketDays>(`/api/symbols/${encodeURIComponent(symbol)}/premarket/days`, signal);
@@ -36,6 +48,7 @@ export function usePreMarketDays(symbol: SymbolCode | null, enabled = true) {
     enabled: active,
     staleTime: STALE_MS,
     gcTime: GC_TIME_MS,
+    refetchInterval: () => (active && isKstPreMarketDaysPollWindow() ? DAYS_BOUNDARY_POLL_MS : false),
     retry: false,
   });
 }

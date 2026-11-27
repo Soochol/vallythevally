@@ -9,7 +9,7 @@ use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::get;
-use domain::{KstDate, KstTime, StockCode, Symbol, TimeOfDay};
+use domain::{KstDate, KstTime, StockCode, Symbol, TimeOfDay, Weekday};
 use duckdb::params;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -23,6 +23,14 @@ use crate::http::{ApiFailure, AppState};
 use crate::shared_data::{CollectorPaths, FlowCursor, SYMBOL_FLOW_FOLDER};
 use crate::symbols::Directory;
 
+const PENDING_DAY_START: TimeOfDay = match TimeOfDay::hms(8, 0, 0) {
+    Some(time) => time,
+    None => panic!("올바른 시각"),
+};
+const PENDING_DAY_END: TimeOfDay = match TimeOfDay::hms(9, 5, 0) {
+    Some(time) => time,
+    None => panic!("올바른 시각"),
+};
 const PREMARKET_START_SEC: u32 = 8 * 3600 + 30 * 60;
 const PREMARKET_END_SEC: u32 = 9 * 3600;
 const PEAK_WINDOW_START_SEC: u32 = 8 * 3600 + 50 * 60;
@@ -186,7 +194,8 @@ impl PreMarketService {
     }
 
     pub async fn days(&self, paths: CollectorPaths, stock: StockCode, now: KstTime) -> Result<PreMarketDays, String> {
-        let days = self.collected.expected_days(paths, stock, now).await?;
+        let mut days = self.collected.expected_days(paths.clone(), stock, now).await?;
+        append_pending_today(&paths, now, &mut days);
         Ok(PreMarketDays { symbol: symbol_code(stock), days })
     }
 
@@ -200,7 +209,8 @@ impl PreMarketService {
         let targets: Vec<(KstDate, String)> = match requested_days {
             Some(list) => list,
             None => {
-                let available = self.collected.expected_days(paths.clone(), stock, now).await?;
+                let mut available = self.collected.expected_days(paths.clone(), stock, now).await?;
+                append_pending_today(&paths, now, &mut available);
                 let start = available.len().saturating_sub(DEFAULT_COMPARE_DAYS);
                 available[start..]
                     .iter()
@@ -238,14 +248,18 @@ impl PreMarketService {
             return Ok((*cached).clone());
         }
         let expected = self.collected.expected_day(paths.clone(), stock, date, date_str, None, now).await?;
-        let ticks = if expected.source == api::BrokerDaySource::Store {
+        let pending_today = expected.source == api::BrokerDaySource::None
+            && date == now.kst_date()
+            && is_premarket_pending_window(&paths, now);
+        let source = if pending_today { api::BrokerDaySource::Flow } else { expected.source };
+        let ticks = if source == api::BrokerDaySource::Store {
             self.collected.ticks_day(paths, stock, date, date_str, None, now).await?.snapshots
         } else {
             Vec::new()
         };
-        let day_series = build_day_series(date_str, expected.source, &expected.snapshots, &ticks);
+        let day_series = build_day_series(date_str, source, &expected.snapshots, &ticks);
         if let Some(stamp) = closed_stamp
-            && expected.source == api::BrokerDaySource::Store
+            && source == api::BrokerDaySource::Store
         {
             self.compare_cache
                 .lock()
@@ -472,6 +486,116 @@ fn resolve_snapshot_date(
                 (today, today.yyyymmdd())
             }
         }
+    }
+}
+
+#[derive(Deserialize)]
+struct CachedHolidaysFile {
+    version: u32,
+    year: i32,
+    holidays: Vec<CachedHolidayEntry>,
+}
+
+#[derive(Deserialize)]
+struct CachedHolidayEntry {
+    date: u32,
+}
+
+#[derive(Deserialize)]
+struct CalendarOverridesFile {
+    version: u32,
+    days: Vec<CalendarOverrideEntry>,
+}
+
+#[derive(Deserialize)]
+struct CalendarOverrideEntry {
+    kind: String,
+    date: u32,
+}
+
+fn date_yyyymmdd_u32(date: KstDate) -> u32 {
+    date.year().cast_unsigned() * 10_000 + u32::from(date.month()) * 100 + u32::from(date.day())
+}
+
+fn calendar_dirs(paths: &CollectorPaths) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut push = |candidate: PathBuf| {
+        if !dirs.contains(&candidate) && candidate.is_dir() {
+            dirs.push(candidate);
+        }
+    };
+    if let Some(hoga_dir) = paths.hoga_dir() {
+        push(hoga_dir.join("calendar"));
+        if let Some(parent) = hoga_dir.parent() {
+            push(parent.join("calendar"));
+        }
+    }
+    if let Some(shared_dir) = paths.shared_dir() {
+        push(shared_dir.join("calendar"));
+        if let Some(parent) = shared_dir.parent() {
+            push(parent.join("calendar"));
+        }
+    }
+    dirs
+}
+
+fn is_closed_by_calendar_files(paths: &CollectorPaths, date: KstDate) -> Option<bool> {
+    let target = date_yyyymmdd_u32(date);
+    let year = date.year();
+    let dirs = calendar_dirs(paths);
+    for dir in &dirs {
+        let path = dir.join("overrides.json");
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        let Ok(file) = serde_json::from_str::<CalendarOverridesFile>(&raw) else { continue };
+        if file.version != 1 {
+            continue;
+        }
+        if let Some(entry) = file.days.iter().find(|entry| entry.date == target) {
+            if entry.kind == "open" {
+                return Some(false);
+            }
+            if entry.kind == "closed" {
+                return Some(true);
+            }
+        }
+    }
+    for dir in &dirs {
+        let path = dir.join(format!("holidays-{year}.json"));
+        let Ok(raw) = std::fs::read_to_string(&path) else { continue };
+        let Ok(file) = serde_json::from_str::<CachedHolidaysFile>(&raw) else { continue };
+        if file.version != 1 || file.year != year || file.holidays.is_empty() {
+            continue;
+        }
+        if file.holidays.iter().any(|entry| entry.date == target) {
+            return Some(true);
+        }
+    }
+    None
+}
+
+fn is_premarket_pending_window(paths: &CollectorPaths, now: KstTime) -> bool {
+    if paths.shared_dir().is_none() {
+        return false;
+    }
+    let time = now.kst_time_of_day();
+    if time < PENDING_DAY_START || time >= PENDING_DAY_END {
+        return false;
+    }
+    let today = now.kst_date();
+    match is_closed_by_calendar_files(paths, today) {
+        Some(closed) => !closed,
+        None => !matches!(today.weekday(), Weekday::Sat | Weekday::Sun),
+    }
+}
+
+fn append_pending_today(paths: &CollectorPaths, now: KstTime, days: &mut Vec<String>) {
+    if !is_premarket_pending_window(paths, now) {
+        return;
+    }
+    let today_str = now.kst_date().yyyymmdd();
+    if !days.iter().any(|d| d == &today_str) {
+        days.push(today_str);
+        days.sort_unstable();
     }
 }
 
@@ -1392,5 +1516,38 @@ mod tests {
                 .is_err()
         );
         assert!(parse_days_query(Some("2026-11-23")).is_err());
+    }
+
+    #[test]
+    fn pending_window_respects_hours_weekends_holidays_and_overrides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = CollectorPaths::hoga_only(tmp.path().to_path_buf());
+        let empty = CollectorPaths::default();
+        let tue = KstDate::new(2026, 11, 24).unwrap();
+        let sat = KstDate::new(2026, 11, 28).unwrap();
+
+        assert!(!is_premarket_pending_window(&empty, kst(tue, 8, 15, 0)));
+        assert!(!is_premarket_pending_window(&paths, kst(tue, 7, 59, 59)));
+        assert!(is_premarket_pending_window(&paths, kst(tue, 8, 0, 0)));
+        assert!(is_premarket_pending_window(&paths, kst(tue, 8, 39, 0)));
+        assert!(is_premarket_pending_window(&paths, kst(tue, 9, 4, 59)));
+        assert!(!is_premarket_pending_window(&paths, kst(tue, 9, 5, 0)));
+        assert!(!is_premarket_pending_window(&paths, kst(sat, 8, 15, 0)));
+
+        let cal_dir = tmp.path().join("calendar");
+        std::fs::create_dir_all(&cal_dir).unwrap();
+        std::fs::write(
+            cal_dir.join("holidays-2026.json"),
+            r#"{"version":1,"year":2026,"fetched_at_unix_ms":0,"holidays":[{"date":20261124,"name":"임시공휴일"}]}"#,
+        )
+        .unwrap();
+        assert!(!is_premarket_pending_window(&paths, kst(tue, 8, 15, 0)));
+
+        std::fs::write(
+            cal_dir.join("overrides.json"),
+            r#"{"version":1,"days":[{"kind":"open","date":20261124,"reason":"개장"}]}"#,
+        )
+        .unwrap();
+        assert!(is_premarket_pending_window(&paths, kst(tue, 8, 15, 0)));
     }
 }

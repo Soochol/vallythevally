@@ -134,6 +134,7 @@ test("장전 동시호가 창에서 2주 이중 Y축 차트, 좌측 세로 날�
   await expect(page.getByTestId("premarket-day-chip-20261120")).toHaveAttribute("data-role", "pin-1");
 
   const svg = page.getByTestId("premarket-overlay-chart");
+  await expect(page.getByTestId("premarket-vol-area")).toBeVisible();
   const box = await svg.boundingBox();
   expect(box).not.toBeNull();
   await page.mouse.move(box!.x + box!.width * 0.78, box!.y + box!.height * 0.5);
@@ -346,4 +347,77 @@ test("단일 포인트 날짜 시리즈는 호버 없이도 SVG 원 마커로 �
   expect(box).not.toBeNull();
   expect(box!.width).toBeGreaterThan(0);
   expect(box!.height).toBeGreaterThan(0);
+});
+
+test("08:00 대기 상태에서 당일이 기준일로 표시되고 08:30 틱이 들어오면 실시간 곡선과 물량 면으로 자동 전환된다", async ({ page, scenario }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "premarket", link: "a", kind: "premarket" },
+    ...layout.windows.filter((w) => w.kind !== "chart"),
+  ];
+  scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+
+  let compareHits = 0;
+
+  scenario.on(
+    (url) => /^\/api\/symbols\/005930\/premarket\/days$/.test(url.pathname),
+    () => ({ body: { symbol: "005930", days: ["20261126", "20261127"] } }),
+  );
+  scenario.on(
+    (url) => /^\/api\/symbols\/005930\/premarket\/compare$/.test(url.pathname),
+    () => {
+      compareHits++;
+      const todaySeries: PreMarketDaySeries =
+        compareHits === 1
+          ? {
+              date: "20261127",
+              source: "flow",
+              points: [],
+              lateDropPct: 0,
+              classification: "flat",
+              openPriceWon: null,
+              return0900Pct: null,
+              return0905Pct: null,
+              return0910Pct: null,
+            }
+          : {
+              date: "20261127",
+              source: "flow",
+              points: [
+                { secOfDay: 30600, expectedPriceWon: 71400, expectedReturnPct: 2.0, expectedQty: 14000, expectedTurnoverMillionWon: 999.6 },
+                { secOfDay: 30900, expectedPriceWon: 72450, expectedReturnPct: 3.5, expectedQty: 26000, expectedTurnoverMillionWon: 1883.7 },
+              ],
+              lateDropPct: 0,
+              classification: "genuineGap",
+              openPriceWon: null,
+              return0900Pct: null,
+              return0905Pct: null,
+              return0910Pct: null,
+            };
+      return { body: { symbol: "005930", series: [SAMSUNG_SERIES["20261126"]!, todaySeries] } };
+    },
+  );
+
+  await page.clock.install({ time: Date.parse("2026-11-27T08:15:00+09:00") });
+  await page.goto("/");
+  await tabOf(page, "premarket").click();
+
+  const todayChip = page.getByTestId("premarket-day-chip-20261127");
+  await expect(todayChip).toHaveAttribute("data-role", "focus");
+  await expect(todayChip).toHaveAttribute("data-pending", "true");
+  await expect(todayChip).toContainText("대기");
+  await expect(page.getByTestId("premarket-pending-badge")).toBeVisible();
+  await expect(page.getByTestId("premarket-waiting-pill")).toBeVisible();
+  await expect(page.getByTestId("premarket-vol-area")).toHaveCount(0);
+  await expect(page.locator('.pm-bg-line[data-date="20261126"]')).toBeVisible();
+
+  await page.clock.runFor(5_500);
+  await expect(page.getByTestId("premarket-waiting-pill")).toHaveCount(0);
+  await expect(todayChip).toHaveAttribute("data-pending", "false");
+  await expect(todayChip).toContainText("실시간");
+  await expect(page.getByTestId("premarket-vol-area")).toBeVisible();
+  await expect(page.locator('.pm-focus-line[data-date="20261127"]')).toBeVisible();
+  await expect(page.getByTestId("premarket-head-metrics")).toContainText("+3.50%");
 });
