@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 use server::app::{ApplicationInputs, application};
 use server::clock::{Clock, kst};
 use server::config::Secret;
-use server::http::router;
+use server::http::{AppState, router};
+use server::intraday_feed::DEFAULT_PROGRAM_LIMIT;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
 use server::kiwoom::stream::KiwoomStream;
@@ -24,6 +25,7 @@ use tower::ServiceExt;
 struct Fixture {
     fake: ScriptedTransport,
     app: Router,
+    state: Arc<AppState>,
     hoga_dir: PathBuf,
     _tmp: tempfile::TempDir,
 }
@@ -60,9 +62,9 @@ impl Fixture {
         if connected {
             rest.set_access(Access::Open);
         }
-        let app = router(state);
+        let app = router(state.clone());
         tokio::time::pause();
-        Fixture { fake, app, hoga_dir, _tmp: tmp }
+        Fixture { fake, app, state, hoga_dir, _tmp: tmp }
     }
 
     async fn get(&self, path: &str) -> (u16, Value) {
@@ -315,7 +317,7 @@ async fn the_later_pages_of_trades_leave_two_slots_so_the_next_symbol_is_not_hel
 async fn the_later_pages_of_program_trades_leave_two_slots_in_the_window() {
     let f = Fixture::start(true).await;
     f.script_five_pages("ka90008", "ka90008_005930_AL_p1", "ka90008_005930_AL_p2");
-    let walk = f.get_in_background("/api/symbols/005930/program-trades");
+    let walk = f.get_in_background("/api/symbols/005930/program-trades?pages=5");
     f.until_calls("ka90008", 3).await;
     f.settle().await;
     assert_eq!(f.calls("ka90008").len(), 3, "넷째 쪽은 창이 빌 때까지 나가지 않는다");
@@ -328,6 +330,159 @@ async fn the_later_pages_of_program_trades_leave_two_slots_in_the_window() {
     tokio::time::advance(Duration::from_secs(10)).await;
     assert_eq!(walk.await.unwrap().0, 200);
     assert_eq!(f.calls("ka90008").len(), 5);
+}
+
+fn program_page_with_rows(count: usize, next_key: Option<&str>) -> Value {
+    let rows: Vec<Value> = (0..count)
+        .map(|i| {
+            let total_secs = 9 * 3600 + i;
+            let hh = total_secs / 3600;
+            let mm = (total_secs % 3600) / 60;
+            let ss = total_secs % 60;
+            json!({
+                "tm": format!("{hh:02}{mm:02}{ss:02}"),
+                "cur_prc": "70000",
+                "prm_sell_qty": "10",
+                "prm_buy_qty": "30",
+                "prm_netprps_qty": "20",
+                "prm_sell_amt": "1",
+                "prm_buy_amt": "2",
+                "prm_netprps_amt": "1",
+                "stex_tp": "통합"
+            })
+        })
+        .collect();
+    let mut page = json!({
+        "stk_tm_prm_trde_trnsn": rows,
+        "return_code": 0,
+        "return_msg": "ok"
+    });
+    if let Some(next) = next_key {
+        page["_headers"] = json!({"cont-yn": "Y", "next-key": next});
+    }
+    page
+}
+
+#[tokio::test]
+async fn default_program_trades_stop_at_three_pages_without_waiting_for_window() {
+    let f = Fixture::start(true).await;
+    f.script_five_pages("ka90008", "ka90008_005930_AL_p1", "ka90008_005930_AL_p2");
+    let before = tokio::time::Instant::now();
+    let (status, body) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!(tokio::time::Instant::now(), before);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["points"].as_array().unwrap().len(), 6);
+    assert_eq!(body["skippedRows"], 3);
+    assert_eq!(
+        f.calls("ka90008").iter().map(|c| c.next_key.clone()).collect::<Vec<_>>(),
+        [None, Some("PAGE2".to_owned()), Some("PAGE3".to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn default_program_trades_stop_after_one_page_when_first_page_reaches_default_limit() {
+    let f = Fixture::start(true).await;
+    f.fake.respond_with("ka90008", 200, program_page_with_rows(DEFAULT_PROGRAM_LIMIT, Some("PAGE2")));
+    f.fake.respond_with_for_key("ka90008", "PAGE2", 200, fixture("ka90008_005930_AL_p2"));
+    let (status, body) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["points"].as_array().unwrap().len(), DEFAULT_PROGRAM_LIMIT);
+    assert_eq!(f.calls("ka90008").iter().map(|c| c.next_key.clone()).collect::<Vec<_>>(), [None]);
+}
+
+#[tokio::test]
+async fn program_trades_cache_reuses_within_ttl_refreshes_after_ttl_and_invalidates_on_generation_or_clear() {
+    let f = Fixture::start(true).await;
+    let reply = |net_qty: i64| {
+        json!({
+            "stk_tm_prm_trde_trnsn": [{
+                "tm": "090100",
+                "cur_prc": "70000",
+                "prm_sell_qty": "10",
+                "prm_buy_qty": "30",
+                "prm_netprps_qty": net_qty.to_string(),
+                "prm_sell_amt": "1",
+                "prm_buy_amt": "2",
+                "prm_netprps_amt": "1",
+                "stex_tp": "통합"
+            }],
+            "return_code": 0,
+            "return_msg": "ok"
+        })
+    };
+    f.fake.respond_with("ka90008", 200, reply(20));
+    let (status, first) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!((status, first["points"][0]["netQuantity"].as_i64()), (200, Some(20)));
+    assert_eq!(f.calls("ka90008").len(), 1);
+
+    tokio::time::advance(Duration::from_secs(14)).await;
+    f.fake.respond_with("ka90008", 200, reply(99));
+    let (status, cached) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!((status, cached), (200, first));
+    assert_eq!(f.calls("ka90008").len(), 1);
+
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let (status, refreshed) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!((status, refreshed["points"][0]["netQuantity"].as_i64()), (200, Some(99)));
+    assert_eq!(f.calls("ka90008").len(), 2);
+
+    tokio::time::advance(Duration::from_secs(2)).await;
+    f.state.generation.advance();
+    f.fake.respond_with("ka90008", 200, reply(120));
+    let (status, after_generation) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!((status, after_generation["points"][0]["netQuantity"].as_i64()), (200, Some(120)));
+    assert_eq!(f.calls("ka90008").len(), 3);
+
+    tokio::time::advance(Duration::from_secs(2)).await;
+    f.state.program_trades.clear();
+    f.fake.respond_with("ka90008", 200, reply(150));
+    let (status, after_clear) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!((status, after_clear["points"][0]["netQuantity"].as_i64()), (200, Some(150)));
+    assert_eq!(f.calls("ka90008").len(), 4);
+
+    tokio::time::advance(Duration::from_secs(2)).await;
+    f.fake.respond_with("ka90008", 200, json!({"return_code": 0, "return_msg": "ok", "stk_tm_prm_trde_trnsn": []}));
+    let (status, empty) = f.get("/api/symbols/005935/program-trades").await;
+    assert_eq!((status, empty["points"].as_array().unwrap().len()), (200, 0));
+    let calls_after_empty = f.calls("ka90008").len();
+    f.fake.respond_with("ka90008", 200, reply(77));
+    let (status, after_empty) = f.get("/api/symbols/005935/program-trades").await;
+    assert_eq!((status, after_empty["points"][0]["netQuantity"].as_i64()), (200, Some(77)));
+    assert!(f.calls("ka90008").len() > calls_after_empty);
+}
+
+#[tokio::test]
+async fn program_trades_prefer_collector_same_day_even_when_source_is_connected() {
+    let f = Fixture::start_with_collector(true, true).await;
+    let today_at = kst(KstDate::new(2026, 11, 9).unwrap(), 15, 20, 0).unix();
+    write_program_store(&f.hoga_dir, "20261109", today_at);
+    let (status, body) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body.get("date"), None);
+    assert!(f.calls("ka90008").is_empty());
+    assert_eq!(
+        body["points"],
+        json!([{
+            "time": "15:20:00",
+            "price": 70_500,
+            "buyQuantity": 650,
+            "sellQuantity": 400,
+            "netQuantity": 250,
+            "buyAmount": 46_000_000,
+            "sellAmount": 28_000_000,
+            "netAmount": 18_000_000,
+        }])
+    );
+}
+
+#[tokio::test]
+async fn program_trades_reject_invalid_pages_query() {
+    let f = Fixture::start(true).await;
+    for bad in ["pages=0", "pages=31", "pages=x"] {
+        let (status, body) = f.get(&format!("/api/symbols/005930/program-trades?{bad}")).await;
+        assert_eq!((status, &body["error"]["code"]), (400, &json!("bad_request")), "{bad}: {body}");
+    }
+    assert!(f.calls("ka90008").is_empty());
 }
 
 fn write_program_store(hoga_dir: &Path, date: &str, recv_s: i64) {

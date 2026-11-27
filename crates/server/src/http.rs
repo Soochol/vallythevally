@@ -57,6 +57,7 @@ pub struct AppState {
     pub heatmap_quotes: Arc<crate::heatmap_board::QuoteCache>,
     pub heatmap_flow: Arc<crate::heatmap_flow::FlowCache>,
     pub quote_minutes: Arc<crate::quote_minutes::QuoteCache>,
+    pub program_trades: Arc<crate::intraday_feed::ProgramTradeCache>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
