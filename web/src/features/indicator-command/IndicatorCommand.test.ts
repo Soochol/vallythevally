@@ -16,18 +16,21 @@ function markup(mode: IndicatorCommandMode) {
   return html;
 }
 
-test("지표 창은 비교 종목 탭 없이 두 탭과 띄운 지표 목록을 가운데 창으로 보인다", () => {
+test("지표 창은 탭·필터 바 없이 카테고리별 지표 종류와 적용된 #1 자식을 통합 트리로 보인다", () => {
   const html = markup("current");
   expect(html).toContain("지표·비교 입력창");
   expect(html).toContain('role="combobox"');
   expect(html).toContain('aria-label="지표·비교 찾기"');
-  expect(html.match(/role="tab"/g)).toHaveLength(2);
-  for (const label of ["이 칸에 띄운 지표", "지표 추가"]) expect(html).toContain(label);
+  expect(html).not.toContain('role="tab"');
+  expect(html).not.toContain("이 칸에 띄운 지표");
+  expect(html).not.toContain('aria-label="지표 분류"');
   expect(html).not.toContain("비교 종목");
+  for (const group of ["가격 패널", "아래 패널", "호가지표", "재무지표"]) expect(html).toContain(group);
+  expect(html).toContain('aria-label="이동평균 단순 20 추가 후보"');
+  expect(html).toContain("#1");
   expect(html).toContain('aria-label="거래량 설정"');
-  expect(html).not.toContain('aria-label="거래량 숨기기"');
+  expect(html).toContain('aria-label="거래량 숨기기"');
   expect(html).toContain('aria-label="거래량 지우기"');
-  expect(html).toContain("아래 패널");
   expect(html).not.toContain("변경 적용");
   expect(html).toContain('data-chart-control=""');
   expect(html).toContain('data-command-frame=""');
@@ -58,17 +61,16 @@ test("통합 이동평균선 편집기는 컬럼 헤더·구분·프리셋·빠�
   expect(html).not.toContain("기간 (봉)");
 });
 
-test("지표 추가 탭은 분류 필터와 서브텍스트 없는 후보 목록, 색상·굵기 팝오버 트리거를 보인다", () => {
+test("추가 모드로 열면 첫 부모 후보의 새 인스턴스 미리보기와 추가 버튼을 보인다", () => {
   const html = markup("add");
-  expect(html).toContain('aria-label="지표 분류"');
+  expect(html).not.toContain('role="tab"');
+  expect(html).not.toContain('aria-label="지표 분류"');
   expect(html).toContain('aria-label="이동평균 단순 20 추가 후보"');
-  expect(html).not.toContain("ic-row-sub");
-  for (const group of ["가격 패널", "아래 패널", "재무지표"]) expect(html).toContain(group);
+  expect(html).toContain("새 인스턴스 #1");
   expect(html).toContain("btn-primary");
   expect(html).toContain("이동평균 단순 20 추가");
   expect(html).toContain('aria-label="선 미리보기"');
   expect(html).toContain('aria-label="선 색 및 굵기 설정"');
-  expect(html).not.toContain('aria-label="거래량 숨기기"');
 });
 
 test("비교 모드로 열면 탭 없이 비교 수·가격축을 보이고 하단 추가 버튼은 두지 않는다", () => {

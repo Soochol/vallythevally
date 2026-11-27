@@ -20,7 +20,7 @@ beforeEach(() => {
 
 resetDomAfterEach();
 
-test("우측 도킹에서 이동평균선 그룹 세부 설정을 열어도 Maximum update depth exceeded 없이 렌더링되고 선 추가가 반영된다", () => {
+test("우측 도킹은 통합 트리에서 자식 인스턴스 편집과 부모 클릭 새 인스턴스 추가를 지원한다", () => {
   const cellId = firstCellId();
   const host = document.createElement("div");
   Object.defineProperty(host, "clientWidth", { value: 900, configurable: true });
@@ -29,15 +29,16 @@ test("우측 도킹에서 이동평균선 그룹 세부 설정을 열어도 Maxi
 
   const { client } = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={hostRef} />, { withToast: false });
 
-  fireEvent.click(screen.getByRole("button", { name: "이동평균선 (1)" }));
+  expect(screen.queryByRole("tab")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "이동평균 단순 20 설정" }));
 
-  expect(screen.getByRole("heading", { name: "이동평균선 (1)" })).toBeTruthy();
-  expect(screen.getByRole("textbox", { name: "이동평균 단순 20 기간" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "이동평균" })).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "기간" }) as HTMLInputElement).value).toBe("20");
 
-  fireEvent.change(screen.getByRole("textbox", { name: "추가할 이동평균 기간" }), { target: { value: "60" } });
-  fireEvent.click(screen.getByRole("button", { name: "이동평균선 추가" }));
+  fireEvent.click(screen.getByRole("button", { name: "← 지표 목록" }));
+  fireEvent.click(screen.getByRole("button", { name: "이동평균 단순 20 추가 후보" }));
 
-  expect(screen.getByRole("heading", { name: "이동평균선 (2)" })).toBeTruthy();
-  expect(screen.getByRole("textbox", { name: "이동평균 단순 60 기간" })).toBeTruthy();
+  expect(screen.getByText("새 인스턴스 #2")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "이동평균 단순 20 추가" })).toBeTruthy();
   client.clear();
 });

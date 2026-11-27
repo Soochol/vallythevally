@@ -1,5 +1,5 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { isFinancial, isQuote, KINDS, specName } from "../../chart/indicators/kinds";
+import { isFinancial, isQuote, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
 import type { ChartSettings, IndicatorConfig } from "../../chart/settings";
 import type { IndicatorCommandMode } from "../../stores/selection";
 import type { SearchList } from "../search/searchList";
@@ -49,6 +49,40 @@ export type CommandRow = { kind: "current"; key: string; group: string; config: 
   | { kind: "symbol"; key: string; group: string; info: SymbolInfo; selectable: boolean };
 
 export type DialogRow = CommandRow | { kind: "maGroup"; key: typeof MA_GROUP_KEY; group: typeof PRICE_GROUP; lines: IndicatorConfig[] };
+
+export type TreeCandidateRow = { kind: "candidate"; key: string; group: string; candidate: IndicatorCandidate; instanceCount: number };
+export type TreeCurrentRow = { kind: "current"; key: string; group: string; parentKey: string; index: number; config: IndicatorConfig };
+export type TreeSymbolRow = { kind: "symbol"; key: string; group: string; info: SymbolInfo; selectable: boolean };
+export type TreeDialogRow = TreeCandidateRow | TreeCurrentRow | TreeSymbolRow;
+
+export function unifiedIndicatorRows(settings: ChartSettings, input: string, collapsedKinds: ReadonlySet<IndicatorKind>): TreeDialogRow[] {
+  const hasQuery = input.trim() !== "";
+  const candidates = parseIndicatorInput(input)
+    .map((candidate) => ({ group: candidateGroup(candidate), candidate }))
+    .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
+  const out: TreeDialogRow[] = [];
+  for (const { group, candidate } of candidates) {
+    const parentKey = `new:${candidate.kind}:${input}`;
+    const instances = settings.indicators.filter((config) => config.spec.kind === candidate.kind);
+    out.push({ kind: "candidate", key: parentKey, group, candidate, instanceCount: instances.length });
+    if (hasQuery || !collapsedKinds.has(candidate.kind)) {
+      instances.forEach((config, idx) => {
+        out.push({ kind: "current", key: currentKey(config.id), group, parentKey, index: idx + 1, config });
+      });
+    }
+  }
+  return out;
+}
+
+export function selectedTreeRow(rows: readonly TreeDialogRow[], chosen: string, preferCurrent = false): TreeDialogRow | undefined {
+  const direct = rows.find((row) => row.key === chosen && (row.kind !== "symbol" || row.selectable));
+  if (direct) return direct;
+  if (preferCurrent) {
+    const firstCurrent = rows.find((row) => row.kind === "current");
+    if (firstCurrent) return firstCurrent;
+  }
+  return rows.find((row) => row.kind === "candidate" || row.kind === "current" || (row.kind === "symbol" && row.selectable));
+}
 
 export function matchesCategory(group: string, category: AddCategory): boolean {
   if (category === "all") return true;

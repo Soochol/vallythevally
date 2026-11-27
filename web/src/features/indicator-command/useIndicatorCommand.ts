@@ -10,12 +10,12 @@ import { checkForm, draftStyle, nextColor, startDraft, type Draft } from "../ind
 import { useValidator } from "../indicator-dialog/IndicatorSettingsForm";
 import { normalizeQuery } from "../search/highlight";
 import { searchList } from "../search/searchList";
-import { executeCommand } from "./execute";
+import { addIndicatorCommand, executeCommand } from "./execute";
 import { commandRows, currentKey, modeAfterInput, selectedRow, type CommandRow, type IndicatorCommandMode } from "./model";
 import { useIndicatorPreview } from "./preview";
 import type { WindowId } from "../../layout/kinds";
 
-export type EditorAction = { commit(onCommitted: () => void): void; focus(): void };
+export type EditorAction = { commit(onCommitted: (createdId?: string) => void): void; focus(): void };
 export type EditableRow = Exclude<CommandRow, { kind: "symbol" }>;
 export type CandidateRow = Extract<CommandRow, { kind: "candidate" }>;
 
@@ -42,7 +42,7 @@ export function useIndicatorCommand(cellId: WindowId, initialMode: IndicatorComm
     return true;
   };
 
-  const submit = (onSubmitted: () => void) => {
+  const submit = (onSubmitted: (createdId?: string) => void) => {
     if (selected?.kind !== "symbol") return editor.current?.commit(onSubmitted);
     if (!selectedSymbol || !addCompareSymbol(selectedSymbol)) return;
     onSubmitted();
@@ -76,23 +76,31 @@ export function useIndicatorDraft(cellId: WindowId, row: EditableRow, actionRef:
   }, [draft, validator, cell.chartSettings.indicators, cellId]);
   useEffect(() => () => useIndicatorPreview.getState().set(cellId, null), [cellId]);
 
-  const commitNow = () => {
-    if (!valid || !check.spec) return false;
-    const committed = executeCommand(cellId, { kind: "indicator", id: editing?.id ?? null, spec: check.spec, style, placement: draft.placement });
-    if (committed && !editing) setDraft((draft) => ({ ...draft, color: "auto" }));
-    return committed;
+  const commitNow = (): { ok: boolean; createdId?: string } => {
+    if (!valid || !check.spec) return { ok: false };
+    if (!editing) {
+      const createdId = addIndicatorCommand(cellId, check.spec, style, draft.placement);
+      if (!createdId) return { ok: false };
+      setDraft((draft) => ({ ...draft, color: "auto" }));
+      return { ok: true, createdId };
+    }
+    return { ok: executeCommand(cellId, { kind: "indicator", id: editing.id, spec: check.spec, style, placement: draft.placement }) };
   };
-  const commitWhenValidatorLoads = useRef<(() => void) | null>(null);
+  const commitWhenValidatorLoads = useRef<((createdId?: string) => void) | null>(null);
   useEffect(() => { commitWhenValidatorLoads.current = null; }, [draft]);
   useEffect(() => {
     const onCommitted = commitWhenValidatorLoads.current;
     if (validator === "loading" || !onCommitted) return;
     commitWhenValidatorLoads.current = null;
-    if (commitNow()) onCommitted();
+    const result = commitNow();
+    if (result.ok) onCommitted(result.createdId);
   }, [validator]);
-  const commit = (onCommitted: () => void) => {
+  const commit = (onCommitted: (createdId?: string) => void) => {
     if (validator === "loading") commitWhenValidatorLoads.current ??= onCommitted;
-    else if (commitNow()) onCommitted();
+    else {
+      const result = commitNow();
+      if (result.ok) onCommitted(result.createdId);
+    }
   };
   useImperativeHandle(actionRef, () => ({ commit, focus }));
 

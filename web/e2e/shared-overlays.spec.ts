@@ -75,7 +75,6 @@ test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
-  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "이동평균 단순 20 추가 후보", exact: true }).click();
   await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
   await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();

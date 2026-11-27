@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { DEFAULT_CHART_SETTINGS, type ChartSettings } from "../../chart/settings";
-import { commandHints, commandKey, commandRows, groupDialogRows, INDICATOR_DIALOG_TABS, MA_GROUP_KEY, modeAfterInput, selectedDialogRow, selectedRow } from "./model";
+import { commandHints, commandKey, commandRows, groupDialogRows, INDICATOR_DIALOG_TABS, MA_GROUP_KEY, modeAfterInput, selectedDialogRow, selectedRow, selectedTreeRow, unifiedIndicatorRows } from "./model";
 
 const empty = { rows: [], selectable: true, empty: true };
 const info: SymbolInfo = { code: "005930", name: "삼성전자", market: "kospi", kind: "common", nxtEnabled: true };
@@ -93,4 +93,29 @@ test("가운데 지표 창은 비교 탭을 빼고 이동평균선을 한 그룹
   const addRows = groupDialogRows(commandRows(multiMa, "", "add", empty), "add", "fin", false);
   expect(addRows.length).toBeGreaterThan(0);
   expect(addRows.every((row) => row.group === "재무지표")).toBe(true);
+});
+
+test("통합 트리 목록은 카테고리별 지표 종류를 1회씩 나열하고 적용된 인스턴스를 부모 아래 #1, #2 자식으로 배치한다", () => {
+  const multiMa: ChartSettings = {
+    ...withMa,
+    indicators: [
+      ...withMa.indicators,
+      { id: "ma2", spec: { kind: "ma", method: "ema", period: 60 }, panel: "price", visible: true, style: { colors: ["ind-3"], width: 2 } },
+    ],
+  };
+  const rows = unifiedIndicatorRows(multiMa, "", new Set());
+  expect([...new Set(rows.map((row) => row.group))]).toEqual(["가격 패널", "아래 패널", "호가지표", "재무지표"]);
+  const maIdx = rows.findIndex((row) => row.kind === "candidate" && row.candidate.kind === "ma");
+  expect(rows[maIdx]).toMatchObject({ kind: "candidate", instanceCount: 2 });
+  expect(rows[maIdx + 1]).toMatchObject({ kind: "current", index: 1, config: { id: "ma" } });
+  expect(rows[maIdx + 2]).toMatchObject({ kind: "current", index: 2, config: { id: "ma2" } });
+
+  const collapsed = unifiedIndicatorRows(multiMa, "", new Set(["ma"]));
+  expect(collapsed.some((row) => row.kind === "current" && row.config.spec.kind === "ma")).toBe(false);
+  const searched = unifiedIndicatorRows(multiMa, "이평", new Set(["ma"]));
+  expect(searched.filter((row) => row.kind === "current").map((row) => row.index)).toEqual([1, 2]);
+
+  expect(selectedTreeRow(rows, "", true)).toMatchObject({ kind: "current", config: { id: "ma" } });
+  expect(selectedTreeRow(rows, "", false)).toMatchObject({ kind: "candidate", candidate: { kind: "ma" } });
+  expect(selectedTreeRow(rows, "current:ma2", false)).toMatchObject({ kind: "current", config: { id: "ma2" } });
 });
