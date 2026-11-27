@@ -17,7 +17,7 @@ import {
   shownColor,
   specName,
 } from "../../chart/indicators/kinds";
-import { barOpacityOf, defaultBarOpacity, type IndicatorConfig, type LineWidth, type Panel, placementOfConfig, readSpecShape } from "../../chart/settings";
+import { barOpacityOf, defaultBarOpacity, DEFAULT_ICHIMOKU_STYLE, ichimokuStyleOf, type IchimokuStyle, type IndicatorConfig, type LineWidth, type Panel, placementOfConfig, readSpecShape } from "../../chart/settings";
 import { normalizeHex } from "../../lib/colors";
 
 export type { Validate };
@@ -38,6 +38,7 @@ export interface Draft {
   width: LineWidth;
   placement: Placement;
   barOpacity: number;
+  ichimoku?: IchimokuStyle;
 }
 
 export const canOverlayPrice = (kind: IndicatorKind): boolean => placementsOf(kind).includes("price") && placementsOf(kind).includes("panel");
@@ -52,7 +53,12 @@ export function hasBarOpacity(target: IndicatorKind | SpecForm): boolean {
 }
 
 export function draftStyle(draft: Draft, colors: IndicatorColor[]): IndicatorConfig["style"] {
-  return { colors, width: draft.width, ...(hasBarOpacity(draft.form) ? { barOpacity: draft.barOpacity } : {}) };
+  return {
+    colors,
+    width: draft.width,
+    ...(hasBarOpacity(draft.form) ? { barOpacity: draft.barOpacity } : {}),
+    ...(draft.form.kind === "ichimoku" ? { ichimoku: draft.ichimoku ?? DEFAULT_ICHIMOKU_STYLE } : {}),
+  };
 }
 
 export function formFromSpec(spec: IndicatorSpec): SpecForm {
@@ -80,9 +86,23 @@ export function formFromSpec(spec: IndicatorSpec): SpecForm {
 
 export function startDraft(editing: IndicatorConfig | null, kind: IndicatorKind): Draft {
   if (editing) {
-    return { form: formFromSpec(editing.spec), color: shownColor(editing.spec, editing.style.colors), width: editing.style.width, placement: placementOfConfig(editing), barOpacity: barOpacityOf(editing.style, editing.spec.kind) };
+    return {
+      form: formFromSpec(editing.spec),
+      color: shownColor(editing.spec, editing.style.colors),
+      width: editing.style.width,
+      placement: placementOfConfig(editing),
+      barOpacity: barOpacityOf(editing.style, editing.spec.kind),
+      ...(editing.spec.kind === "ichimoku" ? { ichimoku: { ...ichimokuStyleOf(editing.style) } } : {}),
+    };
   }
-  return { form: formFromSpec(KINDS[kind].defaults), color: "auto", width: 1, placement: KINDS[kind].place, barOpacity: defaultBarOpacity(kind) };
+  return {
+    form: formFromSpec(KINDS[kind].defaults),
+    color: "auto",
+    width: 1,
+    placement: KINDS[kind].place,
+    barOpacity: defaultBarOpacity(kind),
+    ...(kind === "ichimoku" ? { ichimoku: { ...DEFAULT_ICHIMOKU_STYLE } } : {}),
+  };
 }
 
 const INT = /^\d+$/;
