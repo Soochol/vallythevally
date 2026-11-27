@@ -3,6 +3,7 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { Venue } from "../api/generated/Venue";
 import { retryDelay, shouldRetry } from "../api/retry";
 import type { Connection, MarketSocketLike, QuoteEvent } from "../api/socket";
+import { isIndexCode } from "../lib/symbol";
 
 /** 관심종목 한 줄의 값. `limited`는 서버가 실시간 자리를 주지 못한 종목이다. */
 export interface WatchQuote {
@@ -45,6 +46,13 @@ function mergeRealtimeQuote(incoming: Quote, previous: Quote | undefined): Quote
   }
   if (volume === incoming.volume && tradedMillionWon === incoming.tradedMillionWon) return incoming;
   return tradedMillionWon === undefined ? { ...incoming, volume } : { ...incoming, volume, tradedMillionWon };
+}
+
+function backfillTradedValue(existing: Quote, polled: Quote): Quote {
+  if (existing.tradedMillionWon !== undefined || polled.tradedMillionWon === undefined) return existing;
+  const deltaVolume = existing.source === "expected" ? 0 : Math.max(0, existing.volume - polled.volume);
+  const tradedMillionWon = Math.round(polled.tradedMillionWon + (deltaVolume * existing.price) / 1_000_000);
+  return { ...existing, tradedMillionWon };
 }
 
 /**
@@ -163,21 +171,30 @@ export class QuoteBook {
       const row = this.get(c);
       return row.quote === undefined || (acceptStale && row.stale);
     };
+    const needsTradedValue = (c: SymbolCode) => {
+      const row = this.get(c);
+      return row.quote !== undefined && row.quote.tradedMillionWon === undefined && !isIndexCode(c);
+    };
     let quotes: Quote[];
     try {
       quotes = await this.deps.fetchQuotes(symbols, venue);
     } catch (e) {
       if (!shouldRetry(failures, e)) return;
       setTimeout(() => {
-        const missing = symbols.filter((c) => sameEntry(c) && needsQuote(c));
+        const missing = symbols.filter((c) => sameEntry(c) && (needsQuote(c) || needsTradedValue(c)));
         if (missing.length > 0) void this.load(missing, failures + 1, acceptStale);
       }, retryDelay(failures, e));
       return;
     }
     for (const q of quotes) {
-      if (!sameEntry(q.symbol) || !needsQuote(q.symbol)) continue;
+      if (!sameEntry(q.symbol)) continue;
       const row = this.get(q.symbol);
-      this.put(q.symbol, { quote: q, limited: row.limited, stale: !this.live || row.limited });
+      if (needsQuote(q.symbol)) {
+        this.put(q.symbol, { quote: q, limited: row.limited, stale: !this.live || row.limited });
+      } else if (row.quote !== undefined) {
+        const merged = backfillTradedValue(row.quote, q);
+        if (merged !== row.quote) this.put(q.symbol, { quote: merged, limited: row.limited, stale: row.stale });
+      }
     }
   }
 
