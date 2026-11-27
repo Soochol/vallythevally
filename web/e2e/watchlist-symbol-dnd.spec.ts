@@ -30,7 +30,8 @@ async function seedLayout(scenario: Scenario) {
     windows: [
       { ...baseChart, id: "chart-1", link: "a", symbol: "005930" },
       { ...baseChart, id: "chart-2", link: "a", symbol: "005930" },
-      { id: "book-1", link: "b", kind: "book" },
+      { id: "book-1", link: "a", kind: "book" },
+      { id: "book-pinned", link: "a", kind: "book", symbol: "005930" },
       { id: "tape_matrix", link: null, kind: "tape_matrix" },
       { id: "watchlist", link: "a", kind: "watchlist" },
     ],
@@ -46,7 +47,7 @@ async function seedLayout(scenario: Scenario) {
             kind: "split",
             dir: "row",
             ratio: 0.5,
-            first: { kind: "group", id: "g-charts", tabs: ["chart-1", "book-1"], active: "chart-1" },
+            first: { kind: "group", id: "g-charts", tabs: ["chart-1", "book-1", "book-pinned"], active: "chart-1" },
             second: { kind: "group", id: "g-right", tabs: ["chart-2", "tape_matrix"], active: "chart-2" },
           },
         },
@@ -57,7 +58,7 @@ async function seedLayout(scenario: Scenario) {
   });
 }
 
-test("관심종목에서 연동 차트에 드롭하면 그 차트만 무그룹으로 독립 변경된다", async ({ scenario, page }) => {
+test("관심종목에서 연동 차트에 드롭하면 같은 연동 그룹 차트가 모두 변경된다", async ({ scenario, page }) => {
   await seedLayout(scenario);
   await page.goto("/");
   await expect(watchRow(page, "086520")).toBeVisible();
@@ -66,10 +67,10 @@ test("관심종목에서 연동 차트에 드롭하면 그 차트만 무그룹�
   await dragSymbolTo(watchRow(page, "086520"), chartPanel);
 
   await expect(page.locator("#window-tab-chart-1")).toContainText("에코프로");
-  await expect(page.locator("#window-tab-chart-2")).toContainText("삼성전자");
+  await expect(page.locator("#window-tab-chart-2")).toContainText("에코프로");
 });
 
-test("관심종목에서 비활성 보조창 탭에 드롭하면 탭이 활성화되고 종목이 고정된다", async ({ scenario, page }) => {
+test("관심종목에서 비활성 연동 보조창 탭에 드롭하면 고정 없이 연동 그룹 전체가 변경된다", async ({ scenario, page }) => {
   await seedLayout(scenario);
   await page.goto("/");
   await expect(watchRow(page, "005935")).toBeVisible();
@@ -78,7 +79,21 @@ test("관심종목에서 비활성 보조창 탭에 드롭하면 탭이 활성�
   await dragSymbolTo(watchRow(page, "005935"), bookTab);
 
   await expect(bookTab).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator('[data-dock-group="g-charts"] .window-symbol[data-pinned]')).toBeVisible();
+  await expect(page.locator("#window-tab-chart-1")).toContainText("삼성전자우");
+  await expect(page.locator("#window-tab-chart-2")).toContainText("삼성전자우");
+  await expect(page.locator('[data-dock-group="g-charts"] .dock-tab-group[data-selected] .window-symbol[data-pinned]')).toHaveCount(0);
+});
+
+test("명시적으로 고정된 보조창 탭에 드롭하면 종목이 바뀌지 않는다", async ({ scenario, page }) => {
+  await seedLayout(scenario);
+  await page.goto("/");
+  await expect(watchRow(page, "086520")).toBeVisible();
+
+  const pinnedTab = page.locator("#window-tab-book-pinned");
+  await dragSymbolTo(watchRow(page, "086520"), pinnedTab);
+
+  await expect(page.locator("#window-tab-chart-1")).toContainText("삼성전자");
+  await expect(page.locator('[data-dock-group="g-charts"] .dock-tab-group[data-selected] .window-symbol[data-pinned]')).toBeVisible();
 });
 
 test("관심종목에서 호가 미니 그리드 탭에 드롭하면 종목 카드가 추가된다", async ({ scenario, page }) => {

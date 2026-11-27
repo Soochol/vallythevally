@@ -530,13 +530,15 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const { layout } = get();
       const win = layout.windows.find((w) => w.id === id);
       if (!win) return { changed: [], notice: null };
-      if (isChartWindow(win)) {
-        if (win.link !== null) {
-          patchWindows((w) => (w.id === id && isChartWindow(w) ? { ...w, link: null } : w));
+      if (win.link !== null) {
+        if (isPinnableWindow(win) && win.symbol !== undefined) return { changed: [], notice: null };
+        if (isChartWindow(win) || isPinnableWindow(win)) {
+          const charts = chartWindows(layout).filter((w) => w.link === win.link);
+          return charts.length ? openIn(charts, target) : { changed: [], notice: null };
         }
-        const detached = chartWindows(get().layout).find((w) => w.id === id);
-        return detached ? openIn([detached], target) : { changed: [], notice: null };
+        return { changed: [], notice: null };
       }
+      if (isChartWindow(win)) return openIn([win], target);
       if (isPinnableWindow(win)) {
         if (isIndexCode(target.code)) return { changed: [], notice: null };
         if (win.symbol === target.code) return { changed: [], notice: null };
