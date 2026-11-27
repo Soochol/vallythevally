@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState } from "react";
-import { colorLine, indicatorCssColor, isFinancial, isInvestorFlow, isQuote, isTickCvd, KINDS, shownColor, specName, type IndicatorKind } from "../../chart/indicators/kinds";
+import { colorLine, indicatorCssColor, KINDS, shownColor, specName, type IndicatorKind } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { symbolSub } from "../../lib/symbol";
@@ -13,7 +13,7 @@ import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { EmptyState } from "../overlay/State";
 import { CompareSection } from "./CompareSection";
-import { unifiedIndicatorRows, type TreeCandidateRow, type TreeDialogRow } from "./model";
+import { indicatorPeriodBadge, treeChildLabel, unifiedIndicatorRows, type TreeCandidateRow, type TreeDialogRow } from "./model";
 import { useIndicatorCommand, useIndicatorDraft, type EditorAction } from "./useIndicatorCommand";
 
 export const CHART_DOCK_MIN_WIDTH = 640;
@@ -21,22 +21,6 @@ export const CHART_DOCK_MIN_WIDTH = 640;
 type DockDetailTarget =
   | { kind: "current"; id: string }
   | { kind: "candidate"; row: TreeCandidateRow };
-
-function periodBadge(kind: IndicatorKind): string | null {
-  const spec = KINDS[kind].defaults;
-  if (isFinancial(spec)) return "분기·연";
-  if (isInvestorFlow(spec)) return "일봉+";
-  if (isQuote(spec) || isTickCvd(spec)) return "분봉";
-  return null;
-}
-
-function childLabel(spec: IndicatorConfig["spec"]): string {
-  const label = KINDS[spec.kind].label;
-  const full = specName(spec);
-  if (full === label) return label;
-  const detail = full.startsWith(label) ? full.slice(label.length).trim() : full;
-  return `${label} (${detail})`;
-}
 
 function DockDetailEditor({ cellId, config, instanceIndex, onBack }: { cellId: WindowId; config: IndicatorConfig; instanceIndex: number; onBack(): void }) {
   const { draft, setDraft, check, color } = useLiveIndicatorDraft(cellId, config);
@@ -220,7 +204,7 @@ function ChartRightDockBody({ cellId, mode, detailTarget, setDetailTarget, input
                 {rows.map((row, i) => {
                   const showGroup = row.group !== rows[i - 1]?.group;
                   if (row.kind === "candidate") {
-                    const rule = periodBadge(row.candidate.kind);
+                    const rule = indicatorPeriodBadge(row.candidate.kind);
                     const hasChildren = row.instanceCount > 0;
                     const collapsed = !hasQuery && collapsedKinds.has(row.candidate.kind);
                     return (
@@ -256,7 +240,7 @@ function ChartRightDockBody({ cellId, mode, detailTarget, setDetailTarget, input
                           <span aria-hidden="true" className="ic-tree-idx">#{row.index}</span>
                           <span aria-hidden="true" className="ic-color-dot" style={{ background: hasDot ? indicatorCssColor(shownColor(row.config.spec, row.config.style.colors)) : "var(--text-3)" }} />
                           <button type="button" className="ic-row-text" aria-label={`${full} 설정`} title={full} onClick={(e) => { e.stopPropagation(); setDetailTarget({ kind: "current", id: row.config.id }); }}>
-                            <span className="ic-tree-child-label">{childLabel(row.config.spec)}</span>
+                            <span className="ic-tree-child-label">{treeChildLabel(row.config.spec)}</span>
                           </button>
                           <div className="ic-row-actions">
                             <button type="button" className="icon-btn size-6" aria-label={`${full} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={(e) => { e.stopPropagation(); useLayoutStore.getState().updateIndicator(cellId, row.config.id, { visible: !row.config.visible }); }}><EyeIcon size={13} off={!row.config.visible} /></button>

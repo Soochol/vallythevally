@@ -299,11 +299,9 @@ for (const mode of MODES) {
     await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
     const inspector = page.getByRole("region", { name: "지표", exact: true });
     await expect(inspector).toBeVisible();
-    await inspector.getByRole("tab", { name: "지표 추가", exact: true }).click();
     await inspector.getByRole("searchbox").fill("이평 9");
     await inspector.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
     await inspector.getByRole("searchbox").fill("");
-    await inspector.getByRole("tab", { name: /^이 칸에 띄운 지표/ }).click();
     const fold = cell(page).locator("[data-indicator-fold]:visible");
     if (await fold.count()) await fold.first().hover();
     await cell(page).locator("[data-indicator-row]").filter({ hasText: "이동평균 단순 9" }).hover();
