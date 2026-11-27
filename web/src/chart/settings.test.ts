@@ -51,6 +51,7 @@ const rsi: ChartSettings = {
   showDaySeparators: true,
   showHorzGrid: false,
   showVertGrid: false,
+  regularHoursOnly: true,
 };
 
 test("맞는 v2 모양은 그대로 읽는다", () => {
@@ -95,6 +96,14 @@ test("가로·세로 격자선 켜짐이 없는 저장값은 켬으로 읽고 �
   const { showHorzGrid: _horz, showVertGrid: _vert, ...older } = rsi;
   expect(parseChartSettings(older)).toEqual({ ...rsi, showHorzGrid: true, showVertGrid: true });
   expect(parseChartSettings({ v: 1, style: "bar", scale: "log", indicators: [], compare: [], panels: [] })).toMatchObject({ showHorzGrid: true, showVertGrid: true });
+});
+
+test("정규장만 보기 켜짐이 없는 저장값은 끔으로 읽고 v1의 유효한 불리언은 유지한다", () => {
+  const { regularHoursOnly: _regular, ...older } = rsi;
+  expect(parseChartSettings(older)).toEqual({ ...rsi, regularHoursOnly: false });
+  const v1 = { v: 1, style: "bar", scale: "log", indicators: [], compare: [], panels: [] };
+  expect(parseChartSettings(v1)).toMatchObject({ regularHoursOnly: false });
+  expect(parseChartSettings({ ...v1, regularHoursOnly: true })).toMatchObject({ regularHoursOnly: true });
 });
 
 test("자동 봉 수와 경계의 봉 수는 그대로 읽는다", () => {
@@ -154,6 +163,9 @@ test.each([
   ["날짜 구분선 켜짐이 문자열", { ...rsi, showDaySeparators: "true" }],
   ["가로 격자선 켜짐이 문자열", { ...rsi, showHorzGrid: "true" }],
   ["세로 격자선 켜짐이 숫자", { ...rsi, showVertGrid: 0 }],
+  ["정규장만 보기 켜짐이 문자열", { ...rsi, regularHoursOnly: "true" }],
+  ["정규장만 보기 켜짐이 숫자", { ...rsi, regularHoursOnly: 1 }],
+  ["정규장만 보기 켜짐이 null", { ...rsi, regularHoursOnly: null }],
   ["최고·최저 등락률 기준이 null", { ...rsi, extremeBasis: null }],
   ["v1인데 범례 켜짐이 문자열", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], showLegend: "true" }],
   ["v1인데 봉 수가 틀림", { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [], visibleBars: 0 }],

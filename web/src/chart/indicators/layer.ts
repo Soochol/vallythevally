@@ -106,6 +106,7 @@ export interface LayerHost {
   isIndex(): boolean;
   isPercentScale?(): boolean;
   period(): Period;
+  regularHoursOnly?(): boolean;
   requestFrame(): void;
   axisFormatted(pane: ReturnType<IChartApi["panes"]>[number], side?: "right" | "left"): void;
   axisCoordinates(pane: ReturnType<IChartApi["panes"]>[number], side?: "right" | "left"): number[];
@@ -279,6 +280,7 @@ export class IndicatorLayer {
         bars: () => this.display,
         tokens: () => this.host.tokens(),
         configs: () => this.configs,
+        regularHoursOnly: () => this.host.regularHoursOnly?.() ?? false,
         onTickCvdChanged: (from) => this.applyTickCvdUpdate(from),
         onProgramChanged: () => this.applyProgramUpdate(),
       },
@@ -523,6 +525,18 @@ export class IndicatorLayer {
 
   reset(h: History): void {
     this.host.guard(() => this.resetNow(h));
+  }
+
+  refilter(h: History): void {
+    this.host.guard(() => {
+      for (const s of this.shown.values()) {
+        this.clearLines(s);
+        if (s.config.visible) s.status = { kind: "pending" };
+      }
+      this.quotes.markDepthLegendsDirty();
+      this.load(h, false);
+      this.quotes.redrawHeatmap();
+    });
   }
 
   prepend(h: History): void {

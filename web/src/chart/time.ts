@@ -37,7 +37,14 @@ export function isIntraday(period: Period): boolean {
 }
 
 const DAY_SECONDS = 86400;
+const REGULAR_START_SECONDS = 9 * 3600;
+const REGULAR_END_SECONDS = 15 * 3600 + 30 * 60;
 export const kstDay = (t: UnixSeconds) => Math.floor((t + KST_OFFSET) / DAY_SECONDS);
+
+export function isRegularHours(t: UnixSeconds): boolean {
+  const tod = ((t + KST_OFFSET) % DAY_SECONDS + DAY_SECONDS) % DAY_SECONDS;
+  return tod >= REGULAR_START_SECONDS && tod <= REGULAR_END_SECONDS;
+}
 
 export function kstDateChanges(bars: readonly { t: UnixSeconds }[]): number[] {
   const starts: number[] = [];

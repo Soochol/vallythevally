@@ -4,7 +4,7 @@ import type { Bar } from "../api/generated/Bar";
 import type { BarsPage } from "../api/generated/BarsPage";
 import { ApiRequestError } from "../api/http";
 import type { SubEvent } from "../api/socket";
-import { BarFeed, displayBars, type History, prependOlder } from "./barFeed";
+import { BarFeed, displayBars, filterRegularHistory, type History, prependOlder } from "./barFeed";
 
 const key = (symbol: string, period: SeriesKey["period"], venue: SeriesKey["venue"] = "combined"): SeriesKey => ({
   symbol,
@@ -44,6 +44,47 @@ describe("prependOlder", () => {
 test("displayBars는 확정 봉 뒤에 현재 봉을 붙인다", () => {
   expect(displayBars({ bars: [bar(1)], current: bar(2), nextBefore: null }).map((b) => b.t)).toEqual([1, 2]);
   expect(displayBars({ bars: [bar(1)], current: null, nextBefore: null }).map((b) => b.t)).toEqual([1]);
+});
+
+describe("filterRegularHistory", () => {
+  const kst = (h: number, m: number) => Date.UTC(2026, 10, 6) / 1000 - 32_400 + h * 3600 + m * 60;
+
+  test("정규장(09:00~15:30) 봉과 현재 봉만 남기고 nextBefore는 그대로 둔다", () => {
+    const pre = bar(kst(8, 57), 100);
+    const open = bar(kst(9, 0), 110);
+    const close = bar(kst(15, 30), 120);
+    const after = bar(kst(15, 33), 130);
+    const regularCurrent = bar(kst(14, 0), 115);
+
+    expect(filterRegularHistory({ bars: [pre, open, close, after], current: regularCurrent, nextBefore: 12345 })).toEqual({
+      bars: [open, close],
+      current: regularCurrent,
+      nextBefore: 12345,
+    });
+    expect(filterRegularHistory({ bars: [pre, open], current: after, nextBefore: 99 })).toEqual({
+      bars: [open],
+      current: null,
+      nextBefore: 99,
+    });
+  });
+
+  test("빈 히스토리와 시간외 봉만 있는 히스토리는 빈 bars와 null current를 돌려주고 nextBefore를 유지한다", () => {
+    expect(filterRegularHistory({ bars: [], current: null, nextBefore: null })).toEqual({
+      bars: [],
+      current: null,
+      nextBefore: null,
+    });
+    const onlyExtended: History = {
+      bars: [bar(kst(8, 0), 100), bar(kst(8, 55), 105)],
+      current: bar(kst(16, 0), 110),
+      nextBefore: kst(8, 0),
+    };
+    expect(filterRegularHistory(onlyExtended)).toEqual({
+      bars: [],
+      current: null,
+      nextBefore: kst(8, 0),
+    });
+  });
 });
 
 function fakeSocket() {

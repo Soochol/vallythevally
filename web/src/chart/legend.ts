@@ -233,6 +233,7 @@ export class Legend {
   private readonly sub = el("span", "flex-none text-s text-text-3");
   readonly venueAnchor = el("span", "inline-flex flex-none max-md:hidden");
   private readonly period = el("span", "flex-none text-s text-text-3");
+  private readonly regularBadge = el("span", `${NEUTRAL_PILL} flex-none max-md:hidden`, "정규장");
   private readonly price = priceFields();
   private readonly notice = el("span", `${WARNING_PILL} break-keep max-md:hidden`);
   private readonly head = el("div", "relative z-[6] flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)] pr-1");
@@ -293,9 +294,12 @@ export class Legend {
     this.head.dataset.legendHead = "";
     this.sub.dataset.legendSub = "";
     this.period.dataset.legendPeriod = "";
+    this.regularBadge.dataset.regularHoursBadge = "";
+    this.regularBadge.title = "정규장(09:00~15:30) 봉만 표시 중";
+    this.regularBadge.hidden = true;
     this.statusAnchor.dataset.statusAnchor = "";
     this.ohlcLine.dataset.ohlcLine = "";
-    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.notice, this.statusAnchor);
+    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.regularBadge, this.notice, this.statusAnchor);
     this.name.setAttribute("role", "heading");
     this.name.setAttribute("aria-level", "2");
     this.notice.hidden = true;
@@ -324,12 +328,14 @@ export class Legend {
     if (this.root.style.maxWidth !== nextMaxWidth) this.root.style.maxWidth = nextMaxWidth;
   }
 
-  setHead(h: { name: string; sub: string; period: string }): void {
-    if (this.name.textContent === h.name && this.sub.textContent === h.sub && this.period.textContent === h.period) return;
+  setHead(h: { name: string; sub: string; period: string; regularHoursOnly?: boolean }): void {
+    const regularHidden = !h.regularHoursOnly;
+    if (this.name.textContent === h.name && this.sub.textContent === h.sub && this.period.textContent === h.period && this.regularBadge.hidden === regularHidden) return;
     this.name.textContent = h.name;
     this.name.setAttribute("aria-label", h.name);
     this.sub.textContent = h.sub;
     this.period.textContent = h.period;
+    this.regularBadge.hidden = regularHidden;
     this.fit("content");
   }
 

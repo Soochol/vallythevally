@@ -271,6 +271,7 @@ interface LayoutState {
   setShowDaySeparators(cellId: WindowId, on: boolean): void;
   setShowHorzGrid(cellId: WindowId, on: boolean): void;
   setShowVertGrid(cellId: WindowId, on: boolean): void;
+  setRegularHoursOnly(cellId: WindowId, on: boolean): void;
   setChartSettings(cellId: WindowId, settings: ChartSettings): void;
   addIndicator(cellId: WindowId, spec: IndicatorSpec, style: IndicatorConfig["style"], placement?: IndicatorPlacement): string | null;
   updateIndicator(cellId: WindowId, id: string, patch: Partial<Pick<IndicatorConfig, "spec" | "style" | "visible">>): void;
@@ -342,7 +343,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     });
     return { changed, notice: null };
   };
-  const patchSetting = <K extends "style" | "scale" | "visibleBars" | "showExtremes" | "showLegend" | "showOhlcChange" | "extremeBasis" | "showDaySeparators" | "showHorzGrid" | "showVertGrid">(cellId: WindowId, key: K, value: ChartSettings[K]) =>
+  const patchSetting = <K extends "style" | "scale" | "visibleBars" | "showExtremes" | "showLegend" | "showOhlcChange" | "extremeBasis" | "showDaySeparators" | "showHorzGrid" | "showVertGrid" | "regularHoursOnly">(cellId: WindowId, key: K, value: ChartSettings[K]) =>
     patchCell(cellId, (c) => (c.chartSettings[key] === value ? c : { ...c, chartSettings: { ...c.chartSettings, [key]: value } }));
   const patchSettings = (cellId: WindowId, f: (s: ChartSettings) => ChartSettings) =>
     patchCell(cellId, (c) => {
@@ -659,6 +660,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     setShowDaySeparators: (cellId, on) => patchSetting(cellId, "showDaySeparators", on),
     setShowHorzGrid: (cellId, on) => patchSetting(cellId, "showHorzGrid", on),
     setShowVertGrid: (cellId, on) => patchSetting(cellId, "showVertGrid", on),
+    setRegularHoursOnly: (cellId, on) => patchSetting(cellId, "regularHoursOnly", on),
     setChartSettings: (cellId, settings) => patchSettings(cellId, () => settings),
     addIndicator: (cellId, spec, style, placement) => {
       let added: string | null = null;

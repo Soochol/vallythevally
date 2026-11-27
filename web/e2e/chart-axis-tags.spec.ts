@@ -88,7 +88,7 @@ test("가격이 1,523,000인 종목도 가격축 글자는 11px 이상이고 축
 test("MACD 패널의 축 꼬리표는 MACD 선 하나다", async ({ page, scenario }) => {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings: ChartSettings = {
-    v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showLegend: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, showHorzGrid: true, showVertGrid: true, compare: [],
+    v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showLegend: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, showHorzGrid: true, showVertGrid: true, regularHoursOnly: false, compare: [],
     indicators: [{ id: "macd", spec: KINDS.macd.defaults, panel: "p0", visible: true, style: { colors: ["ind-1", "ind-2", "ind-3"], width: 1 } }],
     panels: [{ id: "p0", stretch: 0.3 }],
   };

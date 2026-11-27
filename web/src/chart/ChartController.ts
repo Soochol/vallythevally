@@ -36,7 +36,7 @@ import { formatPrice } from "../lib/format";
 import type { Connection, MarketSocketLike } from "../api/socket";
 import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
-import { displayBars, type FetchPage, type History } from "./barFeed";
+import { displayBars, type FetchPage, filterRegularHistory, type History } from "./barFeed";
 import { barAtRightEdge, type JumpAnchor, jumpAnchor, jumpHeld, type JumpOutcome, jumpRoute, kstDateOf, lastBarBefore } from "./barJump";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
@@ -65,7 +65,7 @@ import { type ChartSettings, type Panel, type PriceScale, shownScale } from "./s
 import { composeSnapshot, snapshotFileName } from "./snapshot";
 import type { ThemeTokens } from "./theme";
 import { chartTimeProjection, PendingScroll, preserveTimeRange } from "./timeAxis";
-import { formatBarTime, formatTickMark, fromChartTime, isIntraday, toChartTime } from "./time";
+import { formatBarTime, formatTickMark, fromChartTime, isIntraday, isRegularHours, toChartTime } from "./time";
 import type { ChartExtension, ExtensionFactory } from "./extensions";
 import { InitialRange, RIGHT_OFFSET } from "./initialRange";
 
@@ -207,6 +207,7 @@ export class ChartController {
   private readonly onStatus: (s: CellStatus) => void;
   private tokens: ThemeTokens;
   private view: CellView | null = null;
+  private rawHistory: History | null = null;
   private history: History | null = null;
   private bars: Bar[] = [];
   private hoverIndex: number | null = null;
@@ -303,6 +304,7 @@ export class ChartController {
         isIndex: () => this.view !== null && isIndexCode(this.view.symbol),
         isPercentScale: () => this.view !== null && shownScale(this.view.settings) === "percent",
         period: () => this.period(),
+        regularHoursOnly: () => this.regularFilterActive(),
         requestFrame: () => this.requestLegendSources("indicators"),
         guard: (draw) => this.withDataGuard(draw),
         axisFormatted: (pane, side) => this.axisLabels.record(pane, side),
@@ -358,7 +360,10 @@ export class ChartController {
         modeChanged: () => this.onModeChanged(),
         prepended: (h, added) => this.onPrepended(h, added),
         failed: (e) => this.onFailed(e),
-        olderFailed: (e) => this.patchReady({ olderError: e, olderLoading: false }),
+        olderFailed: (e) => {
+          if (this.ready === null) this.onFailed(e, false);
+          else this.patchReady({ olderError: e, olderLoading: false });
+        },
         olderLoading: () => this.patchReady({ olderError: null, olderLoading: true }),
         live: (h, bar) => this.onRealtime(h, bar, "live"),
         confirmed: (h, bar) => this.onRealtime(h, bar, "confirmed"),
@@ -429,6 +434,7 @@ export class ChartController {
       name: next.info?.name ?? next.symbol,
       sub: symbolSub(next.symbol, next.info),
       period: PERIOD_LABEL[next.period],
+      regularHoursOnly: next.settings.regularHoursOnly && isIntraday(next.period),
     });
 
     if (prev?.settings.style !== next.settings.style) this.recreateMain(isIndex);
@@ -454,6 +460,7 @@ export class ChartController {
       }
       this.clearPointedBar();
       this.crosshairMarker.show(null);
+      this.rawHistory = null;
       this.history = null;
       this.initialRange.release();
       this.ready = null;
@@ -480,7 +487,11 @@ export class ChartController {
       this.syncLeftPriceScale();
     }
     if (targetChanged || configsChanged) this.syncMicroFeeds();
-    if (prev && prev.settings.visibleBars !== next.settings.visibleBars) this.fitInitialRange();
+    if (!targetChanged && prev !== null && prev.settings.regularHoursOnly !== next.settings.regularHoursOnly && isIntraday(next.period) && this.rawHistory !== null) {
+      this.reapplyHistory();
+    } else if (prev && prev.settings.visibleBars !== next.settings.visibleBars) {
+      this.fitInitialRange();
+    }
     if (prev?.settings.showExtremes !== next.settings.showExtremes || prev?.settings.extremeBasis !== next.settings.extremeBasis) this.scheduleFrame();
     this.indicators.setPreview(next.previewIndicator ?? null);
     this.syncCompare();
@@ -853,7 +864,59 @@ export class ChartController {
     d.lastClose = String(last?.c ?? "");
   }
 
-  private onRealtime(h: History, bar: Bar, kind: "live" | "confirmed"): void {
+  private regularFilterActive(): boolean {
+    return this.view !== null && this.view.settings.regularHoursOnly && isIntraday(this.view.period);
+  }
+
+  private deriveHistory(raw: History): History {
+    return this.regularFilterActive() ? filterRegularHistory(raw) : raw;
+  }
+
+  private reapplyHistory(): void {
+    const raw = this.rawHistory;
+    if (!raw) return;
+    const h = this.deriveHistory(raw);
+    this.history = h;
+    const bars = displayBars(h);
+    this.hoverIndex = null;
+    this.financialHoverTime = null;
+    this.withDataGuard(() => {
+      this.setBars(bars);
+      this.indicators.refilter(h);
+      if (bars.length > 0) this.fitInitialRange();
+    });
+    this.compare.coverFrom(this.leftT());
+    const latest = bars[bars.length - 1];
+    if (latest) {
+      this.ready = {
+        kind: "ready",
+        latest,
+        prev: bars[bars.length - 2] ?? null,
+        isCurrent: h.current !== null && latest.t === h.current.t,
+        olderError: this.ready?.olderError ?? null,
+        olderLoading: this.ready?.olderLoading ?? false,
+        intradayEnd: false,
+      };
+      this.onStatus(this.ready);
+      this.updateIntradayEnd();
+    } else if (h.nextBefore !== null) {
+      this.ready = null;
+      this.onStatus({ kind: "loading" });
+      this.feed.retryOlder();
+    } else {
+      this.ready = null;
+      this.onStatus({ kind: "error", error: new ApiRequestError("internal", "받은 봉이 없습니다") });
+    }
+  }
+
+  private onRealtime(raw: History, bar: Bar, kind: "live" | "confirmed"): void {
+    this.rawHistory = raw;
+    if (this.regularFilterActive() && !isRegularHours(bar.t)) {
+      this.realtimeSeen = true;
+      this.lastRealtimeAt = nowSeconds();
+      return;
+    }
+    const h = this.deriveHistory(raw);
     const prev = this.bars;
     const next = displayBars(h);
     const prevRealtimeSeen = this.realtimeSeen;
@@ -862,12 +925,15 @@ export class ChartController {
     this.realtimeSeen = true;
     this.lastRealtimeAt = nowSeconds();
     if (this.realtimeLive) this.stalledAt = null;
-    const tail = isTailChange(prev, next, bar);
+    const tail = prev.length > 0 && isTailChange(prev, next, bar);
     if (tail) {
       this.bars = next;
       this.pendingDraw.set(bar.t, bar);
     } else {
-      this.withDataGuard(() => this.setBars(next));
+      this.withDataGuard(() => {
+        this.setBars(next);
+        if (prev.length === 0) this.fitInitialRange();
+      });
     }
     this.indicators.advance(h, bar, kind);
     if (tail && prevRealtimeSeen === this.realtimeSeen && prevStalledAt === this.stalledAt) {
@@ -1079,8 +1145,10 @@ export class ChartController {
     }
   }
 
-  private onReset(h: History): void {
+  private onReset(raw: History): void {
     this.pendingEnd = null;
+    this.rawHistory = raw;
+    const h = this.deriveHistory(raw);
     this.history = h;
     this.hoverIndex = null;
     this.financialHoverTime = null;
@@ -1090,7 +1158,7 @@ export class ChartController {
     this.withDataGuard(() => {
       this.setBars(bars);
       this.indicators.reset(h);
-      this.fitInitialRange();
+      if (bars.length > 0) this.fitInitialRange();
     });
     this.compare.coverFrom(this.leftT());
     this.renderLegend();
@@ -1107,7 +1175,12 @@ export class ChartController {
       };
       this.onStatus(this.ready);
       this.updateIntradayEnd();
+    } else if (this.regularFilterActive() && h.nextBefore !== null) {
+      this.ready = null;
+      this.onStatus({ kind: "loading" });
+      this.feed.needOlder();
     } else {
+      this.ready = null;
       this.onStatus({ kind: "error", error: new ApiRequestError("internal", "받은 봉이 없습니다") });
     }
   }
@@ -1138,7 +1211,14 @@ export class ChartController {
     if (route === "mode") {
       this.jumpInterval = request.interval;
       const entry = await this.feed.enterMode(request.date);
-      return entry === "entered" && token === this.jumpToken ? this.endingOutcome(request.interval) : entry === "entered" ? "cancelled" : entry;
+      if (entry !== "entered") return entry;
+      if (token !== this.jumpToken) return "cancelled";
+      if (this.regularFilterActive() && lastBarBefore(this.bars, request.interval) === null) {
+        const reached = await this.feed.olderUntil((h) => lastBarBefore(displayBars(this.deriveHistory(h)), request.interval) !== null);
+        if (reached === "stale" || token !== this.jumpToken) return "cancelled";
+        if (reached === "failed" && this.bars.length === 0) return "failed";
+      }
+      return this.endingOutcome(request.interval);
     }
     if (route === "view" && request.date >= today && modeDate !== null) {
       this.feed.endMode();
@@ -1146,7 +1226,7 @@ export class ChartController {
     }
     const reaches = route === "extend" ? (bars: readonly Bar[]) => lastBarBefore(bars, request.interval) !== null : request.date >= today ? (bars: readonly Bar[]) => (bars[0]?.t ?? Infinity) <= request.interval.start : null;
     if (reaches) {
-      const reached = await this.feed.olderUntil((h) => reaches(displayBars(h)));
+      const reached = await this.feed.olderUntil((h) => reaches(displayBars(this.deriveHistory(h))));
       if (reached === "stale" || token !== this.jumpToken) return "cancelled";
       if (route === "extend" && lastBarBefore(this.bars, request.interval) === null) return reached === "failed" ? "failed" : "empty";
     }
@@ -1162,9 +1242,11 @@ export class ChartController {
     return end === null ? "empty" : end.inInterval ? "moved" : "previous";
   }
 
-  private onJumpEntered(h: History): void {
+  private onJumpEntered(raw: History): void {
     this.pendingEnd = null;
     this.initialRange.release();
+    this.rawHistory = raw;
+    const h = this.deriveHistory(raw);
     this.history = h;
     this.hoverIndex = null;
     this.financialHoverTime = null;
@@ -1180,9 +1262,16 @@ export class ChartController {
     if (latest) {
       this.ready = { kind: "ready", latest, prev: bars[bars.length - 2] ?? null, isCurrent: false, olderError: null, olderLoading: false, intradayEnd: false };
       this.onStatus(this.ready);
+      const end = this.jumpInterval ? lastBarBefore(bars, this.jumpInterval) : null;
+      if (end) this.fitEndingAt(bars[end.index]!.t);
+    } else if (this.regularFilterActive() && h.nextBefore !== null) {
+      this.ready = null;
+      this.onStatus({ kind: "loading" });
+      this.feed.needOlder();
+    } else {
+      this.ready = null;
+      this.onStatus({ kind: "error", error: new ApiRequestError("internal", "받은 봉이 없습니다") });
     }
-    const end = this.jumpInterval ? lastBarBefore(bars, this.jumpInterval) : null;
-    if (end) this.fitEndingAt(bars[end.index]!.t);
     this.compare.coverFrom(this.leftT());
     this.renderLegend();
     this.updateIntradayEnd();
@@ -1278,12 +1367,58 @@ export class ChartController {
     });
   }
 
-  private onPrepended(h: History, added: number): void {
-    this.patchReady({ olderLoading: false });
+  private onPrepended(raw: History, added: number): void {
+    this.rawHistory = raw;
+    const wasLoadingEmpty = this.ready === null && this.bars.length === 0;
+    const prevLen = this.bars.length;
+    const h = this.deriveHistory(raw);
     this.history = h;
+    const bars = displayBars(h);
+    if (wasLoadingEmpty) {
+      const latest = bars[bars.length - 1];
+      if (latest) {
+        this.withDataGuard(() => {
+          this.setBars(bars);
+          this.indicators.reset(h);
+          this.fitInitialRange();
+        });
+        this.ready = {
+          kind: "ready",
+          latest,
+          prev: bars[bars.length - 2] ?? null,
+          isCurrent: h.current !== null && latest.t === h.current.t,
+          olderError: null,
+          olderLoading: false,
+          intradayEnd: false,
+        };
+        this.onStatus(this.ready);
+        if (this.feed.activeDate !== null && this.jumpInterval) {
+          const end = lastBarBefore(bars, this.jumpInterval);
+          if (end) this.fitEndingAt(bars[end.index]!.t);
+        }
+        this.compare.coverFrom(this.leftT());
+        this.renderLegend();
+        this.updateIntradayEnd();
+      } else if (added > 0 && h.nextBefore !== null) {
+        this.feed.needOlder();
+      } else {
+        this.onStatus({ kind: "error", error: new ApiRequestError("internal", "받은 봉이 없습니다") });
+      }
+      return;
+    }
+    this.patchReady({ olderLoading: false });
     if (added === 0) return this.updateIntradayEnd();
+    if (bars.length === prevLen) {
+      this.updateIntradayEnd();
+      if (h.nextBefore !== null) {
+        const left = this.leftT();
+        const before = left === null ? -1 : barIndexAtOrAfter(this.bars, left);
+        if (before >= 0 && before < LOAD_OLDER_WITHIN) this.feed.needOlder();
+      }
+      return;
+    }
     this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
-      this.setBars(displayBars(h));
+      this.setBars(bars);
       this.indicators.prepend(h);
     }));
     if (this.financialHoverTime !== null) this.hoverIndex = barIndexAt(this.bars, this.financialHoverTime);
@@ -1306,9 +1441,10 @@ export class ChartController {
     if (end !== this.ready.intradayEnd) this.patchReady({ intradayEnd: end });
   }
 
-  private onFailed(error: ApiRequestError): void {
+  private onFailed(error: ApiRequestError, clearRaw = true): void {
     this.initialRange.release();
     this.ready = null;
+    if (clearRaw) this.rawHistory = null;
     this.history = null;
     this.setBars([]);
     this.indicators.clear();
