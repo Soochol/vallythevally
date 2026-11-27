@@ -174,7 +174,6 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
       {panelSection === "settings" ? (
         <div className="ic-settings-body">
           <ChartSettingsSections cellId={cellId} />
-          <p className="cs-foot mt-auto pt-2">자동 저장 · Esc로 되돌리고 닫기</p>
         </div>
       ) : <>
       <div className="ic-head">

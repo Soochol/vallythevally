@@ -142,7 +142,7 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
       </header>
 
       {section === "settings" ? (
-        <div className="cd-body">
+        <div className="cd-settings-body">
           <ChartSettingsSections cellId={cellId} compact />
         </div>
       ) : (

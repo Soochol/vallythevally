@@ -1,15 +1,26 @@
 import type { Page } from "@playwright/test";
 import { expect } from "./harness";
 
-export type SettingsMenu = "봉·축" | "표시" | "지표 창";
+export type SettingsMenu = "봉 · 축" | "범례 · 표시" | "격자 · 구분선" | "창 · 동작" | "봉·축" | "표시" | "지표 창";
+
+const MENU_ALIAS: Record<SettingsMenu, "봉 · 축" | "범례 · 표시" | "격자 · 구분선" | "창 · 동작"> = {
+  "봉 · 축": "봉 · 축",
+  "범례 · 표시": "범례 · 표시",
+  "격자 · 구분선": "격자 · 구분선",
+  "창 · 동작": "창 · 동작",
+  "봉·축": "봉 · 축",
+  "표시": "범례 · 표시",
+  "지표 창": "창 · 동작",
+};
 
 export async function chooseSettingsMenu(page: Page, menu: SettingsMenu) {
-  const section = page.getByRole("dialog", { name: "차트 설정", exact: true }).getByRole("region", { name: menu, exact: true });
-  await section.scrollIntoViewIfNeeded();
-  await expect(section).toBeVisible();
+  const target = MENU_ALIAS[menu];
+  const dialog = page.getByRole("dialog", { name: "차트 설정", exact: true });
+  await dialog.getByRole("tab", { name: target, exact: true }).click();
+  await expect(dialog.getByRole("region", { name: target, exact: true })).toBeVisible();
 }
 
-export async function openChartSettings(page: Page, menu: SettingsMenu = "봉·축") {
+export async function openChartSettings(page: Page, menu: SettingsMenu = "봉 · 축") {
   const dialog = page.getByRole("dialog", { name: "차트 설정", exact: true });
   if (!(await dialog.isVisible())) {
     await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 설정", exact: true }).click();
