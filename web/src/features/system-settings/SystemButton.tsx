@@ -12,9 +12,9 @@ export function SystemButton() {
   const tone = linkDotTone(status);
   const keys = useActionKeys();
   return (
-    <button type="button" className="tb-btn system-btn relative" aria-haspopup="dialog" aria-label="시스템 설정" title={`${keyTitle("시스템 설정", keys, "systemSettings")} · ${systemButtonSentence(status)}`} onClick={() => openSystemSettings()}>
-      <GearIcon />
-      <span className="max-xl:hidden">시스템</span>
+    <button type="button" className="page-rail-item system-btn relative" aria-haspopup="dialog" aria-label="시스템 설정" title={`${keyTitle("시스템 설정", keys, "systemSettings")} · ${systemButtonSentence(status)}`} onClick={() => openSystemSettings()}>
+      <GearIcon size={19} />
+      <span>시스템</span>
       {tone === "red" || tone === "amber" ? <span aria-hidden="true" className="conn-flag" data-tone={tone}><WarningIcon size={12} /></span> : <span aria-hidden="true" className="conn-dot" data-tone={tone} />}
     </button>
   );

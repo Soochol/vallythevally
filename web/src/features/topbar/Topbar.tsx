@@ -12,7 +12,6 @@ import { IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
 import { ArrangeMenu } from "../layouts/ArrangeMenu";
 import { LayoutMenu } from "../layouts/LayoutMenu";
 import { VenuePicker } from "../venue/VenuePicker";
-import { SystemButton } from "../system-settings/SystemButton";
 import { AddWindowMenu } from "../workspace/AddWindowMenu";
 import { BookReplayToggle } from "../book-replay/BookReplayToggle";
 import { AutoGuardBadge } from "./AutoGuardBadge";
@@ -118,8 +117,6 @@ export function Topbar() {
         <LayoutMenu />
         <ArrangeMenu />
         <AddWindowMenu />
-        <span className="tb-sep" />
-        <SystemButton />
       </div>
     </header>
   );

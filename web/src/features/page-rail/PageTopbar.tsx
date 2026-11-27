@@ -3,7 +3,6 @@ import { useSelectionStore } from "../../stores/selection";
 import { useActionKeys } from "../../stores/ui";
 import { SearchIcon } from "../icons";
 import { setPageSlot } from "../pages/pageSlot";
-import { SystemButton } from "../system-settings/SystemButton";
 import { MockBadge } from "../topbar/MockBadge";
 import { BrandLink } from "./BrandLink";
 
@@ -23,7 +22,6 @@ export function PageTopbar() {
         <span className="topbar-label-lg">종목 찾기</span>
         {keys.search?.slice(0, 1).map((key) => <kbd key={key}>{keyCapsLabel(key)}</kbd>)}
       </button>
-      <SystemButton />
     </header>
   );
 }
