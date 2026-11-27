@@ -1,3 +1,6 @@
+mod daily_cache;
+pub use daily_cache::DailyProgramCache;
+
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -10,11 +13,14 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::api::{self, ApiErrorCode, BrokerDaySource, SymbolCode, UnixSeconds};
+use crate::bars::BarError;
 use crate::collected::kind::{CollectedProgramRow, CollectedTradeTick};
-use crate::http::{ApiFailure, AppState};
+use crate::http::{ApiFailure, AppState, Lookup};
 use crate::market_source::stream::TradeSide;
+use crate::market_source::{DayRange, OverviewFeature, Priority, SourceError};
 use crate::screener::store::DailyMicroProgramRow;
 use crate::shared_data::CollectorPaths;
+use daily_cache::DEFAULT_DAILY_LOOKBACK_DAYS;
 
 pub const MID_MIN_WON: u64 = 5_000_000;
 pub const LARGE_MIN_WON: u64 = 30_000_000;
@@ -529,6 +535,28 @@ impl DailyProgramInput {
             sell_amount_million_won: 0.0,
             program_share_pct,
             day_traded_million_won: None,
+        }
+    }
+
+    pub fn from_kiwoom_day(row: &api::StockProgramDailyDay) -> Self {
+        let buy_million = row.buy_amount_million_won as f64;
+        let sell_million = row.sell_amount_million_won as f64;
+        let day_traded_won = u128::from(row.close_won).saturating_mul(u128::from(row.volume));
+        let (program_share_pct, day_traded_million_won) = if day_traded_won > 0 {
+            let total_million = day_traded_won as f64 / WON_PER_MILLION;
+            let share = (((buy_million + sell_million) / total_million) * 100.0).clamp(0.0, 100.0);
+            (Some(share), Some(total_million))
+        } else {
+            (None, None)
+        };
+        Self {
+            date: row.day.0,
+            net_buy_amount_million_won: row.net_buy_amount_million_won as f64,
+            net_buy_qty: row.net_buy_qty,
+            buy_amount_million_won: buy_million,
+            sell_amount_million_won: sell_million,
+            program_share_pct,
+            day_traded_million_won,
         }
     }
 
@@ -1341,6 +1369,14 @@ async fn program_series_intraday(
     }))
 }
 
+fn is_fallback_source_error(err: &SourceError) -> bool {
+    matches!(
+        err,
+        SourceError::Failed(failure)
+            if matches!(failure.reason, api::ApiErrorReason::NotConnected | api::ApiErrorReason::UnsupportedBySource)
+    )
+}
+
 async fn program_series_daily(
     st: &AppState,
     cache: &MicroSeriesCache,
@@ -1351,8 +1387,89 @@ async fn program_series_daily(
 ) -> Result<Json<ProgramSeriesPage>, ApiFailure> {
     let paths = st.collector_paths.snapshot();
     let paths_active = paths_enabled(&paths);
-    let daily_micro_configured = st.screener.has_daily_micro_dir();
     let (from_date, to_date) = daily_date_bounds(period, from, to);
+    let now = st.clock.now();
+    let today = now.kst_date();
+    let overview = crate::market_overview::overview_source(st);
+    if overview.source.is_open() && overview.source.features().contains(OverviewFeature::StockProgramDaily) {
+        let req_to = to_date.unwrap_or(today);
+        let req_from = from_date.unwrap_or_else(|| req_to.add_days(-DEFAULT_DAILY_LOOKBACK_DAYS));
+        let mut by_day: BTreeMap<KstDate, DailyProgramInput> = BTreeMap::new();
+        if let Some(range) = DayRange::new(req_from, req_to) {
+            let started = st.daily_program.ticket();
+            let missing = st.daily_program.missing_ranges(stock, range, today, now);
+            let mut fetched_days: BTreeMap<KstDate, api::StockProgramDailyDay> = BTreeMap::new();
+            for fetch_range in missing {
+                match overview.source.stock_program_daily(stock, fetch_range, now, Priority::Background).await {
+                    Ok(history) => {
+                        for row in &history.days {
+                            if range.contains(row.day.0) {
+                                fetched_days.insert(row.day.0, *row);
+                            }
+                        }
+                        st.daily_program.insert_history(started, stock, fetch_range, history, today, now);
+                    }
+                    Err(SourceError::UnknownSymbol) => {
+                        st.daily_program.mark_exhausted(started, stock, fetch_range, today, now);
+                    }
+                    Err(err) if is_fallback_source_error(&err) => {
+                        return program_series_daily_fallback(st, cache, paths, paths_active, stock, period, from_date, to_date, now, today).await;
+                    }
+                    Err(err) => {
+                        return Err(Lookup::ProgramDaily.failure(BarError::from(err), now));
+                    }
+                }
+            }
+            for row in st.daily_program.rows_in_range(stock, range) {
+                by_day.insert(row.day.0, DailyProgramInput::from_kiwoom_day(&row));
+            }
+            for row in fetched_days.into_values() {
+                by_day.insert(row.day.0, DailyProgramInput::from_kiwoom_day(&row));
+            }
+        }
+        let today_in_range = today >= req_from && today <= req_to;
+        if paths_active && today_in_range {
+            let today_str = format_yyyymmdd(today);
+            let (collected, program_minutes) = cache
+                .load_program_minutes(st, paths.clone(), stock, today, &today_str, now)
+                .await
+                .map_err(|e| internal_error("수집 프로그램 자료를 읽지 못했습니다", e))?;
+            if collected && !program_minutes.is_empty() {
+                let (_, tick_minutes) = cache
+                    .load_tick_minutes(st, paths, stock, today, &today_str, now)
+                    .await
+                    .map_err(|e| internal_error("수집 체결 자료를 읽지 못했습니다", e))?;
+                if let Some(live_today) = DailyProgramInput::from_live_day(today, &program_minutes, &tick_minutes) {
+                    by_day.insert(today, live_today);
+                }
+            }
+        }
+        let inputs: Vec<DailyProgramInput> = by_day.into_values().collect();
+        let points = rollup_program_daily_bars(&inputs, period);
+        return Ok(Json(ProgramSeriesPage {
+            symbol: symbol_code(stock),
+            period: period.into(),
+            state: MicroSeriesState::Ready,
+            points,
+        }));
+    }
+    program_series_daily_fallback(st, cache, paths, paths_active, stock, period, from_date, to_date, now, today).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn program_series_daily_fallback(
+    st: &AppState,
+    cache: &MicroSeriesCache,
+    paths: CollectorPaths,
+    paths_active: bool,
+    stock: StockCode,
+    period: Period,
+    from_date: Option<KstDate>,
+    to_date: Option<KstDate>,
+    now: KstTime,
+    today: KstDate,
+) -> Result<Json<ProgramSeriesPage>, ApiFailure> {
+    let daily_micro_configured = st.screener.has_daily_micro_dir();
     let (has_any_daily_micro, micro_rows) = st
         .screener
         .daily_micro_program_series(stock, from_date, to_date)
@@ -1366,8 +1483,6 @@ async fn program_series_daily(
             points: Vec::new(),
         }));
     }
-    let now = st.clock.now();
-    let today = now.kst_date();
     let today_in_range = from_date.is_none_or(|start| today >= start) && to_date.is_none_or(|end| today <= end);
     let has_today_in_micro = micro_rows.iter().any(|row| row.date == today);
     let mut inputs: Vec<DailyProgramInput> = micro_rows.into_iter().map(DailyProgramInput::from_daily_micro).collect();

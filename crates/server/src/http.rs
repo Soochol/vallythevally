@@ -58,6 +58,7 @@ pub struct AppState {
     pub heatmap_flow: Arc<crate::heatmap_flow::FlowCache>,
     pub quote_minutes: Arc<crate::quote_minutes::QuoteCache>,
     pub program_trades: Arc<crate::intraday_feed::ProgramTradeCache>,
+    pub daily_program: Arc<crate::micro_series::DailyProgramCache>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -237,6 +238,7 @@ pub(crate) enum Lookup {
     OrderBook,
     Trades,
     ProgramTrades,
+    ProgramDaily,
     ScreenerUpdate,
     ScreenerRun,
     Rankings,
@@ -256,6 +258,7 @@ impl Lookup {
             Lookup::OrderBook => "호가",
             Lookup::Trades => "당일 체결",
             Lookup::ProgramTrades => "당일 프로그램매매",
+            Lookup::ProgramDaily => "일별 프로그램매매",
             Lookup::ScreenerUpdate => "스크리너 업데이트",
             Lookup::ScreenerRun => "스크리너 실행",
             Lookup::Rankings => "순위",
