@@ -237,7 +237,8 @@ test("한 묶음에 탭 20개가 있을 때 마지막 탭을 단축키나 복제
 });
 
 const headOf = (page: Page, id: string) => page.locator(`[data-window-header="${id}"]`);
-const unpin = (page: Page, id: string) => headOf(page, id).getByRole("button", { name: "종목 고정 풀기" });
+const headDot = (page: Page, id: string) => headOf(page, id).locator(".link-dot");
+const lockToggle = (page: Page) => page.getByRole("menuitemcheckbox", { name: "이 창 종목 고정" });
 const pinned = (scenario: Scenario, kind: string) => savedWindows(scenario, kind).map((w) => [w.id, (w as { symbol?: string }).symbol ?? null]);
 
 const floatingBooks = (scenario: Scenario, links: [LinkColor | null, LinkColor | null] = [null, null]) =>
@@ -248,7 +249,7 @@ test("고정 안 된 10호가 창은 도킹 탭에 종목 이름과 고정 표�
   await open(page);
   const group = page.locator(".dock-tab-group").filter({ has: tabOf(page, "book") });
   await expect(tabOf(page, "book")).toBeVisible();
-  await expect(group.locator(".window-symbol")).toHaveCount(0);
+  await expect(group.locator(".link-dot[data-locked]")).toHaveCount(0);
   await expect(group.getByText("삼성전자")).toHaveCount(0);
 });
 
@@ -256,29 +257,29 @@ test("고정 안 된 10호가 창은 캔버스 창 머리에 종목 이름과 �
   floatingBooks(scenario);
   await open(page);
   await expect(headOf(page, "book")).toBeVisible();
-  await expect(headOf(page, "book").locator(".window-symbol")).toHaveCount(0);
+  await expect(headOf(page, "book").locator(".link-dot[data-locked]")).toHaveCount(0);
   await expect(headOf(page, "book").getByText("삼성전자")).toHaveCount(0);
 });
 
-test("저장된 고정이 있는 창은 도킹 탭에 고정 점과 풀기 단추만 보이고 종목 이름 글자는 없다", async ({ page, scenario }) => {
+test("저장된 고정이 있는 창은 도킹 탭 배지에 고정 표시가 보이고 종목 이름 글자는 없다", async ({ page, scenario }) => {
   saveWindows(scenario, [{ id: "book", link: null, kind: "book", symbol: "035420" }]);
   await open(page);
   const group = page.locator(".dock-tab-group").filter({ has: tabOf(page, "book") });
   await expect(tabOf(page, "book")).toHaveAccessibleName(/^10호가/);
-  await expect(group.locator('.window-symbol-pin[title="종목 고정: NAVER"]')).toHaveCount(1);
-  await expect(group.getByRole("button", { name: "종목 고정 풀기" })).toBeVisible();
+  await expect(group.locator(".link-dot[data-locked]")).toHaveAttribute("title", /종목 고정됨 \(NAVER\)/);
+  await expect(group.locator(".link-dot-lock")).toBeVisible();
   await expect(group.getByText("NAVER")).toHaveCount(0);
 });
 
-test("저장된 고정이 있는 창은 캔버스 창 머리에 고정 점과 풀기 단추만 보이고 종목 이름 글자는 없다", async ({ page, scenario }) => {
+test("저장된 고정이 있는 창은 캔버스 창 머리 배지에 고정 표시가 보이고 종목 이름 글자는 없다", async ({ page, scenario }) => {
   saveWindows(scenario, [{ id: "book", link: null, kind: "book", symbol: "035420" }], "canvas");
   await open(page);
-  await expect(headOf(page, "book").locator('.window-symbol-pin[title="종목 고정: NAVER"]')).toHaveCount(1);
-  await expect(unpin(page, "book")).toBeVisible();
+  await expect(headDot(page, "book")).toHaveAttribute("data-locked", "");
+  await expect(headDot(page, "book")).toHaveAttribute("title", /종목 고정됨 \(NAVER\)/);
   await expect(headOf(page, "book").getByText("NAVER")).toHaveCount(0);
 });
 
-test("활성 칸을 다른 차트로 바꿔도 고정된 창은 그대로이고 고정 안 된 창은 따라가며, 고정 풀기를 누르면 활성 칸 종목으로 돌아간다", async ({ page, scenario }) => {
+test("활성 칸을 다른 차트로 바꿔도 고정된 창은 그대로이고 고정 안 된 창은 따라가며, 팝오버에서 고정 풀기를 누르면 활성 칸 종목으로 돌아간다", async ({ page, scenario }) => {
   saveWindows(scenario, [{ id: "book", link: null, kind: "book" }, { id: "book-2", link: null, kind: "book", symbol: "035420" }], "canvas");
   await open(page);
   const books = page.getByTestId("book-window");
@@ -288,9 +289,12 @@ test("활성 칸을 다른 차트로 바꿔도 고정된 창은 그대로이고 
   await expect(books.nth(0)).toHaveAttribute("data-symbol", "000660");
   await expect(books.nth(1)).toHaveAttribute("data-symbol", "035420");
 
-  await unpin(page, "book-2").dispatchEvent("click");
+  await headDot(page, "book-2").dispatchEvent("click");
+  await expect(lockToggle(page)).toHaveAttribute("aria-checked", "true");
+  await lockToggle(page).click();
+  await expect(lockToggle(page)).toHaveAttribute("aria-checked", "false");
   await expect(books.nth(1)).toHaveAttribute("data-symbol", "000660");
-  await expect(unpin(page, "book-2")).toHaveCount(0);
+  await expect(headOf(page, "book-2").locator(".link-dot[data-locked]")).toHaveCount(0);
   await pollSaved(() => pinned(scenario, "book")).toEqual([["book", null], ["book-2", null]]);
 });
 
@@ -304,23 +308,23 @@ test("고정된 창에서 연동 색을 고르면 고정이 풀리고 그 색의
   await pollSaved(() => savedWindows(scenario, "book").map((w) => w.link)).toEqual(["a"]);
 });
 
-test("고정은 새로 고침해도 그대로이고 도킹 탭 옆에 고정 점과 풀기 단추가 남으며 탭 이름은 그대로다", async ({ page, scenario }) => {
+test("고정은 새로 고침해도 그대로이고 도킹 탭 배지에 고정 표시가 남으며 탭 이름은 그대로다", async ({ page, scenario }) => {
   saveWindows(scenario, [{ id: "book", link: null, kind: "book", symbol: "035420" }, { id: "trades", link: "a", kind: "trades" }]);
   await open(page);
   const group = page.locator(".dock-tab-group").filter({ has: tabOf(page, "book") });
   await expect(tabOf(page, "book")).toHaveAccessibleName(/^10호가/);
-  await expect(group.locator(".window-symbol-pin")).toHaveCount(1);
-  await expect(group.getByRole("button", { name: "종목 고정 풀기" })).toBeVisible();
+  await expect(group.locator(".link-dot[data-locked]")).toHaveCount(1);
+  await expect(group.locator(".link-dot-lock")).toBeVisible();
   await tabOf(page, "book").click();
   await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", "035420");
-  await expect(page.locator(".dock-tab-group").filter({ has: tabOf(page, "trades") }).locator(".window-symbol")).toHaveCount(0);
+  await expect(page.locator(".dock-tab-group").filter({ has: tabOf(page, "trades") }).locator(".link-dot[data-locked]")).toHaveCount(0);
 
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await tabOf(page, "book").click();
   await expect(page.getByTestId("book-window")).toHaveAttribute("data-symbol", "035420");
-  await expect(group.locator(".window-symbol-pin")).toHaveCount(1);
-  await expect(group.getByRole("button", { name: "종목 고정 풀기" })).toBeVisible();
+  await expect(group.locator(".link-dot[data-locked]")).toHaveCount(1);
+  await expect(group.locator(".link-dot-lock")).toBeVisible();
   await pollSaved(() => pinned(scenario, "book")).toEqual([["book", "035420"]]);
 });
 

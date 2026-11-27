@@ -304,15 +304,9 @@ for (const link of [null, "a"] as const) {
     await page.goto("/");
     for (const id of ["book", "order"]) {
       await tabOf(page, id).click();
-      const group = windowTabs(page).locator(`.dock-tab-group:has([data-window-id="${id}"])`);
-      const pin = group.locator(".window-symbol-pin");
-      await expect(pin).toBeVisible();
-      const dot = await boxOf(dotOf(page, id));
-      const label = await boxOf(pin);
-      const tab = await boxOf(tabOf(page, id));
-      expect(label.x).toBeGreaterThanOrEqual(dot.x + dot.width);
-      expect(label.x - (dot.x + dot.width)).toBeGreaterThan(0);
-      expect(label.x).toBeGreaterThan(tab.x + tab.width);
+      const dot = dotOf(page, id);
+      await expect(dot).toHaveAttribute("data-locked", "");
+      await expect(dot.locator(".link-dot-lock")).toBeVisible();
     }
   });
 }
