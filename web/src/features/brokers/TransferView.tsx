@@ -1,4 +1,4 @@
-import { type PointerEvent as ReactPointerEvent, useId, useMemo, useRef, useState } from "react";
+import { type PointerEvent as ReactPointerEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Bar } from "../../api/generated/Bar";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
@@ -60,6 +60,11 @@ interface BrushDragState {
   readonly anchorT: UnixSeconds;
 }
 
+interface StageSize {
+  readonly width: number;
+  readonly height: number;
+}
+
 const LEVEL_OPTIONS: readonly SegmentOption<TransferLevel>[] = [
   { value: "broker", label: "개별 창구" },
   { value: "group", label: "주체 그룹" },
@@ -72,9 +77,9 @@ const MODE_OPTIONS: readonly SegmentOption<TransferMode>[] = [
 
 const PRESET_OPTIONS: readonly { readonly value: RangePreset; readonly label: string }[] = [
   { value: "all", label: "전체" },
-  { value: "last30", label: "최근 30분" },
-  { value: "last10", label: "최근 10분" },
-  { value: "peak", label: "최대 손바뀜" },
+  { value: "last30", label: "30분" },
+  { value: "last10", label: "10분" },
+  { value: "peak", label: "피크" },
 ];
 
 const CONFIDENCE_LABELS: Record<TransferConfidence, string> = {
@@ -83,12 +88,14 @@ const CONFIDENCE_LABELS: Record<TransferConfidence, string> = {
   low: "낮음",
 };
 
-const SANKEY_WIDTH = 760;
-const SANKEY_HEIGHT = 328;
+const DEFAULT_STAGE_WIDTH = 560;
+const DEFAULT_STAGE_HEIGHT = 320;
+const MIN_STAGE_WIDTH = 280;
+const MIN_STAGE_HEIGHT = 220;
 const BRUSH_WIDTH = 800;
-const BRUSH_HEIGHT = 92;
-const BRUSH_PLOT_BOTTOM = 74;
-const BRUSH_PLOT_TOP = 10;
+const BRUSH_HEIGHT = 38;
+const BRUSH_PLOT_BOTTOM = 26;
+const BRUSH_PLOT_TOP = 3;
 
 function formatCompactQty(qty: number): string {
   const abs = Math.abs(qty);
@@ -99,6 +106,11 @@ function formatCompactQty(qty: number): string {
 
 function formatHm(t: UnixSeconds): string {
   return formatClock(t).slice(0, 5);
+}
+
+function truncateLabel(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(1, maxChars - 1))}…`;
 }
 
 function groupColorToken(group: BrokerGroupKind, side: "src" | "dst", level: TransferLevel): string {
@@ -126,10 +138,26 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
   const [selection, setSelection] = useState<RangeSelection>({ kind: "preset", preset: "all" });
   const [focusNode, setFocusNode] = useState<FocusNode | null>(null);
   const [hoveredLink, setHoveredLink] = useState<HoveredLink | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [stageSize, setStageSize] = useState<StageSize>({ width: DEFAULT_STAGE_WIDTH, height: DEFAULT_STAGE_HEIGHT });
 
   const stageRef = useRef<HTMLDivElement>(null);
   const brushRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<BrushDragState | null>(null);
+
+  useEffect(() => {
+    const element = stageRef.current;
+    if (element === null) return;
+    const syncSize = () => {
+      const nextW = Math.max(MIN_STAGE_WIDTH, Math.round(element.clientWidth));
+      const nextH = Math.max(MIN_STAGE_HEIGHT, Math.round(element.clientHeight));
+      setStageSize((prev) => (prev.width === nextW && prev.height === nextH ? prev : { width: nextW, height: nextH }));
+    };
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [snapshots.length]);
 
   const steps = useMemo(() => buildTransferSteps(snapshots, gapBefore, bars), [snapshots, gapBefore, bars]);
   const events = useMemo(() => detectTransferEvents(steps, level, mode), [steps, level, mode]);
@@ -182,8 +210,8 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
   );
 
   const sankey = useMemo(
-    () => layoutSankey(summary, showOther, SANKEY_WIDTH, SANKEY_HEIGHT),
-    [summary, showOther],
+    () => layoutSankey(summary, showOther, stageSize.width, stageSize.height),
+    [summary, showOther, stageSize.width, stageSize.height],
   );
 
   const brushSeries = useMemo(() => {
@@ -259,7 +287,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
       side: focusNode.side,
       name: focusNode.name,
       total,
-      items: related.slice(0, 5).map((edge) => {
+      items: related.slice(0, 4).map((edge) => {
         const peer = focusNode.side === "src" ? edge.dst : edge.src;
         return {
           peer,
@@ -303,7 +331,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
 
   const xOfTime = (t: UnixSeconds) => ((clamp(t, brushAxis.from, brushAxis.to) - brushAxis.from) / brushSpan) * BRUSH_WIDTH;
   const yOfPrice = (price: number) =>
-    BRUSH_PLOT_TOP + (1 - (price - brushSeries.minPrice) / brushSeries.priceSpan) * (BRUSH_PLOT_BOTTOM - BRUSH_PLOT_TOP - 8);
+    BRUSH_PLOT_TOP + (1 - (price - brushSeries.minPrice) / brushSeries.priceSpan) * (BRUSH_PLOT_BOTTOM - BRUSH_PLOT_TOP - 4);
 
   const clientXToTime = (clientX: number): UnixSeconds => {
     const wrap = brushRef.current;
@@ -383,7 +411,7 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
     const rect = stage.getBoundingClientRect();
     const x = clamp(event.clientX - rect.left, 8, Math.max(8, rect.width - 8));
     const y = clamp(event.clientY - rect.top, 8, Math.max(8, rect.height - 8));
-    setHoveredLink({ link, x, y, flipLeft: x > rect.width * 0.58 });
+    setHoveredLink({ link, x, y, flipLeft: x > rect.width * 0.56 });
   };
 
   const selX0 = xOfTime(activeRange.from);
@@ -403,553 +431,512 @@ export function TransferView({ snapshots, gapBefore, gaps, bars, axis }: Transfe
   const gapHatchId = `br-tr-gap-${uid}`;
 
   const honestyNote = !showOther
-    ? "기타(6위↓) 숨김 — 상위 창구 간 상대 비중만 표시"
+    ? "기타(6위↓) 숨김 · 상위 창구 간 상대 비중만 표시"
     : summary.volumeEstimated
       ? "추정 이동량 (1분봉 거래량 미수신 구간 보정 · 1:1 체결 상대 비공개)"
       : "추정 이동량 (스냅샷 동시 델타 시간적분 · KRX 1:1 체결 상대 비공개)";
 
   const rangeSpanMinutes = Math.max(1, Math.round((activeRange.to - activeRange.from) / 60));
+  const maxLabelChars = stageSize.width < 400 ? 7 : stageSize.width < 520 ? 9 : 13;
+  const leftHeadX = sankey.srcNodes[0] ? sankey.srcNodes[0].x - 8 : 88;
+  const rightHeadX = sankey.dstNodes[0] ? sankey.dstNodes[0].x + sankey.dstNodes[0].width + 8 : stageSize.width - 88;
 
   return (
     <div className="br-tr" data-testid="broker-transfer-view">
-      <div className="br-tr-controls">
-        <Segmented label="집계 단위" options={LEVEL_OPTIONS} value={level} onChange={handleLevelChange} />
-        <Segmented label="계산 모드" options={MODE_OPTIONS} value={mode} onChange={handleModeChange} />
-        <button
-          type="button"
-          className="br-tr-toggle"
-          data-testid="broker-transfer-toggle-other"
-          aria-pressed={showOther}
-          onClick={() => setShowOther((current) => !current)}
-        >
-          {OTHER_BROKER_LABEL}
-        </button>
-        <div className="br-tr-presets" role="group" aria-label="시간 구간">
-          {PRESET_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className="br-tr-preset"
-              data-testid={`broker-transfer-preset-${option.value}`}
-              aria-pressed={selection.kind === "preset" && selection.preset === option.value}
-              disabled={option.value === "peak" && peakEvent === null}
-              onClick={() => {
-                setSelection({ kind: "preset", preset: option.value });
-                setFocusNode(null);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <span className="br-tr-range-tag" data-testid="broker-transfer-range">
-          {`${formatHm(activeRange.from)} ~ ${formatHm(activeRange.to)} (${rangeSpanMinutes}분)`}
-        </span>
-      </div>
-
-      <div className="br-tr-kpi" data-testid="broker-transfer-kpi">
-        <div className="br-tr-kpi-items">
-          <span className="br-tr-kpi-item">
-            <span className="br-tr-kpi-label">구간 거래량</span>
-            <b className="br-tr-kpi-val">{`${formatCompactQty(summary.totalVol)}주`}</b>
-          </span>
-          <span className="br-tr-kpi-item">
-            <span className="br-tr-kpi-label">매도 Top5 포착</span>
-            <b className="br-tr-kpi-val" data-tone="down">{`${summary.covSellPct.toFixed(1)}%`}</b>
-          </span>
-          <span className="br-tr-kpi-item">
-            <span className="br-tr-kpi-label">매수 Top5 포착</span>
-            <b className="br-tr-kpi-val" data-tone="up">{`${summary.covBuyPct.toFixed(1)}%`}</b>
-          </span>
-          <span className="br-tr-kpi-item">
-            <span className="br-tr-kpi-label">확인 이동 비중</span>
-            <b className="br-tr-kpi-val">{`${summary.identifiedPct.toFixed(1)}%`}</b>
-          </span>
-          <span className="br-tr-kpi-item">
-            <span className="br-tr-kpi-label">신뢰도</span>
-            <span
-              className="br-tr-conf"
-              data-testid="broker-transfer-confidence"
-              data-level={summary.confidence}
-            >
-              {CONFIDENCE_LABELS[summary.confidence]}
-            </span>
-          </span>
-        </div>
-        <span className="br-tr-note" data-warn={!showOther ? "" : undefined}>
-          {honestyNote}
-        </span>
-      </div>
-
-      <div className="br-tr-scroll">
-        <div className="br-tr-grid">
-          <div className="br-tr-main">
-            <div className="br-tr-sankey-head">
-              <span className="br-tr-side-sell">공급 측 (Δ매도)</span>
-              <span className="br-tr-sankey-hint">노드 클릭 시 경로 고정</span>
-              <span className="br-tr-side-buy">흡수 측 (Δ매수)</span>
-            </div>
-
-            <div className="br-tr-stage" ref={stageRef} onPointerLeave={() => setHoveredLink(null)}>
-              {sankey.links.length === 0 ? (
-                <div className="br-tr-empty-stage">선택 구간에 표시할 이동량이 없습니다</div>
-              ) : (
-                <svg
-                  className="br-tr-sankey"
-                  data-testid="broker-transfer-sankey"
-                  viewBox={`0 0 ${SANKEY_WIDTH} ${SANKEY_HEIGHT}`}
-                  preserveAspectRatio="xMidYMid meet"
-                  role="img"
-                  aria-label="거래원 추정 물량 이동 다이어그램"
-                >
-                  <defs>
-                    <pattern id={hatchId} width="6" height="6" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
-                      <rect width="6" height="6" fill="var(--raised)" />
-                      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-strong)" strokeWidth="2" />
-                    </pattern>
-                    {sankey.links.map((link, index) => (
-                      <linearGradient key={link.id} id={`br-tr-grad-${uid}-${index}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor={groupColorToken(link.srcGroup, "src", level)} />
-                        <stop offset="100%" stopColor={groupColorToken(link.dstGroup, "dst", level)} />
-                      </linearGradient>
-                    ))}
-                  </defs>
-
-                  {sankey.links.map((link, index) => {
-                    const isFocused =
-                      focusNode === null ||
-                      (focusNode.side === "src" && focusNode.name === link.edge.src) ||
-                      (focusNode.side === "dst" && focusNode.name === link.edge.dst);
-                    const isHovered = hoveredLink?.link.id === link.id;
-                    const opacity = isHovered
-                      ? link.edge.isOther
-                        ? 0.42
-                        : 0.82
-                      : focusNode !== null
-                        ? isFocused
-                          ? link.edge.isOther
-                            ? 0.3
-                            : 0.72
-                          : 0.05
-                        : link.edge.isOther
-                          ? 0.16
-                          : 0.44;
-                    return (
-                      <path
-                        key={link.id}
-                        className="br-tr-link"
-                        data-testid="broker-transfer-link"
-                        data-src={link.edge.src}
-                        data-dst={link.edge.dst}
-                        d={link.path}
-                        fill={`url(#br-tr-grad-${uid}-${index})`}
-                        fillOpacity={opacity}
-                        stroke={link.edge.isOther ? "var(--line)" : "none"}
-                        strokeDasharray={link.edge.isOther ? "3 3" : undefined}
-                        onPointerMove={(event) => handleLinkPointerMove(event, link)}
-                        onPointerLeave={() => setHoveredLink(null)}
-                      />
-                    );
-                  })}
-
-                  {[...sankey.srcNodes, ...sankey.dstNodes].map((node) => {
-                    const isSelected = focusNode !== null && focusNode.side === node.side && focusNode.name === node.name;
-                    const isConnected =
-                      focusNode === null ||
-                      isSelected ||
-                      sankey.links.some((link) =>
-                        focusNode.side === "src"
-                          ? link.edge.src === focusNode.name && node.side === "dst" && link.edge.dst === node.name
-                          : link.edge.dst === focusNode.name && node.side === "src" && link.edge.src === node.name,
-                      );
-                    const midY = node.y + node.height / 2;
-                    const labelX = node.side === "src" ? node.x - 8 : node.x + node.width + 8;
-                    const textAnchor = node.side === "src" ? "end" : "start";
-                    const fill = node.isOther ? `url(#${hatchId})` : groupColorToken(node.group, node.side, level);
-
-                    return (
-                      <g
-                        key={`${node.side}-${node.name}`}
-                        className="br-tr-node"
-                        data-testid="broker-transfer-node"
-                        data-side={node.side}
-                        data-name={node.name}
-                        role="button"
-                        tabIndex={0}
-                        aria-pressed={isSelected}
-                        opacity={isConnected ? 1 : 0.34}
-                        onClick={() => toggleFocus(node.side, node.name)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            toggleFocus(node.side, node.name);
-                          }
-                        }}
-                      >
-                        <rect
-                          x={node.x}
-                          y={node.y}
-                          width={node.width}
-                          height={node.height}
-                          rx={2}
-                          fill={fill}
-                          stroke={isSelected ? "var(--text)" : node.isOther ? "var(--line-strong)" : "var(--bg)"}
-                          strokeWidth={isSelected ? 1.8 : 1}
-                          strokeDasharray={node.isOther ? "3 2" : undefined}
-                        />
-                        <text
-                          x={labelX}
-                          y={midY - 2}
-                          textAnchor={textAnchor}
-                          fill={node.isOther ? "var(--text-3)" : "var(--text)"}
-                          fontSize={11}
-                          fontWeight={node.isOther ? 500 : 600}
-                        >
-                          {node.name}
-                        </text>
-                        <text
-                          x={labelX}
-                          y={midY + 11}
-                          textAnchor={textAnchor}
-                          fill="var(--text-3)"
-                          fontSize={11}
-                          fontWeight={400}
-                        >
-                          {`${formatCompactQty(node.qty)}주 (${node.sharePct.toFixed(0)}%)`}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              )}
-
-              {hoveredLink !== null && (
-                <div
-                  className="br-tr-tooltip"
-                  data-testid="broker-transfer-tooltip"
-                  data-flip={hoveredLink.flipLeft ? "left" : "right"}
-                  style={{ left: `${hoveredLink.x}px`, top: `${hoveredLink.y}px` }}
-                >
-                  <div className="br-tr-tip-title">
-                    <span data-tone="down">{hoveredLink.link.edge.src}</span>
-                    <span className="br-tr-tip-arrow">→</span>
-                    <span data-tone="up">{hoveredLink.link.edge.dst}</span>
-                  </div>
-                  <div className="br-tr-tip-row">
-                    <span>추정 이동량</span>
-                    <b>{`${formatQuantity(Math.round(hoveredLink.link.edge.qty))}주`}</b>
-                  </div>
-                  <div className="br-tr-tip-row">
-                    <span>추정 거래대금</span>
-                    <b>{formatEokWon(hoveredLink.link.edge.valueWon)}</b>
-                  </div>
-                  <div className="br-tr-tip-row">
-                    <span>{`${hoveredLink.link.edge.src} 매도 중`}</span>
-                    <b>{`${hoveredLink.link.srcSharePct.toFixed(1)}%`}</b>
-                  </div>
-                  <div className="br-tr-tip-row">
-                    <span>{`${hoveredLink.link.edge.dst} 매수 중`}</span>
-                    <b>{`${hoveredLink.link.dstSharePct.toFixed(1)}%`}</b>
-                  </div>
-                  <div className="br-tr-tip-row">
-                    <span>최대 동시 시각</span>
-                    <b>{formatHm(hoveredLink.link.edge.peakT)}</b>
-                  </div>
-                  <div className="br-tr-tip-note">
-                    {hoveredLink.link.edge.isOther
-                      ? "6위 이하 미확인 창구 잔여 물량 포함"
-                      : "스냅샷 동시 델타 기반 추정치 (1:1 확정 아님)"}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="br-tr-brush-box">
-              <div className="br-tr-brush-head">
-                <span className="br-tr-brush-title">구간 선택 타임라인</span>
-                <span className="br-tr-brush-hint">핸들 드래그로 구간 조정 · 핀 클릭 시 ±3분 확대</span>
-              </div>
-              <div
-                ref={brushRef}
-                className="br-tr-brush-wrap"
-                data-testid="broker-transfer-brush"
-                onPointerDown={handleBrushBackgroundDown}
-                onPointerMove={handleBrushMove}
-                onPointerUp={handleBrushUp}
-                onPointerCancel={handleBrushUp}
+      <div className="br-tr-bar">
+        <div className="br-tr-controls">
+          <Segmented label="집계 단위" options={LEVEL_OPTIONS} value={level} onChange={handleLevelChange} />
+          <Segmented label="계산 모드" options={MODE_OPTIONS} value={mode} onChange={handleModeChange} />
+          <button
+            type="button"
+            className="br-tr-toggle"
+            data-testid="broker-transfer-toggle-other"
+            aria-pressed={showOther}
+            title={honestyNote}
+            onClick={() => setShowOther((current) => !current)}
+          >
+            {OTHER_BROKER_LABEL}
+          </button>
+          <div className="br-tr-presets" role="group" aria-label="시간 구간">
+            {PRESET_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className="br-tr-preset"
+                data-testid={`broker-transfer-preset-${option.value}`}
+                aria-pressed={selection.kind === "preset" && selection.preset === option.value}
+                disabled={option.value === "peak" && peakEvent === null}
+                onClick={() => {
+                  setSelection({ kind: "preset", preset: option.value });
+                  setFocusNode(null);
+                }}
               >
-                <svg className="br-tr-brush-svg" viewBox={`0 0 ${BRUSH_WIDTH} ${BRUSH_HEIGHT}`} preserveAspectRatio="none">
-                  <defs>
-                    <pattern id={gapHatchId} width="6" height="6" patternTransform="rotate(-45 0 0)" patternUnits="userSpaceOnUse">
-                      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-strong)" strokeWidth="2" />
-                    </pattern>
-                  </defs>
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-                  {brushSeries.gapBands.map((band, index) => (
-                    <rect
-                      key={index}
-                      x={(band.left / 100) * BRUSH_WIDTH}
-                      y={0}
-                      width={Math.max(4, (band.width / 100) * BRUSH_WIDTH)}
-                      height={BRUSH_PLOT_BOTTOM}
-                      fill={`url(#${gapHatchId})`}
-                    />
-                  ))}
+        <div className="br-tr-kpi" data-testid="broker-transfer-kpi" title={honestyNote}>
+          <span className="br-tr-kpi-item">
+            <span className="br-tr-kpi-label">량</span>
+            <b className="br-tr-kpi-val">{formatCompactQty(summary.totalVol)}</b>
+          </span>
+          <span className="br-tr-kpi-item">
+            <span className="br-tr-kpi-label">포착</span>
+            <b className="br-tr-kpi-val" data-tone="down">{`${summary.covSellPct.toFixed(0)}%`}</b>
+            <span className="br-tr-kpi-sep">/</span>
+            <b className="br-tr-kpi-val" data-tone="up">{`${summary.covBuyPct.toFixed(0)}%`}</b>
+          </span>
+          <span className="br-tr-kpi-item">
+            <span className="br-tr-kpi-label">확인</span>
+            <b className="br-tr-kpi-val">{`${summary.identifiedPct.toFixed(0)}%`}</b>
+          </span>
+          <span
+            className="br-tr-conf"
+            data-testid="broker-transfer-confidence"
+            data-level={summary.confidence}
+          >
+            {CONFIDENCE_LABELS[summary.confidence]}
+          </span>
+          <span className="br-tr-range-tag" data-testid="broker-transfer-range">
+            {`${formatHm(activeRange.from)}~${formatHm(activeRange.to)} (${rangeSpanMinutes}분)`}
+          </span>
+        </div>
+      </div>
 
-                  {brushSeries.volSource.map((step) => {
-                    const bh = Math.max(1, (step.vol / brushSeries.maxVol) * (BRUSH_PLOT_BOTTOM * 0.55));
-                    return (
-                      <rect
-                        key={step.t}
-                        x={xOfTime(step.t)}
-                        y={BRUSH_PLOT_BOTTOM - bh}
-                        width={2.5}
-                        height={bh}
-                        fill="var(--line-strong)"
-                        fillOpacity={0.6}
-                      />
-                    );
-                  })}
+      <div className="br-tr-stage" ref={stageRef} onPointerLeave={() => setHoveredLink(null)}>
+        {sankey.links.length === 0 ? (
+          <div className="br-tr-empty-stage">선택 구간에 표시할 이동량이 없습니다</div>
+        ) : (
+          <svg
+            className="br-tr-sankey"
+            data-testid="broker-transfer-sankey"
+            viewBox={`0 0 ${sankey.width} ${sankey.height}`}
+            width="100%"
+            height="100%"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label="거래원 추정 물량 이동 다이어그램"
+          >
+            <defs>
+              <pattern id={hatchId} width="6" height="6" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                <rect width="6" height="6" fill="var(--raised)" />
+                <line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-strong)" strokeWidth="2" />
+              </pattern>
+              {sankey.links.map((link, index) => (
+                <linearGradient key={link.id} id={`br-tr-grad-${uid}-${index}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor={groupColorToken(link.srcGroup, "src", level)} />
+                  <stop offset="100%" stopColor={groupColorToken(link.dstGroup, "dst", level)} />
+                </linearGradient>
+              ))}
+            </defs>
 
-                  {pricePolyline.length > 0 && (
-                    <polyline points={pricePolyline} fill="none" stroke="var(--text-2)" strokeWidth="1.5" />
-                  )}
+            <text x={leftHeadX} y={13} textAnchor="end" fill="var(--down)" fontSize={11} fontWeight={600}>
+              공급 (Δ매도)
+            </text>
+            <text x={rightHeadX} y={13} textAnchor="start" fill="var(--up)" fontSize={11} fontWeight={600}>
+              흡수 (Δ매수)
+            </text>
 
-                  <rect x={0} y={0} width={selX0} height={BRUSH_PLOT_BOTTOM} fill="var(--scrim)" fillOpacity={0.55} />
+            {sankey.links.map((link, index) => {
+              const isFocused =
+                focusNode === null ||
+                (focusNode.side === "src" && focusNode.name === link.edge.src) ||
+                (focusNode.side === "dst" && focusNode.name === link.edge.dst);
+              const isHovered = hoveredLink?.link.id === link.id;
+              const opacity = isHovered
+                ? link.edge.isOther
+                  ? 0.45
+                  : 0.85
+                : focusNode !== null
+                  ? isFocused
+                    ? link.edge.isOther
+                      ? 0.34
+                      : 0.78
+                    : 0.06
+                  : link.edge.isOther
+                    ? 0.18
+                    : 0.52;
+              return (
+                <path
+                  key={link.id}
+                  className="br-tr-link"
+                  data-testid="broker-transfer-link"
+                  data-src={link.edge.src}
+                  data-dst={link.edge.dst}
+                  d={link.path}
+                  fill={`url(#br-tr-grad-${uid}-${index})`}
+                  fillOpacity={opacity}
+                  stroke={link.edge.isOther ? "var(--line)" : "none"}
+                  strokeDasharray={link.edge.isOther ? "3 3" : undefined}
+                  onPointerMove={(event) => handleLinkPointerMove(event, link)}
+                  onPointerLeave={() => setHoveredLink(null)}
+                />
+              );
+            })}
+
+            {[...sankey.srcNodes, ...sankey.dstNodes].map((node) => {
+              const isSelected = focusNode !== null && focusNode.side === node.side && focusNode.name === node.name;
+              const isConnected =
+                focusNode === null ||
+                isSelected ||
+                sankey.links.some((link) =>
+                  focusNode.side === "src"
+                    ? link.edge.src === focusNode.name && node.side === "dst" && link.edge.dst === node.name
+                    : link.edge.dst === focusNode.name && node.side === "src" && link.edge.src === node.name,
+                );
+              const midY = node.y + node.height / 2;
+              const labelX = node.side === "src" ? node.x - 8 : node.x + node.width + 8;
+              const textAnchor = node.side === "src" ? "end" : "start";
+              const fill = node.isOther ? `url(#${hatchId})` : groupColorToken(node.group, node.side, level);
+              const shortName = truncateLabel(node.name, maxLabelChars);
+              const showTwoLines = node.height >= 26;
+
+              return (
+                <g
+                  key={`${node.side}-${node.name}`}
+                  className="br-tr-node"
+                  data-testid="broker-transfer-node"
+                  data-side={node.side}
+                  data-name={node.name}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
+                  opacity={isConnected ? 1 : 0.34}
+                  onClick={() => toggleFocus(node.side, node.name)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      toggleFocus(node.side, node.name);
+                    }
+                  }}
+                >
+                  <title>{`${node.name} · ${formatQuantity(Math.round(node.qty))}주 (${node.sharePct.toFixed(1)}%)`}</title>
                   <rect
-                    x={selX1}
-                    y={0}
-                    width={Math.max(0, BRUSH_WIDTH - selX1)}
-                    height={BRUSH_PLOT_BOTTOM}
-                    fill="var(--scrim)"
-                    fillOpacity={0.55}
-                  />
-
-                  <rect
-                    className="br-tr-brush-sel"
-                    data-can-pan={canPan ? "true" : "false"}
-                    x={selX0}
-                    y={1}
-                    width={selWidth}
-                    height={BRUSH_PLOT_BOTTOM - 2}
-                    fill="var(--accent-soft)"
-                    stroke="var(--accent)"
-                    strokeWidth="1.4"
-                    onPointerDown={(event) => startBrushDrag(event, canPan ? "move" : "new")}
-                  />
-
-                  <rect
-                    className="br-tr-brush-handle"
-                    data-testid="broker-transfer-brush-left"
-                    x={selX0 - 5}
-                    y={12}
-                    width={10}
-                    height={48}
+                    x={node.x}
+                    y={node.y}
+                    width={node.width}
+                    height={node.height}
                     rx={2}
-                    fill="var(--accent)"
-                    onPointerDown={(event) => startBrushDrag(event, "left")}
+                    fill={fill}
+                    stroke={isSelected ? "var(--text)" : node.isOther ? "var(--line-strong)" : "var(--bg)"}
+                    strokeWidth={isSelected ? 1.8 : 1}
+                    strokeDasharray={node.isOther ? "3 2" : undefined}
                   />
-                  <rect
-                    className="br-tr-brush-handle"
-                    data-testid="broker-transfer-brush-right"
-                    x={selX1 - 5}
-                    y={12}
-                    width={10}
-                    height={48}
-                    rx={2}
-                    fill="var(--accent)"
-                    onPointerDown={(event) => startBrushDrag(event, "right")}
-                  />
-
-                  {events.map((ev) => {
-                    const cx = xOfTime(ev.t);
-                    const cy = 22;
-                    const isActive = activeEventT === ev.t;
-                    return (
-                      <g
-                        key={ev.t}
-                        className="br-tr-pin"
-                        data-testid="broker-transfer-pin"
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          selectEvent(ev);
-                        }}
+                  {showTwoLines ? (
+                    <>
+                      <text
+                        x={labelX}
+                        y={midY - 2}
+                        textAnchor={textAnchor}
+                        fill={node.isOther ? "var(--text-2)" : "var(--text)"}
+                        fontSize={12}
+                        fontWeight={node.isOther ? 500 : 600}
                       >
-                        <line
-                          x1={cx}
-                          y1={0}
-                          x2={cx}
-                          y2={BRUSH_PLOT_BOTTOM}
-                          stroke="var(--accent)"
-                          strokeOpacity={isActive ? 0.9 : 0.45}
-                          strokeDasharray="2 2"
-                        />
-                        <polygon
-                          points={`${cx},${cy - 6} ${cx + 5},${cy} ${cx},${cy + 6} ${cx - 5},${cy}`}
-                          fill={isActive ? "var(--accent)" : "var(--surface)"}
-                          stroke="var(--accent)"
-                          strokeWidth="1.5"
-                        />
-                      </g>
-                    );
-                  })}
-
-                  <line x1={0} y1={BRUSH_PLOT_BOTTOM} x2={BRUSH_WIDTH} y2={BRUSH_PLOT_BOTTOM} stroke="var(--line)" />
-                  {tickTimes.map((t, index) => {
-                    const tx = clamp(xOfTime(t), 22, BRUSH_WIDTH - 22);
-                    return (
-                      <text key={index} x={tx} y={BRUSH_HEIGHT - 4} textAnchor="middle" fill="var(--text-3)" fontSize={11}>
-                        {formatHm(t)}
+                        {shortName}
                       </text>
-                    );
-                  })}
-                </svg>
-              </div>
+                      <text
+                        x={labelX}
+                        y={midY + 12}
+                        textAnchor={textAnchor}
+                        fill="var(--text-2)"
+                        fontSize={11}
+                        fontWeight={400}
+                      >
+                        {`${formatCompactQty(node.qty)} (${node.sharePct.toFixed(0)}%)`}
+                      </text>
+                    </>
+                  ) : (
+                    <text
+                      x={labelX}
+                      y={midY + 4}
+                      textAnchor={textAnchor}
+                      fill={node.isOther ? "var(--text-2)" : "var(--text)"}
+                      fontSize={11}
+                      fontWeight={node.isOther ? 500 : 600}
+                    >
+                      {`${shortName} ${formatCompactQty(node.qty)}`}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        )}
+
+        {hoveredLink !== null && (
+          <div
+            className="br-tr-tooltip"
+            data-testid="broker-transfer-tooltip"
+            data-flip={hoveredLink.flipLeft ? "left" : "right"}
+            style={{ left: `${hoveredLink.x}px`, top: `${hoveredLink.y}px` }}
+          >
+            <div className="br-tr-tip-title">
+              <span data-tone="down">{hoveredLink.link.edge.src}</span>
+              <span className="br-tr-tip-arrow">→</span>
+              <span data-tone="up">{hoveredLink.link.edge.dst}</span>
+            </div>
+            <div className="br-tr-tip-row">
+              <span>추정 이동량</span>
+              <b>{`${formatQuantity(Math.round(hoveredLink.link.edge.qty))}주`}</b>
+            </div>
+            <div className="br-tr-tip-row">
+              <span>추정 거래대금</span>
+              <b>{formatEokWon(hoveredLink.link.edge.valueWon)}</b>
+            </div>
+            <div className="br-tr-tip-row">
+              <span>{`${hoveredLink.link.edge.src} 매도 중`}</span>
+              <b>{`${hoveredLink.link.srcSharePct.toFixed(1)}%`}</b>
+            </div>
+            <div className="br-tr-tip-row">
+              <span>{`${hoveredLink.link.edge.dst} 매수 중`}</span>
+              <b>{`${hoveredLink.link.dstSharePct.toFixed(1)}%`}</b>
+            </div>
+            <div className="br-tr-tip-row">
+              <span>최대 동시 시각</span>
+              <b>{formatHm(hoveredLink.link.edge.peakT)}</b>
+            </div>
+            <div className="br-tr-tip-note">
+              {hoveredLink.link.edge.isOther
+                ? "6위 이하 미확인 창구 잔여 물량 포함"
+                : "스냅샷 동시 델타 기반 추정치 (1:1 확정 아님)"}
             </div>
           </div>
-
-          <aside className="br-tr-side">
-            {focusDetail !== null && (
-              <section className="br-tr-section" data-testid="broker-transfer-focus">
-                <div className="br-tr-sec-head">
-                  <span className="br-tr-sec-title">
-                    {focusDetail.side === "src" ? `매도 출처: ${focusDetail.name}` : `매수 도착: ${focusDetail.name}`}
-                  </span>
-                  <button type="button" className="br-tr-clear-btn" onClick={() => setFocusNode(null)}>
-                    해제
-                  </button>
-                </div>
-                <div className="br-tr-focus-card">
-                  <div className="br-tr-focus-total">
-                    <span>{focusDetail.side === "src" ? "추정 공급 합계" : "추정 흡수 합계"}</span>
-                    <b>{`${formatQuantity(Math.round(focusDetail.total))}주`}</b>
-                  </div>
-                  <div className="br-tr-focus-bar" aria-hidden>
-                    {focusDetail.items.map((item) => (
-                      <span
-                        key={item.peer}
-                        style={{
-                          width: `${item.sharePct}%`,
-                          background: groupColorToken(item.group, focusDetail.side === "src" ? "dst" : "src", level),
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div className="br-tr-focus-list">
-                    {focusDetail.items.map((item) => (
-                      <div key={item.peer} className="br-tr-focus-row">
-                        <span data-muted={item.isOther ? "" : undefined}>
-                          {`${focusDetail.side === "src" ? "→ " : "← "}${item.peer}`}
-                        </span>
-                        <span>
-                          <b>{`${formatCompactQty(item.qty)}주`}</b>
-                          <span className="br-tr-pct">{` (${item.sharePct.toFixed(1)}%)`}</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
-            )}
-
-            <section className="br-tr-section" data-testid="broker-transfer-events">
-              <div className="br-tr-sec-head">
-                <span className="br-tr-sec-title">자동 포착 손바뀜 이벤트</span>
-                <span className="br-tr-sec-sub">클릭 시 ±3분 확대</span>
-              </div>
-              {events.length === 0 ? (
-                <div className="br-tr-empty-box">확인된 상위 창구 간 동시 급증 이벤트가 없습니다</div>
-              ) : (
-                <div className="br-tr-event-list">
-                  {events.map((ev) => (
-                    <button
-                      key={ev.t}
-                      type="button"
-                      className="br-tr-event"
-                      data-testid="broker-transfer-event-item"
-                      aria-pressed={activeEventT === ev.t}
-                      onClick={() => selectEvent(ev)}
-                    >
-                      <div className="br-tr-ev-head">
-                        <span className="br-tr-ev-time">{`${formatHm(ev.from)}~${formatHm(ev.to)}`}</span>
-                        <span className="br-tr-ev-cov" data-tone={ev.covAvg >= 55 ? "high" : "medium"}>
-                          {`포착 ${ev.covAvg.toFixed(0)}%`}
-                        </span>
-                      </div>
-                      <div className="br-tr-ev-route">
-                        <span data-tone="down">{ev.src}</span>
-                        <span className="br-tr-ev-arrow">→</span>
-                        <span data-tone="up">{ev.dst}</span>
-                      </div>
-                      <div className="br-tr-ev-meta">
-                        <span>{`추정 ${formatCompactQty(ev.qty)}주 (${formatEokWon(ev.valueWon)})`}</span>
-                        <span>{`동시성 ${ev.score.toFixed(1)}×`}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="br-tr-section" data-testid="broker-transfer-pairs">
-              <div className="br-tr-sec-head">
-                <span className="br-tr-sec-title">상위 추정 이동 경로</span>
-                <span className="br-tr-sec-sub">{focusNode !== null ? `${focusNode.name} 연결` : "확인 경로 우선"}</span>
-              </div>
-              {topPairs.length === 0 ? (
-                <div className="br-tr-empty-box">표시할 추정 경로가 없습니다</div>
-              ) : (
-                <div className="br-tr-pair-list">
-                  {topPairs.map(({ edge, sharePct }) => (
-                    <button
-                      key={`${edge.src}=>${edge.dst}`}
-                      type="button"
-                      className="br-tr-pair"
-                      data-testid="broker-transfer-pair-row"
-                      data-muted={edge.isOther ? "" : undefined}
-                      onClick={() => toggleFocus("src", edge.src)}
-                    >
-                      <span className="br-tr-pair-route">
-                        <span data-tone={edge.src === summary.otherLabel ? "other" : "down"}>{edge.src}</span>
-                        <span className="br-tr-pair-arrow">→</span>
-                        <span data-tone={edge.dst === summary.otherLabel ? "other" : "up"}>{edge.dst}</span>
-                      </span>
-                      <span className="br-tr-pair-qty">{`${formatCompactQty(edge.qty)}주`}</span>
-                      <span className="br-tr-pair-pct">{`${sharePct.toFixed(1)}%`}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-          </aside>
-        </div>
+        )}
       </div>
 
-      <div className="br-foot br-tr-foot">
-        <span>
-          {`스냅샷 ${summary.stepCount}개 구간 적분`}
-          {summary.skippedGaps > 0 ? ` · 수집 끊김 제외 ${summary.skippedGaps}건` : ""}
-          {mode === "net" && summary.selfCancelVol > 0 ? ` · 동일 창구 상쇄 ${formatCompactQty(summary.selfCancelVol)}주` : ""}
-        </span>
-        <span className="br-tr-legend">
-          <span>
-            <i className="br-tr-dot" data-group="foreign" />
-            {GROUP_LABELS.foreign}
+      {focusDetail !== null && (
+        <div className="br-tr-focus-strip" data-testid="broker-transfer-focus">
+          <span className="br-tr-focus-label">
+            <b>{focusDetail.name}</b>
+            <span>{`${focusDetail.side === "src" ? "공급" : "흡수"} ${formatCompactQty(focusDetail.total)}주`}</span>
           </span>
-          <span>
-            <i className="br-tr-dot" data-group="retail" />
-            {GROUP_LABELS.retail}
-          </span>
-          <span>
-            <i className="br-tr-dot" data-group="domestic" />
-            {GROUP_LABELS.domestic}
-          </span>
-          <span>
-            <i className="br-tr-dot" data-group="other" />
-            {GROUP_LABELS.other}
-          </span>
-        </span>
+          <div className="br-tr-focus-peers">
+            {focusDetail.items.map((item) => (
+              <span key={item.peer} className="br-tr-focus-chip" data-muted={item.isOther ? "" : undefined}>
+                {`${focusDetail.side === "src" ? "→" : "←"}${item.peer} ${item.sharePct.toFixed(0)}%`}
+              </span>
+            ))}
+          </div>
+          <button type="button" className="br-tr-clear-btn" onClick={() => setFocusNode(null)}>
+            해제
+          </button>
+        </div>
+      )}
+
+      <div className="br-tr-bottom">
+        <div
+          ref={brushRef}
+          className="br-tr-brush-wrap"
+          data-testid="broker-transfer-brush"
+          title="양 끝 핸들 드래그로 구간 조정 · 핀 클릭 시 ±3분 확대"
+          onPointerDown={handleBrushBackgroundDown}
+          onPointerMove={handleBrushMove}
+          onPointerUp={handleBrushUp}
+          onPointerCancel={handleBrushUp}
+        >
+          <svg className="br-tr-brush-svg" viewBox={`0 0 ${BRUSH_WIDTH} ${BRUSH_HEIGHT}`} preserveAspectRatio="none">
+            <defs>
+              <pattern id={gapHatchId} width="6" height="6" patternTransform="rotate(-45 0 0)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="6" stroke="var(--line-strong)" strokeWidth="2" />
+              </pattern>
+            </defs>
+
+            {brushSeries.gapBands.map((band, index) => (
+              <rect
+                key={index}
+                x={(band.left / 100) * BRUSH_WIDTH}
+                y={0}
+                width={Math.max(4, (band.width / 100) * BRUSH_WIDTH)}
+                height={BRUSH_PLOT_BOTTOM}
+                fill={`url(#${gapHatchId})`}
+              />
+            ))}
+
+            {brushSeries.volSource.map((step) => {
+              const bh = Math.max(1, (step.vol / brushSeries.maxVol) * (BRUSH_PLOT_BOTTOM * 0.65));
+              return (
+                <rect
+                  key={step.t}
+                  x={xOfTime(step.t)}
+                  y={BRUSH_PLOT_BOTTOM - bh}
+                  width={2.5}
+                  height={bh}
+                  fill="var(--line-strong)"
+                  fillOpacity={0.6}
+                />
+              );
+            })}
+
+            {pricePolyline.length > 0 && (
+              <polyline points={pricePolyline} fill="none" stroke="var(--text-2)" strokeWidth="1.4" />
+            )}
+
+            <rect x={0} y={0} width={selX0} height={BRUSH_PLOT_BOTTOM} fill="var(--scrim)" fillOpacity={0.55} />
+            <rect
+              x={selX1}
+              y={0}
+              width={Math.max(0, BRUSH_WIDTH - selX1)}
+              height={BRUSH_PLOT_BOTTOM}
+              fill="var(--scrim)"
+              fillOpacity={0.55}
+            />
+
+            <rect
+              className="br-tr-brush-sel"
+              data-can-pan={canPan ? "true" : "false"}
+              x={selX0}
+              y={1}
+              width={selWidth}
+              height={BRUSH_PLOT_BOTTOM - 2}
+              fill="var(--accent-soft)"
+              stroke="var(--accent)"
+              strokeWidth="1.2"
+              onPointerDown={(event) => startBrushDrag(event, canPan ? "move" : "new")}
+            />
+
+            <rect
+              className="br-tr-brush-handle"
+              data-testid="broker-transfer-brush-left"
+              x={selX0 - 5}
+              y={3}
+              width={10}
+              height={20}
+              rx={2}
+              fill="var(--accent)"
+              onPointerDown={(event) => startBrushDrag(event, "left")}
+            />
+            <rect
+              className="br-tr-brush-handle"
+              data-testid="broker-transfer-brush-right"
+              x={selX1 - 5}
+              y={3}
+              width={10}
+              height={20}
+              rx={2}
+              fill="var(--accent)"
+              onPointerDown={(event) => startBrushDrag(event, "right")}
+            />
+
+            {events.map((ev) => {
+              const cx = xOfTime(ev.t);
+              const cy = 9;
+              const isActive = activeEventT === ev.t;
+              return (
+                <g
+                  key={ev.t}
+                  className="br-tr-pin"
+                  data-testid="broker-transfer-pin"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    selectEvent(ev);
+                  }}
+                >
+                  <line
+                    x1={cx}
+                    y1={0}
+                    x2={cx}
+                    y2={BRUSH_PLOT_BOTTOM}
+                    stroke="var(--accent)"
+                    strokeOpacity={isActive ? 0.9 : 0.45}
+                    strokeDasharray="2 2"
+                  />
+                  <polygon
+                    points={`${cx},${cy - 4} ${cx + 4},${cy} ${cx},${cy + 4} ${cx - 4},${cy}`}
+                    fill={isActive ? "var(--accent)" : "var(--surface)"}
+                    stroke="var(--accent)"
+                    strokeWidth="1.4"
+                  />
+                </g>
+              );
+            })}
+
+            <line x1={0} y1={BRUSH_PLOT_BOTTOM} x2={BRUSH_WIDTH} y2={BRUSH_PLOT_BOTTOM} stroke="var(--line)" />
+            {tickTimes.map((t, index) => {
+              const tx = clamp(xOfTime(t), 22, BRUSH_WIDTH - 22);
+              return (
+                <text key={index} x={tx} y={BRUSH_HEIGHT - 2} textAnchor="middle" fill="var(--text-3)" fontSize={11}>
+                  {formatHm(t)}
+                </text>
+              );
+            })}
+          </svg>
+        </div>
+
+        <div className="br-tr-event-bar" data-testid="broker-transfer-events">
+          <div className="br-tr-event-chips">
+            {events.length === 0 ? (
+              <span className="br-tr-event-none">{`스냅샷 ${summary.stepCount}개 적분 · 포착 이벤트 없음`}</span>
+            ) : (
+              events.map((ev) => (
+                <button
+                  key={ev.t}
+                  type="button"
+                  className="br-tr-ev-chip"
+                  data-testid="broker-transfer-event-item"
+                  aria-pressed={activeEventT === ev.t}
+                  title={`${formatHm(ev.from)}~${formatHm(ev.to)} · 추정 ${formatCompactQty(ev.qty)}주 (${formatEokWon(ev.valueWon)}) · 포착 ${ev.covAvg.toFixed(0)}%`}
+                  onClick={() => selectEvent(ev)}
+                >
+                  <span className="br-tr-ev-time">{formatHm(ev.t)}</span>
+                  <span data-tone="down">{ev.src}</span>
+                  <span className="br-tr-ev-arrow">→</span>
+                  <span data-tone="up">{ev.dst}</span>
+                  <span className="br-tr-ev-qty">{formatCompactQty(ev.qty)}</span>
+                </button>
+              ))
+            )}
+          </div>
+          <button
+            type="button"
+            className="br-tr-drawer-btn"
+            data-testid="broker-transfer-details-toggle"
+            aria-expanded={detailsOpen}
+            onClick={() => setDetailsOpen((current) => !current)}
+          >
+            {detailsOpen ? "경로 접기" : `경로 ${topPairs.length}`}
+          </button>
+        </div>
+
+        {detailsOpen && (
+          <div className="br-tr-drawer" data-testid="broker-transfer-pairs">
+            {topPairs.length === 0 ? (
+              <div className="br-tr-empty-box">표시할 추정 경로가 없습니다</div>
+            ) : (
+              <div className="br-tr-pair-list">
+                {topPairs.map(({ edge, sharePct }) => (
+                  <button
+                    key={`${edge.src}=>${edge.dst}`}
+                    type="button"
+                    className="br-tr-pair"
+                    data-testid="broker-transfer-pair-row"
+                    data-muted={edge.isOther ? "" : undefined}
+                    onClick={() => toggleFocus("src", edge.src)}
+                  >
+                    <span className="br-tr-pair-route">
+                      <span data-tone={edge.src === summary.otherLabel ? "other" : "down"}>{edge.src}</span>
+                      <span className="br-tr-pair-arrow">→</span>
+                      <span data-tone={edge.dst === summary.otherLabel ? "other" : "up"}>{edge.dst}</span>
+                    </span>
+                    <span className="br-tr-pair-qty">{`${formatCompactQty(edge.qty)}주`}</span>
+                    <span className="br-tr-pair-pct">{`${sharePct.toFixed(1)}%`}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="br-tr-drawer-foot">
+              <span>{honestyNote}</span>
+              <span className="br-tr-legend">
+                <span><i className="br-tr-dot" data-group="foreign" />{GROUP_LABELS.foreign}</span>
+                <span><i className="br-tr-dot" data-group="retail" />{GROUP_LABELS.retail}</span>
+                <span><i className="br-tr-dot" data-group="domestic" />{GROUP_LABELS.domestic}</span>
+                <span><i className="br-tr-dot" data-group="other" />{GROUP_LABELS.other}</span>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

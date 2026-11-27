@@ -557,11 +557,11 @@ export function layoutSankey(
   if (width <= 0 || height <= 0 || summary.edges.length === 0) {
     return { width, height, srcNodes: [], dstNodes: [], links: [] };
   }
-  const padTop = 14;
-  const padBottom = 14;
-  const nodeW = 14;
-  const nodeGap = 7;
-  const labelSpace = Math.min(144, Math.max(96, Math.round(width * 0.2)));
+  const padTop = 22;
+  const padBottom = 10;
+  const nodeW = width < 420 ? 10 : 14;
+  const nodeGap = height < 240 ? 5 : 8;
+  const labelSpace = Math.min(156, Math.max(88, Math.round(width * 0.25)));
   const leftX = labelSpace;
   const rightX = Math.max(leftX + nodeW * 3, width - labelSpace);
 

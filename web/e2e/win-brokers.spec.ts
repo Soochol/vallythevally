@@ -240,7 +240,19 @@ test("이동 보기는 추정 물량 이동과 이벤트를 보이고 새로고�
   await expect(win.getByTestId("broker-transfer-node").first()).toBeVisible();
   await expect(win.getByTestId("broker-transfer-link").first()).toBeVisible();
   await expect(win.getByTestId("broker-transfer-brush")).toBeVisible();
+
+  const viewBox = (await win.getByTestId("broker-transfer-view").boundingBox())!;
+  const sankeyBox = (await win.getByTestId("broker-transfer-sankey").boundingBox())!;
+  expect(sankeyBox.height / viewBox.height).toBeGreaterThanOrEqual(0.65);
+
+  const detailsToggle = win.getByTestId("broker-transfer-details-toggle");
+  await expect(detailsToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(win.getByTestId("broker-transfer-pairs")).toHaveCount(0);
+  await detailsToggle.click();
+  await expect(detailsToggle).toHaveAttribute("aria-expanded", "true");
   await expect(win.getByTestId("broker-transfer-pairs")).toBeVisible();
+  await detailsToggle.click();
+  await expect(win.getByTestId("broker-transfer-pairs")).toHaveCount(0);
 
   const toggleOther = win.getByTestId("broker-transfer-toggle-other");
   await expect(toggleOther).toHaveAttribute("aria-pressed", "true");
