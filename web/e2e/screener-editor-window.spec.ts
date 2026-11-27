@@ -155,6 +155,12 @@ test.describe("자료가 있는 저장소", () => {
 
 
   test("창을 연 채 창의 실행으로 결과를 받고 결과 행을 눌러 차트를 열어도 창이 남는다", async ({ scenario, page }, info) => {
+    const layout = scenario.documents.layout();
+    scenario.documents.saveLayout({
+      ...layout,
+      revision: layout.revision + 1,
+      windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "screener" ? { ...w, link: "a" } : w)),
+    });
     scenario.documents.saveScreens({ screens: [{ ...SEEDED, markets: [] }], revision: 1 });
     await page.goto("/");
     await openScreener(page);

@@ -305,6 +305,12 @@ test("묶음 더하기는 차트를 그 묶음에 더하고 기존 단일 창은
 });
 
 test("끌 때 차트 드로잉과 관심종목·포털 도구 입력을 막고 놓은 뒤 정상 입력을 돌린다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({
+    ...layout,
+    revision: layout.revision + 1,
+    windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "watchlist" ? { ...w, link: "a" } : w)),
+  });
   scenario.documents.saveWatchlists({ revision: 100, lists: [{ id: "main", name: "기본", symbols: ["000660"] }] });
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

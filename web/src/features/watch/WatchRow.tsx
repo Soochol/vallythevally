@@ -38,8 +38,7 @@ interface RowProps {
   variant: WatchVariant;
   sender: WindowId | null;
   preview: RowPreviewStore | null;
-  selectedKey: string | null;
-  onSelect(key: string): void;
+  selection: RowPreviewStore;
   editing: boolean;
   dropBefore: boolean;
   dragging: boolean;
@@ -48,24 +47,26 @@ interface RowProps {
   drag: RowDrag;
 }
 
-function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, preview: RowPreviewStore | null, selectedKey: string | null): boolean {
+function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, preview: RowPreviewStore | null, selection: RowPreviewStore): boolean {
   const subscribe = useCallback((listener: () => void) => {
     const stopLayout = useLayoutStore.subscribe(listener);
     const stopSelection = useSelectionStore.subscribe(listener);
     const stopPreview = preview?.subscribe(key, listener);
+    const stopRowSelection = selection.subscribe(key, listener);
     return () => {
       stopLayout();
       stopSelection();
       stopPreview?.();
+      stopRowSelection();
     };
-  }, [preview, key]);
+  }, [preview, selection, key]);
   return useSyncExternalStore(subscribe, () => {
     const pending = preview?.get() ?? null;
     if (pending !== null) return pending === key;
     const layoutState = useLayoutStore.getState();
     if (sender !== null) {
       const win = layoutState.layout.windows.find((w) => w.id === sender);
-      if (win && win.link === null) return selectedKey === key;
+      if (win && win.link === null) return selection.get() === key;
     }
     return watchedSymbol(layoutState.layout, sender, useSelectionStore.getState().activeCell, layoutState.groupSymbols) === code;
   });
@@ -73,10 +74,10 @@ function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, 
 
 const NO_OTHER_LISTS: readonly Watchlist[] = [];
 
-function WatchRowFrame({ list, code, groupId, index, last, columns, template, variant, sender, preview, selectedKey, onSelect, editing, dropBefore, dragging, onMoved, onNaming, drag }: RowProps) {
+function WatchRowFrame({ list, code, groupId, index, last, columns, template, variant, sender, preview, selection, editing, dropBefore, dragging, onMoved, onNaming, drag }: RowProps) {
   const row: WatchRowRef = { code, groupId };
   const key = rowKey(row);
-  const active = useIsActiveRow(sender, code, key, preview, selectedKey);
+  const active = useIsActiveRow(sender, code, key, preview, selection);
   const [menu, setMenu] = useState<{ kind: "actions" | "transfer" | "group" | "addGroup"; x: number; y: number } | null>(null);
   const root = useRef<HTMLLIElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -89,9 +90,22 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
   const grouped = list.groups.length > 0;
 
   const open = () => {
-    onSelect(key);
+    const layoutStore = useLayoutStore.getState();
+    const senderWindow = sender === null ? undefined : layoutStore.layout.windows.find((w) => w.id === sender);
+    if (senderWindow && senderWindow.link === null) selection.set(key);
     const cellId = useSelectionStore.getState().activeCell;
-    const { notice } = useLayoutStore.getState().sendSymbol(sender, cellId, info ?? { code });
+    const { notice } = layoutStore.sendSymbol(sender, cellId, info ?? { code });
+    if (notice) useSelectionStore.getState().showToast(notice);
+    if (variant === "phone") useSelectionStore.getState().setPhoneTab("chart");
+  };
+  const openInCell = () => {
+    const layoutStore = useLayoutStore.getState();
+    const senderWindow = sender === null ? undefined : layoutStore.layout.windows.find((w) => w.id === sender);
+    const cellId = useSelectionStore.getState().activeCell;
+    const { notice } = senderWindow && senderWindow.link === null
+      ? layoutStore.setSymbol(cellId, info ?? { code })
+      : layoutStore.sendSymbol(sender, cellId, info ?? { code });
+    if (senderWindow && senderWindow.link === null) selection.set(key);
     if (notice) useSelectionStore.getState().showToast(notice);
     if (variant === "phone") useSelectionStore.getState().setPhoneTab("chart");
   };
@@ -111,7 +125,7 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
   };
   const context = (x: number, y: number) => { button.current?.focus(); setMenu({ kind: "actions", x, y }); };
   const actionItems = (others: readonly Watchlist[]): MenuItem[] => {
-    const common = symbolRowMenuItems({ name, code, onOpen: open, onCompare: compare });
+    const common = symbolRowMenuItems({ name, code, onOpen: openInCell, onCompare: compare });
     return [
       common.heading,
       common.open,

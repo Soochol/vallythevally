@@ -76,6 +76,12 @@ const surfaces = [
 for (const { width, height } of surfaces) {
   test(`${width}×${height}에서 세 조건의 성공·실행 중·실패 뒤 결과 행 전체를 읽고 스크롤해 차트로 연다`, async ({ scenario, screener, page }, info) => {
     await page.setViewportSize({ width: width!, height: height! });
+    const layout = scenario.documents.layout();
+    scenario.documents.saveLayout({
+      ...layout,
+      revision: layout.revision + 1,
+      windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "screener" ? { ...w, link: "a" } : w)),
+    });
     scenario.documents.saveScreens({ screens: [screen], revision: 1 });
     screener.showResult(currentResult());
     await page.goto("/");
@@ -169,6 +175,12 @@ for (const { width, height } of surfaces) {
 for (const [width, height] of [[320, 568], [1280, 600]]) {
   test(`${width}×${height}에서 긴 오류 설명도 끝까지 읽고 보존 결과를 차트로 연다`, async ({ scenario, screener, page }, info) => {
     await page.setViewportSize({ width: width!, height: height! });
+    const layout = scenario.documents.layout();
+    scenario.documents.saveLayout({
+      ...layout,
+      revision: layout.revision + 1,
+      windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "screener" ? { ...w, link: "a" } : w)),
+    });
     scenario.documents.saveScreens({ screens: [screen], revision: 1 });
     screener.showResult(currentResult());
     await page.goto("/");

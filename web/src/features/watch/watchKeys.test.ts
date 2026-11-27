@@ -7,7 +7,7 @@ import { useAccountStore } from "../../stores/account";
 import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useWizardStore } from "../setup-wizard/wizardOpen";
-import { createRowPreviewStore, nextWatchRow, resolveWatchRow, visibleWatchRows, type WatchKeyEvent, watchKeyStep } from "./watchKeys";
+import { createRowPreviewStore, createRowSelectionStore, nextWatchRow, resolveWatchRow, visibleWatchRows, type WatchKeyEvent, watchKeyStep } from "./watchKeys";
 
 class KeyTarget extends EventTarget {
   constructor(
@@ -169,6 +169,36 @@ test("반복 미리보기 저장소는 줄 이동 때 떠난 줄과 새 줄 구�
 
   store.set(null);
   expect(calls).toEqual({ a: 1, b: 1, c: 1, d: 1 });
+
+  for (const stop of unsubs) stop();
+});
+
+test("행 선택 저장소는 처음 선택과 이동 모두 이전·새 줄 구독자만 깨운다", () => {
+  const store = createRowSelectionStore();
+  const calls = { a: 0, b: 0, c: 0, d: 0 };
+  const unsubs = [
+    store.subscribe("a", () => { calls.a += 1; }),
+    store.subscribe("b", () => { calls.b += 1; }),
+    store.subscribe("c", () => { calls.c += 1; }),
+    store.subscribe("d", () => { calls.d += 1; }),
+  ];
+
+  store.set("b");
+  expect(store.get()).toBe("b");
+  expect(calls).toEqual({ a: 0, b: 1, c: 0, d: 0 });
+
+  calls.b = 0;
+  store.set("c");
+  expect(store.get()).toBe("c");
+  expect(calls).toEqual({ a: 0, b: 1, c: 1, d: 0 });
+
+  calls.b = calls.c = 0;
+  store.set("c");
+  expect(calls).toEqual({ a: 0, b: 0, c: 0, d: 0 });
+
+  store.set(null);
+  expect(store.get()).toBeNull();
+  expect(calls).toEqual({ a: 0, b: 0, c: 1, d: 0 });
 
   for (const stop of unsubs) stop();
 });

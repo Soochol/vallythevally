@@ -9,7 +9,7 @@ import { useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { PauseIcon, PlayIcon } from "../icons";
-import { dropPendingOpen, openResult } from "../screener/resultActions";
+import { dropPendingOpen, openResult, openResultInCell } from "../screener/resultActions";
 import { adaptRanking, brokerShortName, FEED_UNAVAILABLE_TEXT, feedMarkOf, rankingKindOn } from "../status/marketFeed";
 import { openSystemSettings } from "../system-settings/open";
 import { RankingHead } from "./RankingConditions";
@@ -71,6 +71,11 @@ function RankingBody({ id, ranking }: { id: WindowId; ranking: Ranking }) {
     if (row.listed) void openResult(queryClient, row.code, id);
     else useSelectionStore.getState().showToast(UNLISTED_NOTICE);
   };
+  const openInCell = (row: RankingRow) => {
+    setCursor(row.code);
+    if (row.listed) void openResultInCell(queryClient, row.code, id);
+    else useSelectionStore.getState().showToast(UNLISTED_NOTICE);
+  };
   const { page } = feed;
   const mark = page === null ? null : feedMarkOf(source, page.source);
   return (
@@ -100,7 +105,7 @@ function RankingBody({ id, ranking }: { id: WindowId; ranking: Ranking }) {
         ) : page.rows.length === 0 ? (
           <EmptyState title="순위가 비어 있습니다" />
         ) : (
-          <RankingTable ranking={ranking} rows={page.rows} cursor={cursor} watched={watched} onChoose={choose} onCursor={setCursor} onNearEnd={feed.more} scroller={scroller} />
+          <RankingTable ranking={ranking} rows={page.rows} cursor={cursor} watched={watched} onChoose={choose} onOpenInCell={openInCell} onCursor={setCursor} onNearEnd={feed.more} scroller={scroller} />
         )}
       </div>
       {connected && kindOn && page !== null && (

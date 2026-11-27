@@ -238,7 +238,8 @@ test("둘째 차트를 누르면 위 막대·봉 주기·관심종목·드로잉
   await expect(first).toHaveAttribute("aria-label", /삼성전자.* 일$/);
 
   await tab(page, 3, "관심종목").click();
-  await page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="000810"] [data-main]').click();
+  await page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="000810"] [data-main]').click({ button: "right" });
+  await page.getByRole("menu", { name: /행 동작$/ }).getByRole("menuitem", { name: /^이 칸에 열기/ }).click();
   await expect(second).toHaveAttribute("aria-label", /^칸 2: 삼성화재/);
   await expect(first).toHaveAttribute("aria-label", /^칸 1: 삼성전자/);
   await expect(currentSymbol(topbar)).toContainText("삼성화재");

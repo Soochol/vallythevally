@@ -24,6 +24,12 @@ const pressHead = (page: Page, count: number) => panel(page).getByText(`${count}
 const showsSymbol = (page: Page, name: string) => expect(cell(page)).toHaveAttribute("aria-label", new RegExp(`^칸 1: ${name} `));
 
 function seed(scenario: Scenario, symbols: string[], groups: WatchGroup[] = []) {
+  const layout = scenario.documents.layout();
+  scenario.documents.saveLayout({
+    ...layout,
+    revision: layout.revision + 1,
+    windows: layout.windows.map((w) => (w.kind === "chart" || w.kind === "watchlist" || w.kind === "screener" ? { ...w, link: "a" } : w)),
+  });
   scenario.documents.saveWatchlists({ revision: 100, lists: [{ id: "L", name: "기본", symbols, groups }] });
 }
 

@@ -64,7 +64,7 @@ test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값
   await swatch.click();
   await expect(swatch).toHaveAttribute("aria-pressed", "true");
   await popup.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true }).click();
-  await expect.poll(() => maLine(page).then((line) => line?.style)).toEqual({ color, width: 5 });
+  await expect.poll(() => maLine(page).then((line) => line?.style)).toEqual({ color, width: 5, opacity: 1 });
   await pollSaved(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: [color], width: 5 });
   await page.keyboard.press("Escape");
   await expect(popup).toHaveCount(0);

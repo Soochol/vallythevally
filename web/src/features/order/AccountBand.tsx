@@ -170,8 +170,11 @@ export const AccountBand = memo(function AccountBand({
 
   const goTo: GoToSymbol = useStableCallback((target) => {
     const layout = useLayoutStore.getState();
+    const cellId = useSelectionStore.getState().activeCell;
+    const win = layout.layout.windows.find((w) => w.id === windowId);
     layout.pinSymbol(windowId, null);
-    layout.sendSymbol(windowId, useSelectionStore.getState().activeCell, target);
+    if (win && win.link !== null) layout.sendSymbol(windowId, cellId, target);
+    else layout.setSymbol(cellId, target);
     setPanel(null);
   });
 

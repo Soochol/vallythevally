@@ -156,7 +156,6 @@ test("캔들을 지표 위에 스위치는 가격 패널 지표와 캔들의 그
   await openChartSettings(page, "범례 · 표시");
   await dialog(page).getByRole("group", { name: "차트 설정 영역", exact: true }).getByRole("button", { name: "지표", exact: true }).click();
   const cmdDialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
-  await cmdDialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await cmdDialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("이평 5");
   await cmdDialog.getByRole("button", { name: "이동평균 단순 5 추가", exact: true }).click();
   await pollSaved(() => saved(scenario).indicators.length).toBe(4);

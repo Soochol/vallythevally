@@ -6,7 +6,7 @@ import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layou
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { useWatchlistStore } from "../../stores/watchlist";
-import { addResultToWatchlist, dropPendingOpen, openResult, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
+import { addResultToWatchlist, dropPendingOpen, openResult, openResultInCell, pendingResultCode, sendToNewWatchlist, sendToWatchlist } from "./resultActions";
 
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
 const symbol = (code: string): SymbolInfo => ({ code, name: code, market: "kospi", kind: "common", nxtEnabled: true });
@@ -73,6 +73,16 @@ test("연동 색이 켜진 스크리너 창은 그 색의 차트로 결과를 �
   expect(useSelectionStore.getState().toast).toBeNull();
   useLayoutStore.getState().setLink(CELL, "a");
   await openResult(query, "000660", screener);
+  expect(cell()).toMatchObject({ symbol: "000660", period: "W" });
+});
+
+test("연동이 꺼진 스크리너 창에서 이 칸에 열기는 활성 칸 차트의 종목을 바꾼다", async () => {
+  const query = client();
+  query.setQueryData(["symbol", "000660"], symbol("000660"));
+  const screener = useLayoutStore.getState().layout.windows.find((w) => w.kind === "screener")!.id;
+  await openResult(query, "000660", screener);
+  expect(cell().symbol).toBe("005930");
+  await openResultInCell(query, "000660", screener);
   expect(cell()).toMatchObject({ symbol: "000660", period: "W" });
 });
 

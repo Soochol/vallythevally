@@ -1061,6 +1061,8 @@ test.describe("수요일 08:35 시간외 종가 잔량", () => {
   test.use({ clockStart: "20261118083500" });
 
   test.beforeEach(async ({ page, scenario }) => {
+    const state = scenario.documents.uiState();
+    scenario.documents.saveUiState({ ...state, venue: "krx", revision: state.revision + 1 });
     await page.clock.setFixedTime(new Date(scenario.now));
   });
 
