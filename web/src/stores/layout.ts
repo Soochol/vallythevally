@@ -602,9 +602,10 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const { layout, lockedWindows, groupSymbols } = get();
       const win = layout.windows.find((w) => w.id === id);
       if (!win || !isFollowsWindow(win)) return;
-      if (isWindowLocked(win, lockedWindows)) {
+      const pinned = isPinnableWindow(win) && win.symbol !== undefined;
+      if (isWindowLocked(win, lockedWindows) || pinned) {
         set((s) => ({ lockedWindows: s.lockedWindows.filter((w) => w !== id) }));
-        if (isPinnableWindow(win) && win.link !== null) {
+        if (pinned) {
           patchWindows((w) => (w.id === id && isPinnableWindow(w) ? withOptional(w, "symbol", null) : w));
         } else if (isChartWindow(win) && win.link !== null) {
           const groupCode = groupSymbols[win.link] ?? chartWindows(layout).find((c) => c.id !== id && c.link === win.link)?.symbol;

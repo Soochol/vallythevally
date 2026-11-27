@@ -60,7 +60,7 @@ test("주문 수량 칸에서 Tab을 눌러도 수량 칸에 남고 값은 그�
   await expect(quantity).toHaveValue("7");
 });
 
-test("작업 화면에서는 막고 종목 검색 안에서는 Tab이 초점을 옮긴다", async ({ page }) => {
+test("작업 화면에서는 막고 종목 검색 안에서는 Tab이 동작한다", async ({ page }) => {
   await open(page);
   await keepsFocus(page, arrange(page));
   await page.getByRole("button", { name: "종목·지표·명령 찾기", exact: true }).click();
@@ -68,6 +68,8 @@ test("작업 화면에서는 막고 종목 검색 안에서는 Tab이 초점을 
   const input = dialog.getByRole("combobox", { name: "종목 검색" });
   await expect(input).toBeFocused();
   await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("group", { name: "변경 대상" }).getByRole("button", { name: "B그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Shift+Tab");
   await expect(input).not.toBeFocused();
   await expect(dialog.locator(":focus")).toHaveCount(1);
 });
