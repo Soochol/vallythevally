@@ -1,4 +1,4 @@
-import type { IndicatorSpec } from "./indicators/kinds";
+import type { FlowAggregation, FlowDisplayMode, FlowUnit, IndicatorKind, IndicatorSpec } from "./indicators/kinds";
 import type { QuoteDepthSource } from "../api/generated/QuoteDepthSource";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import { isHexColor, type HexColor } from "../lib/colors";
@@ -23,10 +23,17 @@ export interface IndicatorConfig {
 }
 
 export const DEFAULT_BAR_OPACITY = 0.38;
+export const DEFAULT_FLOW_BAR_OPACITY = 0.72;
 export const BAR_OPACITY_MIN = 0.1;
 export const BAR_OPACITY_MAX = 1;
 
-export const barOpacityOf = (style: IndicatorConfig["style"]): number => style.barOpacity ?? DEFAULT_BAR_OPACITY;
+export const defaultBarOpacity = (kind?: IndicatorKind): number =>
+  kind === "foreignFlow" || kind === "institutionFlow" || kind === "programFlow"
+    ? DEFAULT_FLOW_BAR_OPACITY
+    : DEFAULT_BAR_OPACITY;
+
+export const barOpacityOf = (style: IndicatorConfig["style"], kind?: IndicatorKind): number =>
+  style.barOpacity ?? defaultBarOpacity(kind);
 const isBarOpacity = (x: unknown): x is number => isNum(x) && x >= BAR_OPACITY_MIN && x <= BAR_OPACITY_MAX;
 
 export const placementOfConfig = (config: Pick<IndicatorConfig, "panel">): Placement => config.panel === "price" ? "price" : "panel";
@@ -117,6 +124,9 @@ const isNum = (x: unknown): x is number => typeof x === "number" && Number.isFin
 const isNumOrNull = (x: unknown): x is number | null => x === null || isNum(x);
 const QUOTE_DEPTH_SOURCES = ["priceMax", "peak", "close"] as const satisfies readonly QuoteDepthSource[];
 const MICRO_LABEL_MODES = ["clean", "verbose"] as const satisfies readonly MicroLabelMode[];
+const FLOW_DISPLAY_MODES = ["histogram", "line", "both"] as const satisfies readonly FlowDisplayMode[];
+const FLOW_AGGREGATIONS = ["bar", "cumulative"] as const satisfies readonly FlowAggregation[];
+const FLOW_UNITS = ["eok", "shares"] as const satisfies readonly FlowUnit[];
 const isOptionalBool = (x: unknown): x is boolean | undefined => x === undefined || typeof x === "boolean";
 const isOptionalMicroMode = (x: unknown): x is MicroLabelMode | undefined => x === undefined || isOneOf(MICRO_LABEL_MODES, x);
 const isTopLevels = (x: unknown): x is number | null => x === null || (typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= 5);
@@ -250,8 +260,23 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
         && typeof r.showRetail === "boolean"
         ? { kind: "tickCvd", showWhale: r.showWhale, showLarge: r.showLarge, showMid: r.showMid, showRetail: r.showRetail }
         : null;
+    case "foreignFlow":
+    case "institutionFlow":
+      return isOneOf(FLOW_DISPLAY_MODES, r.displayMode)
+        && isOneOf(FLOW_AGGREGATIONS, r.aggregation)
+        && isOneOf(FLOW_UNITS, r.unit)
+        ? { kind: raw.kind, displayMode: r.displayMode, aggregation: r.aggregation, unit: r.unit }
+        : null;
     case "programFlow":
-      return typeof r.showShare === "boolean" ? { kind: "programFlow", showShare: r.showShare } : null;
+      if (typeof r.showShare !== "boolean") return null;
+      if (r.displayMode === undefined && r.aggregation === undefined && r.unit === undefined) {
+        return { kind: "programFlow", displayMode: "line", aggregation: "cumulative", unit: "eok", showShare: r.showShare };
+      }
+      return isOneOf(FLOW_DISPLAY_MODES, r.displayMode)
+        && isOneOf(FLOW_AGGREGATIONS, r.aggregation)
+        && isOneOf(FLOW_UNITS, r.unit)
+        ? { kind: "programFlow", displayMode: r.displayMode, aggregation: r.aggregation, unit: r.unit, showShare: r.showShare }
+        : null;
     default:
       return null;
   }

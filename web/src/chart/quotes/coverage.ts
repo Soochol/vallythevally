@@ -65,6 +65,26 @@ export function missingFromRanges(need: DateRange, haves: readonly DateRange[]):
   return out;
 }
 
+export function missingUnchunked(need: DateRange, haves: readonly DateRange[]): DateRange[] {
+  const nFrom = toDay(need.from);
+  const nTo = toDay(need.to);
+  if (nFrom > nTo) return [];
+  if (haves.length === 0) return [need];
+  const gaps: DateRange[] = [];
+  let cursor = nFrom;
+  for (const h of haves) {
+    const hFrom = toDay(h.from);
+    const hTo = toDay(h.to);
+    if (hTo < cursor) continue;
+    if (hFrom > nTo) break;
+    if (hFrom > cursor) gaps.push({ from: fromDay(cursor), to: fromDay(Math.min(nTo, hFrom - 1)) });
+    cursor = Math.max(cursor, hTo + 1);
+    if (cursor > nTo) break;
+  }
+  if (cursor <= nTo) gaps.push({ from: fromDay(cursor), to: fromDay(nTo) });
+  return gaps.reverse();
+}
+
 export function rangesContain(haves: readonly DateRange[], date: string): boolean {
   return haves.some((r) => date >= r.from && date <= r.to);
 }

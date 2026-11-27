@@ -17,6 +17,14 @@ test.each([
   [1_200, "원/주", "1.2K원/주"],
   [2_000, "원/주", "2K원/주"],
   [0, "원/주", "0원/주"],
+  [120, "eok", "120억"],
+  [-45, "eok", "−45억"],
+  [12_000, "eok", "1.2조"],
+  [0, "eok", "0"],
+  [125_000, "shares", "12.5만"],
+  [-45_000, "shares", "−4.5만"],
+  [3_500, "shares", "3,500"],
+  [0, "shares", "0"],
 ] as const)("축 %s %s → %s", (value, unit, expected) => {
   expect(formatAxisValue(value, unit)).toBe(expected);
 });

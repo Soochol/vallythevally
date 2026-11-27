@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { colorsFrom } from "../../chart/indicators/kinds";
+import { colorsFrom, specLines } from "../../chart/indicators/kinds";
 import { type IndicatorConfig, barOpacityOf, DEFAULT_PANEL_STRETCH, placementOfConfig } from "../../chart/settings";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { checkForm, draftStyle, startDraft } from "./indicatorForm";
@@ -29,9 +29,11 @@ export function useLiveIndicatorDraft(cellId: WindowId, initial: IndicatorConfig
     }
     if (!check.ok) return;
     const spec = JSON.stringify(current.spec) === JSON.stringify(check.spec) ? current.spec : check.spec;
-    const colors = color === originalColor ? initial.style.colors : colorsFrom(spec, color);
+    const colors = color === originalColor && specLines(spec).length === specLines(initial.spec).length
+      ? initial.style.colors
+      : colorsFrom(spec, color);
     const next = draftStyle(draft, colors);
-    const style = current.style.width === next.width && JSON.stringify(current.style.colors) === JSON.stringify(colors) && barOpacityOf(current.style) === barOpacityOf(next) ? current.style : next;
+    const style = current.style.width === next.width && JSON.stringify(current.style.colors) === JSON.stringify(colors) && barOpacityOf(current.style, current.spec.kind) === barOpacityOf(next, spec.kind) ? current.style : next;
     if (spec !== current.spec || style !== current.style) store.updateIndicator(cellId, initial.id, { spec, style });
   }, [draft, validator, cellId, initial]);
 

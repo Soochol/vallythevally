@@ -55,7 +55,7 @@ const CVD_CONFIG: IndicatorConfig = {
 
 const PROGRAM_CONFIG: IndicatorConfig = {
   id: "prog",
-  spec: { kind: "programFlow", showShare: false },
+  spec: { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: false },
   panel: "p-prog",
   visible: true,
   style: { colors: ["ind-3"], width: 1 },
@@ -218,10 +218,16 @@ describe("MicroIndicatorController", () => {
     expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["순매수 +3.50억"]);
 
     ctl.setTarget({ symbol: "005930", period: "D" });
+    await Promise.resolve();
+    await Promise.resolve();
     expect(cvdCalls).toBe(1);
-    expect(programCalls).toBe(1);
+    expect(programCalls).toBe(2);
     expect(ctl.tickCvdRow(CVD_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 분봉 전용"]);
-    expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 분봉 전용"]);
+    expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["순매수 +2.00억"]);
+
+    ctl.setTarget({ symbol: "IDX:001", period: "D" });
+    expect(ctl.tickCvdRow(CVD_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 분봉 전용"]);
+    expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 전용"]);
     ctl.dispose();
   });
 
@@ -349,7 +355,10 @@ describe("MicroIndicatorController", () => {
   test("seeds mid-day programSharePct from HTTP turnover without tickCvd and avoids 100% spike", async () => {
     const t0 = Math.floor(Date.parse("2026-11-24T13:00:00+09:00") / 1000);
     const bars: Bar[] = [{ t: t0, o: 70000, h: 70500, l: 69900, c: 70200, v: 1000 }];
-    const shareConfig: IndicatorConfig = { ...PROGRAM_CONFIG, spec: { kind: "programFlow", showShare: true } };
+    const shareConfig: IndicatorConfig = {
+      ...PROGRAM_CONFIG,
+      spec: { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: true },
+    };
     let resolveProgram!: (page: ProgramSeriesPage) => void;
 
     const ctl = new MicroIndicatorController(

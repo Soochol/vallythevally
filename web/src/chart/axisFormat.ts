@@ -2,7 +2,7 @@ import type { PriceFormatCustom } from "lightweight-charts";
 import type { FinancialMetric } from "../api/generated/FinancialMetric";
 import { MINUS } from "../lib/format";
 
-export type AxisUnit = "price" | "index" | "volume" | "KRW" | "%" | "원/주" | { currency: string };
+export type AxisUnit = "price" | "index" | "volume" | "KRW" | "eok" | "shares" | "%" | "원/주" | { currency: string };
 export interface AxisGeometry {
   toCoordinate(value: number): number | null;
   lastCoordinates(): number[];
@@ -30,7 +30,7 @@ function numberText(value: number, digits: number, grouped: boolean): string {
 }
 const decimal = (v: number, digits: number) => numberText(v, digits, false);
 const PRECISIONS = [undefined, ...Array.from({ length: 13 }, (_, i) => i)];
-const suffix = (unit: AxisUnit) => typeof unit === "object" ? unit.currency : unit === "%" || unit === "원/주" ? unit : "";
+const suffix = (unit: AxisUnit) => typeof unit === "object" ? unit.currency : unit === "%" || unit === "원/주" ? unit : unit === "eok" ? "억" : "";
 const signed = (value: number, text: string) => `${value < 0 ? MINUS : ""}${text}`;
 const scientific = (value: number, digits: number) => signed(value, Math.abs(value).toExponential(digits).replace("e+", "e"));
 
@@ -45,6 +45,22 @@ export function formatAxisValue(value: number, unit: AxisUnit, precision?: numbe
   const v = Math.abs(value);
   if (groupedUnit(unit)) return signed(value, numberText(v, precision ?? (unit === "price" ? 0 : 2), true));
   if (unit === "volume") return volumeLabel(value, volumeScale(v), precision ?? (v >= 1e3 ? 2 : 0));
+  if (unit === "eok") {
+    if (v === 0) return "0";
+    if (v >= 1e4) return signed(value, `${decimal(v / 1e4, precision ?? 1)}조`);
+    const digits = precision ?? (v >= 100 ? 0 : v >= 10 ? 1 : 2);
+    return signed(value, `${numberText(v, digits, true)}억`);
+  }
+  if (unit === "shares") {
+    if (v === 0) return "0";
+    const compact = KOREAN.find(([scale]) => v >= scale);
+    if (compact) {
+      const [scale, label] = compact;
+      const digits = precision ?? (label === "조" ? 1 : label === "만" ? (v < 1e6 ? 1 : 0) : 2);
+      return signed(value, `${decimal(v / scale, digits)}${label}`);
+    }
+    return signed(value, numberText(v, precision ?? 0, true));
+  }
   const compact = (unit === "KRW" ? KOREAN : INTERNATIONAL).find(([scale]) => v >= scale);
   if (compact) {
     const [scale, label] = compact;
@@ -82,9 +98,9 @@ function tickValue(value: number, unit: AxisUnit, precision: number | undefined,
 }
 
 const candidateNotations = (unit: AxisUnit): TickNotation[] =>
-  groupedUnit(unit) ? ["compact", "man", "plain", "scientific"] : unit === "volume" ? ["compact", "plain", "scientific"] : ["compact", "plain", "international", "scientific"];
+  groupedUnit(unit) ? ["compact", "man", "plain", "scientific"] : unit === "volume" || unit === "eok" ? ["compact", "plain", "scientific"] : ["compact", "plain", "international", "scientific"];
 const distinctNotations = (unit: AxisUnit): TickNotation[] =>
-  groupedUnit(unit) ? ["compact", "man", "plain", "scientific"] : unit === "volume" ? ["compact", "plain", "scientific"] : ["compact", "international", "plain", "scientific"];
+  groupedUnit(unit) ? ["compact", "man", "plain", "scientific"] : unit === "volume" || unit === "eok" ? ["compact", "plain", "scientific"] : ["compact", "international", "plain", "scientific"];
 
 function* axisCandidates(value: number, unit: AxisUnit): Generator<string> {
   yield formatAxisValue(value, unit);
