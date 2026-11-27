@@ -76,6 +76,24 @@ test("연동 색이 켜진 스크리너 창은 그 색의 차트로 결과를 �
   expect(cell()).toMatchObject({ symbol: "000660", period: "W" });
 });
 
+test("차트 없는 연동 색에서 종목 정보를 기다리는 동안 다른 종목으로 바뀌면 늦은 응답을 버린다", async () => {
+  let resolve: (response: Response) => void = () => {};
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((done) => { resolve = done; })));
+  const screener = useLayoutStore.getState().layout.windows.find((w) => w.kind === "screener")!.id;
+  useLayoutStore.getState().openWindow("program", undefined, { link: "c" });
+  useLayoutStore.getState().setLink(screener, "c");
+  useLayoutStore.getState().sendSymbol(screener, CELL, { code: "005930" });
+  expect(useLayoutStore.getState().groupSymbols.c).toBe("005930");
+
+  const opened = openResult(client(), "000660", screener);
+  expect(pendingResultCode()).toBe("000660");
+  useLayoutStore.getState().sendSymbolToLink("c", CELL, { code: "035420" });
+  expect(pendingResultCode()).toBeNull();
+  resolve(Response.json(symbol("000660")));
+  await opened;
+  expect(useLayoutStore.getState().groupSymbols.c).toBe("035420");
+});
+
 test("관심종목 저장은 기존 목록의 중복을 건너뛰고 결과 순서를 유지한다", () => {
   useWatchlistStore.getState().add(FIRST_WATCHLIST_ID, "005930");
   const before = useWatchlistStore.getState().revision;

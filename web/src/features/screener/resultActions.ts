@@ -18,7 +18,10 @@ interface ResultOpen {
 }
 
 let pendingOpen: ResultOpen | null = null;
-const shownIn = (sender: WindowId | null, cellId: WindowId) => watchedSymbol(useLayoutStore.getState().layout, sender, cellId);
+const shownIn = (sender: WindowId | null, cellId: WindowId) => {
+  const { layout, groupSymbols } = useLayoutStore.getState();
+  return watchedSymbol(layout, sender, cellId, groupSymbols);
+};
 const toast = (text: string) => useSelectionStore.getState().showToast(text);
 
 export function pendingResultCode(): SymbolCode | null {
