@@ -4,7 +4,7 @@ use domain::{KstDate, KstTime, StockCode, Symbol};
 use futures::future::BoxFuture;
 
 use crate::api::{self, Market};
-use crate::kiwoom::api::{AllIndices, IndexDailyChart, InstitutionForeignStreak, ListedMarket, MarketRequest, ProgramTrendByDay, ProgramTrendByMinute, SectorInvestorNet, StockForeignHoldings, StockInvestorNetShares};
+use crate::kiwoom::api::{AllIndices, IndexDailyChart, InstitutionForeignStreak, ListedMarket, MarketRequest, ProgramTrendByDay, ProgramTrendByMinute, SectorInvestorNet, StockForeignHoldings, StockInvestorNetShares, StockProgramDaily};
 use crate::kiwoom::rest::{Access, ContKey, KiwoomRest};
 use crate::kiwoom::wire::{DayPage, IndexBreadthRow, InstitutionForeignStreakRow, ProgramNetMillionWon, StreakColumns, index_trade_days};
 use crate::market_source::{
@@ -210,6 +210,27 @@ impl OverviewSource for KiwoomOverview {
 
     fn foreign_holdings(&self, code: StockCode, range: DayRange, _now: KstTime, priority: Priority) -> BoxFuture<'_, Result<api::DayHistory<api::ForeignHoldingDay>, SourceError>> {
         Box::pin(async move { self.walk(&StockForeignHoldings::new(code), code, range, priority).await })
+    }
+
+    fn stock_program_daily(&self, code: StockCode, range: DayRange, now: KstTime, priority: Priority) -> BoxFuture<'_, Result<api::DayHistory<api::StockProgramDailyDay>, SourceError>> {
+        Box::pin(async move {
+            let today = now.kst_date();
+            if range.from() > today {
+                return Ok(api::DayHistory {
+                    symbol: api::SymbolCode(Symbol::Stock(code).as_wire()),
+                    from: api::KstDate(range.from()),
+                    to: api::KstDate(range.to()),
+                    coverage: api::RangeCoverage::WholeRange,
+                    days: Vec::new(),
+                    source: crate::api::Broker::Kiwoom,
+                    skipped_days: Vec::new(),
+                    undated_rows: Vec::new(),
+                    estimated_days: None,
+                });
+            }
+            let anchor = range.to().min(today);
+            self.walk(&StockProgramDaily::new(code, anchor), code, range, priority).await
+        })
     }
 }
 

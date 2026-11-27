@@ -416,6 +416,10 @@ impl OverviewSource for KisOverview {
             })
         })
     }
+
+    fn stock_program_daily(&self, _code: StockCode, _range: DayRange, _now: KstTime, _priority: Priority) -> BoxFuture<'_, Result<api::DayHistory<api::StockProgramDailyDay>, SourceError>> {
+        Box::pin(async move { Err(unsupported(OverviewFeature::StockProgramDaily)) })
+    }
 }
 
 #[derive(Default)]
