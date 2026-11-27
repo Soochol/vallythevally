@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::Router;
 use axum::extract::{Path, Query, State};
@@ -28,6 +29,7 @@ struct CachedProgramTrades {
     fetched_at: KstTime,
     points: Vec<api::ProgramTradePoint>,
     skipped_rows: u32,
+    truncated: bool,
 }
 
 impl CachedProgramTrades {
@@ -36,21 +38,29 @@ impl CachedProgramTrades {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CacheTicket {
+    generation: GenerationTicket,
+    epoch: u64,
+}
+
 pub struct ProgramTradeCache {
     entries: GenerationScoped<HashMap<StockCode, CachedProgramTrades>>,
+    epoch: AtomicU64,
 }
 
 impl ProgramTradeCache {
     pub fn with_generation(generation: SourceGeneration) -> Self {
-        Self { entries: GenerationScoped::new(generation) }
+        Self { entries: GenerationScoped::new(generation), epoch: AtomicU64::new(0) }
     }
 
     pub fn clear(&self) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
         self.entries.read(HashMap::clear);
     }
 
-    fn ticket(&self) -> GenerationTicket {
-        self.entries.ticket()
+    fn ticket(&self) -> CacheTicket {
+        CacheTicket { generation: self.entries.ticket(), epoch: self.epoch.load(Ordering::SeqCst) }
     }
 
     fn get(&self, stock: StockCode, today: KstDate, now: KstTime) -> Option<CachedProgramTrades> {
@@ -60,9 +70,12 @@ impl ProgramTradeCache {
         })
     }
 
-    fn insert(&self, started: GenerationTicket, stock: StockCode, entry: CachedProgramTrades) {
+    fn insert(&self, started: CacheTicket, stock: StockCode, entry: CachedProgramTrades) {
         let (today, now) = (entry.date, entry.fetched_at);
-        self.entries.keep(started, |entries| {
+        self.entries.keep(started.generation, |entries| {
+            if self.epoch.load(Ordering::SeqCst) != started.epoch {
+                return;
+            }
             entries.retain(|_, existing| existing.is_fresh(today, now));
             entries.insert(stock, entry);
         });
@@ -141,7 +154,7 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
     };
     let custom_pages = pages_param(&q)?;
     let max_pages = custom_pages.unwrap_or(DEFAULT_PROGRAM_MAX_PAGES);
-    let target_rows = custom_pages.is_none().then_some(DEFAULT_PROGRAM_LIMIT);
+    let target_rows = custom_pages.is_none().then_some(DEFAULT_PROGRAM_LIMIT + 1);
     let use_cache = custom_pages.is_none();
     let now = st.clock.now();
     let today = now.kst_date();
@@ -150,13 +163,13 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
         let listed = st.symbols.updates().borrow().as_ref().is_none_or(|dir| dir.get(Symbol::Stock(stock)).is_some());
         if listed && let Some((resolved_date, points)) = collected_program_fallback(&st, stock, today, &today_str, now).await {
             let date = (resolved_date != today_str).then_some(resolved_date);
-            return Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows: 0, date }));
+            return Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows: 0, date, truncated: None }));
         }
         return Err(err);
     }
     if use_cache {
         if let Some(points) = collected_today_program(&st, stock, today, &today_str, now).await {
-            return Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows: 0, date: None }));
+            return Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows: 0, date: None, truncated: None }));
         }
         if let Some(cached) = st.program_trades.get(stock, today, now) {
             return Ok(Json(api::ProgramTradeTimeline {
@@ -164,6 +177,7 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
                 points: cached.points,
                 skipped_rows: cached.skipped_rows,
                 date: None,
+                truncated: cached.truncated.then_some(true),
             }));
         }
     }
@@ -171,11 +185,11 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
     if let Err(source_error) = require(&st, Lookup::ProgramTrades, MarketFeature::ProgramTrades) {
         if let Some((resolved_date, points)) = collected_program_fallback(&st, stock, today, &today_str, now).await {
             let date = (resolved_date != today_str).then_some(resolved_date);
-            return Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows: 0, date }));
+            return Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows: 0, date, truncated: None }));
         }
         return Err(source_error);
     }
-    let (points, skipped_rows) = match walk_program_trades(st.source.as_ref(), stock, today, max_pages, target_rows).await {
+    let walk = match walk_program_trades(st.source.as_ref(), stock, today, max_pages, target_rows).await {
         Ok(result) => result,
         Err(SourceError::Failed(failure)) if failure.reason == api::ApiErrorReason::NotConnected => {
             if let Some((resolved_date, fallback_points)) = collected_program_fallback(&st, stock, today, &today_str, now).await {
@@ -185,42 +199,69 @@ async fn program_trades(State(st): State<Arc<AppState>>, Path(code): Path<String
                     points: fallback_points,
                     skipped_rows: 0,
                     date,
+                    truncated: None,
                 }));
             }
             return Err(Lookup::ProgramTrades.failure(SourceError::Failed(failure).into(), st.clock.now()));
         }
         Err(err) => return Err(Lookup::ProgramTrades.failure(err.into(), st.clock.now())),
     };
-    if !points.is_empty() {
+    if !walk.points.is_empty() {
         if use_cache {
             st.program_trades.insert(
                 cache_ticket,
                 stock,
-                CachedProgramTrades { date: today, fetched_at: now, points: points.clone(), skipped_rows },
+                CachedProgramTrades {
+                    date: today,
+                    fetched_at: now,
+                    points: walk.points.clone(),
+                    skipped_rows: walk.skipped_rows,
+                    truncated: walk.truncated,
+                },
             );
         }
-        return Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows, date: None }));
+        return Ok(Json(api::ProgramTradeTimeline {
+            symbol: symbol_code(stock),
+            points: walk.points,
+            skipped_rows: walk.skipped_rows,
+            date: None,
+            truncated: walk.truncated.then_some(true),
+        }));
     }
     if let Some((resolved_date, fallback_points)) = collected_program_fallback(&st, stock, today, &today_str, now).await {
         let date = (resolved_date != today_str).then_some(resolved_date);
         return Ok(Json(api::ProgramTradeTimeline {
             symbol: symbol_code(stock),
             points: fallback_points,
-            skipped_rows,
+            skipped_rows: walk.skipped_rows,
             date,
+            truncated: None,
         }));
     }
     if st.source.supports_past_program_trades()
-        && let Some((resolved_date, fallback_points, fallback_skipped)) = past_program_trades_fallback(st.source.as_ref(), stock, today, max_pages, target_rows).await
+        && let Some((resolved_date, fallback_walk)) = past_program_trades_fallback(st.source.as_ref(), stock, today, max_pages, target_rows).await
     {
         return Ok(Json(api::ProgramTradeTimeline {
             symbol: symbol_code(stock),
-            points: fallback_points,
-            skipped_rows: fallback_skipped,
+            points: fallback_walk.points,
+            skipped_rows: fallback_walk.skipped_rows,
             date: Some(resolved_date),
+            truncated: fallback_walk.truncated.then_some(true),
         }));
     }
-    Ok(Json(api::ProgramTradeTimeline { symbol: symbol_code(stock), points, skipped_rows, date: None }))
+    Ok(Json(api::ProgramTradeTimeline {
+        symbol: symbol_code(stock),
+        points: walk.points,
+        skipped_rows: walk.skipped_rows,
+        date: None,
+        truncated: None,
+    }))
+}
+
+struct ProgramWalk {
+    points: Vec<api::ProgramTradePoint>,
+    skipped_rows: u32,
+    truncated: bool,
 }
 
 async fn walk_program_trades(
@@ -229,28 +270,35 @@ async fn walk_program_trades(
     date: KstDate,
     max_pages: usize,
     target_rows: Option<usize>,
-) -> Result<(Vec<api::ProgramTradePoint>, u32), SourceError> {
-    let (mut points, mut skipped_rows) = (Vec::new(), 0);
+) -> Result<ProgramWalk, SourceError> {
+    let (mut points, mut skipped_rows, mut truncated) = (Vec::new(), 0, false);
     let mut seen_keys = HashSet::new();
     let mut cont: Option<Cursor> = None;
-    for _ in 0..max_pages {
+    for page_index in 0..max_pages {
         let priority = if cont.is_none() { Priority::Screen } else { Priority::ScreenBulk };
         let page = source.program_trades_page(stock, date, cont.clone(), priority).await?;
         points.extend(page.rows);
         skipped_rows += page.skipped;
+        let has_more = page.next.is_some();
         if target_rows.is_some_and(|limit| points.len() >= limit) {
+            truncated = has_more;
             break;
         }
         match page.next {
+            Some(_) if page_index + 1 == max_pages => {
+                truncated = true;
+                break;
+            }
             Some(next) if seen_keys.insert(next.clone()) => cont = Some(next),
             Some(_) => {
+                truncated = true;
                 tracing::warn!(feature = MarketFeature::ProgramTrades.label(), code = stock.as_str(), "연속조회 키가 되풀이돼 여기서 멈춥니다");
                 break;
             }
             None => break,
         }
     }
-    Ok((points, skipped_rows))
+    Ok(ProgramWalk { points, skipped_rows, truncated })
 }
 
 async fn past_program_trades_fallback(
@@ -259,7 +307,7 @@ async fn past_program_trades_fallback(
     today: KstDate,
     max_pages: usize,
     target_rows: Option<usize>,
-) -> Option<(String, Vec<api::ProgramTradePoint>, u32)> {
+) -> Option<(String, ProgramWalk)> {
     let mut candidate = today;
     let mut checked = 0usize;
     while checked < MAX_PAST_PROGRAM_DAYS {
@@ -269,7 +317,7 @@ async fn past_program_trades_fallback(
         }
         checked += 1;
         match walk_program_trades(source, stock, candidate, max_pages, target_rows).await {
-            Ok((points, skipped)) if !points.is_empty() => return Some((candidate.yyyymmdd(), points, skipped)),
+            Ok(walk) if !walk.points.is_empty() => return Some((candidate.yyyymmdd(), walk)),
             Ok(_) => {}
             Err(reason) => {
                 tracing::warn!(
@@ -294,7 +342,10 @@ async fn collected_today_program(
 ) -> Option<Vec<api::ProgramTradePoint>> {
     let paths = st.collector_paths.snapshot();
     match st.collected.program_day(paths, stock, today, today_str, None, now).await {
-        Ok(slice) if slice.source != api::BrokerDaySource::None && !slice.snapshots.is_empty() => {
+        Ok(slice)
+            if !slice.snapshots.is_empty()
+                && (slice.source == api::BrokerDaySource::Store || (slice.source == api::BrokerDaySource::Flow && slice.live)) =>
+        {
             Some(slice.snapshots.into_iter().map(collected_program_point).collect())
         }
         Ok(_) => None,

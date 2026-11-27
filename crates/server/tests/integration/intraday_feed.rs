@@ -11,13 +11,14 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use server::app::{ApplicationInputs, application};
 use server::clock::{Clock, kst};
+use server::collected::kind::{CollectedKind, ProgramFlow};
 use server::config::Secret;
 use server::http::{AppState, router};
 use server::intraday_feed::DEFAULT_PROGRAM_LIMIT;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
 use server::kiwoom::stream::KiwoomStream;
-use server::shared_data::CollectorPaths;
+use server::shared_data::{CollectorPaths, FlowDescription, FlowRow, FlowWriter, flow_links_path, flow_path};
 use server::symbols::{Directory, SymbolDirectory};
 use support::{ScriptedReply, ScriptedTransport, fixture};
 use tower::ServiceExt;
@@ -373,6 +374,7 @@ async fn default_program_trades_stop_at_three_pages_without_waiting_for_window()
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["points"].as_array().unwrap().len(), 6);
     assert_eq!(body["skippedRows"], 3);
+    assert_eq!(body["truncated"], json!(true));
     assert_eq!(
         f.calls("ka90008").iter().map(|c| c.next_key.clone()).collect::<Vec<_>>(),
         [None, Some("PAGE2".to_owned()), Some("PAGE3".to_owned())]
@@ -382,12 +384,84 @@ async fn default_program_trades_stop_at_three_pages_without_waiting_for_window()
 #[tokio::test]
 async fn default_program_trades_stop_after_one_page_when_first_page_reaches_default_limit() {
     let f = Fixture::start(true).await;
-    f.fake.respond_with("ka90008", 200, program_page_with_rows(DEFAULT_PROGRAM_LIMIT, Some("PAGE2")));
+    let first_page_rows = DEFAULT_PROGRAM_LIMIT + 1;
+    f.fake.respond_with("ka90008", 200, program_page_with_rows(first_page_rows, Some("PAGE2")));
     f.fake.respond_with_for_key("ka90008", "PAGE2", 200, fixture("ka90008_005930_AL_p2"));
     let (status, body) = f.get("/api/symbols/005930/program-trades").await;
     assert_eq!(status, 200, "{body}");
-    assert_eq!(body["points"].as_array().unwrap().len(), DEFAULT_PROGRAM_LIMIT);
+    assert_eq!(body["points"].as_array().unwrap().len(), first_page_rows);
+    assert_eq!(body["truncated"], json!(true));
     assert_eq!(f.calls("ka90008").iter().map(|c| c.next_key.clone()).collect::<Vec<_>>(), [None]);
+}
+
+#[tokio::test]
+async fn program_trades_clear_invalidates_inflight_cache_insert() {
+    let f = Fixture::start(true).await;
+    let reply = |net_qty: i64| {
+        json!({
+            "stk_tm_prm_trde_trnsn": [{
+                "tm": "090100",
+                "cur_prc": "70000",
+                "prm_sell_qty": "10",
+                "prm_buy_qty": "30",
+                "prm_netprps_qty": net_qty.to_string(),
+                "prm_sell_amt": "1",
+                "prm_buy_amt": "2",
+                "prm_netprps_amt": "1",
+                "stex_tp": "통합"
+            }],
+            "return_code": 0,
+            "return_msg": "ok"
+        })
+    };
+    f.fake.respond_with("ka90008", 200, reply(20));
+    let held = f.fake.hold("ka90008", |call| call.api_id == "ka90008");
+    let inflight = f.get_in_background("/api/symbols/005930/program-trades");
+    held.arrived().await;
+    f.state.program_trades.clear();
+    f.fake.respond_with("ka90008", 200, reply(99));
+    held.release();
+    let (status, first) = inflight.await.unwrap();
+    assert_eq!((status, first["points"][0]["netQuantity"].as_i64()), (200, Some(20)));
+    let (status, after_reset) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!((status, after_reset["points"][0]["netQuantity"].as_i64()), (200, Some(99)));
+    assert_eq!(f.calls("ka90008").len(), 2);
+}
+
+#[tokio::test]
+async fn program_trades_fall_through_to_source_when_collector_today_flow_is_not_live() {
+    let f = Fixture::start_with_collector(true, true).await;
+    let shared_dir = f.state.collector_paths.snapshot().shared_dir().unwrap().to_path_buf();
+    let at_open = kst(KstDate::new(2026, 11, 9).unwrap(), 9, 1, 0).unix() * 1000;
+    let down_at = kst(KstDate::new(2026, 11, 9).unwrap(), 9, 5, 0).unix() * 1000;
+    let path = flow_path(&shared_dir, "20261109", ProgramFlow::TYPE_CODE, "005930", "collect-01");
+    FlowWriter::open(&path, FlowDescription::new(ProgramFlow::TYPE_CODE, "005930", "20261109", "collect-01", ProgramFlow::fids()))
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_open,
+            values: vec![
+                Some("090100".to_owned()),
+                Some("70000".to_owned()),
+                Some("100".to_owned()),
+                Some("7".to_owned()),
+                Some("200".to_owned()),
+                Some("14".to_owned()),
+                Some("100".to_owned()),
+                Some("+10".to_owned()),
+                Some("+7".to_owned()),
+                Some("+1".to_owned()),
+            ],
+        }])
+        .unwrap();
+    let links_path = flow_links_path(&shared_dir, "20261109", "collect-01");
+    std::fs::create_dir_all(links_path.parent().unwrap()).unwrap();
+    std::fs::write(&links_path, format!("{}\n", json!({"t": down_at, "event": "down"}))).unwrap();
+    f.fake.respond_with("ka90008", 200, fixture("ka90008_005930_AL_p2"));
+
+    let (status, body) = f.get("/api/symbols/005930/program-trades").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["points"][0]["netQuantity"], json!(20));
+    assert_eq!(f.calls("ka90008").len(), 1);
 }
 
 #[tokio::test]

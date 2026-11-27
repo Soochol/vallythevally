@@ -10,7 +10,7 @@ const status = (patch: Partial<KiwoomLinkStatus>): KiwoomLinkStatus => ({
   retryAt: null, needsAcknowledgement: false, step: null, tokenExpiresAt: null, realtimeRegistered: null, symbolCount: null, atStart: "connects", ...patch,
 });
 
-beforeEach(() => useKiwoomLinkStore.setState({ status: null, kiwoom: null, source: null, pushes: 0, sourcePushes: 0 }));
+beforeEach(() => useKiwoomLinkStore.setState({ status: null, kiwoom: null, source: null, pushes: 0, sourcePushes: 0, sourceRevision: 0 }));
 
 describe("키움 연결 상태 저장소", () => {
   test("WebSocket의 kiwoom_link 메시지가 상태를 바꾼다", () => {
@@ -83,5 +83,15 @@ describe("시세 공급원 상태", () => {
     socket.start();
     on!.message(JSON.stringify({ type: "market_source", status: kisSource({ state: "disconnected" }) }));
     expect(useKiwoomLinkStore.getState().source).toMatchObject({ broker: "kis", state: "disconnected" });
+  });
+  test("시세 공급원이 실제로 바뀔 때만 sourceRevision이 올라가고 같은 공급원의 상태 변경에는 유지된다", () => {
+    receiveMarketSourcePush(kisSource({ broker: "kiwoom", keyId: "k1", state: "connecting" }));
+    expect(useKiwoomLinkStore.getState().sourceRevision).toBe(0);
+    receiveMarketSourcePush(kisSource({ broker: "kiwoom", keyId: "k1", state: "connected" }));
+    expect(useKiwoomLinkStore.getState().sourceRevision).toBe(0);
+    receiveMarketSourcePush(kisSource({ broker: "kis", keyId: "kis1", state: "connected" }));
+    expect(useKiwoomLinkStore.getState().sourceRevision).toBe(1);
+    receiveMarketSourcePush(kisSource({ broker: "kiwoom", keyId: "k1", state: "connected" }));
+    expect(useKiwoomLinkStore.getState().sourceRevision).toBe(2);
   });
 });
