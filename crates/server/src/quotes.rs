@@ -101,9 +101,9 @@ pub fn base_centi(price: Price, change_centi: i64) -> Option<u64> {
     u64::try_from(price.centi() as i64 - change_centi).ok().filter(|b| *b > 0)
 }
 
-pub fn realtime(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, volume: u64, at: KstTime) -> api::Quote {
+pub fn realtime(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, volume: u64, traded_million_won: Option<u64>, at: KstTime) -> api::Quote {
     let venue = matches!(symbol, Symbol::Stock(_)).then_some(venue);
-    quote(symbol, venue, price.centi(), base_centi, volume, at.unix(), api::QuoteSource::Realtime)
+    api::Quote { traded_million_won, ..quote(symbol, venue, price.centi(), base_centi, volume, at.unix(), api::QuoteSource::Realtime) }
 }
 
 pub fn expected(symbol: Symbol, venue: Venue, price: Price, base_centi: u64, volume: u64, at: KstTime) -> api::Quote {
@@ -244,7 +244,7 @@ mod tests {
         let at = kst(KstDate::new(2026, 11, 9).unwrap(), 10, 0, 1);
         let price = Price::from_centi(19_340_000).unwrap();
         let base = base_centi(price, -810_000).unwrap();
-        let q = realtime(symbol, Venue::Combined, price, base, 56_147_847, at);
+        let q = realtime(symbol, Venue::Combined, price, base, 56_147_847, None, at);
         assert_eq!(q, quote(symbol, Some(Venue::Combined), 19_340_000, 20_150_000, 56_147_847, at.unix(), api::QuoteSource::Realtime));
         assert_eq!((q.price, q.change, q.volume, q.source, q.venue), (193_400.0, -8_100.0, 56_147_847, api::QuoteSource::Realtime, Some(api::Venue::Combined)));
         assert!((q.change_rate - -4.0198).abs() < 1e-3, "{}", q.change_rate);
