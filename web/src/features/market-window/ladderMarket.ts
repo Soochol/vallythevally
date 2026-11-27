@@ -92,7 +92,7 @@ export function resolveLadderMarket(input: LadderMarketInput): ResolvedLadderMar
   const expectedVi = viForExpected(venue, vi, nxtVi);
   const activeVi = expectedVi?.active === true ? expectedVi : null;
   const expected = replay.kind === "live" && liveView !== null ? visibleExpected(liveView.t, nowSeconds, liveView.expected, expectedVi, venue, nxtEnabled) : null;
-  const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(afterHours?.totals ?? null, nowSeconds, venue));
+  const liveTotals = stripTotals(liveView && { ask: liveView.totalAsk, bid: liveView.totalBid }, visibleAfterHours(afterHours?.totals ?? null, nowSeconds, venue, nxtEnabled));
   const totals: StripTotals =
     replay.kind === "live"
       ? liveTotals
