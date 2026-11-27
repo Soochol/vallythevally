@@ -38,7 +38,7 @@ import { useIndicatorCommand, useIndicatorDraft, type CandidateRow, type EditorA
 
 export function IndicatorCommand() {
   const dialog = useSelectionStore((s) => s.dialog);
-  return dialog?.kind === "indicatorCommand" ? <IndicatorCommandBody key={`${dialog.cellId}-${dialog.mode}-${dialog.indicatorId}`} cellId={dialog.cellId} initialMode={dialog.mode} initialIndicator={dialog.indicatorId} /> : null;
+  return dialog?.kind === "indicatorCommand" ? <IndicatorCommandBody key={`${dialog.cellId}-${dialog.indicatorId}`} cellId={dialog.cellId} initialMode={dialog.mode} initialIndicator={dialog.indicatorId} /> : null;
 }
 
 function specSummary(spec: IndicatorConfig["spec"]): string {
@@ -104,10 +104,17 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
     setCategory("all");
     inputRef.current?.focus();
   };
+  useEffect(() => {
+    const nextSection = initialMode === "settings" ? "settings" : initialMode === "compare" ? "compare" : "indicators";
+    setPanelSection(nextSection);
+    if (initialMode !== "settings") command.show(initialMode);
+  }, [initialMode]);
+
   const switchSection = (next: "indicators" | "compare" | "settings") => {
     setPanelSection(next);
-    if (next === "compare") command.show("compare");
-    else if (next === "indicators") command.show(mode === "compare" ? defaultIndicatorMode(cellId) : mode);
+    const nextMode: ChartPanelMode = next === "settings" ? "settings" : next === "compare" ? "compare" : mode === "compare" ? defaultIndicatorMode(cellId) : mode;
+    useSelectionStore.getState().setIndicatorDialogMode(nextMode);
+    if (nextMode !== "settings") command.show(nextMode);
   };
   const startDrag = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || (e.target instanceof Element && e.target.closest("button, input"))) return;

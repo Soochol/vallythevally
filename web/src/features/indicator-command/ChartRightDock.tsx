@@ -9,10 +9,11 @@ import { ChartSettingsSections } from "../chart-settings/ChartSettingsDialog";
 import { CloseIcon, EyeIcon, SearchIcon, SlidersIcon } from "../icons";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
+import { isMaConfig, MaGroupEditor } from "../indicator-dialog/MaGroupEditor";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { EmptyState } from "../overlay/State";
 import { CompareSection } from "./CompareSection";
-import { ADD_CATEGORIES, type AddCategory, groupDialogRows } from "./model";
+import { ADD_CATEGORIES, type AddCategory, groupDialogRows, MA_GROUP_KEY } from "./model";
 import { useIndicatorCommand } from "./useIndicatorCommand";
 
 export const CHART_DOCK_MIN_WIDTH = 640;
@@ -39,11 +40,26 @@ function DockDetailEditor({ cellId, config, onBack }: { cellId: WindowId; config
   );
 }
 
+function DockMaGroupDetail({ cellId, onBack }: { cellId: WindowId; onBack(): void }) {
+  const maLines = useLayoutStore((s) => chartWindows(s.layout).find((c) => c.id === cellId)?.chartSettings.indicators.filter(isMaConfig) ?? []);
+  return (
+    <div className="cd-detail">
+      <div className="cd-detail-head">
+        <button type="button" className="cd-back-btn" onClick={onBack}>← 지표 목록</button>
+      </div>
+      <h3 className="text-m font-semibold">이동평균선 ({maLines.length})</h3>
+      <MaGroupEditor cellId={cellId} />
+    </div>
+  );
+}
+
 export function ChartRightDock({ cellId, hostRef }: { cellId: WindowId; hostRef: React.RefObject<HTMLElement | null> }) {
   const dock = useSelectionStore((s) => s.chartDock);
   const active = dock?.cellId === cellId ? dock : null;
   const [category, setCategory] = useState<AddCategory>("all");
   const [detailId, setDetailId] = useState<string | null>(null);
+  const detailIdRef = useRef<string | null>(null);
+  detailIdRef.current = detailId;
   const inputRef = useRef<HTMLInputElement>(null);
   const ids = useId();
 
@@ -59,7 +75,8 @@ export function ChartRightDock({ cellId, hostRef }: { cellId: WindowId; hostRef:
     const checkWidth = () => {
       if (el.clientWidth > 0 && el.clientWidth < CHART_DOCK_MIN_WIDTH) {
         const sel = useSelectionStore.getState();
-        sel.openIndicatorDialog(cellId, active.mode, detailId);
+        const fallbackId = detailIdRef.current === MA_GROUP_KEY ? null : detailIdRef.current;
+        sel.openIndicatorDialog(cellId, active.mode, fallbackId);
         sel.showToast("차트 폭이 640px 미만이라 가운데 창으로 열었습니다");
       }
     };
@@ -67,7 +84,7 @@ export function ChartRightDock({ cellId, hostRef }: { cellId: WindowId; hostRef:
     const observer = new ResizeObserver(checkWidth);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [active, cellId, detailId, hostRef]);
+  }, [active?.cellId, active?.mode, cellId, hostRef]);
 
   if (!active) return null;
 
@@ -85,25 +102,32 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
   ids: string;
 }) {
   const cmdMode: IndicatorCommandMode = mode === "settings" ? "current" : mode;
-  const command = useIndicatorCommand(cellId, cmdMode, detailId);
+  const command = useIndicatorCommand(cellId, cmdMode, detailId === MA_GROUP_KEY ? null : detailId);
   const { cell, input, rows: rawRows, compareButton } = command;
+
+  useEffect(() => {
+    if (mode !== "settings") command.show(mode);
+  }, [mode]);
+
   const hasQuery = input.trim() !== "";
-  const rows = groupDialogRows(rawRows, cmdMode, category, hasQuery);
-  const detailConfig = detailId ? cell.chartSettings.indicators.find((i) => i.id === detailId) ?? null : null;
+  const rows = groupDialogRows(rawRows, command.mode, category, hasQuery);
+  const isMaDetail = detailId === MA_GROUP_KEY;
+  const detailConfig = detailId && !isMaDetail ? cell.chartSettings.indicators.find((i) => i.id === detailId) ?? null : null;
+  const showingDetail = isMaDetail || detailConfig !== null;
   const section = mode === "settings" ? "settings" : mode === "compare" ? "compare" : "indicators";
 
   const switchSection = (next: "indicators" | "compare" | "settings") => {
     setDetailId(null);
     const nextMode: ChartPanelMode = next === "indicators" ? defaultIndicatorMode(cellId) : next;
     useSelectionStore.getState().openChartDock(cellId, nextMode, null);
-    if (next !== "settings") command.show(nextMode as IndicatorCommandMode);
+    if (nextMode !== "settings") command.show(nextMode);
   };
 
   return (
     <aside data-chart-control="" aria-label="차트 우측 설정 패널" className="cd-drawer" onKeyDown={(e) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        if (detailId) setDetailId(null);
+        if (showingDetail) setDetailId(null);
         else useSelectionStore.getState().closeChartDock();
       }
     }}>
@@ -113,7 +137,7 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
           <button type="button" aria-pressed={section === "compare"} onClick={() => switchSection("compare")}>비교</button>
           <button type="button" aria-pressed={section === "settings"} onClick={() => switchSection("settings")}>설정</button>
         </div>
-        <button type="button" className="cd-mode-btn" aria-label="가운데 모달로 전환" onClick={() => useSelectionStore.getState().openIndicatorDialog(cellId, mode, detailId)}>모달</button>
+        <button type="button" className="cd-mode-btn" aria-label="가운데 모달로 전환" onClick={() => useSelectionStore.getState().openIndicatorDialog(cellId, mode, isMaDetail ? null : detailId)}>모달</button>
         <button type="button" className="icon-btn" aria-label="닫기" onClick={() => useSelectionStore.getState().closeChartDock()}><CloseIcon size={15} /></button>
       </header>
 
@@ -123,7 +147,7 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
         </div>
       ) : (
         <div className="cd-slide-viewport">
-          <div className="cd-slide-track" data-detail={detailConfig ? "true" : undefined}>
+          <div className="cd-slide-track" data-detail={showingDetail ? "true" : undefined}>
             <div className="cd-slide-page">
               <label className="ic-search cd-search">
                 <SearchIcon size={14} />
@@ -164,20 +188,19 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
                     );
                   }
                   if (row.kind === "maGroup") {
-                    const first = row.lines[0];
                     return (
                       <li key={row.key} className="cd-row">
-                        <button type="button" className="cd-row-main" onClick={() => first && setDetailId(first.id)}>
+                        <button type="button" className="cd-row-main" onClick={() => setDetailId(MA_GROUP_KEY)}>
                           <span className="ic-row-title">이동평균선 ({row.lines.length})</span>
                         </button>
-                        <button type="button" className="icon-btn size-6" aria-label="이동평균선 세부 설정" onClick={() => first && setDetailId(first.id)}><SlidersIcon size={13} /></button>
+                        <button type="button" className="icon-btn size-6" aria-label="이동평균선 세부 설정" onClick={() => setDetailId(MA_GROUP_KEY)}><SlidersIcon size={13} /></button>
                       </li>
                     );
                   }
                   if (row.kind === "candidate") {
                     return (
                       <li key={row.key} className="cd-row">
-                        <button type="button" className="cd-row-main" onClick={() => { command.selectKey(row.key); command.submit(() => {}); }}>
+                        <button type="button" className="cd-row-main" onClick={() => useLayoutStore.getState().addIndicator(cellId, KINDS[row.candidate.kind].defaults, { colors: [], width: 1 })}>
                           <span className="ic-row-title">{row.candidate.label}</span>
                         </button>
                       </li>
@@ -198,6 +221,7 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
               </ul>
             </div>
             <div className="cd-slide-page">
+              {isMaDetail && <DockMaGroupDetail cellId={cellId} onBack={() => setDetailId(null)} />}
               {detailConfig && <DockDetailEditor key={detailConfig.id} cellId={cellId} config={detailConfig} onBack={() => setDetailId(null)} />}
             </div>
           </div>

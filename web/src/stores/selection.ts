@@ -47,6 +47,7 @@ interface SelectionState {
   openSearch(purpose?: SearchPurpose, putTarget?: PutTarget): void;
   setPutTarget(putTarget: PutTarget | null): void;
   openIndicatorDialog(cellId: WindowId, mode: ChartPanelMode, indicatorId: string | null): void;
+  setIndicatorDialogMode(mode: ChartPanelMode): void;
   openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
   openChartDock(cellId: WindowId, mode: ChartPanelMode, indicatorId: string | null): void;
   closeChartDock(): void;
@@ -81,6 +82,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   openSearch: (purpose = "open", putTarget) => set({ dialog: { kind: "search", purpose }, ...(putTarget ? { putTarget } : {}) }),
   setPutTarget: (putTarget) => set({ putTarget }),
   openIndicatorDialog: (cellId, mode, indicatorId) => set({ dialog: { kind: "indicatorCommand", cellId, mode, indicatorId }, chartDock: null }),
+  setIndicatorDialogMode: (mode) => set((s) => (s.dialog?.kind === "indicatorCommand" ? { dialog: { ...s.dialog, mode } } : s)),
   openIndicatorInspector: (cellId, mode, indicatorId) => {
     set({ dialog: null, chartDock: null, activeCell: cellId, inspector: { cellId, mode, indicatorId } });
     useLayoutStore.getState().showWindow("indicators");
