@@ -165,7 +165,7 @@ test("지표와 드로잉에서 연 색 창의 제목이 같다", async ({ page,
   await open(page, { width: 1440, height: 900 });
   await indicatorButton(page).click();
   const command = commandDialog(page);
-  await command.getByRole("tab", { name: "지표 추가", exact: true }).click();
+  await command.getByRole("option", { name: "이동평균 단순 20 추가 후보", exact: true }).click();
   await command.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
   await expect(colorWindow(page)).toBeVisible();
   const indicatorTitle = await colorWindow(page).getByRole("heading").first().textContent();

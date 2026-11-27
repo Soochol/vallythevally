@@ -145,7 +145,6 @@ test("일봉에서 외국인·기관·프로그램 순매수를 추가하고 단
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "외국인 순매수 추가 후보", exact: true }).click();
   await dialog.getByRole("button", { name: "외국인 순매수 추가", exact: true }).click();
   await dialog.getByRole("option", { name: "기관 순매수 추가 후보", exact: true }).click();
