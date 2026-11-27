@@ -225,10 +225,6 @@ impl DailyProgramCache {
             entry.days.range(range.from()..=range.to()).map(|(_, day)| *day).collect()
         })
     }
-
-    pub fn has_cached_days(&self, stock: StockCode) -> bool {
-        self.store.read(|store| store.entries.get(&stock).is_some_and(|entry| !entry.days.is_empty()))
-    }
 }
 
 #[cfg(test)]
@@ -333,7 +329,7 @@ mod tests {
             today,
             t0,
         );
-        assert!(cache.has_cached_days(code));
+        assert_eq!(cache.rows_in_range(code, initial).len(), 2);
         assert!(cache.missing_ranges(code, range(day(2026, 11, 18), day(2026, 11, 30)), today, kst(today, 10, 0, 10)).is_empty());
 
         let pan_left = range(day(2026, 11, 1), today);
@@ -357,7 +353,7 @@ mod tests {
 
         let stale_ticket = cache.ticket();
         cache.clear();
-        assert!(!cache.has_cached_days(code));
+        assert!(cache.rows_in_range(code, initial).is_empty());
         cache.insert_history(
             stale_ticket,
             code,
@@ -366,7 +362,7 @@ mod tests {
             today,
             kst(today, 10, 0, 11),
         );
-        assert!(!cache.has_cached_days(code));
+        assert!(cache.rows_in_range(code, initial).is_empty());
 
         let before_switch = cache.ticket();
         cache.insert_history(
@@ -377,9 +373,9 @@ mod tests {
             today,
             kst(today, 10, 0, 12),
         );
-        assert!(cache.has_cached_days(code));
+        assert_eq!(cache.rows_in_range(code, initial).len(), 1);
         generation.advance();
-        assert!(!cache.has_cached_days(code));
+        assert!(cache.rows_in_range(code, initial).is_empty());
         cache.insert_history(
             before_switch,
             code,
@@ -388,6 +384,6 @@ mod tests {
             today,
             kst(today, 10, 0, 13),
         );
-        assert!(!cache.has_cached_days(code));
+        assert!(cache.rows_in_range(code, initial).is_empty());
     }
 }

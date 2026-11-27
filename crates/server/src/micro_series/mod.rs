@@ -1377,6 +1377,15 @@ fn is_fallback_source_error(err: &SourceError) -> bool {
     )
 }
 
+struct DailyFallbackQuery {
+    paths: CollectorPaths,
+    stock: StockCode,
+    period: Period,
+    from_date: Option<KstDate>,
+    to_date: Option<KstDate>,
+    now: KstTime,
+}
+
 async fn program_series_daily(
     st: &AppState,
     cache: &MicroSeriesCache,
@@ -1413,7 +1422,7 @@ async fn program_series_daily(
                         st.daily_program.mark_exhausted(started, stock, fetch_range, today, now);
                     }
                     Err(err) if is_fallback_source_error(&err) => {
-                        return program_series_daily_fallback(st, cache, paths, paths_active, stock, period, from_date, to_date, now, today).await;
+                        return program_series_daily_fallback(st, cache, DailyFallbackQuery { paths, stock, period, from_date, to_date, now }).await;
                     }
                     Err(err) => {
                         return Err(Lookup::ProgramDaily.failure(BarError::from(err), now));
@@ -1453,22 +1462,17 @@ async fn program_series_daily(
             points,
         }));
     }
-    program_series_daily_fallback(st, cache, paths, paths_active, stock, period, from_date, to_date, now, today).await
+    program_series_daily_fallback(st, cache, DailyFallbackQuery { paths, stock, period, from_date, to_date, now }).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn program_series_daily_fallback(
     st: &AppState,
     cache: &MicroSeriesCache,
-    paths: CollectorPaths,
-    paths_active: bool,
-    stock: StockCode,
-    period: Period,
-    from_date: Option<KstDate>,
-    to_date: Option<KstDate>,
-    now: KstTime,
-    today: KstDate,
+    query: DailyFallbackQuery,
 ) -> Result<Json<ProgramSeriesPage>, ApiFailure> {
+    let DailyFallbackQuery { paths, stock, period, from_date, to_date, now } = query;
+    let paths_active = paths_enabled(&paths);
+    let today = now.kst_date();
     let daily_micro_configured = st.screener.has_daily_micro_dir();
     let (has_any_daily_micro, micro_rows) = st
         .screener
