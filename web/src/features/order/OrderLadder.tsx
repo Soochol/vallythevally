@@ -48,6 +48,7 @@ interface Props {
   readonly drag: OrderDrag;
   readonly rowSlots?: LadderRowSlots;
   readonly expectedPrice?: number | null;
+  readonly headerOverlay?: ReactNode;
 }
 
 type MenuState = { readonly x: number; readonly y: number; readonly group: PriceKey | null };
@@ -158,7 +159,7 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyFull = false, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice, headerOverlay }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
@@ -264,7 +265,7 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
         if (resolved !== null) actions.place(resolved.side, resolved.price);
       }}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
-      <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />
+      {headerOverlay ?? <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />}
       {exploring
         ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * rowHeightPx, paddingBottom: (rowCount - range.end) * rowHeightPx }}>{ladderView}</div>
         : ladderView}
