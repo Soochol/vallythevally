@@ -158,6 +158,12 @@ html.dock-dragging, html.dock-dragging * { cursor:grabbing !important; user-sele
 @container (width < 40rem) { .canvas-kind-dock { display:none; } .canvas-kind-fold { display:block; } }
 .layout-mode-control { display:flex; flex-direction:column; gap:var(--s3); margin-top:var(--s1); padding:var(--s3); border-top:var(--size-1) solid var(--line); color:var(--text-2); font-size:var(--fs-s); }
 .layout-mode-segments { width:100%; background:var(--bg); }
+.symbol-drag-chip { position:fixed; left:0; top:0; z-index:110; display:inline-flex; align-items:center; gap:var(--s2); padding:var(--size-4) var(--size-10); border:var(--size-1) solid var(--accent); border-radius:var(--r-pill); background:var(--overlay); box-shadow:var(--shadow-s); color:var(--text); font-size:var(--fs-s); font-weight:600; white-space:nowrap; pointer-events:none; will-change:transform; }
+.symbol-drag-chip-code { color:var(--text-2); font-size:var(--fs-xs); font-weight:500; font-variant-numeric:tabular-nums; }
+.dock-group[data-symbol-drop-active], .window-frame[data-symbol-drop-active] { border-color:var(--accent); box-shadow:inset 0 0 0 var(--size-2) var(--accent); }
+.dock-tab-group[data-symbol-drop-target] { border-radius:var(--r-m); background:var(--accent-soft); box-shadow:inset 0 0 0 var(--size-1) var(--accent); color:var(--accent); }
+.symbol-drop-overlay { position:absolute; inset:var(--size-34) 0 0 0; z-index:30; display:grid; place-items:center; background:color-mix(in srgb,var(--accent) 10%,transparent); pointer-events:none; }
+.symbol-drop-badge { padding:var(--size-6) var(--size-12); border:var(--size-1) solid var(--accent); border-radius:var(--r-pill); background:var(--overlay); box-shadow:var(--shadow-s); color:var(--text); font-size:var(--fs-s); font-weight:600; white-space:nowrap; }
 .layout-mode-segments .ui-seg-item { flex:1; }
 .dock-floats { position:absolute; inset:0; z-index:20; pointer-events:none; isolation:isolate; }
 .dock-floats .window-frame { pointer-events:auto; background:var(--surface); box-shadow:var(--shadow-s); }

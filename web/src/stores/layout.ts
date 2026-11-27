@@ -230,6 +230,7 @@ interface LayoutState {
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbolToLink(link: LinkColor | null, activeCell: WindowId, target: SymbolTarget): SymbolChange;
+  dropSymbolOnWindow(windowId: WindowId, target: SymbolTarget): SymbolChange;
   setLink(window: WindowId, link: LinkColor | null): void;
   setWindowList(window: WindowId, list: string | null): void;
   setWindowScreen(window: WindowId, screen: string | null): void;
@@ -524,6 +525,25 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       const { layout } = get();
       const charts = link === null ? [] : chartWindows(layout).filter((w) => w.link === link);
       return openIn(charts.length ? charts : linkedCharts(layout, activeCell), target);
+    },
+    dropSymbolOnWindow: (id, target) => {
+      const { layout } = get();
+      const win = layout.windows.find((w) => w.id === id);
+      if (!win) return { changed: [], notice: null };
+      if (isChartWindow(win)) {
+        if (win.link !== null) {
+          patchWindows((w) => (w.id === id && isChartWindow(w) ? { ...w, link: null } : w));
+        }
+        const detached = chartWindows(get().layout).find((w) => w.id === id);
+        return detached ? openIn([detached], target) : { changed: [], notice: null };
+      }
+      if (isPinnableWindow(win)) {
+        if (isIndexCode(target.code)) return { changed: [], notice: null };
+        if (win.symbol === target.code) return { changed: [], notice: null };
+        patchWindows((w) => (w.id === id && isPinnableWindow(w) ? withOptional(w, "symbol", target.code) : w));
+        return { changed: [id], notice: null };
+      }
+      return { changed: [], notice: null };
     },
     setLink: (id, link) => {
       set((s) => {

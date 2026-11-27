@@ -23,6 +23,7 @@ import { DockFloats } from "./DockFloats";
 import { DockTabGhost } from "./DockTabGhost";
 import { DockGroup } from "./DockGroup";
 import { DockTabMenu } from "./DockTabMenu";
+import { SymbolDragOverlay } from "./SymbolDragOverlay";
 import { floatPanelId, useDockInteraction } from "./dockInteraction";
 import { useDockMaximize } from "./useDockMaximize";
 import { WindowHost } from "./WindowHost";
@@ -111,6 +112,7 @@ export function Workspace() {
       {mode === "dock" && interaction.dragging && <div className="dock-input-shield" aria-hidden="true" />}
       {mode === "dock" && preview && preview.kind !== "unchanged" && <DockDropPreview preview={preview} />}
       {mode === "dock" && interaction.grab && <DockTabGhost grab={interaction.grab} />}
+      <SymbolDragOverlay />
       <div role="status" className="sr-only">{mode === "dock" && preview && preview.kind !== "unchanged" ? preview.label : ""}</div>
       {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={drawn.dock} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
     </main>

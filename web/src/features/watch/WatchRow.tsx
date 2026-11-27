@@ -7,6 +7,7 @@ import { MAX_WATCH_GROUPS, nextGroupName, type Transfer, type WatchColumn, type 
 import type { WindowId } from "../../layout/kinds";
 import { chartWindow, useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { emptyDragImage, SYMBOL_DRAG_MIME, useSymbolDragStore } from "../../stores/symbolDrag";
 import { useWatchlistStore } from "../../stores/watchlist";
 import { ArrowIcon, CloseIcon, CopyIcon, ListIcon, MoreIcon, PlusIcon } from "../icons";
 import { addRowToCompare, symbolRowMenuItems } from "../list/symbolRowMenu";
@@ -133,11 +134,19 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "copyMove";
         e.dataTransfer.setData("text/plain", rowKey(row));
+        e.dataTransfer.setData(SYMBOL_DRAG_MIME, JSON.stringify({ code, name, sourceWindow: sender }));
+        if (typeof e.dataTransfer.setDragImage === "function") {
+          e.dataTransfer.setDragImage(emptyDragImage(), 0, 0);
+        }
+        useSymbolDragStore.getState().start({ code, name, sourceWindow: sender });
         drag.start(row);
       }}
       onDragOver={(e) => drag.over(e, row)}
       onDrop={(e) => drag.drop(e, row, index)}
-      onDragEnd={drag.end}
+      onDragEnd={() => {
+        useSymbolDragStore.getState().end();
+        drag.end();
+      }}
       onContextMenu={variant === "desktop" ? (e) => { e.preventDefault(); context(e.clientX, e.clientY); } : undefined}
       className={`group relative ${listRowFill(active)} ${active ? "before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-accent" : ""} ${dragging ? "opacity-40" : ""} ${
         dropBefore ? "shadow-[inset_0_2px_0_var(--accent)]" : index > 0 ? "shadow-[inset_0_1px_0_var(--line-subtle)]" : ""

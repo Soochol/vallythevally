@@ -37,8 +37,21 @@ export function saveTapeMatrixConfig(id: WindowId, config: TapeMatrixConfig): vo
   try {
     localStorage.setItem(`${STORAGE_PREFIX}${id}`, JSON.stringify(config));
   } catch {
-    // ignore storage quota errors
   }
+}
+
+export type TapeMatrixAddResult = "added" | "duplicate" | "invalid";
+
+const tapeMatrixAdders = new Map<WindowId, (code: SymbolCode) => TapeMatrixAddResult>();
+
+export function addSymbolToTapeMatrix(id: WindowId, code: SymbolCode): TapeMatrixAddResult {
+  if (!/^\d{6}$/.test(code)) return "invalid";
+  const adder = tapeMatrixAdders.get(id);
+  if (adder) return adder(code);
+  const config = loadTapeMatrixConfig(id);
+  if (config.symbols.includes(code)) return "duplicate";
+  saveTapeMatrixConfig(id, { ...config, symbols: [...config.symbols, code] });
+  return "added";
 }
 
 function TapeCard({
@@ -148,6 +161,23 @@ export function TapeMatrixWindow({ id }: { id: WindowId }) {
   useEffect(() => {
     saveTapeMatrixConfig(id, config);
   }, [id, config]);
+
+  useEffect(() => {
+    tapeMatrixAdders.set(id, (code) => {
+      let result: TapeMatrixAddResult = "added";
+      setConfig((prev) => {
+        if (prev.symbols.includes(code)) {
+          result = "duplicate";
+          return prev;
+        }
+        return { ...prev, symbols: [...prev.symbols, code] };
+      });
+      return result;
+    });
+    return () => {
+      tapeMatrixAdders.delete(id);
+    };
+  }, [id]);
 
   useEffect(() => dropPendingOpen, []);
 

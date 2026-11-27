@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type RefObject, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSymbolInfo } from "../../api/queries";
 import type { GroupNode } from "../../layout/dock/tree";
 import type { WindowId } from "../../layout/kinds";
@@ -6,6 +6,7 @@ import type { Rect } from "../../layout/placement";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { chartNumber, chartWindows, useCell, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { applySymbolDrop, hasDraggedSymbol, isSymbolDropKind, readDraggedSymbol, useSymbolDragStore } from "../../stores/symbolDrag";
 import { ChevronIcon, CloseIcon } from "../icons";
 import { IntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
@@ -16,6 +17,7 @@ import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
 import { WindowSymbol } from "./WindowSymbol";
+import { SymbolDropOverlay } from "./SymbolDragOverlay";
 import { focusWithoutActivation, revealTab, tabLabel } from "./focus";
 
 export const tabId = (window: WindowId) => `window-tab-${window}`;
@@ -134,16 +136,52 @@ const TAB_KEYS: Record<string, (index: number, count: number) => number> = {
 export function DockGroup({ group, rect, number, interaction, maximized, onToggleMaximize }: { group: GroupNode; rect: Rect; number: number; interaction: Pick<DockInteraction, "selectTab" | "keyTab" | "pressTab" | "contextTab" | "grabbed">; maximized: boolean; onToggleMaximize(): void }) {
   const windows = useLayoutStore((s) => s.layout.windows);
   const activeCell = useSelectionStore((s) => s.activeCell);
+  const dragPayload = useSymbolDragStore((s) => s.payload);
+  const dragTarget = useSymbolDragStore((s) => s.target);
   const shown = windows.find((w) => w.id === group.active);
   const strip = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const stripOverflow = useStripOverflow(strip, group.tabs.join(" "));
   useLayoutEffect(() => {
     const selected = strip.current?.querySelector<HTMLElement>('[role=tab][aria-selected=true]');
     if (selected) revealTab(selected);
   }, [group.active, group.tabs.length, stripOverflow.overflowing]);
+  const shownId = shown?.id ?? null;
+  const shownKind = shown?.kind ?? null;
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || shownId === null || shownKind === null || !isSymbolDropKind(shownKind)) return;
+    const onDragOver = (event: DragEvent) => {
+      if (!hasDraggedSymbol(event.dataTransfer)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      useSymbolDragStore.getState().setTarget({ windowId: shownId, kind: shownKind, surface: "panel" });
+    };
+    const onDragLeave = (event: DragEvent) => {
+      if (!el.contains(event.relatedTarget as Node | null)) {
+        const current = useSymbolDragStore.getState().target;
+        if (current?.windowId === shownId && current.surface === "panel") useSymbolDragStore.getState().setTarget(null);
+      }
+    };
+    const onDrop = (event: DragEvent) => {
+      const payload = readDraggedSymbol(event.dataTransfer);
+      if (!payload) return;
+      event.preventDefault();
+      applySymbolDrop(shownId, shownKind, payload, "panel");
+    };
+    el.addEventListener("dragover", onDragOver);
+    el.addEventListener("dragleave", onDragLeave);
+    el.addEventListener("drop", onDrop);
+    return () => {
+      el.removeEventListener("dragover", onDragOver);
+      el.removeEventListener("dragleave", onDragLeave);
+      el.removeEventListener("drop", onDrop);
+    };
+  }, [shownId, shownKind]);
   if (!shown) return null;
   const { overflow } = WINDOW_CONTENT[shown.kind];
   const select = interaction.selectTab;
+  const panelDropActive = dragPayload !== null && dragTarget?.surface === "panel" && dragTarget.windowId === shown.id;
   const move = (event: KeyboardEvent<HTMLButtonElement>, from: WindowId) => {
     if (interaction.keyTab(event, from)) return;
     const step = TAB_KEYS[event.key];
@@ -154,7 +192,7 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
     focusWithoutActivation(document.getElementById(tabId(to)));
   };
   return (
-    <div data-dock-group={group.id} data-kind={shown.kind} data-active-cell={shown.id === activeCell ? "" : undefined} className="dock-group"
+    <div data-dock-group={group.id} data-kind={shown.kind} data-active-cell={shown.id === activeCell ? "" : undefined} data-symbol-drop-active={panelDropActive ? "" : undefined} className="dock-group"
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
       <div className="dock-tabs" onDoubleClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest("button, .link-dot")) onToggleMaximize(); }}>
         <div className="dock-tab-viewport" data-hidden-before={stripOverflow.hiddenBefore ? "" : undefined} data-hidden-after={stripOverflow.hiddenAfter ? "" : undefined}>
@@ -163,8 +201,31 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
               const window = windows.find((w) => w.id === tab);
               if (!window) return null;
               const selected = tab === group.active;
+              const canDropTab = isSymbolDropKind(window.kind);
+              const tabDropActive = dragPayload !== null && dragTarget?.surface === "tab" && dragTarget.windowId === tab;
               return (
-                <span key={tab} className="dock-tab-group" data-selected={selected ? "" : undefined} data-active-cell={tab === activeCell ? "" : undefined} data-grabbed={tab === interaction.grabbed ? "" : undefined}>
+                <span key={tab} className="dock-tab-group" data-selected={selected ? "" : undefined} data-active-cell={tab === activeCell ? "" : undefined} data-grabbed={tab === interaction.grabbed ? "" : undefined}
+                  data-symbol-drop-target={tabDropActive ? "" : undefined}
+                  onDragOver={canDropTab ? (event) => {
+                    if (!hasDraggedSymbol(event.dataTransfer)) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.dataTransfer.dropEffect = "copy";
+                    useSymbolDragStore.getState().setTarget({ windowId: tab, kind: window.kind, surface: "tab" });
+                  } : undefined}
+                  onDragLeave={canDropTab ? (event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      const current = useSymbolDragStore.getState().target;
+                      if (current?.windowId === tab && current.surface === "tab") useSymbolDragStore.getState().setTarget(null);
+                    }
+                  } : undefined}
+                  onDrop={canDropTab ? (event) => {
+                    const payload = readDraggedSymbol(event.dataTransfer);
+                    if (!payload) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    applySymbolDrop(tab, window.kind, payload, "tab");
+                  } : undefined}>
                   <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
                     aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
                     className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}
@@ -183,7 +244,8 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
         <AddWindowMenu targetGroup={group.id} />
         {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}>↙</button>}
       </div>
-      <div id={panelId(group.id)} role="tabpanel" aria-labelledby={tabId(shown.id)} data-window-id={shown.id} className={`dock-panel ${overflow === "auto" ? "overflow-auto" : "overflow-hidden"}`} />
+      <div ref={panelRef} id={panelId(group.id)} role="tabpanel" aria-labelledby={tabId(shown.id)} data-window-id={shown.id} className={`dock-panel ${overflow === "auto" ? "overflow-auto" : "overflow-hidden"}`} />
+      {panelDropActive && dragPayload && <SymbolDropOverlay kind={shown.kind} payload={dragPayload} />}
     </div>
   );
 }
