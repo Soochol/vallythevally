@@ -1,0 +1,35 @@
+{
+ "_source": "ka90013 합성 입력 2페이지(필드 이름은 Kiwoom REST API ka90013 명세 기준). 실측 아님",
+ "_headers": {
+  "cont-yn": "N",
+  "next-key": ""
+ },
+ "stk_daly_prm_trde_trnsn": [
+  {
+   "dt": "20261119",
+   "cur_prc": "-70500",
+   "trde_qty": "5000000",
+   "prm_sell_amt": "806",
+   "prm_buy_amt": "800",
+   "prm_netprps_amt": "--6",
+   "prm_sell_qty": "11430",
+   "prm_buy_qty": "11411",
+   "prm_netprps_qty": "--19",
+   "stex_tp": "통합"
+  },
+  {
+   "dt": "20261118",
+   "cur_prc": "+70000",
+   "trde_qty": "6000000",
+   "prm_sell_amt": "500",
+   "prm_buy_amt": "750",
+   "prm_netprps_amt": "+250",
+   "prm_sell_qty": "7140",
+   "prm_buy_qty": "10710",
+   "prm_netprps_qty": "+3570",
+   "stex_tp": "통합"
+  }
+ ],
+ "return_code": 0,
+ "return_msg": "정상적으로 처리되었습니다"
+}

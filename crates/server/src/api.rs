@@ -2129,6 +2129,20 @@ pub struct InvestorNetSharesDay {
     pub other_corporation: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockProgramDailyDay {
+    pub day: KstDate,
+    pub close_won: u64,
+    pub volume: u64,
+    pub sell_amount_million_won: u64,
+    pub buy_amount_million_won: u64,
+    pub net_buy_amount_million_won: i64,
+    pub sell_qty: u64,
+    pub buy_qty: u64,
+    pub net_buy_qty: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub enum ScreenPeriod {

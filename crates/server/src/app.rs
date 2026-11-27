@@ -22,7 +22,7 @@ use crate::config::Config;
 use crate::db::AppDb;
 use crate::http::{AppState, router};
 use crate::instance::InstanceLock;
-use crate::market::hub::{HubHandle, MarketHub};
+use crate::market::hub::MarketHub;
 use crate::kis::feed::{KisConnect, KisFeedParts};
 use crate::market_overview::MarketOverview;
 use crate::market_source::active::{ActiveSource, ActiveStream};
@@ -210,12 +210,13 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
         quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
         program_trades: Arc::new(crate::intraday_feed::ProgramTradeCache::with_generation(generation.clone())),
+        daily_program: Arc::new(crate::micro_series::DailyProgramCache::with_generation(generation.clone())),
         generation,
     })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
-    daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.program_trades.clone(), state.hub.clone(), state.market_control.clone()).await;
+    daily_reset(state).await;
 }
 
 pub enum StreamSource {
@@ -485,27 +486,28 @@ pub(crate) fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> 
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, program_trades: Arc<crate::intraday_feed::ProgramTradeCache>, hub: HubHandle, control: Arc<MarketControl>) {
+async fn daily_reset(state: Arc<AppState>) {
     loop {
-        clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
-        bars.clear_all();
-        program_trades.clear();
-        hub.daily_reset();
-        if !control.source_connected() {
+        state.clock.sleep_until(next_daily(state.clock.now(), DAILY_RESET_AT)).await;
+        state.bars.clear_all();
+        state.program_trades.clear();
+        state.daily_program.clear();
+        state.hub.daily_reset();
+        if !state.market_control.source_connected() {
             continue;
         }
-        let deadline = next_daily(clock.now(), DAILY_RESET_AT);
-        while let Err(e) = symbols.refresh(source.as_ref(), Priority::Background).await {
+        let deadline = next_daily(state.clock.now(), DAILY_RESET_AT);
+        while let Err(e) = state.symbols.refresh(state.source.as_ref(), Priority::Background).await {
             let Some(retry_at) = e.retry_at() else {
                 tracing::error!(error = %e, "07:45 종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 다시 받지 않습니다");
                 break;
             };
-            let at = next_try(&clock, retry_at, DAILY_LIST_RETRY);
+            let at = next_try(&state.clock, retry_at, DAILY_LIST_RETRY);
             if at >= deadline {
                 break;
             }
             tracing::warn!(error = %e, %at, "종목 목록 갱신에 실패했습니다. 이전 목록을 쓰고 그 시각에 다시 받습니다");
-            clock.sleep_until(at).await;
+            state.clock.sleep_until(at).await;
         }
     }
 }

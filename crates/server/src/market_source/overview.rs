@@ -16,10 +16,11 @@ pub enum OverviewFeature {
     Streaks,
     StockInvestors,
     ForeignHoldings,
+    StockProgramDaily,
 }
 
 impl OverviewFeature {
-    pub const ALL: [OverviewFeature; 8] = [
+    pub const ALL: [OverviewFeature; 9] = [
         OverviewFeature::Index,
         OverviewFeature::Sectors,
         OverviewFeature::Flow,
@@ -28,6 +29,7 @@ impl OverviewFeature {
         OverviewFeature::Streaks,
         OverviewFeature::StockInvestors,
         OverviewFeature::ForeignHoldings,
+        OverviewFeature::StockProgramDaily,
     ];
 
     pub fn label(self) -> &'static str {
@@ -40,16 +42,17 @@ impl OverviewFeature {
             OverviewFeature::Streaks => "시장 개요 연속 매매",
             OverviewFeature::StockInvestors => "종목 투자자 일별 순매수",
             OverviewFeature::ForeignHoldings => "종목 외국인 보유",
+            OverviewFeature::StockProgramDaily => "종목 일별 프로그램매매",
         }
     }
 
-    const fn bit(self) -> u8 {
-        1 << self as u8
+    const fn bit(self) -> u16 {
+        1u16 << self as u16
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct OverviewFeatures(u8);
+pub struct OverviewFeatures(u16);
 
 impl OverviewFeatures {
     pub const NONE: OverviewFeatures = OverviewFeatures(0);
@@ -220,4 +223,5 @@ pub trait OverviewSource: Send + Sync + 'static {
 
     fn stock_investors(&self, code: StockCode, range: DayRange, now: KstTime, priority: Priority) -> BoxFuture<'_, Result<api::DayHistory<api::InvestorNetSharesDay>, SourceError>>;
     fn foreign_holdings(&self, code: StockCode, range: DayRange, now: KstTime, priority: Priority) -> BoxFuture<'_, Result<api::DayHistory<api::ForeignHoldingDay>, SourceError>>;
+    fn stock_program_daily(&self, code: StockCode, range: DayRange, now: KstTime, priority: Priority) -> BoxFuture<'_, Result<api::DayHistory<api::StockProgramDailyDay>, SourceError>>;
 }

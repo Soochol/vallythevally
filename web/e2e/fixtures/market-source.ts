@@ -8,8 +8,8 @@ import type { RankingKindChoices } from "../../src/api/generated/RankingKindChoi
 
 export const ALL_RANKING_KINDS: RankingKind[] = ["tradeAmount", "tradeVolume", "turnover", "volumeSurge", "gainers", "losers", "expected", "investorNetBuy", "foreignStreak", "program", "bidAskBalance", "creditRatio", "mostViewed"];
 export const KIS_RANKING_KINDS: RankingKind[] = ALL_RANKING_KINDS.filter((kind) => kind !== "foreignStreak" && kind !== "program");
-export const ALL_OVERVIEW_FEATURES: OverviewFeature[] = ["index", "sectors", "flow", "intradayFlow", "turnover", "streaks", "stockInvestors", "foreignHoldings"];
-export const KIS_OVERVIEW_FEATURES: OverviewFeature[] = ALL_OVERVIEW_FEATURES.filter((feature) => feature !== "streaks");
+export const ALL_OVERVIEW_FEATURES: OverviewFeature[] = ["index", "sectors", "flow", "intradayFlow", "turnover", "streaks", "stockInvestors", "foreignHoldings", "stockProgramDaily"];
+export const KIS_OVERVIEW_FEATURES: OverviewFeature[] = ALL_OVERVIEW_FEATURES.filter((feature) => feature !== "streaks" && feature !== "stockProgramDaily");
 export const MARKET_FEATURES: MarketFeature[] = ["directory", "fundamentals", "quotes", "dayBars", "weekBars", "monthBars", "yearBars", "minuteBars", "indexBars", "orderBook", "trades", "programTrades"];
 
 const NO_CHOICES: RankingChoicesView = { venues: [], sessions: [], baselines: [], surgeSorts: [], minTradeAmounts: [], investors: [], spans: [], excludesManaged: false };
