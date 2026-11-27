@@ -178,4 +178,75 @@ describe("ReplayEngine", () => {
 
     engine.dispose();
   });
+
+  it("프로그램 체결 스트림에서 순매수 증감 행과 누적 추이를 계산한다", async () => {
+    const { session, meta } = makeFixture();
+    const programMeta: BookReplayMeta = {
+      ...meta,
+      spans: [{ startMinute: 540, bookRows: 1, tradeRows: 1, programRows: 2 }],
+    };
+    const spanBuf = encodeHogaSpan({
+      date: 20261125,
+      startMinute: 540,
+      lengthMinutes: 5,
+      symbol: "005930_AL",
+      streams: [
+        {
+          kind: "book",
+          columns: {
+            recv_ms: [M540],
+            t_s: [32_400],
+            ask_px1: [71_100],
+            bid_px1: [71_000],
+            ask_qty1: [1_000],
+            bid_qty1: [1_000],
+            ask_total: [1_000],
+            bid_total: [1_000],
+          },
+        },
+        {
+          kind: "trades",
+          columns: {
+            recv_ms: [M540 + 100],
+            t_s: [32_400],
+            price: [71_100],
+            qty: [100],
+            venue: [1],
+          },
+        },
+        {
+          kind: "program",
+          columns: {
+            recv_ms: [M540 + 200, M540 + 1_200],
+            t_s: [32_400, 32_401],
+            sell_qty: [300, 400],
+            sell_amt: [21, 28],
+            buy_qty: [1_500, 3_000],
+            buy_amt: [106, 213],
+          },
+        },
+      ],
+    });
+    const engine = new ReplayEngine({
+      code: "005930",
+      session,
+      meta: programMeta,
+      spanFetcher: async () => spanBuf.slice(0),
+      nowPerf: () => 5_000,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    engine.seekMs(M540 + 1_500);
+    const frame = engine.getFrame();
+    expect(frame.programBuyQty).toBe(3_000);
+    expect(frame.programSellQty).toBe(400);
+    expect(frame.programNetQty).toBe(2_600);
+    expect(frame.programNetAmtMillion).toBe(185);
+    expect(frame.programTrend).toEqual([1_200, 2_600]);
+    expect(frame.recentProgramRows).toHaveLength(2);
+    expect(frame.recentProgramRows[0]!.netQtyChange).toBe(1_400);
+    expect(frame.recentProgramRows[1]!.netQtyChange).toBe(1_200);
+
+    engine.dispose();
+  });
 });

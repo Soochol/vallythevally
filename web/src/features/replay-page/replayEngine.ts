@@ -22,6 +22,7 @@ import {
   WHALE_VALUE_WON,
   computeLadderSnapshot,
   filterRecentTrades,
+  formatReplayClock,
   frameIndexAt,
   stepTickSec,
 } from "./replayModel";
@@ -70,6 +71,18 @@ export interface EngineTickTrade extends ReplayTrade {
   readonly freshUntilMs: number;
 }
 
+export interface EngineProgramRow {
+  readonly key: string;
+  readonly recvMs: number;
+  readonly time: string;
+  readonly price: number | null;
+  readonly buyQty: number;
+  readonly sellQty: number;
+  readonly netQty: number;
+  readonly netQtyChange: number;
+  readonly netAmountMillionWon: number;
+}
+
 export interface ReplayEngineFrame {
   readonly cursorMs: number;
   readonly deltaMs: number;
@@ -84,8 +97,12 @@ export interface ReplayEngineFrame {
   readonly cumVal: number;
   readonly vwap: number | null;
   readonly strength: number;
+  readonly programBuyQty: number | null;
+  readonly programSellQty: number | null;
   readonly programNetQty: number | null;
   readonly programNetAmtMillion: number | null;
+  readonly recentProgramRows: readonly EngineProgramRow[];
+  readonly programTrend: readonly number[];
   readonly inGap: boolean;
   readonly singlePrice: boolean;
   readonly formingBar: FormingBar | null;
@@ -180,15 +197,28 @@ function extractTradeRow(span: OpenedHogaSpan, spanStart: number, row: number, f
   };
 }
 
-function extractProgramRow(span: OpenedHogaSpan, row: number): { netQty: number; netAmtMillion: number } | null {
+interface ExtractedProgramRow {
+  readonly recvMs: number;
+  readonly buyQty: number;
+  readonly sellQty: number;
+  readonly netQty: number;
+  readonly netAmtMillion: number;
+}
+
+const MAX_RECENT_PROGRAM_ROWS = 120;
+const MAX_PROGRAM_TREND = 400;
+
+function extractProgramRow(span: OpenedHogaSpan, row: number): ExtractedProgramRow | null {
   const program = span.streams.program;
   if (!program || row < 0 || row >= program.rows) return null;
   const cols = program.columns;
+  const recvMs = cols.recv_ms?.[row];
+  if (recvMs === undefined) return null;
   const buyQty = cols.buy_qty?.[row] ?? 0;
   const sellQty = cols.sell_qty?.[row] ?? 0;
   const buyAmt = cols.buy_amt?.[row] ?? 0;
   const sellAmt = cols.sell_amt?.[row] ?? 0;
-  return { netQty: buyQty - sellQty, netAmtMillion: buyAmt - sellAmt };
+  return { recvMs, buyQty, sellQty, netQty: buyQty - sellQty, netAmtMillion: buyAmt - sellAmt };
 }
 
 function buildLadderFromBooks(
@@ -381,8 +411,12 @@ export class ReplayEngine {
   private cumVal = 0;
   private cumBuyQty = 0;
   private cumSellQty = 0;
+  private programBuyQty: number | null = null;
+  private programSellQty: number | null = null;
   private programNetQty: number | null = null;
   private programNetAmtMillion: number | null = null;
+  private recentProgramRows: EngineProgramRow[] = [];
+  private programTrend: number[] = [];
   private formingBar: FormingBar | null = null;
   private recentTrades: EngineTickTrade[] = [];
   private oneMinDeque: EngineTickTrade[] = [];
@@ -1057,8 +1091,30 @@ export class ReplayEngine {
     } else if (evKind === EVENT_KIND_PROGRAM) {
       const prog = extractProgramRow(span, evRow);
       if (prog) {
+        const prevNet = this.programNetQty ?? 0;
+        const netQtyChange = prog.netQty - prevNet;
+        this.programBuyQty = prog.buyQty;
+        this.programSellQty = prog.sellQty;
         this.programNetQty = prog.netQty;
         this.programNetAmtMillion = prog.netAmtMillion;
+        this.programTrend.push(prog.netQty);
+        if (this.programTrend.length > MAX_PROGRAM_TREND) this.programTrend.shift();
+        if (netQtyChange !== 0) {
+          this.recentProgramRows.unshift({
+            key: `p-${spanStart}-${evRow}`,
+            recvMs: prog.recvMs,
+            time: formatReplayClock(prog.recvMs / 1000, false),
+            price: this.price,
+            buyQty: prog.buyQty,
+            sellQty: prog.sellQty,
+            netQty: prog.netQty,
+            netQtyChange,
+            netAmountMillionWon: prog.netAmtMillion,
+          });
+          if (this.recentProgramRows.length > MAX_RECENT_PROGRAM_ROWS) {
+            this.recentProgramRows.length = MAX_RECENT_PROGRAM_ROWS;
+          }
+        }
       }
     }
   }
@@ -1124,8 +1180,13 @@ export class ReplayEngine {
     this.dayHigh = ck?.dayHigh ?? null;
     this.dayLow = ck?.dayLow ?? null;
     this.price = ck?.close ?? null;
+    this.programBuyQty = null;
+    this.programSellQty = null;
     this.programNetQty = ck?.programNetQty ?? null;
     this.programNetAmtMillion = ck?.programNetAmtMillion ?? null;
+    const fallbackProg = this.buildMinuteProgramHistory(targetMin);
+    this.recentProgramRows = fallbackProg.rows;
+    this.programTrend = fallbackProg.trend;
     this.lastEventMs = targetMs;
     this.deltaMs = 0;
     this.activeSecond = Math.floor(targetMs / 1000);
@@ -1145,8 +1206,12 @@ export class ReplayEngine {
     this.dayHigh = ck?.dayHigh ?? null;
     this.dayLow = ck?.dayLow ?? null;
     this.price = ck?.close ?? null;
+    this.programBuyQty = null;
+    this.programSellQty = null;
     this.programNetQty = ck?.programNetQty ?? null;
     this.programNetAmtMillion = ck?.programNetAmtMillion ?? null;
+    this.recentProgramRows = [];
+    this.programTrend = [];
     this.lastBookMinute = targetMin;
 
     const bookStream = span.streams.book;
@@ -1163,17 +1228,51 @@ export class ReplayEngine {
       this.minuteStartBook = null;
     }
 
+    const preSpanProg = this.buildMinuteProgramHistory(spanStart - 1);
+    const progTrend = [...preSpanProg.trend];
+    const progRowsAsc: EngineProgramRow[] = [...preSpanProg.rows].reverse();
+    let prevProgNet = progRowsAsc.at(-1)?.netQty ?? (this.findCheckpointAtOrBefore(spanStart - 1)?.programNetQty ?? 0);
+
     const programStream = span.streams.program;
+    const tradeStreamForProg = span.streams.trades;
     if (programStream && programStream.rows > 0) {
-      const pRow = lastRowAtOrBefore(programStream.columns.recv_ms!, targetMs);
-      if (pRow >= 0) {
-        const prog = extractProgramRow(span, pRow);
-        if (prog) {
-          this.programNetQty = prog.netQty;
-          this.programNetAmtMillion = prog.netAmtMillion;
+      const pRecv = programStream.columns.recv_ms!;
+      const pRow = lastRowAtOrBefore(pRecv, targetMs);
+      for (let r = 0; r <= pRow; r++) {
+        const prog = extractProgramRow(span, r);
+        if (!prog) continue;
+        const netQtyChange = prog.netQty - prevProgNet;
+        prevProgNet = prog.netQty;
+        this.programBuyQty = prog.buyQty;
+        this.programSellQty = prog.sellQty;
+        this.programNetQty = prog.netQty;
+        this.programNetAmtMillion = prog.netAmtMillion;
+        progTrend.push(prog.netQty);
+        if (netQtyChange !== 0) {
+          let rowPrice: number | null = this.price;
+          if (tradeStreamForProg && tradeStreamForProg.rows > 0) {
+            const trIdx = lastRowAtOrBefore(tradeStreamForProg.columns.recv_ms!, prog.recvMs);
+            if (trIdx >= 0) rowPrice = tradeStreamForProg.columns.price?.[trIdx] ?? rowPrice;
+          }
+          if (rowPrice === null) {
+            rowPrice = this.findCheckpointAtOrBefore(Math.floor(prog.recvMs / MS_PER_MINUTE))?.close ?? null;
+          }
+          progRowsAsc.push({
+            key: `p-${spanStart}-${r}`,
+            recvMs: prog.recvMs,
+            time: formatReplayClock(prog.recvMs / 1000, false),
+            price: rowPrice,
+            buyQty: prog.buyQty,
+            sellQty: prog.sellQty,
+            netQty: prog.netQty,
+            netQtyChange,
+            netAmountMillionWon: prog.netAmtMillion,
+          });
         }
       }
     }
+    this.programTrend = progTrend.slice(-MAX_PROGRAM_TREND);
+    this.recentProgramRows = progRowsAsc.slice(-MAX_RECENT_PROGRAM_ROWS).reverse();
 
     this.formingBar = null;
     this.recentTrades = [];
@@ -1282,6 +1381,36 @@ export class ReplayEngine {
     return Math.min(500, (this.cumBuyQty / this.cumSellQty) * 100);
   }
 
+  private buildMinuteProgramHistory(untilMinute: number): { rows: EngineProgramRow[]; trend: number[] } {
+    const trend: number[] = [];
+    const asc: EngineProgramRow[] = [];
+    let prevNet = 0;
+    for (const pt of this.session.minutes) {
+      if (pt.minute > untilMinute) break;
+      if (pt.programNetQty === null) continue;
+      trend.push(pt.programNetQty);
+      const netQtyChange = pt.programNetQty - prevNet;
+      prevNet = pt.programNetQty;
+      if (netQtyChange !== 0) {
+        asc.push({
+          key: `pm-${pt.minute}`,
+          recvMs: pt.sec * 1000,
+          time: formatReplayClock(pt.sec, false),
+          price: pt.close,
+          buyQty: Math.max(0, pt.programNetQty),
+          sellQty: Math.max(0, -pt.programNetQty),
+          netQty: pt.programNetQty,
+          netQtyChange,
+          netAmountMillionWon: pt.programNetAmtMillion ?? 0,
+        });
+      }
+    }
+    return {
+      rows: asc.slice(-MAX_RECENT_PROGRAM_ROWS).reverse(),
+      trend: trend.slice(-MAX_PROGRAM_TREND),
+    };
+  }
+
   private buildSnapshot(perfNow: number): ReplayEngineFrame {
     if (this.resolution === "minute_only") {
       const sec = this.cursorMs / 1000;
@@ -1289,6 +1418,7 @@ export class ReplayEngine {
       const frame = idx >= 0 ? (this.session.frames[idx] ?? null) : null;
       const ladder = computeLadderSnapshot(this.session, idx, this.deltaMode);
       const tradeSummary = filterRecentTrades(this.session.frames, idx, this.tapeMinWon);
+      const minProg = this.buildMinuteProgramHistory(Math.floor(sec / 60));
       return {
         cursorMs: this.cursorMs,
         deltaMs: 0,
@@ -1303,8 +1433,12 @@ export class ReplayEngine {
         cumVal: frame?.cumVal ?? 0,
         vwap: frame && frame.cumVol > 0 ? frame.cumVal / frame.cumVol : (frame?.price ?? null),
         strength: frame?.strength ?? 100,
+        programBuyQty: null,
+        programSellQty: null,
         programNetQty: frame?.programNetQty ?? null,
         programNetAmtMillion: frame?.programNetAmtMillion ?? null,
+        recentProgramRows: minProg.rows,
+        programTrend: minProg.trend,
         inGap: frame?.inGap ?? false,
         singlePrice: frame?.singlePrice ?? false,
         formingBar: null,
@@ -1374,8 +1508,12 @@ export class ReplayEngine {
       cumVal: this.cumVal,
       vwap: this.cumVol > 0 ? this.cumVal / this.cumVol : this.price,
       strength: this.strengthNow(),
+      programBuyQty: this.programBuyQty,
+      programSellQty: this.programSellQty,
       programNetQty: this.programNetQty,
       programNetAmtMillion: this.programNetAmtMillion,
+      recentProgramRows: [...this.recentProgramRows],
+      programTrend: [...this.programTrend],
       inGap,
       singlePrice,
       formingBar: this.formingBar,

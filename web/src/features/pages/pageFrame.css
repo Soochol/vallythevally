@@ -1,4 +1,6 @@
 .page-frame { display: flex; flex-direction: column; gap: var(--size-16); width: 100%; max-width: 1680px; min-height: 100%; margin-inline: auto; padding: 0 var(--size-12) var(--size-24); }
+.page-frame[data-full-width] { gap: 0; max-width: none; height: 100%; padding: 0; }
+.page-frame[data-full-width] > .page-frame-body { min-height: 0; }
 .page-frame-bar { display: flex; align-items: center; gap: var(--size-10); padding: var(--size-10) 0 var(--size-8); border-bottom: var(--size-1) solid var(--line); }
 .page-frame-title { margin: 0 var(--size-5) 0 0; overflow: hidden; font-size: var(--fs-h); font-weight: 600; letter-spacing: -0.025em; text-overflow: ellipsis; white-space: nowrap; }
 .page-frame-title-menu { min-width: 0; }

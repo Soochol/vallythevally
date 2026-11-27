@@ -23,14 +23,19 @@ for (const [label, path] of PAGES) {
 }
 
 for (const width of [1280, 1024, 832]) {
-  test(`${width}px에서 세 페이지의 위 막대가 가로로 넘치지 않는다`, async ({ page }) => {
+  test(`${width}px에서 네 페이지의 위 막대가 가로로 넘치지 않는다`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     for (const [label, path] of PAGES) {
       await page.goto(path);
       await expect(page.getByRole("main", { name: label, exact: true })).toBeVisible();
       const overflow = await bar(page).evaluate((el) => el.scrollWidth - el.clientWidth);
       expect(overflow).toBeLessThanOrEqual(0);
-      await expect(bar(page).getByRole("button", { name: "종목 찾기" })).toBeVisible();
+      if (path === "/replay") {
+        await expect(bar(page).getByRole("button", { name: "종목 찾기" })).toHaveCount(0);
+        await expect(bar(page).getByRole("button", { name: /^보낼 연동 색/ })).toHaveCount(0);
+      } else {
+        await expect(bar(page).getByRole("button", { name: "종목 찾기" })).toBeVisible();
+      }
     }
   });
 }
