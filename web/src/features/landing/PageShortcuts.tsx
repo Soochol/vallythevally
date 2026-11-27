@@ -7,6 +7,7 @@ const SUMMARIES: Record<(typeof SHORTCUT_PAGES)[number]["id"], string> = {
   heatmap: "내가 고른 테마를 등락률 타일 지도로 봅니다.",
   etf: "ETF가 담은 종목과 겹침을 살펴봅니다.",
   replay: "지나간 날의 호가·체결·수급 흐름을 재생하며 복기합니다.",
+  journal: "체결 내역의 MFE·MAE와 포렌식 진단을 모아 복기합니다.",
 };
 
 export function PageShortcuts() {

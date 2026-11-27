@@ -376,7 +376,10 @@ pub(crate) async fn store_layout(tx: &mut SqliteConnection, input: &LayoutInput,
             | WindowContent::PreMarket { symbol } => {
                 (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None, None, None, None)
             }
-            WindowContent::Indicators => (None, None, None, None, None, None, None, None, None),
+            WindowContent::Indicators
+            | WindowContent::Scanner
+            | WindowContent::Themes
+            | WindowContent::TapeMatrix => (None, None, None, None, None, None, None, None, None),
         };
         sqlx::query(
             "INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen, ranking, broker_view, broker_cards) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1142,7 +1145,7 @@ mod tests {
                     WindowContent::Watchlist { list } => (None, None, None, None, list.clone(), None),
                     WindowContent::Screener { screen } => (None, None, None, None, None, screen.clone()),
                     WindowContent::Trades { symbol } | WindowContent::Book { symbol } | WindowContent::Program { symbol } | WindowContent::Brokers { symbol, .. } => (symbol.as_ref().map(|s| s.0.clone()), None, None, None, None, None),
-                    WindowContent::Indicators | WindowContent::Ranking { .. } | WindowContent::PreMarket { .. } => unreachable!(),
+                    WindowContent::Indicators | WindowContent::Ranking { .. } | WindowContent::PreMarket { .. } | WindowContent::Scanner | WindowContent::Themes | WindowContent::TapeMatrix => unreachable!(),
                 };
                 sqlx::query("INSERT INTO layout_windows (layout_id, id, position, kind, link, symbol, venue, period, chart_settings, list, screen) VALUES ('L3', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     .bind(w.id.as_str()).bind(position as i64).bind(window_kind(&w.content)).bind(w.link.as_ref().map(wire_name)).bind(symbol).bind(venue).bind(period).bind(chart_settings).bind(list).bind(screen)

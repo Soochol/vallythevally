@@ -74,7 +74,7 @@ test.describe("390×844", () => {
     await expect(page.getByRole("main", { name: "시장 종합", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "시장 종합", exact: true }).click();
     const menu = page.getByRole("menu", { name: "페이지 이동" });
-    await expect(menu.getByRole("menuitemradio")).toHaveText(["작업 영역", "시장 종합", "히트맵", "ETF", "호가 복기"]);
+    await expect(menu.getByRole("menuitemradio")).toHaveText(["작업 영역", "시장 종합", "히트맵", "ETF", "호가 복기", "매매 복기"]);
     await expect(menu.getByRole("menuitemradio", { name: "시장 종합" })).toHaveAttribute("aria-checked", "true");
     await menu.getByRole("menuitemradio", { name: "히트맵" }).click();
     await expect(page).toHaveURL(/\/heatmap$/);
