@@ -52,6 +52,14 @@ export function BookSettingsPopover({ settings, onChange }: Props) {
           <label className="od-settings-flag">
             <input
               type="checkbox"
+              checked={settings.divider}
+              onChange={(e) => onChange({ ...settings, divider: e.target.checked })}
+            />
+            구분선
+          </label>
+          <label className="od-settings-flag">
+            <input
+              type="checkbox"
               checked={settings.rate}
               onChange={(e) => setLadderRate(e.target.checked)}
             />

@@ -22,8 +22,8 @@ interface Props {
 const FLAGS: readonly { readonly key: "keepLastEntry" | "averageDot" | "divider" | "rate" | "skipSpreadGap" | "maskAccount" | "sound"; readonly label: string; readonly title?: string }[] = [
   { key: "keepLastEntry", label: KEEP_LAST_ENTRY_LABEL, title: "마지막으로 선택한 수량을 그 창의 그 종목마다 기억해 다시 열 때 그 값으로 시작합니다" },
   { key: "averageDot", label: "평단가 점" },
-  { key: "divider", label: "구분선" },
-  { key: "rate", label: "등락률 표시" },
+  { key: "divider", label: "구분선", title: "10호가창에도 적용" },
+  { key: "rate", label: "등락률 표시", title: "10호가창에도 적용" },
   { key: "skipSpreadGap", label: "호가 사이 빈 가격 건너뛰기", title: "호가 사이에 빈 가격이 있으면 건너뛰어 매도 10단·매수 10단을 채웁니다. 10호가창에도 적용" },
   { key: "maskAccount", label: "계좌번호 가리기" },
   { key: "sound", label: ORDER_SOUND_LABEL, title: "매수 주문 접수, 매도 주문 접수, 주문 체결 시 소리로 알립니다" },

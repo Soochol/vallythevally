@@ -4,13 +4,12 @@ import type { WindowId } from "../../layout/kinds";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useCallAuctionSession } from "../../stores/callAuctionSession";
 import { useViSession } from "../../stores/viSession";
-import { ReplayStrip } from "../book-replay/ReplayStrip";
-import { FeedStrip } from "../market-window/FeedStrip";
 import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { MarketHead } from "../market-window/MarketHead";
+import { BookStatusBar } from "../market-window/MarketStatusBar";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { FooterRatioBar, Strip, TotalFigure, TotalRatioToggle } from "../market-window/parts";
+import { LadderFooter, TotalFigure } from "../market-window/parts";
 import { ladderColumns, PriceLadder } from "../market-window/PriceLadder";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { SymbolHead } from "../market-window/SymbolHead";
@@ -18,27 +17,18 @@ import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/
 import { ladderRowHeightPx } from "../order/orderSettings";
 import { ExpectedHeaderBar } from "../order/ExpectedHeaderBar";
 import { EmptyState, ErrorState } from "../overlay/State";
-import { Notice } from "../ui/Notice";
 import { BookSettingsPopover } from "./BookSettingsPopover";
 import { useRowsPerSide, visibleLadderRows } from "./useRowsPerSide";
-
-const REJECTION: Record<string, string> = {
-  realtime_limit: "실시간 자리가 부족해 호가가 갱신되지 않습니다",
-  kiwoom_unavailable: "키움에 연결되지 않아 호가가 갱신되지 않습니다",
-  unknown_symbol: "알 수 없는 종목입니다",
-  bad_request: "호가를 구독하지 못했습니다",
-};
 
 function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const ladderBox = useRef<HTMLDivElement>(null);
   const settings = useOrderSettings();
   const setSettings = useUiStore((s) => s.setOrderSettings);
-  const { skipSpreadGap, rate, ladderDensity } = settings;
+  const { divider, skipSpreadGap, rate, ladderDensity } = settings;
   const rowsPerSide = useRowsPerSide(ladderBox, ladderRowHeightPx(ladderDensity));
   const market = useLadderMarket(code, pager, skipSpreadGap);
   const { feed, replay, totals, view, liveView, trades } = market;
   const afterHours = totals.source === "afterHours";
-  const notice = replay.kind === "live" && feed.rejected ? REJECTION[feed.rejected] : null;
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null && market.liveQuotes !== null);
   const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", shownLadder, market.liveView?.t ?? null, false);
   const auctionState = useCallAuctionSession(code, market.venue, market.symbolInfo?.nxtEnabled === true, market.expected, replay.kind === "live" && shownLadder && viState.kind === "inactive", market.liveView?.t ?? null);
@@ -46,6 +36,10 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const settingsPopover = useMemo(
     () => <BookSettingsPopover settings={settings} onChange={setSettings} />,
     [settings, setSettings],
+  );
+  const feedStatus = useMemo(
+    () => ({ connected: feed.connected, rejected: feed.rejected, downSince: market.downSince }),
+    [feed.connected, feed.rejected, market.downSince],
   );
 
   const ladder = (() => {
@@ -69,27 +63,31 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
       ) : (
         <SymbolHead code={code} name={market.symbolInfo?.name ?? null} lastPrice={market.headPrice} previousClose={market.headPreviousClose} nxtTraded={market.symbolInfo?.nxtEnabled === true} mock={false} testIdPrefix="market-symbol" trailing={settingsPopover} />
       )}
-      {market.replayEnabled && <ReplayStrip view={replay} />}
-      {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
-      {replay.kind === "live" && !feed.connected && notice === null && <FeedStrip since={market.downSince} />}
       {view !== null && (expectedBarActive ? (
         <ExpectedHeaderBar viState={viState} auctionState={auctionState} previousClose={market.headPreviousClose} variant="book" />
       ) : (
         <BookColumnHead />
       ))}
-      <div ref={ladderBox} className="bk-ladder" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-state={view === null ? "" : undefined}>{ladder}</div>
-      <Strip divided compact>
-        <FooterRatioBar ask={totals.ask} bid={totals.bid} />
-        <span className="mw-strip-group">
-          <span className="mw-strip-name">매도</span>
-          <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />
-        </span>
-        <TotalRatioToggle ask={totals.ask} bid={totals.bid} />
-        <span className="mw-strip-group">
-          <TotalFigure testId="book-total-bid" tone="up" value={totals.bid} afterHours={afterHours} description={totals.description} />
-          <span className="mw-strip-name">매수</span>
-        </span>
-      </Strip>
+      <div ref={ladderBox} className="bk-ladder" data-divider={divider ? "" : undefined} data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-state={view === null ? "" : undefined}>{ladder}</div>
+      <LadderFooter
+        className="mw-strip"
+        testId="book-totals"
+        ask={totals.ask}
+        bid={totals.bid}
+        left={(
+          <>
+            <span className="mw-strip-name">매도</span>
+            <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />
+          </>
+        )}
+        right={(
+          <>
+            <TotalFigure testId="book-total-bid" tone="up" value={totals.bid} afterHours={afterHours} description={totals.description} />
+            <span className="mw-strip-name">매수</span>
+          </>
+        )}
+      />
+      <BookStatusBar feed={feedStatus} replay={replay} replayEnabled={market.replayEnabled} />
     </div>
   );
 }
