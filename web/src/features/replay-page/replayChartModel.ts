@@ -187,14 +187,3 @@ export function panViewport(
   const nextStart = Math.max(0, Math.min(totalBars - span, clamped.start + deltaBars));
   return { start: nextStart, end: nextStart + span };
 }
-
-export function focusViewport(
-  totalBars: number,
-  focusBarIdx: number,
-  spanBars: number,
-): ChartViewport {
-  if (totalBars <= 0) return { start: 0, end: 0 };
-  const span = Math.max(Math.min(MIN_VISIBLE_BARS, totalBars), Math.min(totalBars, spanBars));
-  const start = Math.max(0, Math.min(totalBars - span, focusBarIdx - span / 2));
-  return { start, end: start + span };
-}

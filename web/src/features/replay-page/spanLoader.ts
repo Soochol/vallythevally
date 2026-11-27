@@ -16,6 +16,7 @@ export class HogaSpanLoader {
   private readonly failed = new Map<string, string>();
   private readonly inFlight = new Map<string, number>();
   private readonly pendingById = new Map<number, string>();
+  private readonly backgroundKeys = new Set<string>();
   private protectedKeys = new Set<string>();
   private worker: Worker | null = null;
   private readonly fetcher: SpanBufferFetcher | null;
@@ -67,10 +68,24 @@ export class HogaSpanLoader {
   }
 
   request(key: string, url: string): void {
+    if (this.disposed || this.cache.has(key) || this.failed.has(key)) return;
+    if (this.inFlight.has(key)) {
+      this.backgroundKeys.delete(key);
+      return;
+    }
+    this.enqueue(key, url, false);
+  }
+
+  requestBackground(key: string, url: string): void {
     if (this.disposed || this.cache.has(key) || this.failed.has(key) || this.inFlight.has(key)) return;
+    this.enqueue(key, url, true);
+  }
+
+  private enqueue(key: string, url: string, background: boolean): void {
     const id = this.nextId++;
     this.inFlight.set(key, id);
     this.pendingById.set(id, key);
+    if (background) this.backgroundKeys.add(key);
     if (this.worker !== null) {
       this.worker.postMessage({ id, url });
       return;
@@ -83,6 +98,7 @@ export class HogaSpanLoader {
     this.failed.clear();
     this.inFlight.clear();
     this.pendingById.clear();
+    this.backgroundKeys.clear();
     this.protectedKeys.clear();
   }
 
@@ -125,9 +141,12 @@ export class HogaSpanLoader {
     if (!key) return;
     this.pendingById.delete(id);
     this.inFlight.delete(key);
+    const backgroundOnly = this.backgroundKeys.delete(key);
     const span = openHogaSpan(payload);
-    this.cache.set(key, span);
-    this.evict();
+    if (!backgroundOnly) {
+      this.cache.set(key, span);
+      this.evict();
+    }
     this.onUpdate(key, span);
   }
 
@@ -136,6 +155,7 @@ export class HogaSpanLoader {
     if (!key) return;
     this.pendingById.delete(id);
     this.inFlight.delete(key);
+    this.backgroundKeys.delete(key);
     this.failed.set(key, error);
     this.onUpdate(key, null);
   }

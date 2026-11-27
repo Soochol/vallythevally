@@ -2,6 +2,7 @@ import type { BookReplayMeta } from "../../api/generated/BookReplayMeta";
 import type { BookReplayMinuteCheckpoint } from "../../api/generated/BookReplayMinuteCheckpoint";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { bookReplaySpanUrl } from "../../api/bookReplay";
+import { BIG_TRADE_WON } from "../trades/tape";
 import {
   EVENT_KIND_BOOK,
   EVENT_KIND_PROGRAM,
@@ -111,6 +112,12 @@ export interface ReplayEngineFrame {
   readonly hitRow: { readonly price: number; readonly side: "buy" | "sell"; readonly untilMs: number } | null;
   readonly tradeSummary: ReplayTradeSummary;
   readonly recentTrades: readonly EngineTickTrade[];
+  readonly tradesVersion: number;
+  readonly tradesResetVersion: number;
+  readonly tradesAddedSeq: number;
+  readonly tradesBackfilling: boolean;
+  readonly tradesScannedFromMin: number | null;
+  readonly hasMoreTrades: boolean;
   readonly skipNotice: { readonly skippedMs: number; readonly untilMs: number } | null;
   readonly loadedSpans: readonly number[];
 }
@@ -140,7 +147,14 @@ const MS_PER_MINUTE = 60_000;
 const SPAN_MINUTES = 5;
 const SPAN_MS = SPAN_MINUTES * MS_PER_MINUTE;
 const PREFETCH_OFFSETS = [0, 1, 2, -1] as const;
-const MAX_RECENT_TRADES = 60;
+const INITIAL_ALL_TAPE_LIMIT = 500;
+const LOAD_MORE_ALL_STEP = 500;
+const MAX_ALL_TAPE_LIMIT = 5_000;
+const INITIAL_FILTER_TAPE_LIMIT = 200;
+const LOAD_MORE_FILTER_STEP = 200;
+const MAX_FILTER_TAPE_LIMIT = 2_000;
+const MIN_BIG_INDEX_WON = BIG_TRADE_WON;
+const BACKFILL_CONCURRENCY = 2;
 const FLASH_DURATION_MS = 240;
 const HIT_DURATION_MS = 220;
 const SKIP_NOTICE_DURATION_MS = 1600;
@@ -379,6 +393,8 @@ export class ReplayEngine {
   private readonly nowPerf: () => number;
   private readonly checkpointByMin = new Map<number, BookReplayMinuteCheckpoint>();
   private readonly availableSpans: readonly number[];
+  private readonly tradeSpans: readonly number[];
+  private readonly bigTradesBySpan = new Map<number, readonly EngineTickTrade[]>();
   private readonly frameListeners = new Set<(frame: ReplayEngineFrame) => void>();
   private readonly controlListeners = new Set<(state: ReplayEngineControlState) => void>();
   private readonly marketStepListeners = new Set<(step: ReplayMarketStepEvent) => void>();
@@ -418,7 +434,26 @@ export class ReplayEngine {
   private recentProgramRows: EngineProgramRow[] = [];
   private programTrend: number[] = [];
   private formingBar: FormingBar | null = null;
-  private recentTrades: EngineTickTrade[] = [];
+  private allTrades: EngineTickTrade[] = [];
+  private filteredTrades: EngineTickTrade[] = [];
+  private visibleTrades: readonly EngineTickTrade[] = [];
+  private pendingNewTrades: EngineTickTrade[] = [];
+  private allTapeLimit = INITIAL_ALL_TAPE_LIMIT;
+  private filterTapeLimit = INITIAL_FILTER_TAPE_LIMIT;
+  private allOldestSpanScanned: number | null = null;
+  private allOldestRowInSpan = 0;
+  private allBackfillSpan: number | null = null;
+  private filterBackfillQueue: number[] = [];
+  private readonly filterBackfillInFlight = new Set<number>();
+  private tradesScannedFromMin: number | null = null;
+  private hasMoreFiltered = false;
+  private tradesVersion = 0;
+  private tradesResetVersion = 0;
+  private tradesAddedSeq = 0;
+  private lastMinuteFrameIdx = -1;
+  private lastMinuteMinWon = -1;
+  private lastMinuteLimit = -1;
+  private lastMinuteTotalMatching = 0;
   private oneMinDeque: EngineTickTrade[] = [];
   private oneMinNetQty = 0;
   private whaleBuy = 0;
@@ -444,13 +479,19 @@ export class ReplayEngine {
           .map((s) => s.startMinute)
           .sort((a, b) => a - b)
       : [];
+    this.tradeSpans = options.meta
+      ? options.meta.spans
+          .filter((s) => s.tradeRows > 0)
+          .map((s) => s.startMinute)
+          .sort((a, b) => a - b)
+      : [];
     if (options.meta) {
       for (const ck of options.meta.minutes) {
         this.checkpointByMin.set(ck.minute, ck);
       }
     }
     this.loader = new HogaSpanLoader({ fetcher: options.spanFetcher });
-    this.loader.onUpdate = (key) => this.handleSpanLoaded(key);
+    this.loader.onUpdate = (key, span) => this.handleSpanLoaded(key, span);
 
     const firstStartMs = this.initialCursorMs();
     this.cursorMs = firstStartMs;
@@ -530,8 +571,54 @@ export class ReplayEngine {
   }
 
   setTapeMinWon(minWon: number): void {
+    this.flushPendingTrades();
     if (this.tapeMinWon === minWon) return;
     this.tapeMinWon = minWon;
+    this.allTapeLimit = INITIAL_ALL_TAPE_LIMIT;
+    this.filterTapeLimit = INITIAL_FILTER_TAPE_LIMIT;
+    this.tradesResetVersion += 1;
+    this.tradesAddedSeq = 0;
+    this.cancelTradeBackfills();
+    if (this.resolution === "tick") {
+      if (minWon > 0) {
+        this.rebuildFilteredTrades(true);
+      } else {
+        this.filteredTrades = [];
+        this.tradesScannedFromMin = null;
+        this.hasMoreFiltered = false;
+        this.visibleTrades = [...this.allTrades];
+        this.tradesVersion += 1;
+      }
+    } else {
+      this.tradesVersion += 1;
+    }
+    this.emitFrame();
+  }
+
+  loadMoreTrades(): void {
+    this.flushPendingTrades();
+    if (this.resolution === "minute_only") {
+      if (this.tapeMinWon > 0) {
+        if (this.filterTapeLimit >= MAX_FILTER_TAPE_LIMIT) return;
+        this.filterTapeLimit = Math.min(MAX_FILTER_TAPE_LIMIT, this.filterTapeLimit + LOAD_MORE_FILTER_STEP);
+      } else {
+        if (this.allTapeLimit >= MAX_ALL_TAPE_LIMIT) return;
+        this.allTapeLimit = Math.min(MAX_ALL_TAPE_LIMIT, this.allTapeLimit + LOAD_MORE_ALL_STEP);
+      }
+      this.tradesVersion += 1;
+      this.emitFrame();
+      return;
+    }
+    if (this.tapeMinWon > 0) {
+      if (this.filterTapeLimit >= MAX_FILTER_TAPE_LIMIT) return;
+      this.filterTapeLimit = Math.min(MAX_FILTER_TAPE_LIMIT, this.filterTapeLimit + LOAD_MORE_FILTER_STEP);
+      this.rebuildFilteredTrades(true);
+      this.emitFrame();
+      return;
+    }
+    if (this.allTapeLimit >= MAX_ALL_TAPE_LIMIT) return;
+    this.allTapeLimit = Math.min(MAX_ALL_TAPE_LIMIT, this.allTapeLimit + LOAD_MORE_ALL_STEP);
+    this.topUpAllTrades(true);
     this.emitFrame();
   }
 
@@ -574,10 +661,18 @@ export class ReplayEngine {
     this.tickBudget = 0;
     this.cellFlashes.clear();
     this.hitRow = null;
+    this.pendingNewTrades.length = 0;
+    this.allTapeLimit = INITIAL_ALL_TAPE_LIMIT;
+    this.filterTapeLimit = INITIAL_FILTER_TAPE_LIMIT;
+    this.tradesResetVersion += 1;
+    this.tradesAddedSeq = 0;
+    this.cancelTradeBackfills();
 
     if (this.resolution === "minute_only") {
       this.buffering = false;
       this.activeSecond = Math.floor(clamped / 1000);
+      this.lastMinuteFrameIdx = -1;
+      this.tradesVersion += 1;
       if (clamped < previousMs) {
         this.emitSeek({ previousMs, targetMs: clamped, fromLoop });
       } else if (clamped > previousMs) {
@@ -676,6 +771,8 @@ export class ReplayEngine {
   dispose(): void {
     this.disposed = true;
     this.stopLoop();
+    this.cancelTradeBackfills();
+    this.bigTradesBySpan.clear();
     this.loader.dispose();
     this.frameListeners.clear();
     this.controlListeners.clear();
@@ -709,6 +806,251 @@ export class ReplayEngine {
     return null;
   }
 
+  private prevTradeSpan(beforeStartMinute: number): number | null {
+    for (let i = this.tradeSpans.length - 1; i >= 0; i--) {
+      if (this.tradeSpans[i]! < beforeStartMinute) return this.tradeSpans[i]!;
+    }
+    return null;
+  }
+
+  private spanStartFromKey(key: string): number | null {
+    const raw = Number(key.slice(key.lastIndexOf(":") + 1));
+    return Number.isFinite(raw) ? raw : null;
+  }
+
+  private indexBigTrades(spanStart: number, span: OpenedHogaSpan): void {
+    if (this.bigTradesBySpan.has(spanStart)) return;
+    const trades = span.streams.trades;
+    if (!trades || trades.rows === 0) {
+      this.bigTradesBySpan.set(spanStart, []);
+      return;
+    }
+    const cols = trades.columns;
+    const priceCol = cols.price;
+    const qtyCol = cols.qty;
+    const big: EngineTickTrade[] = [];
+    for (let r = 0; r < trades.rows; r++) {
+      const price = Math.abs(priceCol?.[r] ?? 0);
+      const quantity = Math.abs(qtyCol?.[r] ?? 0);
+      if (price <= 0 || quantity <= 0 || price * quantity < MIN_BIG_INDEX_WON) continue;
+      const tr = extractTradeRow(span, spanStart, r, 0);
+      if (tr) big.push(tr);
+    }
+    this.bigTradesBySpan.set(spanStart, big);
+  }
+
+  private cancelTradeBackfills(): void {
+    this.filterBackfillQueue = [];
+    this.filterBackfillInFlight.clear();
+    this.allBackfillSpan = null;
+  }
+
+  private pumpFilterBackfill(): void {
+    while (this.filterBackfillInFlight.size < BACKFILL_CONCURRENCY && this.filterBackfillQueue.length > 0) {
+      const nextSpan = this.filterBackfillQueue.shift()!;
+      if (this.bigTradesBySpan.has(nextSpan)) continue;
+      const key = this.spanKey(nextSpan);
+      if (this.loader.hasFailed(key)) continue;
+      const cached = this.loader.peek(key);
+      if (cached) {
+        this.indexBigTrades(nextSpan, cached);
+        continue;
+      }
+      this.filterBackfillInFlight.add(nextSpan);
+      this.loader.requestBackground(key, bookReplaySpanUrl(this.code, this.session.date, nextSpan));
+    }
+  }
+
+  private rebuildFilteredTrades(allowBackfill: boolean): void {
+    const curSpanStart = this.spanStartOfMs(this.cursorMs);
+    const result: EngineTickTrade[] = [];
+    let scannedFromMin: number | null = null;
+    let foundOverflow = false;
+    const missingSpans: number[] = [];
+
+    if (this.tapeMinWon >= MIN_BIG_INDEX_WON) {
+      let contiguous = true;
+      for (let i = this.tradeSpans.length - 1; i >= 0; i--) {
+        const s = this.tradeSpans[i]!;
+        if (s > curSpanStart) continue;
+        const key = this.spanKey(s);
+        if (!this.bigTradesBySpan.has(s)) {
+          const cached = this.loader.peek(key);
+          if (cached) this.indexBigTrades(s, cached);
+        }
+        if (contiguous && this.bigTradesBySpan.has(s)) {
+          const bigRows = this.bigTradesBySpan.get(s)!;
+          for (let r = bigRows.length - 1; r >= 0; r--) {
+            const tr = bigRows[r]!;
+            if (tr.recvMs > this.cursorMs) continue;
+            if (tr.value >= this.tapeMinWon) {
+              if (result.length < this.filterTapeLimit) {
+                result.push(tr);
+              } else {
+                foundOverflow = true;
+                break;
+              }
+            }
+          }
+          scannedFromMin = s;
+          if (foundOverflow) break;
+        } else if (!this.bigTradesBySpan.has(s)) {
+          if (!this.loader.hasFailed(key)) {
+            contiguous = false;
+            missingSpans.push(s);
+          }
+        }
+      }
+    } else {
+      for (let i = this.tradeSpans.length - 1; i >= 0; i--) {
+        const s = this.tradeSpans[i]!;
+        if (s > curSpanStart) continue;
+        const span = this.loader.peek(this.spanKey(s));
+        const trades = span?.streams.trades;
+        if (!span || !trades || trades.rows === 0) continue;
+        const endRow = s === curSpanStart
+          ? lastRowAtOrBefore(trades.columns.recv_ms!, this.cursorMs)
+          : trades.rows - 1;
+        for (let r = endRow; r >= 0; r--) {
+          const tr = extractTradeRow(span, s, r, 0);
+          if (!tr) continue;
+          if (tr.value >= this.tapeMinWon) {
+            if (result.length < this.filterTapeLimit) {
+              result.push(tr);
+            } else {
+              foundOverflow = true;
+              break;
+            }
+          }
+        }
+        scannedFromMin = s;
+        if (foundOverflow) break;
+      }
+    }
+
+    this.filteredTrades = result;
+    this.tradesScannedFromMin = scannedFromMin;
+    this.visibleTrades = result;
+    this.tradesVersion += 1;
+
+    if (allowBackfill && !foundOverflow && result.length < this.filterTapeLimit && missingSpans.length > 0) {
+      this.filterBackfillQueue = missingSpans.filter((s) => !this.filterBackfillInFlight.has(s));
+      this.pumpFilterBackfill();
+    } else {
+      this.filterBackfillQueue = [];
+    }
+
+    const hasEarlierUnscanned = scannedFromMin !== null && this.prevTradeSpan(scannedFromMin) !== null;
+    this.hasMoreFiltered =
+      this.filterTapeLimit < MAX_FILTER_TAPE_LIMIT
+      && (foundOverflow || (result.length >= this.filterTapeLimit && hasEarlierUnscanned));
+  }
+
+  private appendAllTradesFromSpan(spanStart: number, span: OpenedHogaSpan, maxRowExclusive: number): void {
+    const trades = span.streams.trades;
+    if (!trades || trades.rows === 0 || maxRowExclusive <= 0) {
+      this.allOldestSpanScanned = spanStart;
+      this.allOldestRowInSpan = 0;
+      return;
+    }
+    let lastProcessed = maxRowExclusive;
+    for (let r = maxRowExclusive - 1; r >= 0 && this.allTrades.length < this.allTapeLimit; r--) {
+      lastProcessed = r;
+      const tr = extractTradeRow(span, spanStart, r, 0);
+      if (!tr) continue;
+      if (tr.recvMs <= this.cursorMs) {
+        this.allTrades.push(tr);
+      }
+    }
+    this.allOldestSpanScanned = spanStart;
+    this.allOldestRowInSpan = lastProcessed;
+  }
+
+  private topUpAllTrades(allowBackfill: boolean): void {
+    let changed = false;
+    const beforeLen = this.allTrades.length;
+
+    if (this.allTrades.length < this.allTapeLimit && this.allOldestSpanScanned !== null && this.allOldestRowInSpan > 0) {
+      const spanStart = this.allOldestSpanScanned;
+      const key = this.spanKey(spanStart);
+      const span = this.loader.peek(key);
+      if (span) {
+        this.appendAllTradesFromSpan(spanStart, span, this.allOldestRowInSpan);
+      } else if (allowBackfill && !this.loader.hasFailed(key)) {
+        this.allBackfillSpan = spanStart;
+        this.loader.requestBackground(key, bookReplaySpanUrl(this.code, this.session.date, spanStart));
+      }
+    }
+
+    while (
+      this.allTrades.length < this.allTapeLimit
+      && this.allOldestSpanScanned !== null
+      && this.allOldestRowInSpan === 0
+      && this.allBackfillSpan === null
+    ) {
+      const prevStart = this.prevTradeSpan(this.allOldestSpanScanned);
+      if (prevStart === null) break;
+      const key = this.spanKey(prevStart);
+      const prevSpan = this.loader.peek(key);
+      if (prevSpan) {
+        this.indexBigTrades(prevStart, prevSpan);
+        const rows = prevSpan.streams.trades?.rows ?? 0;
+        this.appendAllTradesFromSpan(prevStart, prevSpan, rows);
+      } else if (this.loader.hasFailed(key)) {
+        this.allOldestSpanScanned = prevStart;
+        this.allOldestRowInSpan = 0;
+      } else {
+        if (allowBackfill) {
+          this.allBackfillSpan = prevStart;
+          this.loader.requestBackground(key, bookReplaySpanUrl(this.code, this.session.date, prevStart));
+        }
+        break;
+      }
+    }
+
+    changed = this.allTrades.length !== beforeLen;
+    if (changed) {
+      this.visibleTrades = [...this.allTrades];
+      this.tradesVersion += 1;
+    }
+  }
+
+  private flushPendingTrades(): void {
+    if (this.pendingNewTrades.length === 0) return;
+    const incomingDesc = this.pendingNewTrades.reverse();
+    this.pendingNewTrades = [];
+
+    this.allTrades = [...incomingDesc, ...this.allTrades];
+    if (this.allTrades.length > this.allTapeLimit) {
+      this.allTrades.length = this.allTapeLimit;
+    }
+
+    if (this.tapeMinWon > 0) {
+      const matched = incomingDesc.filter((tr) => tr.value >= this.tapeMinWon);
+      if (matched.length > 0) {
+        this.filteredTrades = [...matched, ...this.filteredTrades];
+        if (this.filteredTrades.length > this.filterTapeLimit) {
+          this.filteredTrades.length = this.filterTapeLimit;
+          this.hasMoreFiltered = this.filterTapeLimit < MAX_FILTER_TAPE_LIMIT;
+        }
+        this.visibleTrades = this.filteredTrades;
+        this.tradesAddedSeq += matched.length;
+        this.tradesVersion += 1;
+      }
+    } else {
+      this.visibleTrades = this.allTrades;
+      this.tradesAddedSeq += incomingDesc.length;
+      this.tradesVersion += 1;
+    }
+  }
+
+  private hasMoreAllTrades(): boolean {
+    if (this.allBackfillSpan !== null || this.allTapeLimit >= MAX_ALL_TAPE_LIMIT) return false;
+    if (this.allOldestSpanScanned === null) return false;
+    if (this.allOldestRowInSpan > 0) return true;
+    return this.prevTradeSpan(this.allOldestSpanScanned) !== null;
+  }
+
   private ensurePrefetchWindow(centerSpanStart: number): void {
     if (this.resolution !== "tick") return;
     const targets: number[] = [];
@@ -728,12 +1070,17 @@ export class ReplayEngine {
     }
   }
 
-  private handleSpanLoaded(key: string): void {
+  private handleSpanLoaded(key: string, loadedSpan: OpenedHogaSpan | null): void {
     if (this.disposed) return;
+    const loadedStart = this.spanStartFromKey(key);
+    if (loadedStart !== null && loadedSpan !== null) {
+      this.indexBigTrades(loadedStart, loadedSpan);
+    }
+
     const expectedKey = this.spanKey(this.spanStartOfMs(this.cursorMs));
     if (key === expectedKey) {
       const spanStart = this.spanStartOfMs(this.cursorMs);
-      const span = this.loader.get(key);
+      const span = this.loader.get(key) ?? loadedSpan;
       this.buffering = false;
       if (span) {
         this.reconstructFromSpan(spanStart, span, this.cursorMs);
@@ -744,7 +1091,55 @@ export class ReplayEngine {
       this.emitFrame();
       return;
     }
+
+    let tradesUpdated = false;
+    if (loadedStart !== null) {
+      const wasFilterBackfill = this.filterBackfillInFlight.delete(loadedStart);
+      if (this.tapeMinWon > 0 && (wasFilterBackfill || loadedStart <= this.spanStartOfMs(this.cursorMs))) {
+        this.flushPendingTrades();
+        this.rebuildFilteredTrades(true);
+        tradesUpdated = true;
+      }
+
+      if (this.allBackfillSpan === loadedStart) {
+        this.allBackfillSpan = null;
+        if (this.tapeMinWon === 0 && loadedSpan !== null) {
+          this.flushPendingTrades();
+          if (this.allOldestSpanScanned === loadedStart && this.allOldestRowInSpan > 0) {
+            this.appendAllTradesFromSpan(loadedStart, loadedSpan, this.allOldestRowInSpan);
+          } else if (
+            this.allOldestSpanScanned !== null
+            && this.allOldestRowInSpan === 0
+            && loadedStart === this.prevTradeSpan(this.allOldestSpanScanned)
+          ) {
+            const rows = loadedSpan.streams.trades?.rows ?? 0;
+            this.appendAllTradesFromSpan(loadedStart, loadedSpan, rows);
+          }
+          this.visibleTrades = [...this.allTrades];
+          this.tradesVersion += 1;
+          this.topUpAllTrades(this.allTrades.length < this.allTapeLimit);
+          tradesUpdated = true;
+        } else {
+          tradesUpdated = true;
+        }
+      } else if (
+        this.tapeMinWon === 0
+        && loadedSpan !== null
+        && this.allTrades.length < this.allTapeLimit
+        && this.allOldestSpanScanned !== null
+        && this.allOldestRowInSpan === 0
+        && loadedStart === this.prevTradeSpan(this.allOldestSpanScanned)
+      ) {
+        this.flushPendingTrades();
+        this.topUpAllTrades(false);
+        tradesUpdated = true;
+      }
+    }
+
     this.emitControl();
+    if (tradesUpdated) {
+      this.emitFrame();
+    }
   }
 
   private startLoop(): void {
@@ -1068,8 +1463,7 @@ export class ReplayEngine {
         };
       }
 
-      this.recentTrades.unshift(tr);
-      if (this.recentTrades.length > MAX_RECENT_TRADES) this.recentTrades.length = MAX_RECENT_TRADES;
+      this.pendingNewTrades.push(tr);
       this.oneMinDeque.push(tr);
       if (tr.side === "buy") this.oneMinNetQty += tr.quantity;
       else if (tr.side === "sell") this.oneMinNetQty -= tr.quantity;
@@ -1167,7 +1561,14 @@ export class ReplayEngine {
     this.minuteStartBook = null;
     this.lastBookMinute = targetMin;
     this.formingBar = null;
-    this.recentTrades = [];
+    this.allTrades = [];
+    this.filteredTrades = [];
+    this.visibleTrades = [];
+    this.pendingNewTrades.length = 0;
+    this.allOldestSpanScanned = this.spanStartOfMs(targetMs);
+    this.allOldestRowInSpan = 0;
+    this.tradesScannedFromMin = null;
+    this.hasMoreFiltered = false;
     this.oneMinDeque = [];
     this.oneMinNetQty = 0;
     this.whaleBuy = 0;
@@ -1190,6 +1591,13 @@ export class ReplayEngine {
     this.lastEventMs = targetMs;
     this.deltaMs = 0;
     this.activeSecond = Math.floor(targetMs / 1000);
+    this.topUpAllTrades(false);
+    if (this.tapeMinWon > 0) {
+      this.rebuildFilteredTrades(true);
+    } else {
+      this.visibleTrades = [...this.allTrades];
+      this.tradesVersion += 1;
+    }
   }
 
   private reconstructFromSpan(spanStart: number, span: OpenedHogaSpan, targetMs: number): void {
@@ -1274,8 +1682,13 @@ export class ReplayEngine {
     this.programTrend = progTrend.slice(-MAX_PROGRAM_TREND);
     this.recentProgramRows = progRowsAsc.slice(-MAX_RECENT_PROGRAM_ROWS).reverse();
 
+    this.indexBigTrades(spanStart, span);
+
     this.formingBar = null;
-    this.recentTrades = [];
+    this.allTrades = [];
+    this.pendingNewTrades.length = 0;
+    this.allOldestSpanScanned = spanStart;
+    this.allOldestRowInSpan = 0;
     this.oneMinDeque = [];
     this.oneMinNetQty = 0;
     this.whaleBuy = 0;
@@ -1327,31 +1740,29 @@ export class ReplayEngine {
         else if (tr.side === "sell") this.oneMinNetQty -= tr.quantity;
       }
 
-      for (let r = endRow; r >= 0 && this.recentTrades.length < MAX_RECENT_TRADES; r--) {
-        const tr = extractTradeRow(span, spanStart, r, 0);
-        if (!tr) continue;
-        this.recentTrades.push(tr);
-        if (tr.whale) {
-          if (tr.side === "buy") this.whaleBuy += 1;
-          else if (tr.side === "sell") this.whaleSell += 1;
+      if (endRow >= 0) {
+        this.appendAllTradesFromSpan(spanStart, span, endRow + 1);
+        for (const tr of this.allTrades) {
+          if (tr.whale) {
+            if (tr.side === "buy") this.whaleBuy += 1;
+            else if (tr.side === "sell") this.whaleSell += 1;
+          }
         }
-      }
-      if (this.price === null && endRow >= 0) {
         const lastTr = extractTradeRow(span, spanStart, endRow, 0);
-        if (lastTr) this.price = lastTr.price;
+        if (this.price === null && lastTr) this.price = lastTr.price;
       }
     }
 
-    if (this.recentTrades.length < MAX_RECENT_TRADES && spanStart >= SPAN_MINUTES) {
-      const prevSpan = this.loader.peek(this.spanKey(spanStart - SPAN_MINUTES));
-      const prevTrades = prevSpan?.streams.trades;
-      if (prevSpan && prevTrades && prevTrades.rows > 0) {
-        for (let r = prevTrades.rows - 1; r >= 0 && this.recentTrades.length < MAX_RECENT_TRADES; r--) {
-          const tr = extractTradeRow(prevSpan, spanStart - SPAN_MINUTES, r, 0);
-          if (!tr) continue;
-          this.recentTrades.push(tr);
-        }
-      }
+    this.topUpAllTrades(false);
+
+    if (this.tapeMinWon > 0) {
+      this.rebuildFilteredTrades(true);
+    } else {
+      this.filteredTrades = [];
+      this.tradesScannedFromMin = null;
+      this.hasMoreFiltered = false;
+      this.visibleTrades = [...this.allTrades];
+      this.tradesVersion += 1;
     }
 
     this.eventCursor = lastRowAtOrBefore(span.eventRecvMs, targetMs);
@@ -1417,8 +1828,27 @@ export class ReplayEngine {
       const idx = frameIndexAt(this.session.frames, sec);
       const frame = idx >= 0 ? (this.session.frames[idx] ?? null) : null;
       const ladder = computeLadderSnapshot(this.session, idx, this.deltaMode);
-      const tradeSummary = filterRecentTrades(this.session.frames, idx, this.tapeMinWon);
+      const limit = this.tapeMinWon > 0 ? this.filterTapeLimit : this.allTapeLimit;
+      const maxLimit = this.tapeMinWon > 0 ? MAX_FILTER_TAPE_LIMIT : MAX_ALL_TAPE_LIMIT;
+      const tradeSummary = filterRecentTrades(this.session.frames, idx, this.tapeMinWon, limit);
+      if (idx !== this.lastMinuteFrameIdx || this.tapeMinWon !== this.lastMinuteMinWon || limit !== this.lastMinuteLimit) {
+        if (
+          this.lastMinuteFrameIdx >= 0
+          && idx > this.lastMinuteFrameIdx
+          && this.tapeMinWon === this.lastMinuteMinWon
+          && limit === this.lastMinuteLimit
+        ) {
+          this.tradesAddedSeq += Math.max(0, tradeSummary.totalMatching - this.lastMinuteTotalMatching);
+        }
+        this.lastMinuteFrameIdx = idx;
+        this.lastMinuteMinWon = this.tapeMinWon;
+        this.lastMinuteLimit = limit;
+        this.lastMinuteTotalMatching = tradeSummary.totalMatching;
+        this.visibleTrades = tradeSummary.rows.map((tr) => ({ ...tr, recvMs: tr.secondOfDay * 1000, freshUntilMs: 0 }));
+        this.tradesVersion += 1;
+      }
       const minProg = this.buildMinuteProgramHistory(Math.floor(sec / 60));
+      const scannedMin = this.session.minutes[0]?.minute ?? null;
       return {
         cursorMs: this.cursorMs,
         deltaMs: 0,
@@ -1446,11 +1876,19 @@ export class ReplayEngine {
         cellFlashes: new Map(),
         hitRow: null,
         tradeSummary,
-        recentTrades: tradeSummary.rows.map((tr) => ({ ...tr, recvMs: tr.secondOfDay * 1000, freshUntilMs: 0 })),
+        recentTrades: this.visibleTrades,
+        tradesVersion: this.tradesVersion,
+        tradesResetVersion: this.tradesResetVersion,
+        tradesAddedSeq: this.tradesAddedSeq,
+        tradesBackfilling: false,
+        tradesScannedFromMin: this.tapeMinWon > 0 ? scannedMin : null,
+        hasMoreTrades: limit < maxLimit && tradeSummary.totalMatching > tradeSummary.rows.length,
         skipNotice: null,
         loadedSpans: [],
       };
     }
+
+    this.flushPendingTrades();
 
     for (const [key, flash] of this.cellFlashes) {
       if (perfNow >= flash.untilMs) this.cellFlashes.delete(key);
@@ -1484,9 +1922,12 @@ export class ReplayEngine {
       this.hitRow?.side ?? null,
     );
 
-    const filteredTrades = this.tapeMinWon > 0
-      ? this.recentTrades.filter((tr) => tr.value >= this.tapeMinWon).slice(0, 40)
-      : this.recentTrades.slice(0, 40);
+    const tradesBackfilling = this.tapeMinWon > 0
+      ? this.filterBackfillInFlight.size > 0 || this.filterBackfillQueue.length > 0
+      : this.allBackfillSpan !== null;
+    const hasMoreTrades = this.tapeMinWon > 0
+      ? !tradesBackfilling && this.hasMoreFiltered
+      : this.hasMoreAllTrades();
 
     const loadedSpans = this.loader
       .cachedKeys()
@@ -1521,12 +1962,19 @@ export class ReplayEngine {
       cellFlashes: new Map(this.cellFlashes),
       hitRow: this.hitRow,
       tradeSummary: {
-        rows: filteredTrades,
+        rows: this.visibleTrades,
+        totalMatching: this.visibleTrades.length,
         net1mQty: this.oneMinNetQty,
         whaleBuy: this.whaleBuy,
         whaleSell: this.whaleSell,
       },
-      recentTrades: filteredTrades,
+      recentTrades: this.visibleTrades,
+      tradesVersion: this.tradesVersion,
+      tradesResetVersion: this.tradesResetVersion,
+      tradesAddedSeq: this.tradesAddedSeq,
+      tradesBackfilling,
+      tradesScannedFromMin: this.tapeMinWon > 0 ? this.tradesScannedFromMin : null,
+      hasMoreTrades,
       skipNotice: this.skipNotice,
       loadedSpans,
     };

@@ -121,6 +121,7 @@ export interface ReplayLadderSnapshot {
 
 export interface ReplayTradeSummary {
   readonly rows: readonly ReplayTrade[];
+  readonly totalMatching: number;
   readonly net1mQty: number;
   readonly whaleBuy: number;
   readonly whaleSell: number;
@@ -844,14 +845,15 @@ export function filterRecentTrades(
   frames: readonly ReplayFrame[],
   frameIndex: number,
   minValueWon: number,
-  limit = 40,
+  limit = 500,
 ): ReplayTradeSummary {
   if (frameIndex < 0 || frames.length === 0) {
-    return { rows: [], net1mQty: 0, whaleBuy: 0, whaleSell: 0 };
+    return { rows: [], totalMatching: 0, net1mQty: 0, whaleBuy: 0, whaleSell: 0 };
   }
   const currentSec = frames[frameIndex]!.t;
   const oneMinAgo = currentSec - 60;
   const rows: ReplayTrade[] = [];
+  let totalMatching = 0;
   let net1mQty = 0;
   let whaleBuy = 0;
   let whaleSell = 0;
@@ -867,10 +869,13 @@ export function filterRecentTrades(
       if (tr.side === "buy") whaleBuy += 1;
       else if (tr.side === "sell") whaleSell += 1;
     }
-    if (rows.length < limit && tr.value >= minValueWon) {
-      rows.push(tr);
+    if (tr.value >= minValueWon) {
+      totalMatching += 1;
+      if (rows.length < limit) {
+        rows.push(tr);
+      }
     }
   }
 
-  return { rows, net1mQty, whaleBuy, whaleSell };
+  return { rows, totalMatching, net1mQty, whaleBuy, whaleSell };
 }

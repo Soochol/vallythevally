@@ -6,7 +6,6 @@ import {
   aggregateReplayBars,
   type ChartViewport,
   clampViewport,
-  focusViewport,
   panViewport,
   REPLAY_CHART_TIMEFRAMES,
   type ReplayChartTimeframe,
@@ -20,8 +19,6 @@ import {
   type ReplaySession,
 } from "./replayModel";
 import type { ReplayPaperEngine } from "./replayPaperEngine";
-
-export type ChartRangeMode = "all" | "focus";
 
 interface Props {
   readonly session: ReplaySession;
@@ -101,21 +98,13 @@ function setText(el: HTMLElement | null, text: string): void {
   if (el && el.textContent !== text) el.textContent = text;
 }
 
-function defaultViewportFor(
-  totalBars: number,
-  curBarIdx: number,
-  range: ChartRangeMode,
-  timeframe: ReplayChartTimeframe,
-): ChartViewport {
+function defaultViewportFor(totalBars: number): ChartViewport {
   if (totalBars <= 0) return { start: 0, end: 0 };
-  if (range === "all") return { start: 0, end: totalBars };
-  const spanBars = Math.max(8, Math.round(60 / timeframe));
-  return focusViewport(totalBars, curBarIdx + 0.5, spanBars);
+  return { start: 0, end: totalBars };
 }
 
 export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, palette, onScrub }: Props) {
   const [timeframe, setTimeframe] = useState<ReplayChartTimeframe>(1);
-  const [range, setRange] = useState<ChartRangeMode>("focus");
   const [panning, setPanning] = useState(false);
   const [renderTick, setRenderTick] = useState(0);
 
@@ -195,7 +184,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
 
       const rawView = viewportRef.current !== null
         ? clampViewport(viewportRef.current, totalBars)
-        : defaultViewportFor(totalBars, curBarIdx, range, timeframe);
+        : defaultViewportFor(totalBars);
       activeViewportRef.current = rawView;
 
       const viewSpan = Math.max(1, rawView.end - rawView.start);
@@ -859,7 +848,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
       unsubFrame();
       unsubPaper?.();
     };
-  }, [session, engine, paper, blindMode, bookmarks, palette, range, timeframe, renderTick]);
+  }, [session, engine, paper, blindMode, bookmarks, palette, timeframe, renderTick]);
 
   const scrubAtClientX = (targetEl: HTMLElement, clientX: number) => {
     const rect = targetEl.getBoundingClientRect();
@@ -927,7 +916,6 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
 
   const handleResetZoom = () => {
     viewportRef.current = null;
-    setRange("all");
     paintNowRef.current?.();
   };
 
@@ -950,25 +938,6 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
                 {`${tf}분`}
               </button>
             ))}
-          </div>
-          <div className="rp-seg" role="group" aria-label="차트 범위">
-            <button
-              type="button"
-              aria-pressed={range === "all" && viewportRef.current === null}
-              onClick={handleResetZoom}
-            >
-              장 전체
-            </button>
-            <button
-              type="button"
-              aria-pressed={range === "focus"}
-              onClick={() => {
-                viewportRef.current = null;
-                setRange("focus");
-              }}
-            >
-              ±30분
-            </button>
           </div>
         </div>
       </div>
