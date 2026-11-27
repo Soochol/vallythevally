@@ -7,6 +7,7 @@ import type { MinutePeriod } from "../lib/symbol";
 import type { WatchColumn } from "../lib/watchlist";
 import type { DrawingPrefs } from "../chart/drawings/prefs";
 import { actualKeys, type ActionKeys, type HotkeyOverrides } from "../lib/hotkeys";
+import { type BrokerPrefs, mergeBrokerPrefs } from "../features/brokers/prefs";
 import { type OrderEntries, type OrderEntry, orderEntryKey, withOrderEntry } from "../features/order/orderEntries";
 import type { OrderSettings } from "../features/order/orderSettings";
 import { DEFAULT_UI_PREFS, MAX_RECENT, type IndicatorWindow, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
@@ -37,6 +38,7 @@ interface UiStore {
   setHotkeys(hotkeys: HotkeyOverrides): void;
   setPageLink(link: LinkColor | null): void;
   setBookReplay(enabled: boolean): void;
+  setBrokerPrefs(patch: Partial<BrokerPrefs>): void;
 }
 
 const withEntryAt = (entries: OrderEntries, [key, entry]: readonly [string, OrderEntry]): OrderEntries => withOrderEntry(entries, key, entry);
@@ -81,6 +83,11 @@ export const useUiStore = create<UiStore>()((set, get) => {
     setHotkeys: (hotkeys) => edit((p) => (p.hotkeys === hotkeys ? p : { ...p, hotkeys })),
     setPageLink: (pageLink) => edit((p) => (p.pageLink === pageLink ? p : { ...p, pageLink })),
     setBookReplay: (bookReplay) => edit((p) => (p.bookReplay === bookReplay ? p : { ...p, bookReplay })),
+    setBrokerPrefs: (patch) =>
+      edit((p) => {
+        const brokers = mergeBrokerPrefs(p.brokers, patch);
+        return brokers === p.brokers ? p : { ...p, brokers };
+      }),
     setVenue: (venue) => edit((p) => (p.venue === venue ? p : { ...p, venue })),
     setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
@@ -121,6 +128,8 @@ registerWindowReclaim<OrderEntries>({
 export const useVenue = (): Venue => useUiStore((s) => s.prefs.venue);
 
 export const useBookReplayPref = (): boolean => useUiStore((s) => s.prefs.bookReplay);
+
+export const useBrokerPrefs = (): BrokerPrefs => useUiStore((s) => s.prefs.brokers);
 
 export const useTheme = (): Theme => useUiStore((s) => s.prefs.theme);
 

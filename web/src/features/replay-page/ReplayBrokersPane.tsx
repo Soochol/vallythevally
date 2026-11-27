@@ -3,6 +3,7 @@ import type { Bar } from "../../api/generated/Bar";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { formatPrice } from "../../lib/format";
 import type { BrokerCards, BrokerView } from "../../stores/layout";
+import { useUiStore } from "../../stores/ui";
 import { BoardView } from "../brokers/BoardView";
 import { DetailTable } from "../brokers/DetailTable";
 import { ListView } from "../brokers/ListView";
@@ -51,8 +52,11 @@ export function ReplayBrokersPane({
   const [bottomPane, setBottomPane] = useState<BottomPaneMode>("brokers");
   const [journalTab, setJournalTab] = useState<JournalTab>("fills");
   const [paperTick, setPaperTick] = useState(0);
-  const [brokerView, setBrokerView] = useState<BrokerView>("transfer");
-  const [brokerCards, setBrokerCards] = useState<BrokerCards>("numbers");
+  const brokerView = useUiStore((s) => s.prefs.brokers.replayView);
+  const brokerCards = useUiStore((s) => s.prefs.brokers.replayCards);
+  const setBrokerPrefs = useUiStore((s) => s.setBrokerPrefs);
+  const setBrokerView = (replayView: BrokerView) => setBrokerPrefs({ replayView });
+  const setBrokerCards = (replayCards: BrokerCards) => setBrokerPrefs({ replayCards });
   const [selectedBroker, setSelectedBroker] = useState<string | null>(null);
   const [hoverBrokerCursor, setHoverBrokerCursor] = useState<UnixSeconds | null>(null);
 

@@ -3,7 +3,7 @@ import type { BookReplayMeta } from "../src/api/generated/BookReplayMeta";
 import type { BrokerDay } from "../src/api/generated/BrokerDay";
 import type { ProgramSeriesPage } from "../src/api/generated/ProgramSeriesPage";
 import { encodeHogaSpan } from "../src/features/replay-page/hogaDecode";
-import { expect, type Scenario, test } from "./harness";
+import { expect, pollSaved, type Scenario, test } from "./harness";
 
 test.use({ clockStart: "20261126160000", viewport: { width: 1440, height: 900 } });
 
@@ -478,4 +478,88 @@ test("종목 클릭 시 기존 SearchDialog로 종목을 전환하고, 스플리
   await expect(dialog).toBeHidden();
   await expect(page).toHaveURL(/\/replay\?symbol=000660/);
   await expect(page.getByTestId("replay-symbol-picker")).toContainText("000660");
+});
+
+test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵션은 탭 전환·종목 변경·새로고침 뒤에도 유지된다", async ({ page, scenario }) => {
+  seedTickReplay(scenario);
+  const altCode = "000660";
+  scenario.reply(`/api/symbols/${altCode}/book-replay/days`, { body: { symbol: altCode, days: [DATE] } });
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/book-replay/meta` && url.searchParams.get("date") === DATE,
+    { body: { ...REPLAY_META_TICK, symbol: altCode } },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/book-replay/span` && url.searchParams.get("date") === DATE && url.searchParams.get("startMinute") === "540",
+    { body: SPAN_540_BYTES },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/brokers` && url.searchParams.get("date") === DATE,
+    { body: { ...BROKER_DAY, symbol: altCode } },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${altCode}/program-series`,
+    { body: { ...PROGRAM_PAGE, symbol: altCode } },
+  );
+
+  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
+
+  const brokersPane = page.getByTestId("replay-brokers-pane");
+  const brokers = page.getByTestId("replay-brokers");
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  const levelGroup = brokers.getByRole("group", { name: "집계 단위" });
+  const modeGroup = brokers.getByRole("group", { name: "계산 모드" });
+  const toggleOther = brokers.getByTestId("broker-transfer-toggle-other");
+  const preset30 = brokers.getByTestId("broker-transfer-preset-last30");
+
+  await levelGroup.getByRole("button", { name: "주체 그룹", exact: true }).click();
+  await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
+  await toggleOther.click();
+  await preset30.click();
+
+  await brokersPane.getByTestId("replay-tab-journal").click();
+  await expect(brokersPane.getByTestId("replay-sim-journal")).toBeVisible();
+  await brokersPane.getByTestId("replay-tab-brokers").click();
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  await brokersPane.getByTestId("replay-broker-view-board").click();
+  await brokersPane.getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "복합", exact: true }).click();
+  await brokersPane.getByTestId("replay-broker-view-transfer").click();
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+
+  const assertTransferOptions = async () => {
+    await expect(levelGroup.getByRole("button", { name: "주체 그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(modeGroup.getByRole("button", { name: "총량", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(toggleOther).toHaveAttribute("aria-pressed", "false");
+    await expect(preset30).toHaveAttribute("aria-pressed", "true");
+  };
+
+  await assertTransferOptions();
+
+  await page.getByTestId("replay-symbol-picker").click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill(altCode);
+  const hynix = dialog.getByRole("option").filter({ hasText: altCode });
+  await expect(hynix).toHaveAttribute("aria-disabled", "false");
+  await hynix.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByTestId("replay-symbol-picker")).toContainText(altCode);
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await assertTransferOptions();
+
+  await pollSaved(() => scenario.documents.uiPrefs().brokers).toMatchObject({
+    transferLevel: "group",
+    transferMode: "gross",
+    transferShowOther: false,
+    transferRangePreset: "last30",
+    replayView: "transfer",
+    replayCards: "both",
+  });
+
+  await page.reload();
+  await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await assertTransferOptions();
+
+  await brokersPane.getByTestId("replay-broker-view-board").click();
+  await expect(brokersPane.getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "복합", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
