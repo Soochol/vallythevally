@@ -1,11 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { direction, formatDecimal, formatPrice } from "../../lib/format";
 import { formatQuantity } from "../market-window/format";
 import { RatioBar, Segmented } from "../market-window/parts";
-import { BIG_TRADE_WON, MIN_AMOUNT_OPTIONS, minAmountWon, type MinAmountKey } from "../trades/tape";
+import { useWindowedRows } from "../market-window/useWindowedRows";
+import {
+  BIG_TRADE_WON,
+  MIN_AMOUNT_OPTIONS,
+  minAmountWon,
+  RECENT_RATIO_ROWS,
+  type MinAmountKey,
+} from "../trades/tape";
 import "../trades/trades.css";
-import type { ReplayEngine, ReplayEngineFrame } from "./replayEngine";
-import { formatReplayClock, formatWonCompact } from "./replayModel";
+import type { EngineTickTrade, ReplayEngine, ReplayEngineFrame } from "./replayEngine";
+import { formatReplayClock, formatReplayHM, formatWonCompact } from "./replayModel";
 
 interface Props {
   readonly engine: ReplayEngine;
@@ -15,14 +22,17 @@ interface Props {
   readonly onJumpMs: (ms: number) => void;
 }
 
-const TAPE_SLOTS = Array.from({ length: 40 }, (_, i) => i);
-
-interface TradeSlotRefs {
-  row: HTMLButtonElement | null;
-  time: HTMLSpanElement | null;
-  price: HTMLSpanElement | null;
-  qty: HTMLSpanElement | null;
+interface PaneTradeState {
+  readonly trades: readonly EngineTickTrade[];
+  readonly tradesVersion: number;
+  readonly resolution: "tick" | "minute_only";
+  readonly backfilling: boolean;
+  readonly scannedFromMin: number | null;
+  readonly hasMore: boolean;
+  readonly cursorMs: number;
 }
+
+const PIN_SCROLL_THRESHOLD_PX = 4;
 
 function setText(el: HTMLElement | null, value: string): void {
   if (el && el.textContent !== value) el.textContent = value;
@@ -33,6 +43,43 @@ function minKeyOf(won: number): MinAmountKey {
   return matched ? matched.value : "all";
 }
 
+function extractPaneState(frame: ReplayEngineFrame): PaneTradeState {
+  return {
+    trades: frame.recentTrades,
+    tradesVersion: frame.tradesVersion,
+    resolution: frame.resolution,
+    backfilling: frame.tradesBackfilling,
+    scannedFromMin: frame.tradesScannedFromMin,
+    hasMore: frame.hasMoreTrades,
+    cursorMs: frame.cursorMs,
+  };
+}
+
+function appendOlderTail(
+  frozen: readonly EngineTickTrade[],
+  latest: readonly EngineTickTrade[],
+): readonly EngineTickTrade[] {
+  if (frozen.length === 0 || latest.length === 0) return frozen;
+  const oldest = frozen[frozen.length - 1]!;
+  const idx = latest.findIndex((tr) => tr.key === oldest.key);
+  if (idx >= 0) {
+    if (idx >= latest.length - 1) return frozen;
+    return [...frozen, ...latest.slice(idx + 1)];
+  }
+  const seen = new Set(frozen.map((tr) => tr.key));
+  const extra = latest.filter((tr) => tr.recvMs < oldest.recvMs && !seen.has(tr.key));
+  return extra.length > 0 ? [...frozen, ...extra] : frozen;
+}
+
+function priceDirectionOf(tr: EngineTickTrade, previousClose: number | null): "up" | "down" | "flat" {
+  if (previousClose !== null && previousClose > 0) {
+    return direction(tr.price - previousClose);
+  }
+  if (tr.side === "buy") return "up";
+  if (tr.side === "sell") return "down";
+  return "flat";
+}
+
 export function ReplayTradesPane({
   engine,
   previousClose,
@@ -40,85 +87,164 @@ export function ReplayTradesPane({
   onTapeMinWon,
   onJumpMs,
 }: Props) {
-  const [buySell, setBuySell] = useState<{ readonly buy: number; readonly sell: number }>({ buy: 0, sell: 0 });
+  const [pane, setPane] = useState<PaneTradeState>(() => extractPaneState(engine.getFrame()));
+  const [pinned, setPinned] = useState(false);
+  const [frozenTrades, setFrozenTrades] = useState<readonly EngineTickTrade[]>([]);
+  const [newSincePin, setNewSincePin] = useState(0);
+
   const strengthRef = useRef<HTMLElement>(null);
   const cumRef = useRef<HTMLElement>(null);
-  const emptyRef = useRef<HTMLParagraphElement>(null);
-  const jumpTargetsRef = useRef<number[]>(TAPE_SLOTS.map(() => 0));
-  const slotRefs = useRef<TradeSlotRefs[]>(
-    TAPE_SLOTS.map(() => ({ row: null, time: null, price: null, qty: null })),
-  );
+  const pinnedRef = useRef(false);
+  const pinnedAtSeqRef = useRef(0);
+  const frozenTradesRef = useRef<readonly EngineTickTrade[]>([]);
+  const latestFrameRef = useRef<ReplayEngineFrame>(engine.getFrame());
+  const lastResetVersionRef = useRef<number>(engine.getFrame().tradesResetVersion);
+  const lastAppliedMetaRef = useRef({
+    tradesVersion: -1,
+    backfilling: false,
+    scannedFromMin: null as number | null,
+    hasMore: false,
+  });
+
+  const displayedTrades = pinned ? frozenTrades : pane.trades;
+  const windowed = useWindowedRows(displayedTrades.length);
+  const onWindowScrollRef = useRef(windowed.onScroll);
+  onWindowScrollRef.current = windowed.onScroll;
 
   useEffect(() => {
     const apply = (frame: ReplayEngineFrame) => {
-      const perfNow = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const trades = frame.recentTrades;
-      const withMs = frame.resolution === "tick";
-
+      latestFrameRef.current = frame;
       setText(strengthRef.current, `${formatDecimal(frame.strength)}%`);
       setText(cumRef.current, formatQuantity(frame.cumVol));
 
-      let buy = 0;
-      let sell = 0;
-      for (const tr of trades) {
-        if (tr.side === "buy") buy += tr.quantity;
-        else if (tr.side === "sell") sell += tr.quantity;
+      const resetChanged = frame.tradesResetVersion !== lastResetVersionRef.current;
+      if (resetChanged) {
+        lastResetVersionRef.current = frame.tradesResetVersion;
+        if (windowed.scroller.current && windowed.scroller.current.scrollTop !== 0) {
+          windowed.scroller.current.scrollTop = 0;
+        }
+        pinnedRef.current = false;
+        frozenTradesRef.current = [];
+        setPinned(false);
+        setFrozenTrades([]);
+        setNewSincePin(0);
+        lastAppliedMetaRef.current = {
+          tradesVersion: frame.tradesVersion,
+          backfilling: frame.tradesBackfilling,
+          scannedFromMin: frame.tradesScannedFromMin,
+          hasMore: frame.hasMoreTrades,
+        };
+        setPane(extractPaneState(frame));
+        onWindowScrollRef.current();
+        return;
       }
-      setBuySell((prev) => (prev.buy === buy && prev.sell === sell ? prev : { buy, sell }));
 
-      if (emptyRef.current) {
-        emptyRef.current.hidden = trades.length > 0;
-        if (trades.length === 0) {
-          setText(
-            emptyRef.current,
-            tapeMinWon > 0
-              ? `${formatWonCompact(tapeMinWon)} 이상의 체결이 아직 없습니다`
-              : "이 시점까지 기록된 체결이 없습니다",
-          );
+      const prevMeta = lastAppliedMetaRef.current;
+      const metaChanged =
+        frame.tradesVersion !== prevMeta.tradesVersion
+        || frame.tradesBackfilling !== prevMeta.backfilling
+        || frame.tradesScannedFromMin !== prevMeta.scannedFromMin
+        || frame.hasMoreTrades !== prevMeta.hasMore;
+
+      if (!metaChanged) return;
+
+      lastAppliedMetaRef.current = {
+        tradesVersion: frame.tradesVersion,
+        backfilling: frame.tradesBackfilling,
+        scannedFromMin: frame.tradesScannedFromMin,
+        hasMore: frame.hasMoreTrades,
+      };
+
+      if (pinnedRef.current) {
+        const added = Math.max(0, frame.tradesAddedSeq - pinnedAtSeqRef.current);
+        setNewSincePin((prev) => (prev === added ? prev : added));
+        const merged = appendOlderTail(frozenTradesRef.current, frame.recentTrades);
+        if (merged !== frozenTradesRef.current) {
+          frozenTradesRef.current = merged;
+          setFrozenTrades(merged);
         }
+        setPane((prev) => ({
+          ...prev,
+          backfilling: frame.tradesBackfilling,
+          scannedFromMin: frame.tradesScannedFromMin,
+          hasMore: frame.hasMoreTrades,
+          cursorMs: frame.cursorMs,
+        }));
+        return;
       }
 
-      for (let i = 0; i < TAPE_SLOTS.length; i++) {
-        const refs = slotRefs.current[i]!;
-        const tr = trades[i];
-        if (!refs.row) continue;
-        if (!tr) {
-          refs.row.hidden = true;
-          refs.row.removeAttribute("data-testid");
-          continue;
-        }
-        refs.row.hidden = false;
-        refs.row.setAttribute("data-testid", "replay-tape-row");
-        refs.row.setAttribute("data-side", tr.side);
-        if (tr.value >= BIG_TRADE_WON) refs.row.setAttribute("data-big", "");
-        else refs.row.removeAttribute("data-big");
-        if (perfNow < tr.freshUntilMs) refs.row.setAttribute("data-fresh", "");
-        else refs.row.removeAttribute("data-fresh");
-        jumpTargetsRef.current[i] = tr.recvMs;
-
-        setText(refs.time, formatReplayClock(tr.recvMs / 1000, false));
-        if (refs.time) {
-          refs.time.title = formatReplayClock(tr.recvMs / 1000, withMs);
-        }
-        if (refs.price) {
-          const dir = previousClose !== null && previousClose > 0
-            ? direction(tr.price - previousClose)
-            : tr.side === "buy"
-              ? "up"
-              : tr.side === "sell"
-                ? "down"
-                : "flat";
-          refs.price.setAttribute("data-dir", dir);
-          setText(refs.price, formatPrice(tr.price, false));
-        }
-        setText(refs.qty, formatPrice(tr.quantity, false));
-      }
+      setPane(extractPaneState(frame));
     };
 
     return engine.subscribeFrame(apply);
-  }, [engine, previousClose, tapeMinWon]);
+  }, [engine, windowed.scroller]);
 
+  const handleReturnToTop = useCallback(() => {
+    const scroller = windowed.scroller.current;
+    if (scroller) scroller.scrollTop = 0;
+    pinnedRef.current = false;
+    frozenTradesRef.current = [];
+    setPinned(false);
+    setFrozenTrades([]);
+    setNewSincePin(0);
+    setPane(extractPaneState(latestFrameRef.current));
+    onWindowScrollRef.current();
+  }, [windowed.scroller]);
+
+  const handleScroll = useCallback(() => {
+    windowed.onScroll();
+    const scroller = windowed.scroller.current;
+    if (!scroller) return;
+    const top = scroller.scrollTop;
+    if (top > PIN_SCROLL_THRESHOLD_PX && !pinnedRef.current) {
+      const latest = latestFrameRef.current;
+      pinnedRef.current = true;
+      pinnedAtSeqRef.current = latest.tradesAddedSeq;
+      frozenTradesRef.current = latest.recentTrades;
+      setPinned(true);
+      setFrozenTrades(latest.recentTrades);
+      setNewSincePin(0);
+    } else if (top <= PIN_SCROLL_THRESHOLD_PX && pinnedRef.current) {
+      pinnedRef.current = false;
+      frozenTradesRef.current = [];
+      setPinned(false);
+      setFrozenTrades([]);
+      setNewSincePin(0);
+      setPane(extractPaneState(latestFrameRef.current));
+    }
+  }, [windowed]);
+
+  const buySell = useMemo(() => {
+    let buy = 0;
+    let sell = 0;
+    const limit = Math.min(displayedTrades.length, RECENT_RATIO_ROWS);
+    for (let i = 0; i < limit; i++) {
+      const tr = displayedTrades[i]!;
+      if (tr.side === "buy") buy += tr.quantity;
+      else if (tr.side === "sell") sell += tr.quantity;
+    }
+    return { buy, sell };
+  }, [displayedTrades]);
+
+  const perfNow = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const withMs = pane.resolution === "tick";
   const minKey = minKeyOf(tapeMinWon);
+  const visibleSlice = displayedTrades.slice(windowed.range.start, windowed.range.end);
+  const showFooter = pane.backfilling || pane.hasMore || (tapeMinWon > 0 && displayedTrades.length > 0 && pane.scannedFromMin !== null);
+
+  const emptyMessage = pane.backfilling
+    ? `${formatWonCompact(tapeMinWon)} 이상의 과거 체결을 찾는 중입니다`
+    : tapeMinWon > 0
+      ? `${formatWonCompact(tapeMinWon)} 이상의 체결이 없습니다`
+      : "이 시점까지 기록된 체결이 없습니다";
+
+  const footerStatus = pane.backfilling
+    ? (pane.scannedFromMin !== null
+        ? `과거 체결 탐색 중 (${formatReplayHM(pane.scannedFromMin * 60)} 이전)`
+        : "과거 체결 탐색 중")
+    : tapeMinWon > 0 && pane.scannedFromMin !== null
+      ? `${formatReplayHM(pane.scannedFromMin * 60)} ~ ${formatReplayHM(pane.cursorMs / 1000)} (${displayedTrades.length.toLocaleString("ko-KR")}건)`
+      : `${displayedTrades.length.toLocaleString("ko-KR")}건 표시`;
 
   return (
     <section className="rp-col" aria-label="체결창" data-testid="replay-trades-pane">
@@ -148,52 +274,85 @@ export function ReplayTradesPane({
           </div>
         </div>
 
-        <div className="tr-body">
-          <div className="tr-tape rp-mono" data-testid="replay-tape" role="table" aria-label="체결 내역">
+        <div className="tr-body rp-tape-body">
+          {pinned && (
+            <button
+              type="button"
+              className="rp-tape-pin-btn"
+              data-testid="replay-tape-return-top"
+              onClick={handleReturnToTop}
+            >
+              {newSincePin > 0
+                ? `↑ 새 체결 ${newSincePin.toLocaleString("ko-KR")}건 · 맨 위로`
+                : "↑ 맨 위로"}
+            </button>
+          )}
+          <div
+            ref={windowed.scroller}
+            className="tr-tape rp-mono rp-tape-scroll"
+            data-testid="replay-tape"
+            data-pinned={pinned ? "true" : "false"}
+            role="table"
+            aria-label="체결 내역"
+            onScroll={handleScroll}
+          >
             <div role="row" className="tr-head">
               <span role="columnheader">시각</span>
               <span role="columnheader">체결가</span>
               <span role="columnheader">체결량</span>
             </div>
-            <div className="tr-rows">
-              {TAPE_SLOTS.map((idx) => (
+            <div ref={windowed.list} className="tr-rows" style={windowed.spacing}>
+              {visibleSlice.map((tr) => (
                 <button
-                  key={idx}
-                  ref={(el) => {
-                    slotRefs.current[idx]!.row = el;
-                  }}
+                  key={tr.key}
                   type="button"
                   role="row"
                   className="tr-row rp-tr-btn"
-                  hidden
-                  onClick={() => onJumpMs(jumpTargetsRef.current[idx] ?? 0)}
+                  data-testid="replay-tape-row"
+                  data-side={tr.side}
+                  data-big={tr.value >= BIG_TRADE_WON ? "" : undefined}
+                  data-fresh={!pinned && perfNow < tr.freshUntilMs ? "" : undefined}
+                  onClick={() => onJumpMs(tr.recvMs)}
                 >
                   <span
-                    ref={(el) => {
-                      slotRefs.current[idx]!.time = el;
-                    }}
                     role="cell"
                     className="tr-time"
-                  />
+                    title={formatReplayClock(tr.recvMs / 1000, withMs)}
+                  >
+                    {formatReplayClock(tr.recvMs / 1000, false)}
+                  </span>
                   <span
-                    ref={(el) => {
-                      slotRefs.current[idx]!.price = el;
-                    }}
                     role="cell"
                     className="tr-price"
-                  />
-                  <span
-                    ref={(el) => {
-                      slotRefs.current[idx]!.qty = el;
-                    }}
-                    role="cell"
-                    className="tr-qty"
-                  />
+                    data-dir={priceDirectionOf(tr, previousClose)}
+                  >
+                    {formatPrice(tr.price, false)}
+                  </span>
+                  <span role="cell" className="tr-qty">
+                    {formatPrice(tr.quantity, false)}
+                  </span>
                 </button>
               ))}
             </div>
-            <p ref={emptyRef} className="tr-empty">이 시점까지 기록된 체결이 없습니다</p>
+            {displayedTrades.length === 0 && (
+              <p className="tr-empty" data-testid="replay-tape-empty">{emptyMessage}</p>
+            )}
           </div>
+          {showFooter && (
+            <div className="rp-tape-foot rp-mono" data-testid="replay-tape-footer">
+              <span className="rp-tape-foot-status">{footerStatus}</span>
+              {pane.hasMore && !pane.backfilling && (
+                <button
+                  type="button"
+                  className="rp-tape-more-btn"
+                  data-testid="replay-tape-load-more"
+                  onClick={() => engine.loadMoreTrades()}
+                >
+                  이전 체결 더 보기
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </section>

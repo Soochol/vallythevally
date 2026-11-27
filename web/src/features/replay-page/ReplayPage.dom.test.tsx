@@ -95,5 +95,8 @@ test("minute_only 해상도 폴백, 종목 전환 대화상자, 블라인드·�
   expect(within(popover).getByRole("button", { name: "24" }).getAttribute("data-available")).toBe("false");
   fireEvent.click(within(popover).getByRole("button", { name: "25" }));
   expect(screen.queryByTestId("replay-date-popover")).toBeNull();
+
+  expect(screen.queryByRole("group", { name: "차트 범위" })).toBeNull();
+  expect(screen.getByRole("button", { name: "±5분 정밀" })).toBeTruthy();
   client.clear();
 });

@@ -465,6 +465,100 @@
   white-space: nowrap;
 }
 
+.rp-tape-body {
+  flex-direction: column;
+}
+
+.rp-tape-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.rp-tape-scroll::-webkit-scrollbar {
+  width: var(--size-6);
+}
+
+.rp-tape-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.rp-tape-scroll::-webkit-scrollbar-thumb {
+  border-radius: var(--r-pill);
+  background: var(--line-strong);
+}
+
+.rp-tape-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+.rp-tape-pin-btn {
+  position: absolute;
+  top: var(--size-28);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  height: var(--size-24);
+  padding: 0 var(--size-10);
+  border: var(--size-1) solid var(--accent);
+  border-radius: var(--r-pill);
+  background: var(--overlay);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.rp-tape-pin-btn:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.rp-tape-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-6);
+  min-height: var(--size-24);
+  padding: var(--size-2) var(--size-6);
+  border-top: var(--size-1) solid var(--line);
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.rp-tape-foot-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-tape-more-btn {
+  flex: none;
+  height: var(--size-20);
+  padding: 0 var(--size-6);
+  border: var(--size-1) solid var(--line-strong);
+  border-radius: var(--r-s);
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rp-tape-more-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .rp-col .pg-table {
   --pg-time: 7.5ch;
   --pg-price: 6.5ch;

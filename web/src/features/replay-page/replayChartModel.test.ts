@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateReplayBars,
-  focusViewport,
   panViewport,
   zoomViewport,
 } from "./replayChartModel";
@@ -69,8 +68,14 @@ function makeFrame(cursorMin: number, forming?: { minute: number; open: number; 
     },
     cellFlashes: new Map(),
     hitRow: null,
-    tradeSummary: { rows: [], net1mQty: 0, whaleBuy: 0, whaleSell: 0 },
+    tradeSummary: { rows: [], totalMatching: 0, net1mQty: 0, whaleBuy: 0, whaleSell: 0 },
     recentTrades: [],
+    tradesVersion: 0,
+    tradesResetVersion: 0,
+    tradesAddedSeq: 0,
+    tradesBackfilling: false,
+    tradesScannedFromMin: null,
+    hasMoreTrades: false,
     skipNotice: null,
     loadedSpans: [],
   };
@@ -106,7 +111,7 @@ describe("replayChartModel", () => {
     expect(bars3m[1]!.isFuture).toBe(true);
   });
 
-  it("zooms around anchor ratio, pans within bounds, and focuses window cleanly", () => {
+  it("zooms around anchor ratio and pans within bounds cleanly", () => {
     const full = { start: 0, end: 100 };
     const zoomed = zoomViewport(full, 100, 0.5, 0.5);
     expect(zoomed.end - zoomed.start).toBeCloseTo(50, 5);
@@ -119,9 +124,5 @@ describe("replayChartModel", () => {
     const pannedRight = panViewport(zoomed, 100, 80);
     expect(pannedRight.end).toBe(100);
     expect(pannedRight.start).toBeCloseTo(50, 5);
-
-    const focused = focusViewport(100, 10, 20);
-    expect(focused.start).toBe(0);
-    expect(focused.end).toBe(20);
   });
 });
