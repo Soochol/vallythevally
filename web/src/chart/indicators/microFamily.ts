@@ -15,7 +15,7 @@ import { kstDateOf } from "../barJump";
 import { type DateRange, mergeRanges, missingFromRanges, missingUnchunked, rangesContain } from "../quotes/coverage";
 import type { IndicatorConfig } from "../settings";
 import { indicatorColorValue, type ThemeTokens } from "../theme";
-import { isIntraday } from "../time";
+import { isIntraday, isRegularHours } from "../time";
 import {
   bucketInclusiveEndDate,
   buildProgramFlowSeries,
@@ -301,6 +301,7 @@ export interface MicroFamilyHost {
   bars(): readonly Bar[];
   tokens(): ThemeTokens;
   configs(): readonly IndicatorConfig[];
+  regularHoursOnly?(): boolean;
   onTickCvdChanged(from: UnixSeconds | null): void;
   onProgramChanged(from: UnixSeconds | null): void;
 }
@@ -370,6 +371,7 @@ interface ProgramSeriesCacheEntry {
   readonly rev: number;
   readonly bars: readonly Bar[];
   readonly period: Period;
+  readonly regularHoursOnly: boolean;
   readonly spec: ProgramFlowSpec;
   readonly data: ProgramFlowSeriesData;
 }
@@ -528,7 +530,9 @@ export class MicroIndicatorController {
       if (!updated) continue;
       if (this.cvd.state !== "ready") this.cvd.state = "ready";
       if (this.cvd.liveLatestT === null || updated.t > this.cvd.liveLatestT) this.cvd.liveLatestT = updated.t;
-      if (earliestT === null || updated.t < earliestT) earliestT = updated.t;
+      if ((!this.regularFilterActive() || isRegularHours(updated.t)) && (earliestT === null || updated.t < earliestT)) {
+        earliestT = updated.t;
+      }
     }
     if (earliestT === null) return false;
     this.host.onTickCvdChanged(earliestT);
@@ -550,8 +554,17 @@ export class MicroIndicatorController {
     if (this.program.state !== "ready") this.program.state = "ready";
     if (this.program.liveLatestT === null || updated.t > this.program.liveLatestT) this.program.liveLatestT = updated.t;
     this.programRev++;
+    if (this.regularFilterActive() && !isRegularHours(updated.t)) return false;
     this.host.onProgramChanged(updated.t);
     return true;
+  }
+
+  private regularFilterActive(): boolean {
+    return Boolean(this.host.regularHoursOnly?.()) && this.target !== null && isIntraday(this.target.period);
+  }
+
+  private effectiveLiveLatestT(liveLatestT: UnixSeconds | null): UnixSeconds | null {
+    return liveLatestT !== null && (!this.regularFilterActive() || isRegularHours(liveLatestT)) ? liveLatestT : null;
   }
 
   cvdState(): MicroFeedState {
@@ -571,11 +584,11 @@ export class MicroIndicatorController {
   }
 
   cvdLiveLatestT(): UnixSeconds | null {
-    return this.cvd.liveLatestT;
+    return this.effectiveLiveLatestT(this.cvd.liveLatestT);
   }
 
   programLiveLatestT(): UnixSeconds | null {
-    return this.program.liveLatestT;
+    return this.effectiveLiveLatestT(this.program.liveLatestT);
   }
 
   tickCvdRow(
@@ -608,18 +621,20 @@ export class MicroIndicatorController {
     }
     const bars = this.host.bars();
     const period = this.target?.period ?? "1m";
+    const regularHoursOnly = this.regularFilterActive();
     const cached = this.programSeriesCache.get(config.id);
     if (
       cached
       && cached.rev === this.programRev
       && cached.bars === bars
       && cached.period === period
+      && cached.regularHoursOnly === regularHoursOnly
       && cached.spec === config.spec
     ) {
       return cached.data;
     }
-    const data = buildProgramFlowSeries(bars, period, this.program.points, this.program.liveLatestT, config.spec);
-    this.programSeriesCache.set(config.id, { rev: this.programRev, bars, period, spec: config.spec, data });
+    const data = buildProgramFlowSeries(bars, period, this.program.points, this.programLiveLatestT(), config.spec);
+    this.programSeriesCache.set(config.id, { rev: this.programRev, bars, period, regularHoursOnly, spec: config.spec, data });
     return data;
   }
 
@@ -642,9 +657,10 @@ export class MicroIndicatorController {
     const state = this.program.state;
     const series = this.programSeriesFor(config);
     const lastBarT = this.host.bars().at(-1)?.t ?? null;
+    const liveLatestT = this.programLiveLatestT();
     const resolvedTime =
-      time !== null && lastBarT !== null && time === lastBarT && this.program.liveLatestT !== null && this.program.liveLatestT > time && series.byTime.has(this.program.liveLatestT)
-        ? this.program.liveLatestT
+      time !== null && lastBarT !== null && time === lastBarT && liveLatestT !== null && liveLatestT > time && series.byTime.has(liveLatestT)
+        ? liveLatestT
         : time;
     const entry = resolvedTime !== null ? series.byTime.get(resolvedTime) : undefined;
     if (state === "loading" && !entry) return { id: config.id, name: specName(spec), color: primary, values: [], state: "pending", panel };
@@ -695,8 +711,9 @@ export class MicroIndicatorController {
   private resolvePoint<P extends { t: UnixSeconds }, L>(store: SeriesStore<P, L>, time: UnixSeconds | null): P | undefined {
     if (time === null) return undefined;
     const lastBarT = this.host.bars().at(-1)?.t ?? null;
-    if (lastBarT !== null && time === lastBarT && store.liveLatestT !== null && store.liveLatestT > time) {
-      const livePt = store.points.get(store.liveLatestT);
+    const liveLatestT = this.effectiveLiveLatestT(store.liveLatestT);
+    if (lastBarT !== null && time === lastBarT && liveLatestT !== null && liveLatestT > time) {
+      const livePt = store.points.get(liveLatestT);
       if (livePt) return livePt;
     }
     return store.points.get(time);

@@ -113,3 +113,42 @@ test("범례 OHLC 갱신은 셀 DOM을 다시 만들지 않고 텍스트와 등�
   expect(firstCells[0]!.textContent).toBe("시68,600");
   legend.dispose();
 });
+
+test("범례 머리줄의 정규장 배지는 setHead의 regularHoursOnly에 따라 보이고 숨는다", () => {
+  const raf = vi.fn(() => 1);
+  vi.stubGlobal("document", {
+    createElement: (tag: string) => new FakeEl(tag),
+    createTextNode: (text: string) => new FakeText(text),
+    fonts: { addEventListener: () => {}, removeEventListener: () => {}, ready: new Promise(() => {}) },
+  });
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  vi.stubGlobal("MutationObserver", class { observe() {} disconnect() {} });
+  vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }));
+  vi.stubGlobal("requestAnimationFrame", raf);
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+
+  const parent = new FakeEl("div");
+  const legend = new Legend(parent as unknown as HTMLElement, {
+    projectRows: () => [],
+    readViewport: () => ({ pricePane: null, axisWidth: 72 }),
+    applyTier: () => {},
+    reserveTop: () => {},
+  });
+  const head = (legend.root as unknown as FakeEl).children[0]!;
+  const badge = head.children.find((child) => "regularHoursBadge" in child.dataset);
+  expect(badge).toBeDefined();
+  expect(badge!.textContent).toBe("정규장");
+  expect(badge!.title).toBe("정규장(09:00~15:30) 봉만 표시 중");
+  expect(badge!.hidden).toBe(true);
+
+  legend.setHead({ name: "삼성전자", sub: "005930", period: "3분", regularHoursOnly: true });
+  expect(badge!.hidden).toBe(false);
+  expect(raf).toHaveBeenCalledTimes(1);
+
+  legend.setHead({ name: "삼성전자", sub: "005930", period: "3분", regularHoursOnly: true });
+  expect(raf).toHaveBeenCalledTimes(1);
+
+  legend.setHead({ name: "삼성전자", sub: "005930", period: "3분", regularHoursOnly: false });
+  expect(badge!.hidden).toBe(true);
+  legend.dispose();
+});

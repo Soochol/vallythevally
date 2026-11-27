@@ -36,7 +36,8 @@ function isSectionModified(sectionId: ChartSettingsSectionId, settings: ChartSet
   if (sectionId === "bars") {
     return settings.style !== DEFAULT_CHART_SETTINGS.style
       || settings.scale !== DEFAULT_CHART_SETTINGS.scale
-      || settings.visibleBars !== DEFAULT_CHART_SETTINGS.visibleBars;
+      || settings.visibleBars !== DEFAULT_CHART_SETTINGS.visibleBars
+      || settings.regularHoursOnly !== DEFAULT_CHART_SETTINGS.regularHoursOnly;
   }
   if (sectionId === "display") {
     return settings.showLegend !== DEFAULT_CHART_SETTINGS.showLegend
@@ -89,7 +90,7 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
   const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
   const cellName = `${name} · ${PERIOD_LABEL[cell.period]}`;
   const indicatorWindow = useShownIndicatorWindow();
-  const { setChartSettings, setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setShowHorzGrid, setShowVertGrid, setStyle, setScale } = useLayoutStore.getState();
+  const { setChartSettings, setVisibleBars, setShowExtremes, setShowLegend, setShowOhlcChange, setExtremeBasis, setShowDaySeparators, setShowHorzGrid, setShowVertGrid, setRegularHoursOnly, setStyle, setScale } = useLayoutStore.getState();
   const [activeSection, setActiveSection] = useState<ChartSettingsSectionId>("bars");
   const [draft, setDraft] = useState<string | null>(null);
   const id = useId();
@@ -123,6 +124,7 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
       showHorzGrid: DEFAULT_CHART_SETTINGS.showHorzGrid,
       showVertGrid: DEFAULT_CHART_SETTINGS.showVertGrid,
       showDaySeparators: DEFAULT_CHART_SETTINGS.showDaySeparators,
+      regularHoursOnly: DEFAULT_CHART_SETTINGS.regularHoursOnly,
     });
     useUiStore.getState().setIndicatorWindow(DEFAULT_INDICATOR_WINDOW);
   };
@@ -149,6 +151,8 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
           </div>
           <Segmented mode="pressed" label="화면에 보이는 봉" options={BAR_PRESET_OPTIONS} value={String(settings.visibleBars)} className="cs-presets"
             onChange={(bars) => { setDraft(null); setVisibleBars(cellId, bars === "null" ? null : Number(bars)); }} />
+          <div className="cs-divider" />
+          <SettingSwitch label="정규장만 보기" detail="분봉에서 정규장(09:00~15:30) 봉만 표시" checked={settings.regularHoursOnly} onChange={(on) => setRegularHoursOnly(cellId, on)} />
         </div>
       );
     }
