@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { ProgramTradePoint } from "../../api/generated/ProgramTradePoint";
-import { boldKeys, EMPTY_PROGRAM_LIVE, eokFromMillionWon, historyRows, isNoProgramData, joinHistoryAndLive, keepProgramHistory, liveRow, MAX_LIVE_PROGRAM_LINES, MAX_PROGRAM_TREND_POINTS, nonZeroChangeLines, reduceProgramLive, rowsOf, sparklinePoints, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
+import { boldKeys, EMPTY_PROGRAM_LIVE, eokFromMillionWon, historyRows, isHistoryFresherThanLive, isNoProgramData, joinHistoryAndLive, keepProgramHistory, liveRow, MAX_LIVE_PROGRAM_LINES, MAX_PROGRAM_TREND_POINTS, nonZeroChangeLines, reduceProgramLive, rowsOf, sparklinePoints, widestSoFar, type ProgramLine, type ProgramRow } from "./program";
 
 const KST_0905 = Date.parse("2026-11-09T09:05:00+09:00") / 1000;
 const point = (time: string, netQuantity: number): ProgramTradePoint => ({ time, price: 70_000, buyQuantity: 10, sellQuantity: 5, netQuantity, buyAmount: 0, sellAmount: 0, netAmount: netQuantity * 70_000_000 });
@@ -98,4 +98,34 @@ test("실시간 프로그램 상태는 행과 추이 길이를 상한 안에 유
   expect(state.trend.length).toBeLessThanOrEqual(MAX_PROGRAM_TREND_POINTS);
   const vertices = sparklinePoints(Array.from({ length: 2_000 }, (_, i) => Math.sin(i / 10) * 100), 100, 16).split(" ");
   expect(vertices.length).toBeLessThanOrEqual(200);
+});
+
+test("잘린 이력은 가장 오래된 기준 행의 증감을 0으로 두고 다음 행부터 실제 증감을 계산한다", () => {
+  const rows = historyRows([point("14:02:00", 50_030), point("14:00:00", 50_000), point("14:01:00", 50_010)], true);
+  expect(rows.map((r) => [r.time, r.netQty, r.netQtyChange])).toEqual([
+    ["14:00:00", 50_000, 0],
+    ["14:01:00", 50_010, 10],
+    ["14:02:00", 50_030, 20],
+  ]);
+  const visible = rowsOf(nonZeroChangeLines(rows.map((r) => ({ kind: "row", row: r }))));
+  expect(visible.map((r) => r.time)).toEqual(["14:01:00", "14:02:00"]);
+});
+
+test("같은 시각·값의 실시간 스냅샷 재수신과 과거 시각 역행은 중복 행을 만들지 않는다", () => {
+  const tick = { t: KST_0905, price: 70_000, sellQty: 5, sellAmount: 1, buyQty: 10, buyAmount: 2, netQty: 5, netQtyChange: 5, netAmount: 1, netAmountChange: 1 };
+  let state = reduceProgramLive(EMPTY_PROGRAM_LIVE, { type: "row", row: tick });
+  state = reduceProgramLive(state, { type: "row", row: tick });
+  state = reduceProgramLive(state, { type: "row", row: { ...tick, t: KST_0905 - 5, netQty: 2, netQtyChange: 2 } });
+  expect(rowsOf(state.lines)).toHaveLength(1);
+  expect(state.latest?.netQty).toBe(5);
+});
+
+test("오늘 이력이 실시간 스냅샷보다 최신이면 과거 스냅샷이 오늘 이력을 덮어쓰지 않는다", () => {
+  const past = historyRows([point("09:00:00", 10), point("09:05:00", 30), point("09:06:00", 60)]);
+  const live = reduceProgramLive(EMPTY_PROGRAM_LIVE, {
+    type: "row",
+    row: { t: KST_0905, price: 70_000, sellQty: 0, sellAmount: 0, buyQty: 30, buyAmount: 0, netQty: 30, netQtyChange: 20, netAmount: 0, netAmountChange: 0 },
+  });
+  expect(isHistoryFresherThanLive(past, live, false)).toBe(true);
+  expect(isHistoryFresherThanLive(past, live, true)).toBe(false);
 });

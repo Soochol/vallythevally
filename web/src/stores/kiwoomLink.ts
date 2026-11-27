@@ -32,12 +32,19 @@ export function marketLinkOf(kiwoom: KiwoomLinkStatus | null, source: MarketSour
   };
 }
 
+const sourceIdentity = (source: MarketSourceStatus | null): string | null =>
+  source === null ? null : `${source.broker}:${source.keyId ?? ""}:${source.feedBroker?.broker ?? ""}`;
+
+const nextSourceRevision = (current: number, previous: MarketSourceStatus | null, next: MarketSourceStatus): number =>
+  previous !== null && sourceIdentity(previous) !== sourceIdentity(next) ? current + 1 : current;
+
 interface KiwoomLinkStore {
   status: KiwoomLinkStatus | null;
   kiwoom: KiwoomLinkStatus | null;
   source: MarketSourceStatus | null;
   pushes: number;
   sourcePushes: number;
+  sourceRevision: number;
   receivePush(status: KiwoomLinkStatus): void;
   receiveSnapshot(status: KiwoomLinkStatus, pushesAtRequest: number): void;
   receiveSourcePush(source: MarketSourceStatus): void;
@@ -50,10 +57,26 @@ export const useKiwoomLinkStore = create<KiwoomLinkStore>()((set) => ({
   source: null,
   pushes: 0,
   sourcePushes: 0,
+  sourceRevision: 0,
   receivePush: (status) => set((s) => ({ kiwoom: status, status: marketLinkOf(status, s.source), pushes: s.pushes + 1 })),
   receiveSnapshot: (status, pushesAtRequest) => set((s) => (s.pushes === pushesAtRequest ? { kiwoom: status, status: marketLinkOf(status, s.source) } : s)),
-  receiveSourcePush: (source) => set((s) => ({ source, status: marketLinkOf(s.kiwoom, source), sourcePushes: s.sourcePushes + 1 })),
-  receiveSourceSnapshot: (source, pushesAtRequest) => set((s) => (s.sourcePushes === pushesAtRequest ? { source, status: marketLinkOf(s.kiwoom, source) } : s)),
+  receiveSourcePush: (source) =>
+    set((s) => ({
+      source,
+      status: marketLinkOf(s.kiwoom, source),
+      sourcePushes: s.sourcePushes + 1,
+      sourceRevision: nextSourceRevision(s.sourceRevision, s.source, source),
+    })),
+  receiveSourceSnapshot: (source, pushesAtRequest) =>
+    set((s) =>
+      s.sourcePushes === pushesAtRequest
+        ? {
+            source,
+            status: marketLinkOf(s.kiwoom, source),
+            sourceRevision: nextSourceRevision(s.sourceRevision, s.source, source),
+          }
+        : s,
+    ),
 }));
 
 export const isMockEnvironment = (): boolean => useKiwoomLinkStore.getState().status?.environment === "mock";
@@ -63,6 +86,7 @@ export const receiveKiwoomLinkPush = (status: KiwoomLinkStatus) => useKiwoomLink
 export const receiveMarketSourcePush = (source: MarketSourceStatus) => useKiwoomLinkStore.getState().receiveSourcePush(source);
 
 export const useMarketSource = (): MarketSourceStatus | null => useKiwoomLinkStore((s) => s.source);
+export const useMarketSourceRevision = (): number => useKiwoomLinkStore((s) => s.sourceRevision);
 export const useSourceBroker = (): Broker => useKiwoomLinkStore((s) => s.source?.broker ?? "kiwoom");
 const kiwoomReceivesFeed = (s: Pick<KiwoomLinkStore, "source">): boolean => s.source !== null && s.source.broker !== "kiwoom" && s.source.feedBroker?.broker === "kiwoom";
 export const useFeedLink = (): KiwoomLinkStatus | null => useKiwoomLinkStore((s) => (kiwoomReceivesFeed(s) ? null : s.status));

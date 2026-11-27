@@ -287,6 +287,7 @@ pub struct MarketHub {
     manager: SubscriptionManager,
     rejected: BTreeSet<Holder>,
     broker_history: BTreeMap<Symbol, (BrokerSnapshot, KstTime)>,
+    program_history: BTreeMap<Symbol, (RealProgramTrade, KstTime)>,
     last_books: HashMap<(Symbol, Venue), (BookSnapshot, KstTime)>,
     last_expected: HashMap<(Symbol, Venue), (ExpectedTrade, KstTime)>,
     micro_detectors: HashMap<(Symbol, Venue), MicroEventDetector>,
@@ -328,6 +329,7 @@ impl MarketHub {
             manager,
             rejected: BTreeSet::new(),
             broker_history: BTreeMap::new(),
+            program_history: BTreeMap::new(),
             last_books: HashMap::new(),
             last_expected: HashMap::new(),
             micro_detectors: HashMap::new(),
@@ -426,6 +428,7 @@ impl MarketHub {
             }
             HubInput::DailyReset => {
                 self.broker_history.clear();
+                self.program_history.clear();
                 self.last_books.clear();
                 self.last_expected.clear();
                 self.micro_detectors.clear();
@@ -435,12 +438,13 @@ impl MarketHub {
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
             HubInput::SourceSwitched => {
-                self.manager.reseat(self.stream.seat_rules());
-                self.replan(now);
                 self.broker_history.clear();
+                self.program_history.clear();
                 self.last_books.clear();
                 self.last_expected.clear();
                 self.micro_detectors.clear();
+                self.manager.reseat(self.stream.seat_rules());
+                self.replan(now);
                 tracing::info!(keys = self.keys.len(), "시세 공급원이 바뀌어 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
@@ -549,6 +553,14 @@ impl MarketHub {
             && let Some((snapshot, received_at)) = self.broker_history.get(&feed.symbol)
         {
             let msg = ServerMessage::FeedBrokers { sub: sub.0.clone(), brokers: feed_brokers(snapshot, *received_at) };
+            push(&self.conns, &mut self.closing, conn, msg);
+        }
+        if feed.kind == FeedKind::Program
+            && self.session_live
+            && let Some((row, received_at)) = self.program_history.get(&feed.symbol)
+            && received_at.kst_date() == self.clock.now().kst_date()
+        {
+            let msg = ServerMessage::FeedProgram { sub: sub.0.clone(), row: feed_program(row, *received_at) };
             push(&self.conns, &mut self.closing, conn, msg);
         }
         if feed.kind == FeedKind::Book
@@ -696,6 +708,7 @@ impl MarketHub {
     fn replan(&mut self, now: KstTime) {
         let plan = self.manager.plan(now);
         self.broker_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Brokers)));
+        self.program_history.retain(|symbol, _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Program)));
         self.last_books.retain(|(symbol, venue), _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Book(*venue))));
         self.last_expected.retain(|(symbol, venue), _| plan.feeds.get(symbol).is_some_and(|kinds| kinds.contains(&StreamKind::Book(*venue))));
         let active_micro: HashSet<(Symbol, Venue)> = self
@@ -1035,17 +1048,20 @@ impl MarketHub {
             StreamEvent::AfterHours { totals, received_at } => self.on_after_hours(&totals, received_at),
             StreamEvent::Vi { signal, received_at } => self.on_vi(&signal, received_at),
             StreamEvent::Down { at } => {
+                self.program_history.clear();
                 self.publish_feed_link(false, at);
                 let from = *self.gap_from.get_or_insert(at);
                 self.session_down(RealtimeState::Reconnecting, from);
             }
             StreamEvent::Idle => {
+                self.program_history.clear();
                 let now = self.clock.now();
                 self.publish_feed_link(false, now);
                 self.gap_from.get_or_insert(now);
                 self.session_down(RealtimeState::NotConnected, now);
             }
             StreamEvent::Halted => {
+                self.program_history.clear();
                 let now = self.clock.now();
                 self.publish_feed_link(false, now);
                 self.gap_from.get_or_insert(now);
@@ -1053,6 +1069,7 @@ impl MarketHub {
             }
             StreamEvent::SourceSwitched => {
                 let now = self.clock.now();
+                self.program_history.clear();
                 self.reset_vi(now);
                 self.stream.forget_vi_history();
             }
@@ -1227,6 +1244,7 @@ impl MarketHub {
             let msg = ServerMessage::FeedProgram { sub: sub.0, row: message.clone() };
             push(&self.conns, &mut self.closing, conn, msg);
         }
+        self.program_history.insert(row.symbol, (*row, received_at));
     }
 
     fn on_broker(&mut self, snapshot: BrokerSnapshot, received_at: KstTime) {
@@ -4121,6 +4139,106 @@ mod tests {
             _ => None,
         }).collect();
         assert_eq!(nets, [10, -20, 30]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn program_history_is_sent_to_a_late_subscriber() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "first", FeedKind::Program, Venue::Combined);
+        take(&out).await;
+        h.events.send(program_event(&h, 100)).await.unwrap();
+        let tick_at = at(9, 0, 52);
+        h.clock.sleep_until(tick_at).await;
+        let StreamEvent::Program { mut row, .. } = program_event(&h, 150) else { unreachable!() };
+        row.hhmmss = tick_at.kst_time_of_day();
+        h.events.send(StreamEvent::Program { row, received_at: tick_at }).await.unwrap();
+        take(&out).await;
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        let subscribe_at = h.clock.now();
+        let (late_conn, late) = connect(&h).await;
+        subscribe_feed(&h, late_conn, "late", FeedKind::Program, Venue::Combined);
+        let msgs = take(&late).await;
+        let [ServerMessage::FeedSubscribed { sub: sub_ack, kind: FeedKind::Program }, ServerMessage::FeedProgram { sub, row }] = msgs.as_slice() else { panic!("{msgs:?}") };
+        assert_eq!((sub_ack.as_str(), sub.as_str(), row.net_qty), ("late", "late", 150));
+        assert_eq!(row.t.0, tick_at.unix());
+        assert_ne!(row.t.0, subscribe_at.unix());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn program_history_is_dropped_after_release_daily_reset_and_source_switch() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "a", FeedKind::Program, Venue::Combined);
+        take(&out).await;
+        h.events.send(program_event(&h, 100)).await.unwrap();
+        take(&out).await;
+        h.hub.unsubscribe(conn, sub("a"));
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        subscribe_feed(&h, conn, "within-grace", FeedKind::Program, Venue::Combined);
+        assert_eq!(take(&out).await.len(), 2);
+        h.hub.unsubscribe(conn, sub("within-grace"));
+        tokio::time::sleep(Duration::from_secs(32)).await;
+        subscribe_feed(&h, conn, "after-grace", FeedKind::Program, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("after-grace", FeedKind::Program)]);
+        h.events.send(program_event(&h, 200)).await.unwrap();
+        take(&out).await;
+        h.hub.daily_reset();
+        take(&out).await;
+        h.hub.unsubscribe(conn, sub("after-grace"));
+        subscribe_feed(&h, conn, "after-reset", FeedKind::Program, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("after-reset", FeedKind::Program)]);
+        h.events.send(program_event(&h, 300)).await.unwrap();
+        take(&out).await;
+        h.hub.source_switched();
+        take(&out).await;
+        h.hub.unsubscribe(conn, sub("after-reset"));
+        subscribe_feed(&h, conn, "after-switch", FeedKind::Program, Venue::Combined);
+        assert_eq!(take(&out).await, [feed_subscribed("after-switch", FeedKind::Program)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn program_history_is_not_pushed_across_midnight_or_after_stream_down_or_source_switch_event() {
+        let h = std_harness();
+        live(&h).await;
+        let (conn, out) = connect(&h).await;
+        subscribe_feed(&h, conn, "a", FeedKind::Program, Venue::Combined);
+        take(&out).await;
+        h.events.send(program_event(&h, 100)).await.unwrap();
+        take(&out).await;
+
+        let down_at = h.clock.now().plus_secs(10);
+        h.clock.sleep_until(down_at).await;
+        h.events.send(StreamEvent::Down { at: down_at }).await.unwrap();
+        take(&out).await;
+        let (down_conn, down_out) = connect(&h).await;
+        subscribe_feed(&h, down_conn, "while-down", FeedKind::Program, Venue::Combined);
+        let msgs = take(&down_out).await;
+        assert!(msgs.iter().all(|m| !matches!(m, ServerMessage::FeedProgram { .. })));
+
+        h.events.send(StreamEvent::Live { since: down_at.plus_secs(5) }).await.unwrap();
+        take(&out).await;
+        let (reconn, reconn_out) = connect(&h).await;
+        subscribe_feed(&h, reconn, "after-reconnect", FeedKind::Program, Venue::Combined);
+        assert_eq!(take(&reconn_out).await, [feed_subscribed("after-reconnect", FeedKind::Program)]);
+
+        h.events.send(program_event(&h, 200)).await.unwrap();
+        take(&out).await;
+        h.events.send(StreamEvent::SourceSwitched).await.unwrap();
+        take(&out).await;
+        let (sw_conn, sw_out) = connect(&h).await;
+        subscribe_feed(&h, sw_conn, "after-source-event", FeedKind::Program, Venue::Combined);
+        assert_eq!(take(&sw_out).await, [feed_subscribed("after-source-event", FeedKind::Program)]);
+
+        h.events.send(program_event(&h, 300)).await.unwrap();
+        take(&out).await;
+        let next_day = kst(KstDate::new(2026, 11, 10).unwrap(), 0, 5, 0);
+        h.clock.sleep_until(next_day).await;
+        let (next_conn, next_out) = connect(&h).await;
+        subscribe_feed(&h, next_conn, "next-day", FeedKind::Program, Venue::Combined);
+        assert_eq!(take(&next_out).await, [feed_subscribed("next-day", FeedKind::Program)]);
     }
 
     #[tokio::test(start_paused = true)]

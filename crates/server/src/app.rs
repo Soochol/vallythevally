@@ -209,12 +209,13 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
         heatmap_quotes: Arc::new(crate::heatmap_board::QuoteCache::with_generation(generation.clone())),
         heatmap_flow: Arc::new(crate::heatmap_flow::FlowCache::with_generation(generation.clone())),
         quote_minutes: Arc::new(crate::quote_minutes::QuoteCache::new()),
+        program_trades: Arc::new(crate::intraday_feed::ProgramTradeCache::with_generation(generation.clone())),
         generation,
     })
 }
 
 pub async fn daily_maintenance(state: Arc<AppState>) {
-    daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.hub.clone(), state.market_control.clone()).await;
+    daily_reset(state.clock.clone(), state.source.clone(), state.symbols.clone(), state.bars.clone(), state.program_trades.clone(), state.hub.clone(), state.market_control.clone()).await;
 }
 
 pub enum StreamSource {
@@ -484,10 +485,11 @@ pub(crate) fn next_try(clock: &Clock, retry_at: KstTime, at_least: Duration) -> 
     retry_at.max(clock.now().plus_secs(at_least.as_secs() as i64))
 }
 
-async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, hub: HubHandle, control: Arc<MarketControl>) {
+async fn daily_reset(clock: Clock, source: Arc<dyn MarketSource>, symbols: Arc<SymbolDirectory>, bars: Arc<BarService>, program_trades: Arc<crate::intraday_feed::ProgramTradeCache>, hub: HubHandle, control: Arc<MarketControl>) {
     loop {
         clock.sleep_until(next_daily(clock.now(), DAILY_RESET_AT)).await;
         bars.clear_all();
+        program_trades.clear();
         hub.daily_reset();
         if !control.source_connected() {
             continue;
