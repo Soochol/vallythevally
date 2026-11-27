@@ -40,7 +40,7 @@ async function open(page: Page) {
 
 const section = (page: Page, name: string) => popover(page).getByRole("region", { name, exact: true });
 
-test("위 막대의 차트 설정 버튼은 지표 창이 아니라 화면 가운데에 340px 한 열 창을 연다", async ({ page }) => {
+test("위 막대의 차트 설정 버튼은 화면 가운데에 통합 차트 설정 창을 연다", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await open(page);
   await expect(page.getByRole("button", { name: "봉 모양", exact: true })).toHaveCount(0);
@@ -50,9 +50,9 @@ test("위 막대의 차트 설정 버튼은 지표 창이 아니라 화면 가�
   await expect(page.getByRole("dialog", { name: "지표·비교 입력창" })).toHaveCount(0);
   await expect(popover(page).getByRole("tablist")).toHaveCount(0);
   for (const name of ["봉·축", "표시", "지표 창"]) await expect(section(page, name)).toBeVisible();
-  await expect(popover(page).getByText("삼성전자 · 일").first()).toBeVisible();
+  await expect(popover(page).getByRole("group", { name: "차트 설정 영역", exact: true }).getByRole("button", { name: "차트 설정", exact: true })).toHaveAttribute("aria-pressed", "true");
   const box = (await popover(page).boundingBox())!;
-  expect(box.width).toBe(340);
+  expect(box.width).toBeLessThanOrEqual(760);
   expect(Math.abs(box.x + box.width / 2 - 1440 / 2)).toBeLessThanOrEqual(2);
   expect(Math.abs(box.y + box.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
   expect(box.y + box.height).toBeLessThanOrEqual(900);
@@ -87,14 +87,18 @@ test("차트 설정 창은 닫기 버튼·바깥 클릭으로 닫으면 바꾼 �
   await pollSaved(() => saved(scenario).style).toBe("bar");
 });
 
-test("구역 셋이 세로로 쌓이고 구역 제목 오른쪽에 적용 범위가 붙으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
+test("구역 셋이 두 열로 배치되고 구역 제목 오른쪽에 적용 범위가 붙으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
   await open(page);
   await openSettings(page);
   const names = ["봉·축", "표시", "지표 창"];
-  const tops: number[] = [];
-  for (const name of names) tops.push((await section(page, name).boundingBox())!.y);
-  expect([...tops].sort((a, b) => a - b)).toEqual(tops);
-  expect(new Set(tops).size).toBe(3);
+  const boxes = new Map<string, { x: number; y: number }>();
+  for (const name of names) {
+    const box = (await section(page, name).boundingBox())!;
+    boxes.set(name, { x: box.x, y: box.y });
+  }
+  expect(Math.abs(boxes.get("봉·축")!.y - boxes.get("표시")!.y)).toBeLessThanOrEqual(2);
+  expect(boxes.get("봉·축")!.x).toBeLessThan(boxes.get("표시")!.x);
+  expect(boxes.get("지표 창")!.y).toBeGreaterThan(boxes.get("봉·축")!.y);
   const scopes = ["이 칸", "이 칸", "모든 차트"];
   for (const [i, name] of names.entries()) await expect(section(page, name).getByText(scopes[i]!, { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");

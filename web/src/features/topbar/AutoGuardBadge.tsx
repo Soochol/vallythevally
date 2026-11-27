@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
+import { usePublicMode } from "../../public-mode/serverMode";
 import { isActiveAutoOrder, useAutoOrdersStore } from "../../stores/autoOrders";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 
 export function AutoGuardBadge() {
+  const publicMode = usePublicMode();
   const loaded = useAutoOrdersStore((s) => s.loaded);
   const masterEnabled = useAutoOrdersStore((s) => s.masterEnabled);
   const rules = useAutoOrdersStore((s) => s.rules);
@@ -15,8 +17,8 @@ export function AutoGuardBadge() {
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!loaded) void load();
-  }, [loaded, load]);
+    if (!publicMode && !loaded) void load();
+  }, [publicMode, loaded, load]);
 
   useEffect(() => {
     if (!open) return;
@@ -27,6 +29,7 @@ export function AutoGuardBadge() {
     return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  if (publicMode) return null;
   const activeRules = rules.filter(isActiveAutoOrder);
   if (activeRules.length === 0) return null;
 
