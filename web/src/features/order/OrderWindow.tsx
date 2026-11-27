@@ -14,7 +14,7 @@ import { FeedStrip } from "../market-window/FeedStrip";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
-import { Strip, TotalFigure } from "../market-window/parts";
+import { FooterRatioBar, TotalFigure, TotalRatioToggle } from "../market-window/parts";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
 import { EmptyState, ErrorState } from "../overlay/State";
@@ -31,7 +31,7 @@ import { typedQuantity } from "./orderRules";
 import { ladderRowHeightPx, type PresetMode } from "./orderSettings";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { OrderStatusBar } from "./OrderStatusBar";
-import { OrderTotals } from "./OrderTotals";
+import { OrderTotalCell } from "./OrderTotals";
 import { fullRangePrices } from "./priceRange";
 import { QuantityRow } from "./QuantityRow";
 import { useAccountBalance } from "./useAccountBalance";
@@ -251,11 +251,18 @@ function OrderBody({
         )}
         <ViOrderOverlay band="bottom" state={viState} previousClose={market.headPreviousClose} />
       </div>
-      <OrderTotals groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
-      <Strip>
-        <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-        <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-      </Strip>
+      <div className="od-footer" data-testid="order-totals">
+        <FooterRatioBar ask={totals.ask} bid={totals.bid} />
+        <div className="od-footer-side">
+          <OrderTotalCell side="sell" groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
+          <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
+        </div>
+        <TotalRatioToggle ask={totals.ask} bid={totals.bid} />
+        <div className="od-footer-side">
+          <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
+          <OrderTotalCell side="buy" groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
+        </div>
+      </div>
       <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} replay={market.replayEnabled ? replay : null} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       <DragGhost drag={drag} />
       {commands.confirm && <HighValueConfirm request={commands.confirm} onClose={commands.clearConfirm} />}

@@ -218,13 +218,14 @@ test("걸린 주문은 같은 가격 합계의 칩이고 사다리 아래 두 �
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: "../target/ux-screens/win-order.png" });
 });
 
-test("접수 합계 칸은 사다리 주문 칸과 같은 열이고 사다리와 총잔량 띠 사이 줄에 있다", async ({ page, scenario }) => {
+test("접수 합계 칸은 사다리 주문 칸과 같은 열이고 사다리 아래 한 줄 푸터에 총잔량과 나란히 있다", async ({ page, scenario }) => {
   ordersOn(scenario);
   tradingApi(scenario, [openOrder("0000001", "buy", 70_000, 5), openOrder("0000003", "sell", 70_100, 4)]);
   await openOrderWindow(page, scenario);
   const box = async (locator: Locator) => (await locator.boundingBox())!;
   const sell = await box(page.getByTestId("order-total-sell"));
   const buy = await box(page.getByTestId("order-total-buy"));
+  const ask = await box(page.getByTestId("order-total-ask"));
   const sellCell = await box(cellAt(page, "sell", 70_100));
   const buyCell = await box(cellAt(page, "buy", 70_000));
   expect(Math.abs(sell.x - sellCell.x)).toBeLessThanOrEqual(1);
@@ -234,7 +235,14 @@ test("접수 합계 칸은 사다리 주문 칸과 같은 열이고 사다리와
   expect(sell.y).toBe(buy.y);
   const ladder = await box(page.getByTestId("order-ladder"));
   expect(sell.y).toBeGreaterThanOrEqual(ladder.y + ladder.height - 1);
-  expect(sell.y + sell.height).toBeLessThanOrEqual((await box(page.getByTestId("order-total-ask"))).y);
+  expect(Math.abs((sell.y + sell.height / 2) - (ask.y + ask.height / 2))).toBeLessThanOrEqual(2);
+  const ratioToggle = page.getByTestId("footer-ratio-toggle");
+  await expect(ratioToggle).toHaveAttribute("data-mode", "percent");
+  await ratioToggle.click();
+  await expect(ratioToggle).toHaveAttribute("data-mode", "multiple");
+  await expect(ratioToggle).toContainText(": 1");
+  await ratioToggle.click();
+  await expect(ratioToggle).toHaveAttribute("data-mode", "percent");
 });
 
 test("접수 합계 칸을 누르면 주문 메뉴가 열려 주문 하나 또는 그 쪽 전부를 취소한다", async ({ page, scenario }) => {

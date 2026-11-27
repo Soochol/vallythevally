@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { NXT_UNAVAILABLE } from "../../lib/venue";
 import { useVenue } from "../../stores/ui";
@@ -8,8 +8,76 @@ import type { WindowId, WindowKind } from "../../layout/kinds";
 import { useLinkedSymbol } from "./MarketWindowGate";
 import { useShownVenue } from "./useShownVenue";
 
-export function Strip({ children, divided }: { children: ReactNode; divided?: boolean }) {
-  return <div className="mw-strip" data-divided={divided ? "" : undefined}>{children}</div>;
+export type TotalRatioMode = "percent" | "multiple";
+
+const RATIO_MODE_KEY = "vally:total-ratio-mode";
+const ratioListeners = new Set<() => void>();
+
+function readRatioMode(): TotalRatioMode {
+  try {
+    return window.localStorage.getItem(RATIO_MODE_KEY) === "multiple" ? "multiple" : "percent";
+  } catch {
+    return "percent";
+  }
+}
+
+let currentRatioMode: TotalRatioMode = typeof window === "undefined" ? "percent" : readRatioMode();
+
+function subscribeRatioMode(listener: () => void): () => void {
+  ratioListeners.add(listener);
+  return () => ratioListeners.delete(listener);
+}
+
+function toggleRatioMode(): void {
+  currentRatioMode = currentRatioMode === "percent" ? "multiple" : "percent";
+  try {
+    window.localStorage.setItem(RATIO_MODE_KEY, currentRatioMode);
+  } catch {
+  }
+  ratioListeners.forEach((listener) => listener());
+}
+
+export function useTotalRatioMode(): readonly [TotalRatioMode, () => void] {
+  const mode = useSyncExternalStore<TotalRatioMode>(subscribeRatioMode, () => currentRatioMode, () => "percent");
+  return [mode, toggleRatioMode] as const;
+}
+
+export function formatTotalRatio(ask: number | null, bid: number | null, mode: TotalRatioMode): string {
+  if (ask === null || bid === null) return "-";
+  if (mode === "multiple") {
+    if (bid <= 0) return ask > 0 ? "∞ : 1" : "-";
+    return `${(ask / bid).toFixed(2)} : 1`;
+  }
+  const total = ask + bid;
+  if (!(total > 0)) return "-";
+  const askPct = Math.round((ask / total) * 100);
+  return `${askPct}% : ${100 - askPct}%`;
+}
+
+export function FooterRatioBar({ ask, bid }: { ask: number | null; bid: number | null }) {
+  const total = (ask ?? 0) + (bid ?? 0);
+  const split = ask !== null && bid !== null && total > 0 ? ratioSplit(bid, ask) : { buy: 50, sell: 50 };
+  return (
+    <div className="mw-strip-ratio" aria-hidden="true">
+      <i className="mw-strip-ratio-ask" style={{ width: `${split.sell}%` }} />
+      <i className="mw-strip-ratio-bid" style={{ width: `${split.buy}%` }} />
+    </div>
+  );
+}
+
+export function TotalRatioToggle({ ask, bid }: { ask: number | null; bid: number | null }) {
+  const [mode, toggle] = useTotalRatioMode();
+  const text = formatTotalRatio(ask, bid, mode);
+  const title = mode === "percent" ? "매도/매수 잔량 비율 (%) · 클릭해 배율(매수=1)로 전환" : "매도/매수 잔량 배율 (매수=1) · 클릭해 비율(%)로 전환";
+  return (
+    <button type="button" className="mw-strip-ratio-btn" data-testid="footer-ratio-toggle" data-mode={mode} title={title} aria-label={title} onClick={toggle}>
+      {text}
+    </button>
+  );
+}
+
+export function Strip({ children, divided, compact }: { children: ReactNode; divided?: boolean; compact?: boolean }) {
+  return <div className="mw-strip" data-divided={divided ? "" : undefined} data-compact={compact ? "" : undefined}>{children}</div>;
 }
 
 export function RatioBar({ buy, sell, sellFirst, label }: { buy: number; sell: number; sellFirst?: boolean; label: string }) {

@@ -9,9 +9,9 @@
 .od-ladder { position:relative; flex:1; min-height:0; overflow:auto; user-select:none; }
 .od { --od-ladder-max:calc(var(--size-320) + var(--size-240)); }
 .od[data-rate-hidden] { --od-ladder-max:calc(var(--size-320) + var(--size-240) - var(--size-48)); }
-.od-ladder .mw-ladder, .od-colhead, .od-totals { max-width:var(--od-ladder-max); width:100%; }
+.od-ladder .mw-ladder, .od-colhead, .od-totals, .od-footer { max-width:var(--od-ladder-max); width:100%; }
 @container od (width >= 680px) {
-  .od-ladder .mw-ladder, .od-colhead, .od-totals { margin-inline:auto; }
+  .od-ladder .mw-ladder, .od-colhead, .od-totals, .od-footer { margin-inline:auto; }
 }
 .od-ladder .mw-ladder { padding-bottom:var(--s4); }
 .od-colhead { position:sticky; top:0; z-index:3; box-sizing:border-box; display:grid; align-items:center; height:var(--ctl-xs); padding:0 var(--s4); border-bottom:var(--size-1) solid var(--line); background:var(--bg); color:var(--text-3); font-size:var(--fs-xs); font-weight:500; white-space:nowrap; }
@@ -49,6 +49,9 @@
 .od-ghost[data-cancel] { border:var(--size-1) solid var(--danger); background:var(--danger-soft); color:var(--danger); font-weight:700; }
 .od-ghost[data-side=sell] b { color:var(--down); } .od-ghost[data-side=buy] b { color:var(--up); }
 
+.od-footer { position:relative; z-index:3; box-sizing:border-box; display:flex; flex:none; align-items:center; justify-content:space-between; gap:var(--s2); height:var(--size-26); padding:var(--size-2) var(--s4) 0; border-bottom:var(--size-1) solid var(--line); background:var(--bg); font-variant-numeric:tabular-nums; user-select:none; white-space:nowrap; }
+.od-footer-side { display:inline-flex; align-items:center; gap:var(--s3); min-width:0; }
+.od-footer-side b { font-size:var(--fs-s); font-weight:600; }
 .od-totals { position:relative; z-index:3; display:flex; flex:none; justify-content:space-between; padding:var(--s2) var(--s4); border-top:var(--size-1) solid var(--line); background:var(--bg); user-select:none; }
 .od-total { width:var(--size-64); height:var(--size-20); padding:0; border:var(--size-1) solid var(--line); border-radius:var(--r-s); font-size:var(--fs-xs); font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; color:var(--text); transition:background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
 .od-total[data-side=sell] { background:color-mix(in srgb, var(--down) 7%, transparent); }

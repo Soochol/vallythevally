@@ -18,7 +18,7 @@ interface Actions {
   cancelGroups(keys: readonly PriceKey[]): void;
 }
 
-function OrderTotalCell({ side, groups, writable, actions, drag }: { side: OrderSide; groups: ReadonlyMap<string, PriceGroup>; writable: boolean; actions: Actions; drag: OrderDrag }) {
+export function OrderTotalCell({ side, groups, writable, actions, drag }: { side: OrderSide; groups: ReadonlyMap<string, PriceGroup>; writable: boolean; actions: Actions; drag: OrderDrag }) {
   const [open, setOpen] = useState(false);
   const dragging = useStoreValue(drag.views, (view) => view?.source.kind === "total" && view.source.side === side);
   const button = useRef<HTMLButtonElement>(null);

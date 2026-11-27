@@ -9,7 +9,7 @@ import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../mark
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { MarketHead } from "../market-window/MarketHead";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { Strip, TotalFigure } from "../market-window/parts";
+import { FooterRatioBar, Strip, TotalFigure, TotalRatioToggle } from "../market-window/parts";
 import { ladderColumns, PriceLadder } from "../market-window/PriceLadder";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { SymbolHead } from "../market-window/SymbolHead";
@@ -72,11 +72,13 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
       <ViOrderOverlay band="top" state={viState} previousClose={market.headPreviousClose} />
       {view !== null && <BookColumnHead />}
       <div ref={ladderBox} className="bk-ladder" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-state={view === null ? "" : undefined}>{ladder}</div>
-      <Strip divided>
+      <Strip divided compact>
+        <FooterRatioBar ask={totals.ask} bid={totals.bid} />
         <span className="mw-strip-group">
           <span className="mw-strip-name">매도</span>
           <TotalFigure testId="book-total-ask" tone="down" value={totals.ask} afterHours={afterHours} description={totals.description} />
         </span>
+        <TotalRatioToggle ask={totals.ask} bid={totals.bid} />
         <span className="mw-strip-group">
           <TotalFigure testId="book-total-bid" tone="up" value={totals.bid} afterHours={afterHours} description={totals.description} />
           <span className="mw-strip-name">매수</span>
