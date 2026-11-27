@@ -5,12 +5,21 @@ import type { SubErrorCode } from "../api/generated/SubErrorCode";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { ApiRequestError } from "../api/http";
 import type { MarketSocketLike, SubEvent } from "../api/socket";
+import { isRegularHours } from "./time";
 
 /** 칸 하나가 지금 가진 봉. bars는 확정 봉(t 오름차순), current는 진행 중 구간의 봉. */
 export interface History {
   bars: Bar[];
   current: Bar | null;
   nextBefore: UnixSeconds | null;
+}
+
+export function filterRegularHistory(h: History): History {
+  return {
+    bars: h.bars.filter((b) => isRegularHours(b.t)),
+    current: h.current && isRegularHours(h.current.t) ? h.current : null,
+    nextBefore: h.nextBefore,
+  };
 }
 
 export function historyFromLatest(page: BarsPage): History {

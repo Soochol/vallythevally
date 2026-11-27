@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { TickMarkType } from "lightweight-charts";
-import { formatBarTime, formatKstClock, formatTickMark, fromChartTime, kstDateChanges, toChartTime } from "./time";
+import { formatBarTime, formatKstClock, formatTickMark, fromChartTime, isRegularHours, kstDateChanges, toChartTime } from "./time";
 
 // 2026-11-06 00:00 KST = 2026-11-05 15:00 UTC
 const nov6Kst = Date.UTC(2026, 10, 6) / 1000 - 32400;
@@ -72,4 +72,17 @@ test("한국 시각 자정 앞뒤의 두 봉은 UTC로 같은 날이어도 다�
 test("봉이 0개나 1개면 날짜가 바뀌는 봉이 없다", () => {
   expect(kstDateChanges([])).toEqual([]);
   expect(kstDateChanges([{ t: nov6Kst }])).toEqual([]);
+});
+
+test("정규장 판정은 KST 09:00~15:30만 참이고 UTC 날짜 경계를 넘어도 한국 시각을 따른다", () => {
+  const kst = (h: number, m: number) => nov6Kst + h * 3600 + m * 60;
+  expect(isRegularHours(kst(8, 59))).toBe(false);
+  expect(isRegularHours(kst(9, 0))).toBe(true);
+  expect(isRegularHours(kst(12, 0))).toBe(true);
+  expect(isRegularHours(kst(15, 30))).toBe(true);
+  expect(isRegularHours(kst(15, 31))).toBe(false);
+  expect(isRegularHours(kst(19, 59))).toBe(false);
+  expect(isRegularHours(Date.UTC(2026, 10, 6, 23, 59) / 1000)).toBe(false);
+  expect(isRegularHours(Date.UTC(2026, 10, 7, 0, 0) / 1000)).toBe(true);
+  expect(isRegularHours(Date.UTC(2026, 10, 6, 15, 0) / 1000)).toBe(false);
 });

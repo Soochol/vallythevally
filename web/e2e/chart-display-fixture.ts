@@ -37,7 +37,7 @@ export async function seedChartDisplay(scenario: Scenario, period: FinancialPeri
     scenario.reply(url => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "000660" && url.searchParams.get("period") === value, { body: chartDisplayBars(value) });
   }
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
-  const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showLegend: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, showHorzGrid: true, showVertGrid: true, compare: [], indicators: METRICS.map(kind => ({
+  const chartSettings: ChartSettings = { v: 2, style: "candle", scale: "normal", visibleBars: null, showExtremes: false, showLegend: true, showOhlcChange: false, extremeBasis: "last", showDaySeparators: false, showHorzGrid: true, showVertGrid: true, regularHoursOnly: false, compare: [], indicators: METRICS.map(kind => ({
     id: kind, spec: { kind }, panel: kind, visible: true, style: { colors: ["ind-1"], width: 1 },
   })), panels: METRICS.map(id => ({ id, stretch: 0.3 })) };
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "000660", venue: "combined", period, chartSettings }) });

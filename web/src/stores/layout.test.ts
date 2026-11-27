@@ -881,3 +881,19 @@ test("되돌린 호가주문창의 기억은 다시 하기로 새 창이 받을 
   state().undoArrangement();
   expect(useUiStore.getState().prefs.orderEntries[key]).toEqual(closedEntry);
 });
+
+test("정규장만 보기 설정은 값이 바뀔 때만 차트 설정과 저장 순서를 바꾼다", () => {
+  const id = firstChart().id;
+  const startRevision = state().revision;
+  expect(chartWindow(state().layout, id).chartSettings.regularHoursOnly).toBe(false);
+  state().setRegularHoursOnly(id, false);
+  expect(state().revision).toBe(startRevision);
+  state().setRegularHoursOnly(id, true);
+  expect(chartWindow(state().layout, id).chartSettings.regularHoursOnly).toBe(true);
+  expect(state().revision).toBe(startRevision + 1);
+  state().setRegularHoursOnly(id, true);
+  expect(state().revision).toBe(startRevision + 1);
+  state().setRegularHoursOnly(id, false);
+  expect(chartWindow(state().layout, id).chartSettings.regularHoursOnly).toBe(false);
+  expect(state().revision).toBe(startRevision + 2);
+});
