@@ -3,6 +3,7 @@ import type { LinkColor } from "../src/api/generated/LinkColor";
 import type { FeedBook } from "../src/api/generated/FeedBook";
 import type { Quote } from "../src/api/generated/Quote";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
+import { WINDOW_KIND_LIST } from "../src/layout/kinds";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
 import { BASE, CODE, ordersOn, pinQuote, snapshot, tradingApi, win } from "./order-window";
 import { readyStatus, resultRows } from "./fixtures/screener";
@@ -202,7 +203,7 @@ test("창 49개가 든 레이아웃에서 하나를 더하면 50개가 되고 �
   await pollSaved(() => saved(scenario).windows.length).toBe(50);
 
   await addButton(page).click();
-  await expect(menu(page).getByRole("menuitem")).toHaveCount(11);
+  await expect(menu(page).getByRole("menuitem")).toHaveCount(WINDOW_KIND_LIST.length);
   for (const item of await menu(page).getByRole("menuitem").all()) await expect(item).toBeDisabled();
   await expect(kindItem(page, "체결")).toContainText(WINDOW_LIMIT);
   await page.keyboard.press("Escape");
