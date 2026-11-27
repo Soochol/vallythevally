@@ -135,16 +135,55 @@ describe("resolveLadderMarket", () => {
     expect(combined.liveQuotes!.asks).toHaveLength(3);
     expect(combined.liveQuotes!.bids).toHaveLength(3);
     expect(combined.expected).toEqual({ price: 70_000, qty: 300 });
+    expect(combined.totals).toEqual({ ask: 1_000, bid: 2_000, source: "regular", description: null });
 
     const krx = resolveLadderMarket({ ...base, venue: "krx", nxtEnabled: true });
     expect(krx.liveQuotes!.asks).toHaveLength(10);
     expect(krx.liveQuotes!.bids).toHaveLength(10);
     expect(krx.expected).toBeNull();
+    expect(krx.totals.source).toBe("afterHours");
+    expect(krx.totals.ask).toBe(500);
 
     const nonNxt = resolveLadderMarket({ ...base, venue: "combined", nxtEnabled: false });
     expect(nonNxt.liveQuotes!.asks).toHaveLength(10);
     expect(nonNxt.liveQuotes!.bids).toHaveLength(10);
     expect(nonNxt.expected).toBeNull();
+    expect(nonNxt.totals.source).toBe("afterHours");
+    expect(nonNxt.totals.ask).toBe(500);
+  });
+
+  it("15:52 NXT 애프터마켓 통합 뷰에서는 KRX 시간외 종가 잔량(0E) 대신 호가 총잔량을 표시한다", () => {
+    const at1552 = Date.parse("2026-11-18T15:52:00+09:00") / 1000;
+    const view: BookView = {
+      asks: Array.from({ length: 10 }, (_, i) => ({ price: 70_100 + 100 * i, quantity: 1_121 + i, change: 0 })),
+      bids: Array.from({ length: 10 }, (_, i) => ({ price: 70_000 - 100 * i, quantity: 1_143 + i, change: 0 })),
+      totalAsk: 11_218,
+      totalBid: 11_430,
+      expected: null,
+      t: at1552,
+    };
+    const base = {
+      book: { phase: "live", view } as BookState,
+      afterHours: { source: "live" as const, totals: { t: at1552, askQty: 3, bidQty: 0 } },
+      lastPrice: 70_000,
+      previousClose: 69_500,
+      fundamentals: { lowerLimit: 48_650, upperLimit: 90_350 } as never,
+      symbolKind: "common" as const,
+      replay: { kind: "live" as const },
+      vi: null,
+      nxtVi: null,
+      nowSeconds: at1552,
+      serverNowSeconds: at1552,
+      skipSpreadGap: false,
+    };
+
+    const combined = resolveLadderMarket({ ...base, venue: "combined", nxtEnabled: true });
+    expect(combined.totals).toEqual({ ask: 11_218, bid: 11_430, source: "regular", description: null });
+
+    const krx = resolveLadderMarket({ ...base, venue: "krx", nxtEnabled: true });
+    expect(krx.totals.source).toBe("afterHours");
+    expect(krx.totals.ask).toBe(3);
+    expect(krx.totals.bid).toBe(0);
   });
 
   it("NXT VI 발동 중이면 nxt·combined에서 예상체결을 표시한다", () => {

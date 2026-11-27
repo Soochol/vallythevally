@@ -78,8 +78,8 @@ export function visibleExpected(
   return auction !== null && auction === callAuctionOf(now, venue, nxtEnabled) ? expected : null;
 }
 
-export function visibleAfterHours(totals: AfterHoursTotals | null, now: UnixSeconds, venue: Venue = "combined"): AfterHoursTotals | null {
-  if (totals === null || venue === "nxt") return null;
+export function visibleAfterHours(totals: AfterHoursTotals | null, now: UnixSeconds, venue: Venue = "combined", nxtEnabled = false): AfterHoursTotals | null {
+  if (totals === null || venue === "nxt" || (venue === "combined" && nxtEnabled)) return null;
   const window = rangeIndexOf(AFTER_HOURS_CLOSES, totals.t);
   return window !== null && window === rangeIndexOf(AFTER_HOURS_CLOSES, now) ? totals : null;
 }

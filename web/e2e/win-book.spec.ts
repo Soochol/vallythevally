@@ -1120,6 +1120,11 @@ test.describe("시간외 종가 잔량", () => {
   test.describe("수요일 08:35", () => {
     test.use({ clockStart: "20261118083500" });
 
+    test.beforeEach(({ scenario }) => {
+      const state = scenario.documents.uiState();
+      scenario.documents.saveUiState({ ...state, venue: "krx", revision: state.revision + 1 });
+    });
+
     test("사다리가 없어도 빈 상태 아래 띠의 총잔량 자리에 시간외 잔량이 보인다", async ({ page, scenario }) => {
       bookWindow(scenario, CODE);
       replyBook(scenario, 70000);
@@ -1165,6 +1170,20 @@ test.describe("시간외 종가 잔량", () => {
       await expect(book(page).getByTestId("book-total-ratio")).toHaveCount(0);
       const after = (await strip(page).boundingBox())!;
       expect(after.height).toBe(before.height);
+    });
+  });
+
+  test.describe("수요일 15:52", () => {
+    test.use({ clockStart: "20261118155200" });
+
+    test("NXT 애프터마켓 통합 뷰에서는 KRX 시간외 종가 잔량이 호가 총잔량을 덮어쓰지 않는다", async ({ page, scenario }) => {
+      await open(page, scenario, 70000);
+      const bookSub = await subOf(scenario, "book");
+      scenario.live.emit({ type: "feed_book", sub: bookSub, book: { ...liveOf([[70100, 1_120]], [[70000, 1_140]], [11_218, 11_430]), t: scenario.now / 1000 } });
+      scenario.live.emit({ type: "feed_after_hours", sub: bookSub, totals: afterHours(scenario, 3, 0) });
+      await expect(page.getByTestId("book-total-ask")).toHaveAttribute("data-source", "regular");
+      await expect(page.getByTestId("book-total-ask")).toHaveText("11,218");
+      await expect(page.getByTestId("book-total-bid")).toHaveText("11,430");
     });
   });
 

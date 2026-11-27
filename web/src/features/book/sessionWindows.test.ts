@@ -117,3 +117,14 @@ test("NXT 단독 거래소에서는 KRX 동시호가와 KRX 시간외 종가 잔
   expect(visibleAfterHours(totalsAt(WEDNESDAY, "08:35:00"), at(WEDNESDAY, "08:35:00"), "nxt")).toBeNull();
   expect(visibleAfterHours(totalsAt(WEDNESDAY, "15:45:00"), at(WEDNESDAY, "15:45:00"), "nxt")).toBeNull();
 });
+
+test("NXT 가능 종목의 통합 거래소에서는 NXT 프리·애프터마켓과 겹치는 KRX 시간외 종가 잔량이 보이지 않고, KRX 단독·NXT 불가 종목에서는 보인다", () => {
+  const pre = totalsAt(WEDNESDAY, "08:35:00");
+  const after = totalsAt(WEDNESDAY, "15:52:00");
+  expect(visibleAfterHours(pre, pre.t, "combined", true)).toBeNull();
+  expect(visibleAfterHours(after, after.t, "combined", true)).toBeNull();
+  expect(visibleAfterHours(pre, pre.t, "krx", true)).toEqual(pre);
+  expect(visibleAfterHours(after, after.t, "krx", true)).toEqual(after);
+  expect(visibleAfterHours(pre, pre.t, "combined", false)).toEqual(pre);
+  expect(visibleAfterHours(after, after.t, "combined", false)).toEqual(after);
+});
