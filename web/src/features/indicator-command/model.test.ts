@@ -36,11 +36,17 @@ test("비교 종목 탭은 종목만 고르고 검색이 끝나기 전에는 고
   expect(selectedRow(stale, stale[0]!.key)).toBeUndefined();
 });
 
-test("띄운 지표 탭에서 글자를 치면 지표 추가 탭으로 넘어가고 다른 탭은 그대로다", () => {
-  expect(modeAfterInput("current", "이평")).toBe("add");
+test("띄운 지표 탭에서 검색어를 입력해도 탭을 유지하고 띄운 지표만 이름·별칭·코드로 거른다", () => {
+  expect(modeAfterInput("current", "이평")).toBe("current");
   expect(modeAfterInput("current", " ")).toBe("current");
   expect(modeAfterInput("add", "")).toBe("add");
   expect(modeAfterInput("compare", "삼성")).toBe("compare");
+
+  const byAlias = commandRows(withMa, "이평", "current", empty);
+  expect(byAlias.map((row) => row.kind === "current" && row.config.spec.kind)).toEqual(["ma"]);
+  const byCode = commandRows(withMa, "volume", "current", empty);
+  expect(byCode.map((row) => row.kind === "current" && row.config.spec.kind)).toEqual(["volume"]);
+  expect(commandRows(withMa, "rsi", "current", empty)).toEqual([]);
 });
 
 test("Enter는 계속 추가하고 Shift+Enter만 추가 뒤 닫으며 한글 조합은 소비하지 않는다", () => {
