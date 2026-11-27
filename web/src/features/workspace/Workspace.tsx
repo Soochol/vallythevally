@@ -27,7 +27,7 @@ import { SymbolDragOverlay } from "./SymbolDragOverlay";
 import { floatPanelId, useDockInteraction } from "./dockInteraction";
 import { useDockMaximize } from "./useDockMaximize";
 import { WindowHost } from "./WindowHost";
-import { CANVAS_DOCK_HEIGHT, dockGapForStyle, useElementSize } from "./size";
+import { dockGapForStyle, useElementSize } from "./size";
 
 const FOLD_NOTICE = "자리가 좁아 창 묶음 일부를 탭으로 접었습니다 · 창을 넓히면 돌아옵니다";
 
@@ -37,7 +37,7 @@ export function Workspace() {
   const area = useElementSize(root);
   const mode = useUiStore((s) => s.prefs.layoutMode);
   const placement = useLayoutStore((s) => s.layout.placement);
-  const canvasArea = useMemo(() => area && workArea(area.w, area.h - CANVAS_DOCK_HEIGHT), [area]);
+  const canvasArea = useMemo(() => area && workArea(area.w, area.h), [area]);
   const windows = useLayoutStore((s) => s.layout.windows);
   const saved = useLayoutStore((s) => s.layout.placement.dock);
   const rateShown = useLadderRateShown();
@@ -109,7 +109,7 @@ export function Workspace() {
         const panel = mode === "canvas" ? canvasPanelId(window.id) : shown.floats.some((float) => float.window === window.id) ? floatPanelId(window.id) : group?.active === window.id && (!maximizedGroup || group.id === maximizedGroup.group.id) ? `window-panel-${group.id}` : null;
         return <WindowHost key={window.id} window={window} panel={panel} parking={parking} />;
       })}
-      {mode === "dock" && interaction.dragging && <div className="dock-input-shield" aria-hidden="true" />}
+      {mode === "dock" && interaction.dragging && <div className="dock-input-shield" data-cursor={interaction.dragCursor ?? undefined} aria-hidden="true" />}
       {mode === "dock" && preview && preview.kind !== "unchanged" && <DockDropPreview preview={preview} />}
       {mode === "dock" && interaction.grab && <DockTabGhost grab={interaction.grab} />}
       <SymbolDragOverlay />

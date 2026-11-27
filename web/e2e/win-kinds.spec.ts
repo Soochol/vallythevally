@@ -160,7 +160,7 @@ test("새 종류 넷을 레이아웃에 저장하면 다시 열어도 그대로 
 });
 
 for (const mode of ["dock", "canvas"] as const) {
-  test(`${mode}: 개체 목록은 창 더하기 메뉴와 창 종류 막대와 드로잉 도구 막대 어디에도 없다`, async ({ page, scenario }) => {
+  test(`${mode}: 개체 목록은 창 더하기 메뉴와 드로잉 도구 막대 어디에도 없고 캔버스 하단 막대도 없다`, async ({ page, scenario }) => {
     scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: mode });
     await page.goto("/");
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -171,9 +171,7 @@ for (const mode of ["dock", "canvas"] as const) {
     await expandDock(page);
     await expect(drawingDock(page).getByRole("button", { name: "개체 목록 열기" })).toHaveCount(0);
     if (mode === "canvas") {
-      const kinds = page.getByRole("navigation", { name: "창 종류" });
-      await expect(kinds.getByRole("button", { name: "지표 창 더하기" })).toBeVisible();
-      await expect(kinds.getByRole("button", { name: /개체 목록/ })).toHaveCount(0);
+      await expect(page.getByRole("navigation", { name: "창 종류" })).toHaveCount(0);
     }
   });
 }
