@@ -1,5 +1,5 @@
 import { Fragment, type PointerEvent, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
-import { colorLine, indicatorCssColor, isFinancial, isInvestorFlow, isQuote, isTickCvd, KINDS, shownColor, specName, type IndicatorKind } from "../../chart/indicators/kinds";
+import { colorLine, indicatorCssColor, KINDS, shownColor, specName, type IndicatorKind } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { symbolSub } from "../../lib/symbol";
@@ -23,8 +23,10 @@ import {
   commandHints,
   commandKey,
   currentKey,
+  indicatorPeriodBadge,
   PRICE_GROUP,
   selectedTreeRow,
+  treeChildLabel,
   unifiedIndicatorRows,
   type IndicatorCommandMode,
   type TreeCandidateRow,
@@ -36,22 +38,6 @@ import { useIndicatorCommand, useIndicatorDraft, type EditorAction } from "./use
 export function IndicatorCommand() {
   const dialog = useSelectionStore((s) => s.dialog);
   return dialog?.kind === "indicatorCommand" ? <IndicatorCommandBody key={`${dialog.cellId}-${dialog.indicatorId}`} cellId={dialog.cellId} initialMode={dialog.mode} initialIndicator={dialog.indicatorId} /> : null;
-}
-
-function periodBadge(kind: IndicatorKind): string | null {
-  const spec = KINDS[kind].defaults;
-  if (isFinancial(spec)) return "분기·연";
-  if (isInvestorFlow(spec)) return "일봉+";
-  if (isQuote(spec) || isTickCvd(spec)) return "분봉";
-  return null;
-}
-
-function childLabel(spec: IndicatorConfig["spec"]): string {
-  const label = KINDS[spec.kind].label;
-  const full = specName(spec);
-  if (full === label) return label;
-  const detail = full.startsWith(label) ? full.slice(label.length).trim() : full;
-  return `${label} (${detail})`;
 }
 
 export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = null }: { cellId: WindowId; initialMode: ChartPanelMode; initialIndicator?: string | null }) {
@@ -240,7 +226,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
               return <Fragment key={row.key}>
                 {showGroup && <li role="presentation" className="ic-group"><span>{row.group}</span></li>}
                 {row.kind === "candidate" ? (() => {
-                  const rule = periodBadge(row.candidate.kind);
+                  const rule = indicatorPeriodBadge(row.candidate.kind);
                   const hasChildren = row.instanceCount > 0;
                   const collapsed = !hasQuery && collapsedKinds.has(row.candidate.kind);
                   return (
@@ -272,7 +258,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
                       <span aria-hidden="true" className="ic-tree-idx">#{row.index}</span>
                       <span aria-hidden="true" className="ic-color-dot" style={{ background: hasDot ? indicatorCssColor(shownColor(row.config.spec, row.config.style.colors)) : "var(--text-3)" }} />
                       <button type="button" className="ic-row-text" aria-label={`${full} 설정`} title={full} onClick={() => selectRow(row)}>
-                        <span className="ic-tree-child-label">{childLabel(row.config.spec)}</span>
+                        <span className="ic-tree-child-label">{treeChildLabel(row.config.spec)}</span>
                       </button>
                       <div className="ic-row-actions">
                         <button type="button" className="icon-btn size-6" aria-label={`${full} ${row.config.visible ? "숨기기" : "보이기"}`} title={row.config.visible ? "숨기기" : "보이기"} onClick={(event) => {

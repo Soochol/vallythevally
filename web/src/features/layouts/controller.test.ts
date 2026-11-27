@@ -3,6 +3,7 @@ import type { Layout } from "../../api/generated/Layout";
 import type { LayoutInput } from "../../api/generated/LayoutInput";
 import { ApiRequestError } from "../../api/http";
 import { type Autosave, startAutosave } from "../../persist/autosave";
+import { groupSymbolsKey, readGroupSymbols } from "../../persist/groupSymbols";
 import { toWireWindow } from "../../persist/layoutWire";
 import { restoreLayout } from "../../persist/restore";
 import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
@@ -244,4 +245,80 @@ test("이름 바꾸기 성공은 도중 편집을 지키고 서버가 받은 번
   expect(useLayoutStore.getState().layout.name).toBe("새 이름");
   expect(sent.at(-1)).toMatchObject({ name: "새 이름", windows: [{ period: "W" }, {}, {}] });
   expect(sent.at(-1)!.revision).toBeGreaterThan(revision);
+});
+
+test("새 이름 저장은 차트 없는 연동 종목을 새 레이아웃 ID로 이어 쓰고 삭제는 지운 레이아웃의 저장 키를 정리한다", async () => {
+  const memory = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => { memory.set(key, value); },
+    removeItem: (key: string) => { memory.delete(key); },
+  });
+  try {
+    useLayoutStore.getState().openWindow("program", undefined, { link: "c" });
+    useLayoutStore.getState().sendSymbolToLink("c", CELL, { code: "005930" });
+    const originalSaved: Layout = {
+      ...useLayoutStore.getState().layout,
+      windows: useLayoutStore.getState().layout.windows.map(toWireWindow),
+      revision: 11,
+      updatedAt: 0,
+    };
+    expect(memory.has(groupSymbolsKey(DEFAULT_LAYOUT.id))).toBe(true);
+
+    const commands = setup({
+      get: async (id) => (id === DEFAULT_LAYOUT.id ? originalSaved : stored(id)),
+      install: (next) => {
+        useLayoutStore.getState().load(next.layout);
+        autosave.replaceLayout(next.layout, next.revision, next.serverCharts);
+      },
+    });
+    await commands.saveAs("사본");
+    expect(useLayoutStore.getState().layout.id).toBe("copy");
+    expect(readGroupSymbols(useLayoutStore.getState().layout)).toEqual({ c: "005930" });
+    expect(useLayoutStore.getState().groupSymbols.c).toBe("005930");
+    expect(memory.has(groupSymbolsKey("copy"))).toBe(true);
+
+    await commands.delete();
+    expect(memory.has(groupSymbolsKey("copy"))).toBe(false);
+    expect(memory.has(groupSymbolsKey(DEFAULT_LAYOUT.id))).toBe(true);
+    expect(useLayoutStore.getState().groupSymbols.c).toBe("005930");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("새 이름 저장 중 원본 레이아웃이 바뀌어도 저장 시점의 차트 없는 연동 종목 스냅샷을 사본에 유지한다", async () => {
+  const memory = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => { memory.set(key, value); },
+    removeItem: (key: string) => { memory.delete(key); },
+  });
+  try {
+    const programId = useLayoutStore.getState().openWindow("program", undefined, { link: "c" })!;
+    useLayoutStore.getState().sendSymbolToLink("c", CELL, { code: "005930" });
+    const putDeferred = deferred<Layout>();
+    let capturedBody: LayoutInput | null = null;
+    const commands = setup({
+      put: (body) => {
+        capturedBody = body;
+        return putDeferred.promise;
+      },
+      install: (next) => {
+        useLayoutStore.getState().load(next.layout);
+        autosave.replaceLayout(next.layout, next.revision, next.serverCharts);
+      },
+    });
+    const saving = commands.saveAs("사본");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useLayoutStore.getState().closeWindow(programId)).toBe(true);
+    expect(useLayoutStore.getState().groupSymbols.c).toBeUndefined();
+    putDeferred.resolve({ ...capturedBody!, updatedAt: 0 });
+    await saving;
+    expect(useLayoutStore.getState().layout.id).toBe("copy");
+    expect(useLayoutStore.getState().groupSymbols.c).toBe("005930");
+    expect(readGroupSymbols(useLayoutStore.getState().layout)).toEqual({ c: "005930" });
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

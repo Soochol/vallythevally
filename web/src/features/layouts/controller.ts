@@ -8,6 +8,7 @@ import { fetchLayout, fetchLayouts, layoutPath } from "../../api/userData";
 import { tidyCanvas } from "../workspace/canvasCommands";
 import { defaultDock } from "../../layout/dock/fit";
 import { layoutAutosave } from "../../persist/autosave";
+import { clearGroupSymbols, writeGroupSymbols } from "../../persist/groupSymbols";
 import { restoreLayout, type RestoredLayout } from "../../persist/restore";
 import { clearUnsaved, readUnsaved } from "../../persist/unsaved";
 import { useDrawingSession } from "../../stores/drawingSession";
@@ -74,6 +75,7 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
   const finishDeletion = async (pending: NonNullable<typeof pendingDelete>) => {
     pendingDelete = null;
     clearUnsaved("layout", Number.MAX_SAFE_INTEGER, layoutPath(pending.id));
+    clearGroupSymbols(pending.id);
     deps.install(pending.next);
     await afterMutation();
   };
@@ -121,11 +123,12 @@ export function createLayoutCommands(deps: LayoutCommandsDeps) {
       const nextName = name(input);
       const saver = layoutAutosave().savers.layout;
       await saver.save();
-      const snapshot = useLayoutStore.getState().layout;
+      const { layout: snapshot, groupSymbols: snapshotGroupSymbols } = useLayoutStore.getState();
       const saved = await deps.put({ ...snapshot, windows: snapshot.windows.map(toWireWindow), id: deps.uuid(), name: nextName, revision: Date.now() });
       try {
         const next = await deps.restore(saved);
         await saver.saveAndSuspend();
+        writeGroupSymbols(next.layout, snapshotGroupSymbols);
         deps.install(next);
       } finally { await afterMutation(); }
     }),

@@ -103,7 +103,7 @@ function useStoreStatus(pollWhileUpdatingMs: number) {
 
 function useWatchedSymbol(sender: WindowId | null): SymbolCode | null {
   const activeCell = useSelectionStore((s) => s.activeCell);
-  return useLayoutStore((s) => watchedSymbol(s.layout, sender, activeCell));
+  return useLayoutStore((s) => watchedSymbol(s.layout, sender, activeCell, s.groupSymbols));
 }
 
 function useMenuToggle() {

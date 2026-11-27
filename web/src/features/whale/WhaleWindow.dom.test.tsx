@@ -2,7 +2,9 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { whaleBook } from "../../stores/realtime";
-import { useLayoutStore } from "../../stores/layout";
+import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
+import { useSelectionStore } from "../../stores/selection";
+import { windowId } from "../../layout/kinds";
 import { renderWithProviders, stubFetch } from "../../test/domHarness";
 import { resetDomAfterEach } from "../../test/domSetup";
 import { WhaleWindow } from "./WhaleWindow";
@@ -47,5 +49,25 @@ test("WhaleWindow 행과 정렬 헤더는 키보드와 ARIA 속성으로 조작�
 
   const rankRow = screen.getByTestId("whale-rank-table").querySelector('tbody tr[data-symbol="000660"]') as HTMLElement;
   expect(rankRow.tabIndex).toBe(0);
+  client.clear();
+});
+
+test("차트 없는 연동 색에 묶인 WhaleWindow는 groupSymbols의 활성 종목 행을 강조한다", async () => {
+  stubFetch(() => ({ body: { items: [{ code: "000660", name: "SK하이닉스", market: "kospi", listed: true, kind: "stock" }] } }));
+  const cell = windowId("cell-0");
+  useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
+  useLayoutStore.getState().setSymbol(cell, { code: "005930" });
+  useLayoutStore.getState().openWindow("program", undefined, { link: "c" });
+  const whale = useLayoutStore.getState().openWindow("whale", undefined, { link: "c" })!;
+  useLayoutStore.getState().sendSymbolToLink("c", cell, { code: "000660" });
+  useSelectionStore.setState({ activeCell: cell });
+
+  const { client } = renderWithProviders(<WhaleWindow id={whale} />);
+  const streamRow = screen.getByTestId("whale-stream-table").querySelector('tbody tr[data-symbol="000660"]');
+  expect(streamRow?.hasAttribute("data-selected")).toBe(true);
+
+  fireEvent.click(screen.getByTestId("whale-view-rank"));
+  const rankRow = screen.getByTestId("whale-rank-table").querySelector('tbody tr[data-symbol="000660"]');
+  expect(rankRow?.hasAttribute("data-selected")).toBe(true);
   client.clear();
 });

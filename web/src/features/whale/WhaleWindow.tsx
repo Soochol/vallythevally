@@ -27,7 +27,7 @@ import "./whale.css";
 
 function useWatched(id: WindowId): SymbolCode | null {
   const activeCell = useSelectionStore((s) => s.activeCell);
-  return useLayoutStore((s) => watchedSymbol(s.layout, id, activeCell));
+  return useLayoutStore((s) => watchedSymbol(s.layout, id, activeCell, s.groupSymbols));
 }
 
 export function WhaleWindow({ id }: { id: WindowId }) {

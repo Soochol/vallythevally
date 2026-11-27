@@ -2,10 +2,12 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { AccountStatus } from "../../api/generated/AccountStatus";
 import type { Watchlist } from "../../api/generated/Watchlist";
 import { rowKey } from "../../lib/watchlist";
+import { windowId } from "../../layout/kinds";
 import { useAccountStore } from "../../stores/account";
+import { DEFAULT_LAYOUT, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useWizardStore } from "../setup-wizard/wizardOpen";
-import { createRowPreviewStore, nextWatchRow, visibleWatchRows, type WatchKeyEvent, watchKeyStep } from "./watchKeys";
+import { createRowPreviewStore, nextWatchRow, resolveWatchRow, visibleWatchRows, type WatchKeyEvent, watchKeyStep } from "./watchKeys";
 
 class KeyTarget extends EventTarget {
   constructor(
@@ -169,4 +171,23 @@ test("반복 미리보기 저장소는 줄 이동 때 떠난 줄과 새 줄 구�
   expect(calls).toEqual({ a: 1, b: 1, c: 1, d: 1 });
 
   for (const stop of unsubs) stop();
+});
+
+test("차트 없는 연동 색에 묶인 관심종목의 방향키 이동은 groupSymbols의 현재 종목을 기준으로 다음·이전 줄을 고른다", () => {
+  const cell = windowId("cell-0");
+  const watchlist = windowId("watchlist");
+  useLayoutStore.getState().load(structuredClone(DEFAULT_LAYOUT));
+  useLayoutStore.getState().setSymbol(cell, { code: "005930" });
+  useLayoutStore.getState().openWindow("program", undefined, { link: "c" });
+  useLayoutStore.getState().setLink(watchlist, "c");
+  useLayoutStore.getState().sendSymbol(watchlist, cell, { code: "086520" });
+  useSelectionStore.setState({ activeCell: cell });
+
+  const rows = [
+    { code: "005930", groupId: null },
+    { code: "086520", groupId: null },
+    { code: "005935", groupId: null },
+  ];
+  expect(resolveWatchRow(watchlist, rows, 1, { previewKey: null, focusedKey: null })).toEqual(rows[2]);
+  expect(resolveWatchRow(watchlist, rows, -1, { previewKey: null, focusedKey: null })).toEqual(rows[0]);
 });

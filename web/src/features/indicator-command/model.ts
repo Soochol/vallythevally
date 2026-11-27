@@ -1,17 +1,11 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { isFinancial, isQuote, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
+import { isFinancial, isInvestorFlow, isQuote, isTickCvd, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
 import type { ChartSettings, IndicatorConfig } from "../../chart/settings";
 import type { IndicatorCommandMode } from "../../stores/selection";
 import type { SearchList } from "../search/searchList";
 import { parseIndicatorInput, type IndicatorCandidate } from "./parseInput";
 
 export type { IndicatorCommandMode };
-
-export const COMMAND_TABS = [
-  { mode: "current", label: "이 칸에 띄운 지표" },
-  { mode: "add", label: "지표 추가" },
-  { mode: "compare", label: "비교 종목" },
-] as const satisfies readonly { mode: IndicatorCommandMode; label: string }[];
 
 export const INDICATOR_DIALOG_TABS = [
   { mode: "current", label: "이 칸에 띄운 지표" },
@@ -54,6 +48,22 @@ export type TreeCandidateRow = { kind: "candidate"; key: string; group: string; 
 export type TreeCurrentRow = { kind: "current"; key: string; group: string; parentKey: string; index: number; config: IndicatorConfig };
 export type TreeSymbolRow = { kind: "symbol"; key: string; group: string; info: SymbolInfo; selectable: boolean };
 export type TreeDialogRow = TreeCandidateRow | TreeCurrentRow | TreeSymbolRow;
+
+export function indicatorPeriodBadge(kind: IndicatorKind): string | null {
+  const spec = KINDS[kind].defaults;
+  if (isFinancial(spec)) return "분기·연";
+  if (isInvestorFlow(spec)) return "일봉+";
+  if (isQuote(spec) || isTickCvd(spec)) return "분봉";
+  return null;
+}
+
+export function treeChildLabel(spec: IndicatorConfig["spec"]): string {
+  const label = KINDS[spec.kind].label;
+  const full = specName(spec);
+  if (full === label) return label;
+  const detail = full.startsWith(label) ? full.slice(label.length).trim() : full;
+  return `${label} (${detail})`;
+}
 
 export function unifiedIndicatorRows(settings: ChartSettings, input: string, collapsedKinds: ReadonlySet<IndicatorKind>): TreeDialogRow[] {
   const hasQuery = input.trim() !== "";

@@ -95,6 +95,17 @@ export function nextWatchRow(
   return next === at ? null : rows[next]!;
 }
 
+export function resolveWatchRow(
+  sender: WindowId,
+  rows: readonly WatchRowRef[],
+  step: -1 | 1,
+  state: { previewKey: string | null; focusedKey: string | null },
+): WatchRowRef | null {
+  const { layout, groupSymbols } = useLayoutStore.getState();
+  const watched = watchedSymbol(layout, sender, useSelectionStore.getState().activeCell, groupSymbols);
+  return nextWatchRow(rows, step, { previewKey: state.previewKey, watched, focusedKey: state.focusedKey });
+}
+
 export function watchKeyStep(event: WatchKeyEvent): -1 | 1 | null {
   if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return null;
@@ -179,10 +190,8 @@ export function useWatchKeys({ enabled, sender, list, collapsed, scroller, previ
       if (step === null) return;
       const rows = visibleWatchRows(latest.current.list, latest.current.collapsed);
       if (rows.length > 0) event.preventDefault();
-      const watched = watchedSymbol(useLayoutStore.getState().layout, sender, useSelectionStore.getState().activeCell);
-      const next = nextWatchRow(rows, step, {
+      const next = resolveWatchRow(sender, rows, step, {
         previewKey: preview.get(),
-        watched,
         focusedKey: focusedRowKey(scroller.current),
       });
       if (next === null) return;
