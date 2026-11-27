@@ -5,6 +5,7 @@ pub mod outbox;
 pub mod subscriptions;
 pub mod vi;
 pub mod venue_volume;
+pub mod whale;
 
 /// 브라우저 WebSocket 연결 하나. 서버가 연결마다 새로 붙인다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

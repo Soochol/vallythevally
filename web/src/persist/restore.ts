@@ -189,6 +189,7 @@ function restoreWindow(raw: LayoutWindow): WindowState {
     case "ranking":
       return { ...base, kind: raw.kind, ranking: raw.ranking };
     case "indicators":
+    case "whale":
       return { ...base, kind: raw.kind };
     case "chart":
       break;

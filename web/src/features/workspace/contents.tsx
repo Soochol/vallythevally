@@ -10,6 +10,7 @@ import { RankingWindow } from "../ranking/RankingWindow";
 import { ScreenerPanel } from "../screener/ScreenerPanel";
 import { TradesWindow } from "../trades/TradesWindow";
 import { WatchPanel } from "../watch/Watchlist";
+import { WhaleWindow } from "../whale/WhaleWindow";
 import { ChartWindow } from "./ChartWindow";
 
 export type WindowContent = { readonly Content: ComponentType<{ id: WindowId }>; readonly overflow: "auto" | "hidden" };
@@ -26,4 +27,5 @@ export const WINDOW_CONTENT: { readonly [K in WindowKind]: WindowContent } = {
   order: { Content: OrderWindow, overflow: "hidden" },
   ranking: { Content: RankingWindow, overflow: "hidden" },
   premarket: { Content: PreMarketWindow, overflow: "hidden" },
+  whale: { Content: WhaleWindow, overflow: "hidden" },
 };

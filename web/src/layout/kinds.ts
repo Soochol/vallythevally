@@ -26,6 +26,7 @@ export const WINDOW_KINDS = Object.freeze({
   order: { name: "호가주문", minSize: { w: 420, h: 520 }, maxCount: MAX_WINDOWS, link: "follows", home: "side" },
   ranking: { name: "순위", minSize: { w: 320, h: 240 }, maxCount: MAX_WINDOWS, link: "sends", home: "side" },
   premarket: { name: "장전 동시호가", minSize: { w: 420, h: 320 }, maxCount: MAX_WINDOWS, link: "follows", home: "wide" },
+  whale: { name: "고래 체결", minSize: { w: 340, h: 240 }, maxCount: MAX_WINDOWS, link: "sends", home: "side" },
 } as const satisfies Record<LayoutWindow["kind"], WindowKindSpec>);
 
 export type WindowKind = keyof typeof WINDOW_KINDS;

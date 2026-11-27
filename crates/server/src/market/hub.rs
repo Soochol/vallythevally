@@ -18,6 +18,7 @@ use super::outbox::Outbox;
 use super::subscriptions::{Holder, SubscriptionManager};
 use super::venue_volume::{DayTallies, DayVolumes, Fill};
 use super::vi::{BaseAfterRelease, ViBoard};
+use super::whale::WhaleBoard;
 use super::{ConnId, SubId};
 use crate::api::{self, ConnectionStatus, FeedKind, RealtimeState, ReloadReason, ServerMessage, SubErrorCode, UnixSeconds};
 use crate::bars::{BarError, BarService, Seed};
@@ -88,6 +89,14 @@ impl HubHandle {
         self.send(HubInput::Watch { conn, symbols, venue });
     }
 
+    pub fn subscribe_whales(&self, conn: ConnId) {
+        self.send(HubInput::SubscribeWhales(conn));
+    }
+
+    pub fn unsubscribe_whales(&self, conn: ConnId) {
+        self.send(HubInput::UnsubscribeWhales(conn));
+    }
+
     /// 실시간 집계 중인 키가 아니면 None.
     pub async fn snapshot(&self, key: SeriesKey) -> Option<HubSnapshot> {
         let (reply, rx) = oneshot::channel();
@@ -119,6 +128,8 @@ enum HubInput {
     Unsubscribe { conn: ConnId, sub: SubId },
     Disconnect(ConnId),
     Watch { conn: ConnId, symbols: Vec<Symbol>, venue: Venue },
+    SubscribeWhales(ConnId),
+    UnsubscribeWhales(ConnId),
     Snapshot { key: SeriesKey, reply: oneshot::Sender<Option<HubSnapshot>> },
     DailyReset,
     SourceSwitched,
@@ -248,6 +259,7 @@ struct Conn {
     requested_watch: Vec<Symbol>,
     watch_venue: Venue,
     limited_sent: BTreeSet<Symbol>,
+    whales: bool,
 }
 
 #[derive(Debug, Default)]
@@ -283,6 +295,7 @@ pub struct MarketHub {
     tallies: DayTallies,
     vi: ViBoard,
     vi_epoch: u64,
+    whales: WhaleBoard,
     last_fill: HashMap<(StockCode, Exchange), KstTime>,
     last_row_volume: HashMap<(StockCode, Venue), (KstDate, u64)>,
     directory: watch::Receiver<Option<Arc<Directory>>>,
@@ -322,6 +335,7 @@ impl MarketHub {
             tallies: DayTallies::default(),
             vi: ViBoard::default(),
             vi_epoch: 0,
+            whales: WhaleBoard::default(),
             last_fill: HashMap::new(),
             last_row_volume: HashMap::new(),
             conns: HashMap::new(),
@@ -365,7 +379,7 @@ impl MarketHub {
                 let hello = ServerMessage::Hello { protocol: PROTOCOL, server_time: UnixSeconds(now.unix()), status: self.status() };
                 let vi = ServerMessage::ViSnapshot { states: self.vi.states() };
                 if outbox.push(hello).is_ok() && outbox.push(vi).is_ok() {
-                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), feeds: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new() });
+                    self.conns.insert(conn, Conn { outbox, subs: HashMap::new(), feeds: HashMap::new(), requested_watch: Vec::new(), watch_venue: Venue::Combined, limited_sent: BTreeSet::new(), whales: false });
                 }
             }
             HubInput::Direct { conn, message } => {
@@ -385,6 +399,21 @@ impl MarketHub {
             }
             HubInput::Disconnect(conn) => self.drop_conn(conn, now),
             HubInput::Watch { conn, symbols, venue } => self.watch(conn, symbols, venue, now),
+            HubInput::SubscribeWhales(conn) => {
+                if let Some(c) = self.conns.get_mut(&conn) {
+                    c.whales = true;
+                    let watched_count = u32::try_from(self.manager.admitted_count()).unwrap_or(u32::MAX);
+                    let snap = self.whales.snapshot(watched_count);
+                    if c.outbox.push(snap).is_err() {
+                        self.closing.push(conn);
+                    }
+                }
+            }
+            HubInput::UnsubscribeWhales(conn) => {
+                if let Some(c) = self.conns.get_mut(&conn) {
+                    c.whales = false;
+                }
+            }
             HubInput::Snapshot { key, reply } => {
                 let snap = self.keys.get(&key).map(|ks| HubSnapshot {
                     seq: ks.seq,
@@ -399,6 +428,7 @@ impl MarketHub {
                 self.last_expected.clear();
                 self.micro_detectors.clear();
                 self.reset_vi();
+                self.reset_whales();
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
             }
@@ -1227,6 +1257,17 @@ impl MarketHub {
         }
     }
 
+    fn reset_whales(&mut self) {
+        self.whales.clear();
+        let watched_count = u32::try_from(self.manager.admitted_count()).unwrap_or(u32::MAX);
+        let snap = self.whales.snapshot(watched_count);
+        for (conn, c) in &self.conns {
+            if c.whales && c.outbox.push(snap.clone()).is_err() {
+                self.closing.push(*conn);
+            }
+        }
+    }
+
     fn publish_vi(&self, code: StockCode, market: ViMarket) {
         let Some(state) = self.vi.state(code, market) else {
             return;
@@ -1271,6 +1312,15 @@ impl MarketHub {
         }
         self.publish_quotes(&tick, at);
         self.publish_feed_trade(&tick, at);
+        if let Some((event, summary)) = self.whales.on_trade(&tick, at) {
+            let watched_count = u32::try_from(self.manager.admitted_count()).unwrap_or(u32::MAX);
+            let msg = ServerMessage::WhaleTick { event, summary, watched_count };
+            for (conn, c) in &self.conns {
+                if c.whales && c.outbox.push(msg.clone()).is_err() {
+                    self.closing.push(*conn);
+                }
+            }
+        }
         if !self.micro_detectors.is_empty() && matches!(tick.symbol, Symbol::Stock(_)) {
             let qty = i64::try_from(tick.qty.0).unwrap_or(i64::MAX);
             let signed_qty = if tick.side == Some(TradeSide::Sell) { -qty } else { qty };
