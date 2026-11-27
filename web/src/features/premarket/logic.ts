@@ -44,6 +44,7 @@ export interface ChartGeometry {
   readonly plotLeft: number;
   readonly plotRight: number;
   readonly plotTop: number;
+  readonly priceBottom: number;
   readonly plotBottom: number;
   readonly minPct: number;
   readonly maxPct: number;
@@ -285,6 +286,7 @@ export function buildChartGeometry(
   historicalBand: readonly HistoricalBandPoint[] = [],
   spotSeries: PreMarketDaySeries | null = null,
   unit: VolumeUnit = "qty",
+  pinnedSeries: readonly PreMarketDaySeries[] = [],
 ): ChartGeometry {
   let minPct = 0;
   let maxPct = 0;
@@ -309,6 +311,12 @@ export function buildChartGeometry(
   for (const b of historicalBand) {
     if (b.avgVolume > peakVol) peakVol = b.avgVolume;
   }
+  for (const pinned of pinnedSeries) {
+    for (const pt of pinned.points) {
+      const v = pointVolumeValue(pt, unit);
+      if (v > peakVol) peakVol = v;
+    }
+  }
   if (spotSeries) {
     for (const pt of spotSeries.points) {
       const v = pointVolumeValue(pt, unit);
@@ -323,8 +331,11 @@ export function buildChartGeometry(
   const plotBottom = CHART_VIEW_H - CHART_PAD_BOTTOM;
   const plotW = plotRight - plotLeft;
   const plotH = plotBottom - plotTop;
-  const volTop = plotTop + plotH * 0.56;
-  const volH = plotBottom - volTop;
+  const volH = Math.round(plotH * 0.28);
+  const laneGap = 16;
+  const volTop = plotBottom - volH;
+  const priceBottom = volTop - laneGap;
+  const priceH = Math.max(1, priceBottom - plotTop);
   const xSpan = PREMARKET_END_SEC - PREMARKET_START_SEC;
   const ySpan = Math.max(0.5, hi - lo);
 
@@ -334,7 +345,7 @@ export function buildChartGeometry(
   };
   const yOf = (pct: number) => {
     const ratio = (pct - lo) / ySpan;
-    return plotBottom - Math.max(0, Math.min(1, ratio)) * plotH;
+    return priceBottom - Math.max(0, Math.min(1, ratio)) * priceH;
   };
   const yVolOf = (vol: number) => {
     const ratio = Math.max(0, Math.min(1, vol / maxVol));
@@ -364,6 +375,7 @@ export function buildChartGeometry(
     plotLeft,
     plotRight,
     plotTop,
+    priceBottom,
     plotBottom,
     minPct: lo,
     maxPct: hi,

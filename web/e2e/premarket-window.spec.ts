@@ -121,11 +121,18 @@ test("장전 동시호가 창에서 2주 이중 Y축 차트, 좌측 세로 날�
   await expect(page.getByTestId("premarket-day-chip-20261127")).toHaveAttribute("data-role", "focus");
   await expect(page.getByTestId("premarket-day-chip-20261116")).toBeVisible();
 
+  await expect(page.locator(".pm-bg-line")).toHaveCount(0);
+  await expect(page.locator(".pm-band-area")).toBeVisible();
+  await expect(page.locator(".pm-band-median")).toBeVisible();
+
   await page.getByTestId("premarket-day-chip-20261120").hover();
   await expect(page.locator('.pm-spot-line[data-date="20261120"]')).toBeVisible();
+  await expect(page.locator('.pm-vol-spot-line[data-date="20261120"]')).toBeVisible();
 
   await page.getByTestId("premarket-day-chip-20261125").click();
   await expect(page.getByTestId("premarket-day-chip-20261125")).toHaveAttribute("data-role", "pin-0");
+  await expect(page.locator('.pm-pin-line[data-date="20261125"]')).toBeVisible();
+  await expect(page.locator('.pm-vol-pin-line[data-date="20261125"]')).toBeVisible();
   await page.getByTestId("premarket-day-chip-20261124").click();
   await expect(page.getByTestId("premarket-day-chip-20261124")).toHaveAttribute("data-role", "pin-1");
   await page.getByTestId("premarket-day-chip-20261120").click();

@@ -113,13 +113,17 @@ describe("premarket logic", () => {
     expect(startBand?.median).toBeCloseTo(0.5, 3);
     expect(startBand?.avgVolume).toBeCloseTo(15000, 3);
 
-    const geom = buildChartGeometry([d1, d2, focus], focus, band, null, "qty");
+    const geom = buildChartGeometry([d1, d2, focus], focus, band, null, "qty", [d2]);
     expect(geom.xOf(PREMARKET_START_SEC)).toBeCloseTo(geom.plotLeft, 3);
     expect(geom.xOf(PREMARKET_END_SEC)).toBeCloseTo(geom.plotRight, 3);
     expect(geom.secOfX(geom.plotLeft)).toBe(PREMARKET_START_SEC);
     expect(geom.secOfX(geom.plotRight)).toBe(PREMARKET_END_SEC);
+    expect(geom.priceBottom).toBeLessThan(geom.volTop);
+    expect(geom.yOf(geom.minPct)).toBeCloseTo(geom.priceBottom, 3);
+    expect(geom.yOf(geom.maxPct)).toBeCloseTo(geom.plotTop, 3);
     expect(geom.yVolOf(0)).toBeCloseTo(geom.plotBottom, 3);
     expect(geom.yVolOf(geom.maxVol)).toBeCloseTo(geom.volTop, 3);
+    expect(geom.maxVol).toBeGreaterThanOrEqual(50000);
     expect(nearestPointAt(focus.points, 31750)?.secOfDay).toBe(31800);
     expect(nearestPointAt(focus.points, 32390)?.secOfDay).toBe(32400);
   });
