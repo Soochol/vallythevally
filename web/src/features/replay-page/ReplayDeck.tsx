@@ -528,7 +528,7 @@ export function ReplayDeck({
           <div className="rp-timeline-tooltip rp-mono" style={{ left: `${hoverX}px` }}>
             <b>{formatReplayClock(hoverSec, false)}</b>
             {hoverPrice !== null && (
-              <span className={hoverRate !== null ? (hoverRate >= 0 ? "rp-up" : "rp-down") : ""}>
+              <span className={hoverRate !== null ? (hoverRate > 0 ? "rp-up" : hoverRate < 0 ? "rp-down" : "rp-muted") : ""}>
                 {formatPrice(hoverPrice, false)}
                 {hoverRate !== null ? ` (${formatPercent(hoverRate)})` : ""}
               </span>

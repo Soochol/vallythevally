@@ -118,7 +118,7 @@ export function findUndefinedTokens(files: readonly SourceFile[], tokensPath: st
 const GLOBAL_KEYWORDS = new Set(["inherit", "initial", "unset", "revert", "revert-layer"]);
 const WEIGHT_KEYWORDS = new Set(["normal", "bold"]);
 const IMPORTANT = /\s*!\s*important\s*$/i;
-const VARIABLE_CALL = /^var\(\s*--[\w-]+\s*(?:,([\s\S]*))?\)$/i;
+const VARIABLE_CALL = /^var\(\s*(--[\w-]+)\s*(?:,([\s\S]*))?\)$/i;
 const LENGTH_START = /^(?:[\d.]+[a-z%]+|(?:calc|clamp|min|max)\()/i;
 
 const NAMED_COLORS = `aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen`.split(" ");
@@ -156,7 +156,7 @@ const whitespaceTokens = (value: string): string[] => splitTopLevel(value, /\s/)
 function weightViolations(value: string): string[] {
   return whitespaceTokens(withoutImportant(value)).flatMap((token) => {
     const variable = VARIABLE_CALL.exec(token);
-    if (variable) return variable[1] === undefined ? [] : weightViolations(variable[1]);
+    if (variable) return variable[2] === undefined ? [] : weightViolations(variable[2]);
     const keyword = token.toLowerCase();
     if (GLOBAL_KEYWORDS.has(keyword) || WEIGHT_KEYWORDS.has(keyword)) return [];
     return ALLOWED_FONT_WEIGHTS.includes(Number(token)) ? [] : [token];
@@ -167,7 +167,10 @@ function sizeViolations(value: string): string[] {
   const text = withoutImportant(value);
   if (text === "") return [];
   const variable = VARIABLE_CALL.exec(text);
-  if (variable) return variable[1] === undefined ? [] : sizeViolations(variable[1]);
+  if (variable) {
+    if (variable[1]!.startsWith("--size-")) return [variable[1]!];
+    return variable[2] === undefined ? [] : sizeViolations(variable[2]);
+  }
   if (GLOBAL_KEYWORDS.has(text.toLowerCase())) return [];
   const pixels = /^([\d.]+)(?:px)?$/i.exec(text);
   if (pixels) return ALLOWED_FONT_SIZES_PX.includes(Number(pixels[1])) ? [] : [`${pixels[1]}px`];
@@ -225,8 +228,8 @@ function checkFile(file: SourceFile): RuleViolation[] {
   for (const match of code.matchAll(TAILWIND_WEIGHT)) for (const detail of weightViolations(match[1]!)) report("글자 굵기", detail);
   for (const match of code.matchAll(TAILWIND_SIZE)) for (const detail of sizeViolations(match[1]!)) report("글자 크기", detail);
 
-  for (const match of code.matchAll(COLOR_LITERAL)) report("색 직접 값", match[0]);
   for (const text of cssTexts) {
+    for (const match of text.matchAll(COLOR_LITERAL)) report("색 직접 값", match[0]);
     for (const { property, value } of declarationsOf(text, isCss)) {
       if (COLOR_PROPERTY.test(property)) for (const name of namedColorsIn(value)) report("색 직접 값", name);
     }

@@ -68,7 +68,7 @@ describe("피보나치 확장", () => {
   });
 
   test("셋째 점을 찍기 전에는 첫 두 점을 잇는 선만 그린다", () => {
-    expect(draw(up.slice(0, 2))).toEqual([{ kind: "segment", a: { x: 100, y: 400 }, b: { x: 200, y: 300 }, stroke: { color: "#868993", width: 1, dash: "dashed" } }]);
+    expect(draw(up.slice(0, 2))).toEqual([{ kind: "segment", a: { x: 100, y: 400 }, b: { x: 200, y: 300 }, stroke: { color: "$text-3", width: 1, dash: "dashed" } }]);
     expect(draw(up.slice(0, 2), fibext.parseStyle({ ...style, trendLine: false }))).toHaveLength(1);
     expect(draw(up.slice(0, 1))).toEqual([]);
   });

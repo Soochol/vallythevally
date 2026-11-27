@@ -3,9 +3,15 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
+import { formatPercent } from "../../lib/format";
+import { useFeedLink } from "../../stores/kiwoomLink";
+import { useVenue } from "../../stores/ui";
 import { useBookFeed } from "../book/useBookFeed";
+import { CloseIcon } from "../icons";
+import { FeedConnectGate } from "../market-window/MarketWindowGate";
 import { EmptyState } from "../overlay/State";
 import { dropPendingOpen, openResult } from "../screener/resultActions";
+import { Segmented } from "../ui/Segmented";
 import "./tapeMatrix.css";
 
 export type GridCols = "auto" | "2" | "3" | "4";
@@ -77,8 +83,9 @@ function TapeCard({
   onRemove: (code: SymbolCode) => void;
 }) {
   const queryClient = useQueryClient();
+  const venue = useVenue();
   const info = useSymbolInfo(code).data;
-  const feed = useBookFeed(code, "krx", null);
+  const feed = useBookFeed(code, venue, null);
   const view = feed.book.phase === "empty" ? null : feed.book.view;
   const asks = (view?.asks ?? []).slice(0, 3).reverse();
   const bids = (view?.bids ?? []).slice(0, 3);
@@ -106,49 +113,55 @@ function TapeCard({
           {info?.name ?? code}
         </button>
         <span className={`tm-card-price ${rate !== null && rate > 0 ? "tm-up" : rate !== null && rate < 0 ? "tm-down" : ""}`}>
-          {lastPrice !== null ? lastPrice.toLocaleString() : "-"}
-          {rate !== null ? ` (${rate > 0 ? "+" : ""}${rate.toFixed(1)}%)` : ""}
+          {lastPrice !== null ? lastPrice.toLocaleString("ko-KR") : "—"}
+          {rate !== null ? ` (${formatPercent(rate)})` : ""}
         </span>
-        <button type="button" className="tm-card-act" aria-label="앞으로 이동" disabled={index === 0} onClick={() => onMove(index, index - 1)}>◀</button>
-        <button type="button" className="tm-card-act" aria-label="뒤로 이동" disabled={index === total - 1} onClick={() => onMove(index, index + 1)}>▶</button>
-        <button type="button" className="tm-card-act" aria-label={`${code} 제거`} onClick={() => onRemove(code)}>×</button>
+        <button type="button" className="tm-card-act" aria-label="앞으로 이동" disabled={index === 0} onClick={() => onMove(index, index - 1)}>‹</button>
+        <button type="button" className="tm-card-act" aria-label="뒤로 이동" disabled={index === total - 1} onClick={() => onMove(index, index + 1)}>›</button>
+        <button type="button" className="tm-card-act" aria-label={`${code} 제거`} onClick={() => onRemove(code)}><CloseIcon size={12} /></button>
       </div>
       {feed.rejected === "realtime_limit" && (
         <div className="tm-limit" data-testid={`tape-limit-${code}`}>실시간 슬롯 한도 초과로 갱신이 제한됩니다</div>
       )}
       <div className="tm-book">
-        {asks.map((level, i) => {
-          const qty = level.quantity;
-          const width = Math.round((qty / maxQty) * 100);
-          return (
-            <div key={`a-${i}`} className="tm-lvl">
-              <div className="tm-bar-wrap" style={{ justifyContent: "flex-end" }}>
-                <div className="tm-bar-ask" style={{ width: `${width}%` }} />
-                <span className="tm-qty">{qty > 0 ? qty.toLocaleString() : "-"}</span>
-              </div>
-              <span className={`tm-px ${priceToneClass(level.price, prevClose)}`}>{level.price.toLocaleString()}</span>
-              <span />
-            </div>
-          );
-        })}
-        {bids.map((level, i) => {
-          const qty = level.quantity;
-          const width = Math.round((qty / maxQty) * 100);
-          return (
-            <div key={`b-${i}`} className="tm-lvl">
-              <span />
-              <span className={`tm-px ${priceToneClass(level.price, prevClose)}`}>{level.price.toLocaleString()}</span>
-              <div className="tm-bar-wrap">
-                <div className="tm-bar-bid" style={{ width: `${width}%` }} />
-                <span className="tm-qty">{qty > 0 ? qty.toLocaleString() : "-"}</span>
-              </div>
-            </div>
-          );
-        })}
+        {asks.length === 0 && bids.length === 0 ? (
+          <div className="tm-book-empty">호가 대기 중</div>
+        ) : (
+          <>
+            {asks.map((level, i) => {
+              const qty = level.quantity;
+              const width = Math.round((qty / maxQty) * 100);
+              return (
+                <div key={`a-${i}`} className="tm-lvl">
+                  <div className="tm-bar-wrap" style={{ justifyContent: "flex-end" }}>
+                    <div className="tm-bar-ask" style={{ width: `${width}%` }} />
+                    <span className="tm-qty">{qty > 0 ? qty.toLocaleString("ko-KR") : "—"}</span>
+                  </div>
+                  <span className={`tm-px ${priceToneClass(level.price, prevClose)}`}>{level.price.toLocaleString("ko-KR")}</span>
+                  <span />
+                </div>
+              );
+            })}
+            {bids.map((level, i) => {
+              const qty = level.quantity;
+              const width = Math.round((qty / maxQty) * 100);
+              return (
+                <div key={`b-${i}`} className="tm-lvl">
+                  <span />
+                  <span className={`tm-px ${priceToneClass(level.price, prevClose)}`}>{level.price.toLocaleString("ko-KR")}</span>
+                  <div className="tm-bar-wrap">
+                    <div className="tm-bar-bid" style={{ width: `${width}%` }} />
+                    <span className="tm-qty">{qty > 0 ? qty.toLocaleString("ko-KR") : "—"}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
       <div className="tm-card-foot">
-        <span>매수/매도비 {ratio !== null ? `${ratio.toFixed(0)}%` : "-"}</span>
-        <span>총잔량 {bidTotal.toLocaleString()} / {askTotal.toLocaleString()}</span>
+        <span>매수/매도비 {ratio !== null ? `${ratio.toFixed(0)}%` : "—"}</span>
+        <span>총잔량 {bidTotal.toLocaleString("ko-KR")} / {askTotal.toLocaleString("ko-KR")}</span>
       </div>
     </div>
   );
@@ -162,6 +175,8 @@ const COL_PRESETS: readonly { readonly id: GridCols; readonly label: string }[] 
 ];
 
 export function TapeMatrixWindow({ id }: { id: WindowId }) {
+  const link = useFeedLink();
+  const connected = link === null || link.state === "connected";
   const [config, setConfig] = useState<TapeMatrixConfig>(() => loadTapeMatrixConfig(id));
   const [draft, setDraft] = useState("");
 
@@ -218,19 +233,14 @@ export function TapeMatrixWindow({ id }: { id: WindowId }) {
   return (
     <div className="tm-window" data-testid="tape-matrix-window">
       <div className="tm-head">
-        <div className="tm-seg" role="group" aria-label="그리드 열 수">
-          {COL_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className="tm-seg-btn"
-              aria-pressed={config.cols === preset.id}
-              onClick={() => setConfig((prev) => ({ ...prev, cols: preset.id }))}
-            >
-              {preset.label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="그리드 열 수"
+          mode="pressed"
+          size="xs"
+          value={config.cols}
+          options={COL_PRESETS.map((preset) => ({ value: preset.id, label: preset.label }))}
+          onChange={(cols) => setConfig((prev) => ({ ...prev, cols }))}
+        />
         <form className="tm-add-form" onSubmit={addSymbol}>
           <input
             type="text"
@@ -247,7 +257,9 @@ export function TapeMatrixWindow({ id }: { id: WindowId }) {
         <span className="tm-meta">{config.symbols.length}종목 동시 감시</span>
       </div>
       <div className="tm-body">
-        {config.symbols.length === 0 ? (
+        {!connected ? (
+          <FeedConnectGate message={link?.message} />
+        ) : config.symbols.length === 0 ? (
           <EmptyState title="감시할 종목을 추가해 주세요" />
         ) : (
           <div className="tm-grid" data-cols={config.cols} data-testid="tape-matrix-grid">

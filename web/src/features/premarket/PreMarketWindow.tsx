@@ -4,7 +4,9 @@ import { usePreMarketCompare, usePreMarketDays } from "../../api/premarket";
 import { useSymbolInfo } from "../../api/queries";
 import type { WindowId } from "../../layout/kinds";
 import { isIndexCode } from "../../lib/symbol";
-import { useLinkedSymbol } from "../market-window/MarketWindowGate";
+import { useFeedLink } from "../../stores/kiwoomLink";
+import { FeedConnectGate, useLinkedSymbol } from "../market-window/MarketWindowGate";
+import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { useWindowVisible } from "../workspace/windowVisibility";
 import { DateListPane } from "./DateListPane";
 import {
@@ -29,6 +31,8 @@ import { OverlayChart } from "./OverlayChart";
 import "./premarket.css";
 
 export function PreMarketWindow({ id }: { id: WindowId }) {
+  const link = useFeedLink();
+  const connected = link === null || link.state === "connected";
   const linkedSymbol = useLinkedSymbol(id);
   const stockSymbol = linkedSymbol !== null && !isIndexCode(linkedSymbol) ? linkedSymbol : null;
   const symbolInfo = useSymbolInfo(stockSymbol);
@@ -266,13 +270,23 @@ export function PreMarketWindow({ id }: { id: WindowId }) {
       </div>
 
       {stockSymbol === null ? (
-        <div className="pm-empty">주식을 선택하면 장전 예상체결 추이를 볼 수 있습니다</div>
+        <EmptyState title="주식을 선택하면 장전 예상체결 추이를 볼 수 있습니다" />
       ) : error !== null ? (
-        <div className="pm-empty" role="alert">{error}</div>
+        <ErrorState
+          message={error}
+          retry={() => {
+            void daysQuery.refetch();
+            void compareQuery.refetch();
+          }}
+        />
       ) : loading && series.length === 0 ? (
-        <div className="pm-empty">장전 예상체결 자료를 불러오는 중입니다</div>
+        <Skeleton label="장전 예상체결 자료를 불러오는 중입니다" rows={6} />
       ) : rangeDates.length === 0 ? (
-        <div className="pm-empty">수집된 장전 예상체결 자료가 없습니다</div>
+        !connected ? (
+          <FeedConnectGate message={link?.message} />
+        ) : (
+          <EmptyState title="수집된 장전 예상체결 자료가 없습니다" />
+        )
       ) : (
         <div className="pm-workspace">
           <DateListPane

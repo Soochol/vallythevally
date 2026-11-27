@@ -83,7 +83,7 @@ export function parseFibStyle(raw: unknown, d: FibStyle): FibStyle {
   };
 }
 
-const TREND_STROKE: Stroke = { color: "#868993", width: 1, dash: "dashed" };
+const TREND_STROKE: Stroke = { color: "$text-3", width: 1, dash: "dashed" };
 const LABEL_GAP = 4;
 
 export interface Leveled {

@@ -141,11 +141,11 @@ export function ObjectTree({ cellId }: { cellId: WindowId }) {
         )}
       </div>
       <div className="draw-tree-foot">
-        <button type="button" className="tb-btn" onClick={() => {
+        <button type="button" className="btn btn-sm" onClick={() => {
           setCell({ hiddenIds: [] });
           if (prefs.hideAll) useUiStore.getState().setDrawingPrefs({ hideAll: false });
         }}>모두 보이기</button>
-        <button type="button" className="tb-btn text-danger" disabled={unlocked.length === 0} onClick={() => {
+        <button type="button" className="btn btn-sm text-danger" disabled={unlocked.length === 0} onClick={() => {
           if (unlocked.length === 0) return;
           surface.sync.commitWithUndo(cellId, unlocked.map((before) => ({ kind: "delete", before })), `드로잉 ${unlocked.length}개를 지웠습니다`);
           useDrawingSession.getState().select(cellId, []);

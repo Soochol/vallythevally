@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useState } from "react";
 import { addKey, type HotkeyActionDef, keyLabel, keyOf, moveKey, removeKey, resetAction, resetAllActions } from "../../lib/hotkeys";
 import { useActionKeys, useUiStore } from "../../stores/ui";
-import { WarningIcon } from "../icons";
+import { CloseIcon, WarningIcon } from "../icons";
 import { Badge } from "../ui/Badge";
 import { Kbd } from "../ui/Kbd";
 import { useHotkeyRecording } from "./hotkeyRecording";
@@ -93,8 +93,8 @@ export function HotkeysMenuContent() {
       {confirmingAll && (
         <div role="group" aria-label="기본값 확인" className="flex flex-wrap items-center gap-2 rounded-m border border-line bg-raised px-3 py-2 text-m">
           <span className="min-w-0 flex-1">바꾼 키를 모두 되돌릴까요?</span>
-          <button type="button" className="btn" onClick={() => { setHotkeys(resetAllActions()); setConfirmingAll(false); }}>되돌리기</button>
           <button type="button" className="btn" onClick={() => setConfirmingAll(false)}>취소</button>
+          <button type="button" className="btn-danger" onClick={() => { setHotkeys(resetAllActions()); setConfirmingAll(false); }}>되돌리기</button>
         </div>
       )}
       {groups.length === 0 && <p className="text-m text-text-2">맞는 단축키가 없습니다</p>}
@@ -120,7 +120,7 @@ export function HotkeysMenuContent() {
                       {own.map((key) => (
                         <span key={key} className="sys-keychip">
                           <Pieces pieces={keyPieces(key)} />
-                          <button type="button" className="icon-btn !h-5 !w-5" aria-label={`${a.name}에서 ${keyLabel(key)} 빼기`} onClick={() => { setNotice(null); setHotkeys(removeKey(hotkeys, a.id, key)); }}>×</button>
+                          <button type="button" className="icon-btn !h-5 !w-5" aria-label={`${a.name}에서 ${keyLabel(key)} 빼기`} onClick={() => { setNotice(null); setHotkeys(removeKey(hotkeys, a.id, key)); }}><CloseIcon size={12} /></button>
                         </span>
                       ))}
                       <button type="button" className="sys-keychip sys-keychip-add" aria-label={`${a.name}에 키 더하기`} aria-pressed={recording} onClick={() => record(a.id)}>
@@ -135,8 +135,8 @@ export function HotkeysMenuContent() {
                       <span className="ui-notice-text">{noticeText(rowNotice)}</span>
                       {rowNotice.kind === "taken" && (
                         <>
-                          <button type="button" className="btn btn-sm" onClick={() => { setHotkeys(moveKey(hotkeys, a.id, rowNotice.key)); setNotice(null); }}>옮기기</button>
                           <button type="button" className="btn btn-sm" onClick={() => setNotice(null)}>취소</button>
+                          <button type="button" className="btn-primary btn-sm" onClick={() => { setHotkeys(moveKey(hotkeys, a.id, rowNotice.key)); setNotice(null); }}>옮기기</button>
                         </>
                       )}
                     </div>

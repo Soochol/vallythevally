@@ -63,5 +63,5 @@ function ToastItem({ toast }: { toast: ToastEntry }) {
 
 function UndoButton({ action, close }: { action: ToastUndo; close(): void }) {
   const enabled = useSyncExternalStore(action.subscribe, action.available);
-  return <button className="btn btn-sm gap-1.5" disabled={!enabled} aria-keyshortcuts={action.shortcut === undefined ? undefined : "Control+Z Meta+Z"} onClick={() => { action.run(); close(); }}>되돌리기{action.shortcut && <Kbd aria-hidden="true">{action.shortcut}</Kbd>}</button>;
+  return <button type="button" className="btn btn-sm gap-1.5" disabled={!enabled} aria-keyshortcuts={action.shortcut === undefined ? undefined : "Control+Z Meta+Z"} onClick={() => { action.run(); close(); }}>되돌리기{action.shortcut && <Kbd aria-hidden="true">{action.shortcut}</Kbd>}</button>;
 }

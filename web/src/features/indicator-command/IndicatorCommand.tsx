@@ -180,8 +180,8 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
         </div>
         <div className="ic-top-actions">
           {isMoved && <button type="button" className="icon-btn" aria-label="가운데로" title="가운데로 복귀" onClick={() => setDragOffset({ x: 0, y: 0 })}>⌖</button>}
-          <button type="button" className="cd-mode-btn" aria-label="차트 오른쪽에 도킹" title="차트 오른쪽에 도킹" onClick={() => useSelectionStore.getState().openChartDock(cellId, activeDockMode, selected?.kind === "current" ? selected.config.id : null)}>우측 도킹</button>
-          <button type="button" className="icon-btn" aria-label={panelSection === "settings" ? "닫기" : "입력창 닫기"} title="닫기" onClick={() => handleClose()}><CloseIcon size={16} /></button>
+          <button type="button" className="cd-mode-btn max-sm:hidden" aria-label="차트 오른쪽에 도킹" title="차트 오른쪽에 도킹" onClick={() => useSelectionStore.getState().openChartDock(cellId, activeDockMode, selected?.kind === "current" ? selected.config.id : null)}>우측 도킹</button>
+          <button type="button" className="icon-btn" aria-label={panelSection === "settings" ? "닫기" : "입력창 닫기"} title="닫기" onClick={() => handleClose()}><CloseIcon size={14} /></button>
         </div>
       </div>
 

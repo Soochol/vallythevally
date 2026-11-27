@@ -4,9 +4,11 @@ import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WindowId } from "../../layout/kinds";
 import { formatPrice } from "../../lib/format";
 import { useSymbolInfos } from "../../api/queries";
+import { useFeedLink } from "../../stores/kiwoomLink";
 import { useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { whaleBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
+import { FeedConnectGate } from "../market-window/MarketWindowGate";
 import { dropPendingOpen, openResult } from "../screener/resultActions";
 import { symbolDragProps } from "../../stores/symbolDrag";
 import {
@@ -30,6 +32,8 @@ function useWatched(id: WindowId): SymbolCode | null {
 
 export function WhaleWindow({ id }: { id: WindowId }) {
   const queryClient = useQueryClient();
+  const link = useFeedLink();
+  const connected = link === null || link.state === "connected";
   const watched = useWatched(id);
   const liveSnapshot = useSyncExternalStore(
     (onStoreChange) => whaleBook.subscribe(onStoreChange),
@@ -172,7 +176,9 @@ export function WhaleWindow({ id }: { id: WindowId }) {
       </div>
 
       <div className="wh-body">
-        {view === "stream" ? (
+        {!connected ? (
+          <FeedConnectGate message={link?.message} />
+        ) : view === "stream" ? (
           filtered.length === 0 ? (
             <p className="wh-empty" data-testid="whale-empty">조건에 맞는 고래 체결이 없습니다</p>
           ) : (

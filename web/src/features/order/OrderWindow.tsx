@@ -309,7 +309,7 @@ function OrderBody({
         ) : (
           <EmptyState title="호가를 기다리는 중입니다" />
         )}
-        <ViOrderOverlay band="bottom" state={viState} previousClose={market.headPreviousClose} />
+        <ViOrderOverlay state={viState} />
       </div>
       <OrderFooter
         ask={totals.ask}

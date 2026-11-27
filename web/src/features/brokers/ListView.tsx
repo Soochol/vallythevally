@@ -46,7 +46,7 @@ const TrajectoryPlot = memo(function TrajectoryPlot({ runs, cumulative, axis }: 
   }, [runs, axis]);
 
   if (geometry === null) return null;
-  const color = (cumulative ?? 0) >= 0 ? "var(--up)" : "var(--down)";
+  const color = (cumulative ?? 0) > 0 ? "var(--up)" : (cumulative ?? 0) < 0 ? "var(--down)" : "var(--text-3)";
 
   return (
     <svg viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} width="100%" height={SPARK_H} preserveAspectRatio="none" aria-hidden>
@@ -106,7 +106,7 @@ export function ListView({
           {rows.map((row, index) => {
             const net = nets[index] ?? null;
             const foreign = isForeignBroker(row.name);
-            const tone = net === null ? "none" : net >= 0 ? "up" : "down";
+            const tone = net === null || net === 0 ? "none" : net > 0 ? "up" : "down";
             return (
               <Fragment key={row.code}>
                 {index === sellStart && sellStart > 0 && <div className="br-hr" data-testid="broker-sell-divider" aria-hidden />}
@@ -131,7 +131,7 @@ export function ListView({
       </div>
       <div className="br-foot">
         <span>외국계 합계</span>
-        <span className="br-foot-r" data-testid="broker-foreign-sum" data-tone={foreignTotal === null ? "none" : foreignTotal >= 0 ? "up" : "down"}>
+        <span className="br-foot-r" data-testid="broker-foreign-sum" data-tone={foreignTotal === null || foreignTotal === 0 ? "none" : foreignTotal > 0 ? "up" : "down"}>
           {foreignTotal === null ? "-" : signed(foreignTotal)}
         </span>
       </div>

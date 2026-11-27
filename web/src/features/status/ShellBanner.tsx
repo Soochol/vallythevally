@@ -62,7 +62,7 @@ export function ShellBanner() {
   const banner = useBanner();
   if (!banner) return null;
   return (
-    <div role="alert" data-testid="shell-banner" data-banner={banner.id} className={`absolute inset-x-3 top-[calc(var(--island-gap)+var(--island-h)+var(--s1))] z-30 flex h-8 items-center gap-2 rounded-m border px-3 text-s text-text shadow-[var(--shadow-s)] max-md:hidden ${TONE_FACE[banner.tone].face}`}>
+    <div role="alert" data-testid="shell-banner" data-banner={banner.id} className={`absolute inset-x-3 top-[calc(var(--island-gap)+var(--island-h)+var(--s1))] z-[var(--z-banner)] flex min-h-8 items-center gap-2 rounded-m border px-3 py-1 text-s text-text shadow-[var(--shadow-s)] max-md:inset-x-2 max-md:top-[calc(var(--size-48)+var(--s1))] ${TONE_FACE[banner.tone].face}`}>
       <span aria-hidden="true" className={`flex flex-none ${TONE_FACE[banner.tone].icon}`}><WarningIcon size={14} /></span>
       <span className="min-w-0 flex-1 truncate" title={banner.text}>{banner.text}</span>
       {banner.detail && <Details text={banner.detail} />}

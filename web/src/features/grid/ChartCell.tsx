@@ -261,7 +261,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
           className="absolute left-2 top-1/2 z-[15] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-line bg-surface px-3 py-2 text-s text-text-2 shadow-dialog"
         >
           <p>분봉은 최근 1년까지 볼 수 있습니다. 더 과거는 일봉으로 보세요</p>
-          <button type="button" className="tb-btn border border-line" onClick={() => useLayoutStore.getState().setPeriod(cellId, "D")}>
+          <button type="button" className="btn btn-sm" onClick={() => useLayoutStore.getState().setPeriod(cellId, "D")}>
             일봉으로 보기
           </button>
         </div>

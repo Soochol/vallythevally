@@ -7,7 +7,6 @@
 .etf-search::placeholder { color: var(--text-3); }
 .etf-seg { width: 100%; }
 .etf-seg .ui-seg-item { flex: 1; }
-.etf-seg .ui-seg-item[aria-pressed="true"] { background: transparent; color: var(--text); border-bottom-color: var(--accent); box-shadow: none; }
 .etf-selects { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--size-8); }
 .etf-selects > span { width: 100%; }
 .etf-select { width: 100%; height: var(--ctl-m); padding: 0 var(--size-8); border: var(--size-1) solid var(--line-strong); border-radius: var(--r-m); background: var(--bg); color: var(--text); font-size: var(--fs-s); }
@@ -339,7 +338,7 @@
 .etf-acc-contrib-change[data-direction="up"] { color: var(--up); }
 .etf-acc-contrib-change[data-direction="down"] { color: var(--down); }
 .etf-acc-contrib-weight { min-width: var(--size-48); color: var(--text-2); }
-.etf-acc-contrib-bar { height: var(--size-3); border-radius: var(--r-pill); background: var(--bg); overflow: hidden; }
+.etf-acc-contrib-bar { height: var(--size-3); border-radius: var(--r-pill); background: var(--raised); overflow: hidden; }
 .etf-acc-contrib-bar i { display: block; height: 100%; background: var(--accent); }
 .etf-acc-contrib-bar i[data-direction="sell"] { background: var(--down); }
 .etf-similar-issuer { color: var(--text-3); font-size: var(--fs-xs); }
@@ -355,8 +354,8 @@
 .etf-flow-rank-head[data-direction="up"] { color: var(--up); }
 .etf-flow-rank-head[data-direction="down"] { color: var(--down); }
 .etf-flow-bars { display: flex; flex-direction: column; gap: var(--size-6); }
-.etf-flow-bar-row { display: grid; grid-template-columns: var(--size-20) minmax(0, var(--size-168)) minmax(0, 1fr) var(--size-72); align-items: center; gap: var(--size-8); width: 100%; padding: var(--size-6) var(--size-8); border: var(--size-1) solid transparent; border-radius: var(--r-m); background: var(--bg); text-align: left; transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
-.etf-flow-bar-row:hover { background: var(--raised); border-color: var(--line-strong); }
+.etf-flow-bar-row { display: grid; grid-template-columns: var(--size-20) minmax(0, var(--size-168)) minmax(0, 1fr) var(--size-72); align-items: center; gap: var(--size-8); width: 100%; padding: var(--size-6) var(--size-8); border: var(--size-1) solid transparent; border-radius: var(--r-m); background: var(--raised); text-align: left; transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.etf-flow-bar-row:hover { background: var(--hover); border-color: var(--line-strong); }
 .etf-flow-bar-rank { color: var(--text-3); font-size: var(--fs-xs); text-align: center; font-variant-numeric: tabular-nums; }
 .etf-flow-bar-info { display: flex; flex-direction: column; gap: var(--size-2); min-width: 0; }
 .etf-flow-bar-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-s); font-weight: 600; }
@@ -414,7 +413,7 @@
 .etf-shares-banner-copy { display: flex; flex-wrap: wrap; align-items: center; gap: var(--size-8); color: var(--text-2); font-size: var(--fs-xs); }
 .etf-shares-banner-copy strong { color: var(--text); font-size: var(--fs-s); }
 .etf-shares-progress { display: flex; align-items: center; gap: var(--size-8); min-width: var(--size-220); }
-.etf-shares-progress-track { flex: 1; height: var(--size-6); border-radius: var(--r-pill); background: var(--bg); overflow: hidden; }
+.etf-shares-progress-track { flex: 1; height: var(--size-6); border-radius: var(--r-pill); background: var(--line); overflow: hidden; }
 .etf-shares-progress-track i { display: block; height: 100%; border-radius: var(--r-pill); background: var(--accent); }
 .etf-shares-progress-label { color: var(--accent); font-size: var(--fs-xs); font-weight: 700; font-variant-numeric: tabular-nums; }
 
@@ -432,12 +431,12 @@
 .etf-shares-graceful { display: flex; flex-direction: column; gap: var(--size-4); padding: var(--size-12); border: var(--size-1) solid color-mix(in srgb, var(--success) 32%, var(--line)); border-radius: var(--r-m); background: var(--success-soft); color: var(--text-2); font-size: var(--fs-xs); }
 .etf-shares-graceful strong { color: var(--success); font-size: var(--fs-s); }
 
-@media (max-width: 1120px) {
+@media (width < 70rem) {
   .etf-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .etf-alpha-grid, .etf-flow-split-grid, .etf-shares-setup { grid-template-columns: minmax(0, 1fr); }
 }
 
-@media (max-width: 900px) {
+@media (width < 56.25rem) {
   .etf-layout { grid-template-columns: minmax(0, 1fr); }
   .etf-layout[data-view="list"] .etf-main, .etf-layout[data-view="detail"] .etf-rail { display: none; }
   .etf-rail { position: static; max-height: none; }
@@ -449,10 +448,12 @@
   .etf-table-tools .etf-ma-legend { margin-left: 0; }
 }
 
-@media (max-width: 600px) {
+@media (width < 37.5rem) {
   .etf-matrix { border-spacing: 2px; font-size: var(--fs-xs); }
   .etf-matrix th, .etf-matrix td { padding: 0; }
   .etf-matrix-cell { padding: var(--size-6) 0; font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; }
   .etf-chip-remove { min-width: var(--size-16); min-height: var(--size-16); margin-left: var(--size-2); }
   .etf-butterfly-head, .etf-butterfly-row { grid-template-columns: minmax(0, 1fr) minmax(68px, 96px) minmax(0, 1fr); gap: var(--size-4); }
+  .etf-flow-bar-row { grid-template-columns: var(--size-20) minmax(0, 1fr) var(--size-72); }
+  .etf-flow-bar-track { display: none; }
 }

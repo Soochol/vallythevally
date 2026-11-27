@@ -342,14 +342,14 @@ function RrgPlot({ seriesList }: { seriesList: readonly MarketOverviewRrgSeries[
               <dt>RS-Ratio</dt>
               <dd className="mk-num">
                 {activeLast === undefined ? "—" : formatRrgIndex(activeLast.rsRatio)}
-                {ratioDelta !== null && <span className="mk-rrg-delta"> ({ratioDelta >= 0 ? "+" : ""}{ratioDelta.toFixed(2)})</span>}
+                {ratioDelta !== null && <span className="mk-rrg-delta"> ({ratioDelta > 0 ? "+" : ""}{ratioDelta.toFixed(2)})</span>}
               </dd>
             </div>
             <div>
               <dt>RS-Momentum</dt>
               <dd className="mk-num">
                 {activeLast === undefined ? "—" : formatRrgIndex(activeLast.rsMomentum)}
-                {momDelta !== null && <span className="mk-rrg-delta"> ({momDelta >= 0 ? "+" : ""}{momDelta.toFixed(2)})</span>}
+                {momDelta !== null && <span className="mk-rrg-delta"> ({momDelta > 0 ? "+" : ""}{momDelta.toFixed(2)})</span>}
               </dd>
             </div>
             <div>

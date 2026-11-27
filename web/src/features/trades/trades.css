@@ -3,7 +3,7 @@
 .tr-body > .ui-state { flex:1; }
 .tr-tape { flex:1; min-height:0; overflow:hidden auto; }
 .tr-head, .tr-row { display:grid; grid-template-columns:var(--size-72) 1fr 1fr; align-items:center; padding:0 var(--s4); }
-.tr-head { position:sticky; top:0; z-index:2; box-sizing:border-box; height:var(--size-24); border-bottom:var(--size-1) solid var(--line); background:var(--surface); color:var(--text-3); font-size:var(--fs-xs); }
+.tr-head { position:sticky; top:0; z-index:2; box-sizing:border-box; height:var(--size-24); border-bottom:var(--size-1) solid var(--line); background:var(--strip-bg, var(--surface)); color:var(--text-3); font-size:var(--fs-xs); }
 .tr-head span:nth-child(n+2), .tr-row > span:nth-child(n+2) { text-align:right; }
 .tr-row { position:relative; box-sizing:border-box; height:var(--size-24); font-size:var(--fs-b); }
 .tr-row:hover { background:var(--hover); }
@@ -20,6 +20,8 @@
 .tr-figure { display:inline-flex; flex:0 1 auto; align-items:center; gap:var(--size-3); min-width:0; }
 .tr-figure[data-figure="strength"] { flex-shrink:0; }
 .tr-figure b { min-width:0; overflow:hidden; color:var(--text); font-size:var(--fs-xs); font-weight:700; text-overflow:ellipsis; }
+.tr-figure b[data-dir=up] { color:var(--up); }
+.tr-figure b[data-dir=down] { color:var(--down); }
 .tr-min-label { position:absolute; width:var(--size-1); height:var(--size-1); margin:calc(-1 * var(--size-1)); padding:0; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; }
 @container tr (width < 480px) {
   .tr-strips { gap:var(--size-4); }

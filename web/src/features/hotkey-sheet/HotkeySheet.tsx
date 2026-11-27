@@ -21,7 +21,7 @@ function HotkeySheetBody() {
   const sections = sheetSections(keys, query);
   return <DialogFrame solid labelledBy={titleId} onClose={close} width="h-[min(640px,80dvh)] w-[min(720px,calc(100vw-32px))] max-md:h-[85dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-none items-center gap-3 border-b border-line px-4 py-3">
+      <div className="flex flex-none items-center gap-3 border-b border-line px-4 py-3 focus-within:border-accent">
         <h2 id={titleId} className="text-l font-semibold">단축키</h2>
         <label className="flex min-w-0 flex-1 items-center gap-2 text-text-3">
           <SearchIcon size={16} />

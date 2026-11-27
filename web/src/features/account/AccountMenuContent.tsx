@@ -59,8 +59,8 @@ export function AccountMenuContent() {
           <p className="text-m">계정 서버에 있는 이 계정과 올려 둔 셋업을 지웁니다. 이 PC의 셋업은 남습니다.</p>
           <Field label={`확인하려면 “${DELETE_PHRASE}”을 입력하세요`} autoFocus value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-danger" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>계정 삭제 실행</button>
             <button type="button" className="btn" disabled={command.busy} onClick={() => { setDeleting(false); setPhrase(""); setDeleteError(null); }}>취소</button>
+            <button type="button" className="btn-danger" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>계정 삭제 실행</button>
           </div>
           {deleteError && <p role="alert" className="text-m text-danger">{deleteError}</p>}
         </section>

@@ -46,7 +46,7 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, panelStyle, 
   const [nested] = useState(() => typeof document !== "undefined" && document.querySelector(OPEN_FRAME) !== null);
   return (
     <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} data-nested={nested ? "" : undefined} data-no-scrim={scrim ? undefined : ""} data-placement={placement === "center" ? undefined : placement} onClose={onClose}
-      className={`ui-dialog-backdrop fixed inset-0 z-50 flex justify-center${scrim ? " bg-[var(--scrim)]" : ""}`}
+      className={`ui-dialog-backdrop fixed inset-0 flex justify-center${scrim ? " bg-[var(--scrim)]" : ""}`}
     >
       <div
         ref={panelRef}
@@ -71,9 +71,9 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, panelStyle, 
 }
 
 export function Row({ label, labelFor, children }: { label: string; labelFor?: string; children: ReactNode }) {
-  const caption = "text-s leading-[30px] text-text-2";
+  const caption = "text-s leading-[30px] text-text-2 max-sm:leading-snug";
   return (
-    <div className="grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3">
+    <div className="grid grid-cols-[92px_minmax(0,1fr)] items-start gap-3 max-sm:grid-cols-1 max-sm:gap-1">
       {labelFor ? (
         <label htmlFor={labelFor} className={caption}>
           {label}
@@ -86,41 +86,10 @@ export function Row({ label, labelFor, children }: { label: string; labelFor?: s
   );
 }
 
-export function Segment<T extends string | number>({
-  label,
-  options,
-  value,
-  disabled = false,
-  onChange,
-}: {
-  label: string;
-  options: readonly (readonly [T, string])[];
-  value: T | string;
-  disabled?: boolean;
-  onChange(v: T): void;
-}) {
-  return (
-    <div role="group" aria-label={label} className="inline-flex w-max items-center gap-0.5 rounded-m border border-line bg-bg p-0.5">
-      {options.map(([v, text]) => (
-        <button
-          key={v}
-          type="button"
-          aria-pressed={v === value}
-          disabled={disabled}
-          onClick={() => onChange(v)}
-          className="inline-flex h-7 items-center justify-center rounded-s px-3 text-s font-medium text-text-3 transition-colors hover:text-text disabled:cursor-not-allowed disabled:opacity-50 aria-pressed:bg-raised aria-pressed:font-semibold aria-pressed:text-accent"
-        >
-          {text}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export function Errors({ id, messages }: { id: string; messages: readonly string[] }) {
   if (messages.length === 0) return null;
   return (
-    <p id={id} className="text-s text-danger">
+    <p id={id} role="alert" className="text-s text-danger">
       {messages.join(" ")}
     </p>
   );

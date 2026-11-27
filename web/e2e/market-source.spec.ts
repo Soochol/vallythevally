@@ -116,22 +116,27 @@ test("한투로 받을 때 많이 본 종목의 30초 기간과 투자자 순매
   openLayout(scenario, INVESTOR);
   await openRanking(page);
   await openConditions(page);
-  const trust = field(page, "투자자").locator('option[value="investmentTrust"]');
+  await field(page, "투자자").click();
+  const investorMenu = page.getByRole("menu", { name: "순위 투자자", exact: true });
+  const trust = investorMenu.locator('[data-option-value="investmentTrust"]');
   await expect(trust).toBeDisabled();
   await expect(trust).toHaveAttribute("title", "한투로 받을 때는 고를 수 없습니다");
-  await expect(field(page, "투자자").locator('option[value="foreign"]')).toBeEnabled();
-  await expect(field(page, "투자자").locator('option[value="institution"]')).toBeEnabled();
+  await expect(investorMenu.locator('[data-option-value="foreign"]')).toBeEnabled();
+  await expect(investorMenu.locator('[data-option-value="institution"]')).toBeEnabled();
 
+  await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.getByRole("tab", { name: "기타", exact: true }).click();
   await page.getByRole("tab", { name: "많이 본 종목" }).click();
   await openConditions(page);
-  await expect(field(page, "구간").locator('option[value="seconds30"]')).toBeDisabled();
-  await expect(field(page, "구간").locator('option[value="seconds30"]')).toHaveAttribute("title", "한투로 받을 때는 고를 수 없습니다");
-  await expect(field(page, "구간").locator('option[value="today"]')).toBeEnabled();
+  await field(page, "구간").click();
+  const spanMenu = page.getByRole("menu", { name: "순위 구간", exact: true });
+  await expect(spanMenu.locator('[data-option-value="seconds30"]')).toBeDisabled();
+  await expect(spanMenu.locator('[data-option-value="seconds30"]')).toHaveAttribute("title", "한투로 받을 때는 고를 수 없습니다");
+  await expect(spanMenu.locator('[data-option-value="today"]')).toBeEnabled();
 
   scenario.live.source(KIWOOM_MARKET_SOURCE);
-  await expect(field(page, "구간").locator('option[value="seconds30"]')).toBeEnabled();
+  await expect(spanMenu.locator('[data-option-value="seconds30"]')).toBeEnabled();
 });
 
 test("이미 고른 값을 한투가 받지 않으면 첫 받는 값으로 바꾸고 바꿨다고 알린다", async ({ page, scenario }) => {
@@ -140,7 +145,7 @@ test("이미 고른 값을 한투가 받지 않으면 첫 받는 값으로 바�
   openLayout(scenario, MOST_VIEWED_MINUTE);
   await openRanking(page);
   await openConditions(page);
-  await expect(field(page, "구간")).toHaveValue("today");
+  await expect(field(page, "구간")).toHaveAttribute("data-value", "today");
   await expect(page.getByRole("status").filter({ hasText: "조회 기간을 ‘당일 누적’으로 바꿨습니다" })).toBeVisible();
   await pollSaved(() => savedRanking(scenario)).toEqual({ ...MOST_VIEWED_MINUTE, span: "today" });
 });

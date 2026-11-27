@@ -227,14 +227,14 @@ export function ScreenerPanel({ id }: { id: WindowId | null }) {
           ) : chosen ? (
             <ScreenHeader windowId={id} screenEditing={screenEditing} chosen={chosen} entries={view.entries} block={block} status={status} rows={filteredRows} onRun={execute} />
           ) : (
-            <header className="flex h-11 flex-none items-center gap-1 border-b border-line pl-3 pr-1.5">
-              <h2 className="text-l font-[700]">스크리너</h2>
+            <header className="flex h-8 flex-none items-center gap-1 border-b border-line bg-[var(--strip-bg,var(--surface))] pl-3 pr-1.5">
+              <h2 className="text-b font-[700]">스크리너</h2>
               <span className="flex-1" />
               <PanelMenu screen={null} rows={filteredRows} status={status} />
             </header>
           )}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-auto">
           {screen ? (
             <Results screen={screen} run={run} rows={rows} filteredRows={filteredRows} filter={resultFilter} status={status} block={block} onRun={execute} onEdit={desktop ? () => setEditing(true) : () => openDialog(id)} selected={active} onSelect={select} />
           ) : (
@@ -689,10 +689,12 @@ function ResultList({ screen, result, rows, filteredRows, filter, running, rerun
           {left > 0 && ` 상장 기간이나 이력이 짧아 ${count(left)}종목이 빠졌습니다.`}
         </StatePanel>
       ) : filteredRows.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-          <p className="text-s text-text-2">필터 조건에 맞는 종목이 없습니다</p>
-          <button type="button" className="btn btn-sm" onClick={filter.onReset}>필터 초기화</button>
-        </div>
+        <StatePanel
+          title="필터 조건에 맞는 종목이 없습니다"
+          action={<button type="button" className="btn btn-sm" onClick={filter.onReset}>필터 초기화</button>}
+        >
+          검색어나 필터를 풀면 결과를 다시 볼 수 있습니다.
+        </StatePanel>
       ) : (
         <ResultTable screen={screen} asOf={result.asOf} rows={filteredRows} selected={selected} sort={sort} onSort={useScreenerStore.getState().setSort} onSelect={onSelect} />
       )}

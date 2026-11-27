@@ -130,8 +130,16 @@ export function ResultTable({ screen, asOf, rows, selected, sort, onSort, onSele
   }, [rows]);
 
   const lastIndex = columns.length - 1;
+  const fixedColsWidth =
+    LIST_PRICE_WIDTH +
+    LIST_COLUMN_GAP +
+    LIST_RATE_WIDTH +
+    LIST_COLUMN_GAP +
+    (lastIndex === 2 ? LIST_EDGE : 0) +
+    activeExtra.reduce((sum, col, extraIdx) => sum + EXTRA_COLUMN_WIDTH[col] + LIST_COLUMN_GAP + (extraIdx === activeExtra.length - 1 ? LIST_EDGE : 0), 0);
+  const minTableWidth = activeExtra.length > 0 ? 112 + fixedColsWidth : undefined;
   return <>
-  <table ref={table} aria-label={`${screen.name} 결과`} className="w-full table-fixed border-collapse text-b tabular-nums">
+  <table ref={table} aria-label={`${screen.name} 결과`} className="w-full table-fixed border-collapse text-b tabular-nums" style={minTableWidth ? { minWidth: minTableWidth } : undefined}>
     <colgroup>
       <col />
       <col style={{ width: LIST_PRICE_WIDTH + LIST_COLUMN_GAP }} />

@@ -4,17 +4,17 @@ import type { DrawingPoint, Stroke } from "../types";
 import { levelColor, type LineLook, mainColor, MAX_LEVELS, readLevels, readLineLook } from "./fibKit";
 
 export const FIBTIME_LEVELS: readonly Level[] = [
-  { value: 0, color: "#787b86", on: true },
-  { value: 1, color: "#2962ff", on: true },
-  { value: 2, color: "#2962ff", on: true },
-  { value: 3, color: "#2962ff", on: true },
-  { value: 5, color: "#2962ff", on: true },
-  { value: 8, color: "#2962ff", on: true },
-  { value: 13, color: "#2962ff", on: true },
-  { value: 21, color: "#2962ff", on: true },
-  { value: 34, color: "#2962ff", on: true },
-  { value: 55, color: "#2962ff", on: true },
-  { value: 89, color: "#2962ff", on: true },
+  { value: 0, color: "$text-3", on: true },
+  { value: 1, color: "$accent", on: true },
+  { value: 2, color: "$accent", on: true },
+  { value: 3, color: "$accent", on: true },
+  { value: 5, color: "$accent", on: true },
+  { value: 8, color: "$accent", on: true },
+  { value: 13, color: "$accent", on: true },
+  { value: 21, color: "$accent", on: true },
+  { value: 34, color: "$accent", on: true },
+  { value: 55, color: "$accent", on: true },
+  { value: 89, color: "$accent", on: true },
 ];
 
 export interface FibTimeStyle {

@@ -72,14 +72,14 @@ function readOverlayPalette(): OverlayPalette {
   const styles = getComputedStyle(document.documentElement);
   const cssVar = (name: string) => styles.getPropertyValue(name).trim();
   return {
-    up: cssVar("--up") || "#ef4444",
-    down: cssVar("--down") || "#3b82f6",
-    text: cssVar("--text") || "#e5e7eb",
-    text2: cssVar("--text-2") || "#9ca3af",
-    surface: cssVar("--surface") || "#111827",
-    raised: cssVar("--raised") || "#1f2937",
-    cloudUp: cssVar("--cloud-up") || "rgba(239, 68, 68, 0.1)",
-    cloudDown: cssVar("--cloud-down") || "rgba(59, 130, 246, 0.1)",
+    up: cssVar("--up"),
+    down: cssVar("--down"),
+    text: cssVar("--text"),
+    text2: cssVar("--text-2"),
+    surface: cssVar("--surface"),
+    raised: cssVar("--raised"),
+    cloudUp: cssVar("--cloud-up"),
+    cloudDown: cssVar("--cloud-down"),
     fontFamily: cssVar("--font-sans") || "system-ui, sans-serif",
   };
 }

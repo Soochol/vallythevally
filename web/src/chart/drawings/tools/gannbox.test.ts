@@ -29,7 +29,7 @@ const points: DrawingPoint[] = [
 ];
 const draw = (pts: readonly DrawingPoint[], s: unknown = style) => gannbox.shapes({ points: pts, style: s, text: null, selected: false }, ctx);
 const ofKind = <K extends Shape["kind"]>(shapes: readonly Shape[], kind: K) => shapes.filter((s): s is Extract<Shape, { kind: K }> => s.kind === kind);
-const HALF = "#4caf50";
+const HALF = "$ind-4";
 
 describe("갠 상자", () => {
   test("두 점, Shift는 정사각형이고 기본 수준은 다섯 개다", () => {
@@ -52,7 +52,7 @@ describe("갠 상자", () => {
   });
 
   test("수준은 첫 점에서 잰다", () => {
-    const quarter = ofKind(draw(points), "segment").filter((s) => s.stroke.color === "#f23645");
+    const quarter = ofKind(draw(points), "segment").filter((s) => s.stroke.color === "$up");
     expect(quarter.map((s) => [s.a, s.b])).toEqual([
       [{ x: 100, y: 375 }, { x: 300, y: 375 }],
       [{ x: 150, y: 300 }, { x: 150, y: 400 }],
@@ -107,7 +107,7 @@ describe("갠 상자", () => {
     const next = gannbox.parseStyle(gannbox.bar.lineColor?.set(gannbox.parseStyle({ ...style, levels }), "#123456")) as GannBoxStyle;
     expect(next.border.color).toBe("#123456");
     expect(next.levels.slice(1).every((l) => l.color === "#123456")).toBe(true);
-    expect(next.levels[0]?.color).toBe("#f23645");
+    expect(next.levels[0]?.color).toBe("$up");
     expect(gannbox.bar.lineColor?.get(next)).toBe("#123456");
     const filled = gannbox.bar.dash?.set(gannbox.bar.fill?.set(style, { on: false, color: "#ff0000", opacity: 0.5 }), "dashed");
     expect(gannbox.parseStyle(filled)).toMatchObject({ border: { dash: "dashed" }, fill: { on: false, color: "#ff0000", opacity: 0.5 } });

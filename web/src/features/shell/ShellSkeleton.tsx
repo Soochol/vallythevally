@@ -37,7 +37,7 @@ export function ShellSkeleton({ restoring }: { restoring: boolean }) {
           {Array.from({ length: 4 }, (_, index) => <Bone key={index} size="tile" />)}
         </nav>
       </div>
-      <footer data-skeleton-part="status" className="status-bar flex min-w-0 flex-none items-center border-t border-line px-3 text-xs">
+      <footer data-skeleton-part="status" className="status-bar flex min-w-0 flex-none items-center border-t border-line px-3 text-s max-md:hidden">
         {restoring && <span className="shell-skeleton-status chart-loading-label">{RESTORING_STATUS}</span>}
       </footer>
     </div>

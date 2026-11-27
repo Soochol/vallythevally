@@ -112,6 +112,8 @@ export function TotalFigure({ testId, tone, value, afterHours, description, hide
   );
 }
 
+import { Segmented as UiSegmented } from "../ui/Segmented";
+
 export interface SegmentOption<T extends string> {
   readonly value: T;
   readonly label: string;
@@ -119,9 +121,14 @@ export interface SegmentOption<T extends string> {
 
 export function Segmented<T extends string>({ label, options, value, disabled, onChange }: { label: string; options: readonly SegmentOption<T>[]; value: T; disabled?: readonly T[]; onChange(value: T): void }) {
   return (
-    <div className="ui-seg" data-size="sm" role="group" aria-label={label}>
-      {options.map((option) => <button key={option.value} type="button" className="ui-seg-item" aria-pressed={option.value === value} disabled={disabled?.includes(option.value)} onClick={() => onChange(option.value)}>{option.label}</button>)}
-    </div>
+    <UiSegmented
+      label={label}
+      mode="pressed"
+      size="sm"
+      value={value}
+      options={options.map((option) => ({ ...option, disabled: disabled?.includes(option.value) }))}
+      onChange={onChange}
+    />
   );
 }
 

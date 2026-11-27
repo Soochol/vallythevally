@@ -3,6 +3,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { chartWindows, type ChartWindowState, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { CloseIcon, CollapseIcon, DockIcon, ExpandIcon } from "../icons";
 import { IntegratedBadge } from "../market-window/parts";
+import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
 
@@ -19,6 +20,7 @@ export function WindowHeader({ window, maximized, onMaximize, action }: HeaderPr
   return (
     <>
       {window.kind === "chart" ? <ChartTitle window={window} /> : <span className="window-title">{name}</span>}
+      {window.kind === "screener" && <ScreenerBadge id={window.id} />}
       <IntegratedBadge id={window.id} kind={window.kind} />
       <span className="window-actions"><LinkDot window={window} selected />
         {action ? <button type="button" className="window-action" aria-label={`${name} 붙이기`} title="붙이기" onClick={action.run}><DockIcon size={14} /></button> : <button type="button" className="window-action" aria-label={`${name} ${maximized ? "원래 크기로" : "크게 보기"}`} title={maximized ? "원래 크기로" : "크게 보기"} aria-pressed={maximized} onClick={onMaximize}>{maximized ? <CollapseIcon size={14} /> : <ExpandIcon size={14} />}</button>}

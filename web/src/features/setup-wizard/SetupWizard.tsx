@@ -5,6 +5,7 @@ import { useAccountStore } from "../../stores/account";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { useSetupChangeStore } from "../../stores/setupChange";
 import { PROVIDER_NAME } from "../account/provider";
+import { BrandIcon } from "../icons";
 import { Kbd } from "../ui/Kbd";
 import { KiwoomIpHelp } from "../system-settings/KiwoomIpHelp";
 import { KiwoomKeyForm } from "../system-settings/KiwoomKeyForm";
@@ -52,7 +53,7 @@ export function SetupWizard() {
     return () => window.removeEventListener("keydown", onKey);
   }, [choosing, hide]);
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title" className="fixed inset-0 z-[60] overflow-y-auto bg-bg">
+    <div role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title" className="fixed inset-0 z-[var(--z-modal)] overflow-y-auto bg-bg">
       <div className="mx-auto flex min-h-full w-full flex-col items-center gap-4 px-4 py-6 md:py-10">
         {link === null ? <p className="text-m text-text-2">연결 상태를 불러오는 중입니다</p> : <WizardBody initial={firstStep(link, choosing)} />}
       </div>
@@ -63,10 +64,7 @@ export function SetupWizard() {
 function Logo() {
   return (
     <span className="flex items-center gap-2 text-l font-bold">
-      <svg aria-hidden="true" width="28" height="28" viewBox="0 0 28 28">
-        <rect width="28" height="28" rx="8" fill="var(--accent)" />
-        <path d="M7 9l7 11 7-11" fill="none" stroke="var(--accent-ink)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+      <BrandIcon size={24} />
       vally
     </span>
   );

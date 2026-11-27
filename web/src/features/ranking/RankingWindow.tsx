@@ -16,6 +16,7 @@ import { RankingHead } from "./RankingConditions";
 import { RankingTable } from "./RankingTable";
 import { choiceLabel, KIWOOM_TR, VENUE_LABEL } from "./rankingChoices";
 import { formatClock } from "../market-window/format";
+import { FeedConnectGate } from "../market-window/MarketWindowGate";
 import { DataAgeNote } from "../data-age/DataAgeNote";
 import { useDocumentVisible, useRankingFeed } from "./useRankingFeed";
 import "./ranking.css";
@@ -84,7 +85,7 @@ function RankingBody({ id, ranking }: { id: WindowId; ranking: Ranking }) {
       />
       <div className="rk-body">
         {!connected ? (
-          <EmptyState title="키움 연결 전입니다">{link?.message && <p>{link.message}</p>}</EmptyState>
+          <FeedConnectGate message={link?.message} />
         ) : !kindOn ? (
           <div className="ui-state" data-testid="ranking-unavailable">
             <p>{FEED_UNAVAILABLE_TEXT}</p>

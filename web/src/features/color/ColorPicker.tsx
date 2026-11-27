@@ -3,6 +3,7 @@ import { belowTopbar } from "../overlay/position";
 import { useId, useRef, useState } from "react";
 import { FALLBACK_PICKED_COLOR, hexToHsv, hsvToHex, isHexColor, normalizeHex, type HexColor, type HsvColor } from "../../lib/colors";
 import { CheckIcon, ChevronIcon, CloseIcon } from "../icons";
+import { Switch } from "../ui/Switch";
 import { ColorGrid } from "./ColorGrid";
 
 const RECENT_KEY = "vv.recent-colors.v1";
@@ -156,9 +157,7 @@ export function ColorDialog({ label, initial, initialRaw, width, trigger, startC
         <h3 id={`${id}-title`}>{label}</h3>
         <div className="color-picker-head-actions">
           {toggle && (
-            <button type="button" role="switch" aria-checked={toggle.checked} aria-label={toggle.label} className="ui-switch draw-switch" onClick={() => toggle.onChange(!toggle.checked)}>
-              <span aria-hidden="true" className="ui-switch-track"><span /></span>
-            </button>
+            <Switch ariaLabel={toggle.label} checked={toggle.checked} className="draw-switch" onChange={toggle.onChange} />
           )}
           <button type="button" className="icon-btn" aria-label="색상 선택 취소" onClick={cancel}><CloseIcon size={14} /></button>
         </div>
@@ -192,7 +191,7 @@ export function ColorDialog({ label, initial, initialRaw, width, trigger, startC
       )}
       <div className="color-recent"><span>최근</span><div className="color-grid" aria-label="최근 쓴 색상">{recent.length ? recent.map((c) => swatch(c, "최근 색상")) : <p>고른 색이 여기에 모입니다</p>}</div></div>
       <div className="color-picker-sample"><span>선 샘플</span><div><i style={{ background: color, height: width, opacity: opacity ? opacity.value : 1 }} /></div><span>{width} px</span></div>
-      <div className="color-picker-foot"><button type="button" className="tb-btn border border-line" onClick={cancel}>취소</button><button type="button" className="btn-primary" disabled={!valid} onClick={apply}>선택</button></div>
+      <div className="color-picker-foot"><button type="button" className="btn" onClick={cancel}>취소</button><button type="button" className="btn-primary" disabled={!valid} onClick={apply}>선택</button></div>
     </Popover>
   );
 }

@@ -2,8 +2,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useKiwoomThemeMembers, useKiwoomThemes } from "../../api/kiwoomThemes";
 import type { WindowId } from "../../layout/kinds";
+import { formatPercent } from "../../lib/format";
+import { useFeedLink } from "../../stores/kiwoomLink";
+import { ChevronIcon } from "../icons";
+import { FeedConnectGate } from "../market-window/MarketWindowGate";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { dropPendingOpen, openResult } from "../screener/resultActions";
+import { Segmented } from "../ui/Segmented";
 import { symbolDragProps } from "../../stores/symbolDrag";
 import "./themes.css";
 
@@ -23,7 +28,11 @@ function ThemeMembersPanel({ code, windowId }: { code: string; windowId: WindowI
     return <div className="thm-members"><span className="thm-meta">구성 종목을 불러오는 중…</span></div>;
   }
   if (query.isError) {
-    return <div className="thm-members"><span className="thm-meta">구성 종목을 불러오지 못했습니다</span></div>;
+    return (
+      <div className="thm-members">
+        <ErrorState message="구성 종목을 불러오지 못했습니다" retry={() => void query.refetch()} />
+      </div>
+    );
   }
   const members = [...(query.data?.members ?? [])].sort((a, b) => b.changeRate - a.changeRate);
   if (members.length === 0) {
@@ -42,11 +51,11 @@ function ThemeMembersPanel({ code, windowId }: { code: string; windowId: WindowI
         >
           <span className="thm-role" data-rank={index}>{roleLabel(index)}</span>
           <span className="thm-name">{member.name}</span>
-          <span className="thm-num">{member.price.toLocaleString()}</span>
+          <span className="thm-num">{member.price.toLocaleString("ko-KR")}</span>
           <span className={`thm-num ${member.changeRate > 0 ? "thm-up" : member.changeRate < 0 ? "thm-down" : ""}`}>
-            {member.changeRate > 0 ? "+" : ""}{member.changeRate.toFixed(2)}%
+            {formatPercent(member.changeRate)}
           </span>
-          <span className="thm-num thm-meta">{member.volume.toLocaleString()}</span>
+          <span className="thm-num thm-meta">{member.volume.toLocaleString("ko-KR")}</span>
         </button>
       ))}
     </div>
@@ -54,9 +63,11 @@ function ThemeMembersPanel({ code, windowId }: { code: string; windowId: WindowI
 }
 
 export function ThemesWindow({ id }: { id: WindowId }) {
+  const link = useFeedLink();
+  const connected = link === null || link.state === "connected";
   const [sort, setSort] = useState<SortKey>("rate");
   const [expanded, setExpanded] = useState<string | null>(null);
-  const query = useKiwoomThemes(1);
+  const query = useKiwoomThemes(1, connected);
 
   useEffect(() => dropPendingOpen, []);
 
@@ -76,16 +87,25 @@ export function ThemesWindow({ id }: { id: WindowId }) {
   return (
     <div className="thm-window" data-testid="themes-window">
       <div className="thm-head">
-        <div className="thm-seg" role="group" aria-label="테마 정렬">
-          <button type="button" className="thm-seg-btn" aria-pressed={sort === "rate"} onClick={() => setSort("rate")}>등락률순</button>
-          <button type="button" className="thm-seg-btn" aria-pressed={sort === "breadth"} onClick={() => setSort("breadth")}>상승비율순</button>
-          <button type="button" className="thm-seg-btn" aria-pressed={sort === "count"} onClick={() => setSort("count")}>종목수순</button>
-        </div>
+        <Segmented<SortKey>
+          label="테마 정렬"
+          mode="pressed"
+          size="xs"
+          value={sort}
+          options={[
+            { value: "rate", label: "등락률순" },
+            { value: "breadth", label: "상승비율순" },
+            { value: "count", label: "종목수순" },
+          ]}
+          onChange={setSort}
+        />
         <span className="thm-spacer" />
         <span className="thm-meta">{themes.length > 0 ? `${themes.length}개 테마` : "테마 리더보드"}</span>
       </div>
       <div className="thm-body">
-        {query.isPending ? (
+        {!connected ? (
+          <FeedConnectGate message={link?.message} />
+        ) : query.isPending ? (
           <Skeleton label="테마 리더보드를 불러오는 중" rows={8} />
         ) : query.isError ? (
           <ErrorState message="테마 목록을 불러오지 못했습니다" retry={() => void query.refetch()} />
@@ -106,10 +126,10 @@ export function ThemesWindow({ id }: { id: WindowId }) {
                   aria-expanded={isOpen}
                   onClick={() => setExpanded(isOpen ? null : theme.code)}
                 >
-                  <span className="thm-meta">{isOpen ? "▾" : "▸"}</span>
+                  <span className={`thm-meta inline-flex transition-transform duration-[var(--dur-fast)] ${isOpen ? "" : "-rotate-90"}`}><ChevronIcon size={12} /></span>
                   <span className="thm-name">{theme.name}</span>
                   <span className={`thm-num ${theme.changeRate > 0 ? "thm-up" : theme.changeRate < 0 ? "thm-down" : ""}`}>
-                    {theme.changeRate > 0 ? "+" : ""}{theme.changeRate.toFixed(2)}%
+                    {formatPercent(theme.changeRate)}
                   </span>
                   <div className="thm-bar" aria-label={`상승 ${upPct}%`}>
                     <div className="thm-bar-up" style={{ width: `${upPct}%` }} />

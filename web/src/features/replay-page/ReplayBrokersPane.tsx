@@ -346,11 +346,11 @@ export function ReplayBrokersPane({
               </div>
               <div className="rp-jstat-card">
                 <span>청산 승률</span>
-                <b className={winRate >= 50 ? "rp-up" : "rp-down"}>{`${winRate.toFixed(1)}%`}</b>
+                <b className={closedFills.length === 0 ? "rp-muted" : winRate >= 50 ? "rp-up" : "rp-down"}>{`${winRate.toFixed(1)}%`}</b>
               </div>
               <div className="rp-jstat-card">
                 <span>건당 평균 손익</span>
-                <b className={avgRealized >= 0 ? "rp-up" : "rp-down"}>{`${formatSignedQty(avgRealized)}원`}</b>
+                <b className={avgRealized > 0 ? "rp-up" : avgRealized < 0 ? "rp-down" : "rp-muted"}>{`${formatSignedQty(avgRealized)}원`}</b>
               </div>
               <div className="rp-jstat-card">
                 <span>누적 수수료·세금</span>

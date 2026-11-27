@@ -3,26 +3,16 @@ import type { ViDirection } from "../../api/generated/ViDirection";
 import type { ViPlaybook } from "../../api/generated/ViPlaybook";
 import type { ViPlaybookHorizon } from "../../api/generated/ViPlaybookHorizon";
 import type { ViPlaybookMatch } from "../../api/generated/ViPlaybookMatch";
-import { direction as toneOf, formatPercent, formatPrice, formatVolume } from "../../lib/format";
-import { formatCountdown, type ViExpectedPoint, type ViTrapAlert, type ViViewState } from "../../stores/viSession";
+import { direction as toneOf, formatPercent, formatPrice } from "../../lib/format";
+import type { ViViewState } from "../../stores/viSession";
 import { Popover } from "../overlay/Popover";
 
-const SPARK_WIDTH = 240;
-const SPARK_HEIGHT = 36;
-const SPARK_PAD_X = 3;
-const SPARK_PAD_TOP = 4;
-const SPARK_PAD_BOTTOM = 4;
-const SPARK_BAR_MAX_H = 14;
 const CARD_MINUTES: readonly number[] = [1, 3, 5];
 
 function directionBadgeLabel(direction: ViDirection | null): string {
   if (direction === "up") return "상승 VI";
   if (direction === "down") return "하락 VI";
   return "VI 발동";
-}
-
-function marketLabel(market: "krx" | "nxt"): string {
-  return market === "nxt" ? "NXT" : "KRX";
 }
 
 function kindLabel(kind: string): string {
@@ -32,81 +22,8 @@ function kindLabel(kind: string): string {
   return kind;
 }
 
-function trapLabel(direction: ViDirection | null, alert: ViTrapAlert): string {
-  if (alert.reason === "volume_shrink") return "막판 15초 급락 · 잔량급감";
-  if (direction === "down") return "막판 15초 급반등";
-  return "막판 15초 급락";
-}
-
 function formatOptionalPercent(value: number | null): string {
   return value === null ? "-" : formatPercent(value);
-}
-
-function ViExpectedSparkline({ series, direction }: { series: readonly ViExpectedPoint[]; direction: ViDirection | null }) {
-  if (series.length === 0) {
-    return (
-      <div className="od-vi-spark-empty" data-testid="order-vi-sparkline">
-        0H 예상체결 대기
-      </div>
-    );
-  }
-  const prices = series.map((point) => point.price);
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-  const priceSpan = maxPrice - minPrice;
-  const turnovers = series.map((point) => point.price * point.qty);
-  const maxTurnover = Math.max(0, ...turnovers);
-  const innerWidth = SPARK_WIDTH - SPARK_PAD_X * 2;
-  const innerHeight = SPARK_HEIGHT - SPARK_PAD_TOP - SPARK_PAD_BOTTOM;
-  const barWidth = Math.max(2, Math.min(8, innerWidth / Math.max(series.length, 1) - 1));
-
-  const coords = series.map((point, index) => {
-    const x = series.length === 1 ? SPARK_PAD_X + innerWidth / 2 : SPARK_PAD_X + (index / (series.length - 1)) * innerWidth;
-    const norm = priceSpan > 0 ? (point.price - minPrice) / priceSpan : 0.5;
-    const y = SPARK_PAD_TOP + (1 - norm) * innerHeight;
-    const turnover = turnovers[index]!;
-    const barH = maxTurnover > 0 ? Math.max(1, (turnover / maxTurnover) * SPARK_BAR_MAX_H) : 0;
-    return { x, y, barH };
-  });
-
-  const polyline = coords.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
-  const latest = coords[coords.length - 1]!;
-
-  return (
-    <svg
-      className="od-vi-spark"
-      data-testid="order-vi-sparkline"
-      data-direction={direction ?? "unknown"}
-      viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`}
-      preserveAspectRatio="none"
-      role="img"
-      aria-label="예상체결 추이"
-    >
-      {coords.map((point, index) => (
-        <rect
-          key={index}
-          className="od-vi-spark-bar"
-          x={(point.x - barWidth / 2).toFixed(1)}
-          y={(SPARK_HEIGHT - point.barH).toFixed(1)}
-          width={barWidth.toFixed(1)}
-          height={point.barH.toFixed(1)}
-        />
-      ))}
-      {coords.length >= 2 ? (
-        <polyline className="od-vi-spark-line" fill="none" points={polyline} />
-      ) : (
-        <line
-          className="od-vi-spark-line"
-          x1={SPARK_PAD_X}
-          y1={latest.y.toFixed(1)}
-          x2={SPARK_WIDTH - SPARK_PAD_X}
-          y2={latest.y.toFixed(1)}
-          strokeDasharray="3 3"
-        />
-      )}
-      <circle className="od-vi-spark-dot" cx={latest.x.toFixed(1)} cy={latest.y.toFixed(1)} r="2.5" />
-    </svg>
-  );
 }
 
 function PlaybookPopover({
@@ -198,12 +115,10 @@ function PlaybookPopover({
 }
 
 interface Props {
-  readonly band: "top" | "bottom";
   readonly state: ViViewState;
-  readonly previousClose: number | null;
 }
 
-export function ViOrderOverlay({ band, state, previousClose }: Props) {
+export function ViOrderOverlay({ state }: Props) {
   const activeSessionKey = state.kind === "active" ? state.sessionKey : null;
   const [openedSessionKey, setOpenedSessionKey] = useState<string | null>(null);
   const popoverOpen = activeSessionKey !== null && openedSessionKey === activeSessionKey;
@@ -217,50 +132,14 @@ export function ViOrderOverlay({ band, state, previousClose }: Props) {
 
   if (state.kind === "inactive") return null;
 
-  const { trigger, remainingSec, expectedSeries, trapAlert, playbook, playbookStatus } = state;
-
-  if (band === "top") {
-    const latest = expectedSeries[expectedSeries.length - 1] ?? null;
-    const reference = previousClose ?? trigger.triggerPrice;
-    const rate = latest !== null && reference !== null && reference > 0 ? ((latest.price - reference) / reference) * 100 : null;
-    return (
-      <div className="od-vi-top" data-testid="order-vi-top" data-direction={trigger.direction ?? "unknown"}>
-        <div className="od-vi-top-row">
-          <span className="od-vi-badge" data-testid="order-vi-badge" data-direction={trigger.direction ?? "unknown"}>
-            {directionBadgeLabel(trigger.direction)} · {marketLabel(trigger.market)}
-          </span>
-          {trigger.triggerPrice !== null && (
-            <span className="od-vi-meta">발동 {formatPrice(trigger.triggerPrice, false)}</span>
-          )}
-          {trapAlert !== null && (
-            <span className="od-vi-trap" data-testid="order-vi-trap" role="alert">
-              {trapLabel(trigger.direction, trapAlert)}
-            </span>
-          )}
-          <span className="od-vi-timer" data-testid="order-vi-countdown" data-late={remainingSec <= 15 ? "" : undefined}>
-            {formatCountdown(remainingSec)}
-          </span>
-        </div>
-        <div className="od-vi-spark-row">
-          <ViExpectedSparkline series={expectedSeries} direction={trigger.direction} />
-          {latest !== null && (
-            <div className="od-vi-latest" data-testid="order-vi-expected-latest">
-              <b data-tone={rate === null ? "flat" : toneOf(rate)}>{formatPrice(latest.price, false)}</b>
-              {rate !== null && <span data-tone={toneOf(rate)}>{formatPercent(rate)}</span>}
-              <small>{formatVolume(latest.qty)}주</small>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const { playbook, playbookStatus } = state;
 
   const horizonMap = new Map((playbook?.horizons ?? []).map((item) => [item.minutes, item]));
 
   return (
     <div ref={bottomRef} className="od-vi-bottom" data-testid="order-vi-bottom">
       {playbookStatus === "error" ? (
-        <div className="od-vi-empty" data-testid="order-vi-error" role="status">
+        <div className="od-vi-empty" data-tone="error" data-testid="order-vi-error" role="status">
           과거 VI 이력을 불러오지 못했습니다
         </div>
       ) : playbook === null ? (

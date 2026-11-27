@@ -27,7 +27,7 @@ function FieldShell({ label, help, error, layout = "stack", inputId, helpId, err
       <label htmlFor={inputId} className="ui-field-label">{label}</label>
       <div className="ui-field-body">
         {children}
-        {error && <p id={errorId} className="ui-field-error">{error}</p>}
+        {error && <p id={errorId} role="alert" className="ui-field-error">{error}</p>}
         {help && <p id={helpId} className="ui-field-help">{help}</p>}
       </div>
     </div>
@@ -84,7 +84,7 @@ export function SecretField({ label, help, error, layout, id, value, onChange, c
           }}
         />
         <span className="ui-field-actions">
-          <button type="button" className="btn-ghost btn-sm" aria-pressed={shown} aria-label={shown ? "숨기기" : "보기"} onClick={() => setShown(!shown)}><EyeIcon off={shown} /></button>
+          <button type="button" className="btn-ghost btn-sm" disabled={input.disabled} aria-pressed={shown} aria-label={shown ? "숨기기" : "보기"} onClick={() => setShown(!shown)}><EyeIcon off={shown} /></button>
           <button type="button" className="btn-ghost btn-sm" disabled={input.disabled} onClick={paste}>붙여넣기</button>
         </span>
       </div>

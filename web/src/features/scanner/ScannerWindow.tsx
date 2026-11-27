@@ -3,10 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { Ranking } from "../../api/generated/Ranking";
 import type { RankingRow } from "../../api/generated/RankingRow";
 import type { WindowId } from "../../layout/kinds";
+import { formatPercent } from "../../lib/format";
 import { useFeedLink } from "../../stores/kiwoomLink";
+import { FeedConnectGate } from "../market-window/MarketWindowGate";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { useRankingFeed } from "../ranking/useRankingFeed";
 import { dropPendingOpen, openResult } from "../screener/resultActions";
+import { Segmented } from "../ui/Segmented";
 import { symbolDragProps } from "../../stores/symbolDrag";
 import "./scanner.css";
 
@@ -116,8 +119,8 @@ function classifyRow(row: RankingRow): ScannerEvent {
 
 function formatBillion(value: number): string {
   if (value >= 1000) return `${(value / 100).toFixed(0)}억`;
-  if (value > 0) return `${value.toLocaleString()}`;
-  return "-";
+  if (value > 0) return value.toLocaleString("ko-KR");
+  return "—";
 }
 
 export function ScannerWindow({ id }: { id: WindowId }) {
@@ -145,32 +148,34 @@ export function ScannerWindow({ id }: { id: WindowId }) {
   return (
     <div className="scn-window" data-testid="scanner-window">
       <div className="scn-head">
-        <div className="scn-seg" role="group" aria-label="스캐너 신호 필터">
-          {FILTERS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className="scn-seg-btn"
-              aria-pressed={filter === item.id}
-              onClick={() => setFilter(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div className="scn-seg" role="group" aria-label="스캐너 정렬">
-          <button type="button" className="scn-seg-btn" aria-pressed={sort === "score"} onClick={() => setSort("score")}>강도순</button>
-          <button type="button" className="scn-seg-btn" aria-pressed={sort === "rate"} onClick={() => setSort("rate")}>등락순</button>
-          <button type="button" className="scn-seg-btn" aria-pressed={sort === "value"} onClick={() => setSort("value")}>대금순</button>
-        </div>
+        <Segmented<SignalKind>
+          label="스캐너 신호 필터"
+          mode="pressed"
+          size="xs"
+          value={filter}
+          options={FILTERS.map((item) => ({ value: item.id, label: item.label }))}
+          onChange={setFilter}
+        />
+        <Segmented<SortKey>
+          label="스캐너 정렬"
+          mode="pressed"
+          size="xs"
+          value={sort}
+          options={[
+            { value: "score", label: "강도순" },
+            { value: "rate", label: "등락순" },
+            { value: "value", label: "대금순" },
+          ]}
+          onChange={setSort}
+        />
         <span className="scn-spacer" />
-        <button type="button" className="scn-ctrl" onClick={() => setPaused((v) => !v)}>
+        <button type="button" className="scn-ctrl" aria-pressed={paused} onClick={() => setPaused((v) => !v)}>
           {paused ? "재개" : "일시정지"}
         </button>
       </div>
       <div className="scn-body">
         {!connected ? (
-          <EmptyState title="키움 연결 전입니다" />
+          <FeedConnectGate message={link?.message} />
         ) : feed.page === null && feed.error !== null ? (
           <ErrorState message={feed.error} retry={feed.retry} />
         ) : feed.page === null ? (
@@ -199,12 +204,12 @@ export function ScannerWindow({ id }: { id: WindowId }) {
                 }}
               >
                 <span><span className="scn-badge" data-tone={ev.signal.toLowerCase()}>{ev.signalLabel}</span></span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span className="truncate">
                   <strong>{ev.name}</strong>
                 </span>
-                <span className="scn-num">{ev.price.toLocaleString()}</span>
+                <span className="scn-num">{ev.price.toLocaleString("ko-KR")}</span>
                 <span className={`scn-num ${ev.changeRate > 0 ? "scn-up" : ev.changeRate < 0 ? "scn-down" : ""}`}>
-                  {ev.changeRate > 0 ? "+" : ""}{ev.changeRate.toFixed(2)}%
+                  {formatPercent(ev.changeRate)}
                 </span>
                 <span className="scn-num">{formatBillion(ev.tradeValue)}</span>
                 <span className="scn-muted">{ev.detail}</span>

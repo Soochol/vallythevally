@@ -2,7 +2,7 @@
   0%, 100% { opacity:1; }
   50% { opacity:0.35; }
 }
-.pm { --pm-side-w: 176px; display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; background:var(--surface); color:var(--text); font-variant-numeric:tabular-nums; }
+.pm { container:pm / inline-size; --pm-side-w: 176px; display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; background:var(--strip-bg, var(--surface)); color:var(--text); font-variant-numeric:tabular-nums; }
 .pm-head { display:flex; flex:none; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--s3); padding:var(--size-8) var(--s4); border-bottom:var(--size-1) solid var(--line); }
 .pm-head-left { display:flex; flex-wrap:wrap; align-items:center; gap:var(--s4); min-width:0; }
 .pm-sym { display:inline-flex; align-items:baseline; gap:var(--size-6); min-width:0; }
@@ -23,6 +23,11 @@
 .pm-seg-btn:hover { color:var(--text); }
 .pm-seg-btn[aria-pressed=true] { background:var(--surface); color:var(--accent); font-weight:700; }
 .pm-workspace { display:grid; flex:1; grid-template-columns:var(--pm-side-w) minmax(0, 1fr); min-height:0; min-width:0; overflow:hidden; }
+@container pm (width < 460px) {
+  .pm-workspace { grid-template-columns:minmax(0, 1fr); grid-template-rows:minmax(0, 1fr) var(--size-140); }
+  .pm-side { order:2; border-right:0; border-top:var(--size-1) solid var(--line); }
+  .pm-chart-pane { order:1; }
+}
 .pm-side { display:flex; flex-direction:column; min-height:0; min-width:0; border-right:var(--size-1) solid var(--line); background:color-mix(in srgb, var(--chart-bg) 52%, var(--surface)); overflow:hidden; }
 .pm-side-head { display:flex; flex:none; align-items:center; justify-content:space-between; padding:var(--size-6) var(--size-10); border-bottom:var(--size-1) solid var(--line); color:var(--text-3); font-size:var(--fs-xs); font-weight:600; }
 .pm-side-list { display:flex; flex:1; flex-direction:column; gap:var(--size-2); min-height:0; overflow:auto; padding:var(--size-5) var(--size-6) var(--size-6); }

@@ -11,7 +11,7 @@ import type { PageId } from "./pages";
 export function PageTopbar({ page }: { page?: PageId }) {
   const keys = useActionKeys();
   const openSearch = useSelectionStore((s) => s.openSearch);
-  const showPageFind = page !== "replay";
+  const showPageFind = page !== "replay" && page !== "journal";
   return (
     <header role="toolbar" aria-label="페이지 도구 막대" className="desktop-topbar page-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
       <div className="topbar-zone" data-zone="app">

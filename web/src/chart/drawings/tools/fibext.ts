@@ -2,12 +2,12 @@ import type { Level } from "../toolSpec";
 import { defineFibTool } from "./fibKit";
 
 export const FIBEXT_LEVELS: readonly Level[] = [
-  { value: 0, color: "#787b86", on: true },
-  { value: 0.618, color: "#089981", on: true },
-  { value: 1, color: "#787b86", on: true },
-  { value: 1.272, color: "#3f51b5", on: true },
-  { value: 1.618, color: "#2962ff", on: true },
-  { value: 2.618, color: "#e91e63", on: false },
+  { value: 0, color: "$text-3", on: true },
+  { value: 0.618, color: "$accent", on: true },
+  { value: 1, color: "$text-3", on: true },
+  { value: 1.272, color: "$down", on: true },
+  { value: 1.618, color: "$ind-3", on: true },
+  { value: 2.618, color: "$ind-5", on: false },
 ];
 
 export const fibext = defineFibTool({

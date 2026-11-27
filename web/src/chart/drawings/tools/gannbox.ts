@@ -5,11 +5,11 @@ import { MAX_LEVELS, readLevels, recolor } from "./fibKit";
 import { cornerHandles, cornerLabels, cornersOf } from "./rect";
 
 export const GANNBOX_LEVELS: readonly Level[] = [
-  { value: 0.25, color: "#f23645", on: true },
-  { value: 0.382, color: "#ff9800", on: true },
-  { value: 0.5, color: "#4caf50", on: true },
-  { value: 0.618, color: "#089981", on: true },
-  { value: 0.75, color: "#2962ff", on: true },
+  { value: 0.25, color: "$up", on: true },
+  { value: 0.382, color: "$ind-1", on: true },
+  { value: 0.5, color: "$ind-4", on: true },
+  { value: 0.618, color: "$accent", on: true },
+  { value: 0.75, color: "$down", on: true },
 ];
 
 export interface GannBoxStyle {

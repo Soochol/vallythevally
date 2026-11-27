@@ -31,8 +31,8 @@ export const DetailTable = memo(function DetailTable({ track, bars, cursor }: { 
               return (
                 <div key={event.t} className="br-det-tr" role="row" data-testid="broker-detail-row">
                   <span role="cell" className="br-det-time">{formatClock(event.t)}</span>
-                  <span role="cell" className="br-det-num" data-tone={event.net >= 0 ? "up" : "down"}>{signed(event.net)}</span>
-                  <span role="cell" className="br-det-num" data-tone={event.cumulative >= 0 ? "up" : "down"}>{signed(event.cumulative)}</span>
+                  <span role="cell" className="br-det-num" data-tone={event.net > 0 ? "up" : event.net < 0 ? "down" : "none"}>{signed(event.net)}</span>
+                  <span role="cell" className="br-det-num" data-tone={event.cumulative > 0 ? "up" : event.cumulative < 0 ? "down" : "none"}>{signed(event.cumulative)}</span>
                   <span role="cell" className="br-det-num br-det-price">{price === null ? "-" : formatPrice(price, false)}</span>
                 </div>
               );

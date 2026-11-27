@@ -1,7 +1,7 @@
 .screen-fields { padding:var(--size-24); gap:var(--size-24); }
 .screen-part { display:flex; flex-direction:column; gap:var(--size-16); }
 .screen-part + .screen-part { padding-top:var(--size-24); border-top:var(--size-1) solid var(--line); }
-.screen-part>h3 { font-size:var(--size-14); font-weight:600; }
+.screen-part>h3 { font-size:var(--fs-m); font-weight:600; }
 .sentence-token,
 .sentence-condition [role="combobox"] {
   min-height: var(--size-24);
