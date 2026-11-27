@@ -108,6 +108,14 @@ export function formatKoreanWeekday(yyyymmdd: string): string {
   return KOREAN_WEEKDAYS[dt.getUTCDay()] ?? "";
 }
 
+export function kstTodayYyyymmdd(nowMs = Date.now()): string {
+  const kst = new Date(nowMs + 9 * 3600 * 1000);
+  const y = String(kst.getUTCFullYear()).padStart(4, "0");
+  const m = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(kst.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
 function mondayEpochDay(yyyymmdd: string): number | null {
   const dt = parseUtcDate(yyyymmdd);
   if (!dt) return null;

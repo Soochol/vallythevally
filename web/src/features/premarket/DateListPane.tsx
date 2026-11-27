@@ -5,6 +5,7 @@ import {
   formatShortDate,
   formatSignedPct,
   groupDatesByWeek,
+  kstTodayYyyymmdd,
   pointVolumeValue,
   valueTone,
   type CompareRange,
@@ -44,6 +45,7 @@ export function DateListPane({
 
   const datesDescending = useMemo(() => [...rangeDates].reverse(), [rangeDates]);
   const groups = useMemo(() => groupDatesByWeek(datesDescending), [datesDescending]);
+  const todayStr = kstTodayYyyymmdd();
 
   const maxDayVol = useMemo(() => {
     let peak = 0;
@@ -78,9 +80,13 @@ export function DateListPane({
               const isFocus = date === focusDate;
               const pinIdx = pinnedDates.indexOf(date);
               const role = isFocus ? "focus" : pinIdx === 0 ? "pin-0" : pinIdx === 1 ? "pin-1" : "bg";
+              const isFlow = day?.source === "flow";
+              const isPending = isFlow && lastPt === null;
+              const isLive = isFlow && lastPt !== null;
+              const isTodayStore = !isFlow && date === todayStr;
               const volRatio = lastPt ? Math.max(8, Math.round((pointVolumeValue(lastPt, unit) / maxDayVol) * 100)) : 0;
               const weekday = formatKoreanWeekday(date);
-              const isFlow = day?.source === "flow";
+              const dotRole = isPending ? "wait" : role;
 
               return (
                 <div
@@ -89,6 +95,7 @@ export function DateListPane({
                   role="listitem"
                   data-date={date}
                   data-role={role}
+                  data-pending={isPending}
                   data-spot={spotDate === date}
                   onPointerEnter={() => onSpotDate(date)}
                   onMouseEnter={() => onSpotDate(date)}
@@ -99,15 +106,27 @@ export function DateListPane({
                     data-testid={`premarket-day-chip-${date}`}
                     data-date={date}
                     data-role={role}
+                    data-pending={isPending}
                     aria-pressed={isFocus || pinIdx >= 0}
                     onClick={() => onTogglePin(date)}
                   >
-                    <span className="pm-day-dot" data-role={role} aria-hidden="true" />
+                    <span className="pm-day-dot" data-role={dotRole} aria-hidden="true" />
                     <span className="pm-date-label">
                       <span>{formatShortDate(date)}</span>
-                      <span className="pm-date-dow">{isFlow ? "실시간" : weekday}</span>
+                      {isPending ? (
+                        <span className="pm-row-tag" data-kind="wait">대기</span>
+                      ) : isLive ? (
+                        <span className="pm-row-tag" data-kind="live">실시간</span>
+                      ) : isTodayStore ? (
+                        <span className="pm-row-tag" data-kind="today">오늘</span>
+                      ) : (
+                        <span className="pm-date-dow">{weekday}</span>
+                      )}
                     </span>
-                    <span className="pm-date-pct pm-val" data-tone={valueTone(lastPt?.expectedReturnPct)}>
+                    <span
+                      className="pm-date-pct pm-val"
+                      data-tone={isPending ? "accent" : valueTone(lastPt?.expectedReturnPct)}
+                    >
                       {lastPt ? formatSignedPct(lastPt.expectedReturnPct, 1) : "—"}
                     </span>
                   </button>
@@ -134,10 +153,7 @@ export function DateListPane({
           </div>
         ))}
       </div>
-      <div className="pm-side-foot">
-        <span>호버: 스포트라이트 · 클릭: 핀(2개)</span>
-        <span>☆: 물량 기준일 전환</span>
-      </div>
+      <div className="pm-side-foot">호버 스포트라이트 · 클릭 핀(2) · ★ 기준</div>
     </aside>
   );
 }

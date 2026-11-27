@@ -768,3 +768,72 @@ async fn perf_four_day_compare_and_500_stock_closed_snapshot() {
     assert!(snap_cold_ms < 1000.0, "500-stock snapshot cold {snap_cold_ms:.2}ms exceeded 1000ms");
     assert!(snap_warm_ms < 5.0, "500-stock snapshot warm {snap_warm_ms:.2}ms exceeded 5ms");
 }
+
+#[tokio::test]
+async fn premarket_includes_pending_today_between_0800_and_0905_and_skips_holidays() {
+    let h = Harness::start(true, &[("005930", "삼성전자")]).await;
+    write_complete(&h.data, "20261123", &["005930"]);
+    let mut oh: HashMap<String, Vec<String>> = HashMap::new();
+    oh.entry(bucket_file("005930_AL")).or_default().extend([
+        expected_sql("005930_AL", at_ms(23, 8, 30, 0), "083000", 70_700, 700, 1.0, 10_000),
+        expected_sql("005930_AL", at_ms(23, 8, 59, 50), "085950", 71_400, 1_400, 2.0, 20_000),
+    ]);
+    write_parquet_buckets(&h.data, "20261123", "0H", &oh);
+
+    let set_clock = |target: domain::KstTime| h.clock.jump(target.unix() - h.clock.now().unix());
+
+    set_clock(kst(KstDate::new(2026, 11, 24).unwrap(), 7, 59, 0));
+    let (_, before_body) = h.get("/api/symbols/005930/premarket/days").await;
+    let before_days: PreMarketDays = serde_json::from_value(before_body).unwrap();
+    assert_eq!(before_days.days, vec!["20261123"]);
+
+    set_clock(kst(KstDate::new(2026, 11, 24).unwrap(), 8, 15, 0));
+    let (_, open_body) = h.get("/api/symbols/005930/premarket/days").await;
+    let open_days: PreMarketDays = serde_json::from_value(open_body).unwrap();
+    assert_eq!(open_days.days, vec!["20261123", "20261124"]);
+
+    let (status, cmp_body) = h.get("/api/symbols/005930/premarket/compare?days=20261123,20261124").await;
+    assert_eq!(status, 200, "{cmp_body}");
+    let cmp: PreMarketCompare = serde_json::from_value(cmp_body).unwrap();
+    assert_eq!(cmp.series.len(), 2);
+    assert_eq!(cmp.series[1].date, "20261124");
+    assert_eq!(cmp.series[1].source, server::api::BrokerDaySource::Flow);
+    assert!(cmp.series[1].points.is_empty());
+
+    let cal_dir = h.data.join("calendar");
+    std::fs::create_dir_all(&cal_dir).unwrap();
+    std::fs::write(
+        cal_dir.join("holidays-2026.json"),
+        r#"{"version":1,"year":2026,"fetched_at_unix_ms":0,"holidays":[{"date":20261124,"name":"임시휴장"}]}"#,
+    )
+    .unwrap();
+    let (_, hol_body) = h.get("/api/symbols/005930/premarket/days").await;
+    let hol_days: PreMarketDays = serde_json::from_value(hol_body).unwrap();
+    assert_eq!(hol_days.days, vec!["20261123"]);
+
+    std::fs::remove_file(cal_dir.join("holidays-2026.json")).unwrap();
+    set_clock(kst(KstDate::new(2026, 11, 24).unwrap(), 8, 31, 0));
+    let flow_file = flow_path(&h.shared(), "20261124", ExpectedTrades::TYPE_CODE, "005930", "k1");
+    FlowWriter::open(&flow_file, FlowDescription::new(ExpectedTrades::TYPE_CODE, "005930", "20261124", "k1", ExpectedTrades::fids()))
+        .unwrap()
+        .append(&[FlowRow {
+            recv_ms: at_ms(24, 8, 30, 15),
+            values: vec![
+                Some("083015".into()),
+                Some("+72100".into()),
+                Some("+2100".into()),
+                Some("+3.00".into()),
+                Some("12000".into()),
+                Some("12000".into()),
+                Some("2".into()),
+            ],
+        }])
+        .unwrap();
+
+    let (status_live, live_body) = h.get("/api/symbols/005930/premarket/compare?days=20261123,20261124").await;
+    assert_eq!(status_live, 200, "{live_body}");
+    let live_cmp: PreMarketCompare = serde_json::from_value(live_body).unwrap();
+    assert_eq!(live_cmp.series[1].source, server::api::BrokerDaySource::Flow);
+    assert_eq!(live_cmp.series[1].points.len(), 1);
+    assert_eq!(live_cmp.series[1].points[0].expected_return_pct, 3.0);
+}

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { PreMarketDaySeries } from "../../api/generated/PreMarketDaySeries";
+import { isKstPreMarketDaysPollWindow } from "../../api/premarket";
 import {
   buildChartGeometry,
   computeHistoricalBand,
@@ -13,6 +14,7 @@ import {
   formatSignedTurnover,
   formatTurnover,
   groupDatesByWeek,
+  kstTodayYyyymmdd,
   nearestBandAt,
   nearestPointAt,
   PREMARKET_END_SEC,
@@ -120,5 +122,15 @@ describe("premarket logic", () => {
     expect(geom.yVolOf(geom.maxVol)).toBeCloseTo(geom.volTop, 3);
     expect(nearestPointAt(focus.points, 31750)?.secOfDay).toBe(31800);
     expect(nearestPointAt(focus.points, 32390)?.secOfDay).toBe(32400);
+  });
+
+  test("identifies KST weekday premarket boundary poll window and date string", () => {
+    expect(isKstPreMarketDaysPollWindow(Date.parse("2026-11-27T07:54:59+09:00"))).toBe(false);
+    expect(isKstPreMarketDaysPollWindow(Date.parse("2026-11-27T07:55:00+09:00"))).toBe(true);
+    expect(isKstPreMarketDaysPollWindow(Date.parse("2026-11-27T08:30:00+09:00"))).toBe(true);
+    expect(isKstPreMarketDaysPollWindow(Date.parse("2026-11-27T09:04:59+09:00"))).toBe(true);
+    expect(isKstPreMarketDaysPollWindow(Date.parse("2026-11-27T09:05:00+09:00"))).toBe(false);
+    expect(isKstPreMarketDaysPollWindow(Date.parse("2026-11-28T08:15:00+09:00"))).toBe(false);
+    expect(kstTodayYyyymmdd(Date.parse("2026-11-27T00:10:00+09:00"))).toBe("20261127");
   });
 });

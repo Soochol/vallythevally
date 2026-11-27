@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { PreMarketDaySeries } from "../../api/generated/PreMarketDaySeries";
 import {
   buildChartGeometry,
@@ -6,6 +6,7 @@ import {
   CHART_VIEW_W,
   computeHistoricalBand,
   computePointDeltas,
+  formatKoreanWeekday,
   formatSecOfDay,
   formatShortDate,
   formatSignedPct,
@@ -41,6 +42,10 @@ export function OverlayChart({
   bgStyle,
 }: OverlayChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const gradPrefix = useId().replace(/:/g, "");
+  const volAreaGradId = `${gradPrefix}-vol-area`;
+  const volDropGradId = `${gradPrefix}-vol-drop`;
+  const volSpotGradId = `${gradPrefix}-vol-spot`;
   const [hoverSec, setHoverSec] = useState<number | null>(null);
 
   const focusSeries = useMemo(
@@ -101,6 +106,9 @@ export function OverlayChart({
   const spoofW = Math.max(0, geom.xOf(PREMARKET_END_SEC) - spoofX);
   const zeroY = geom.yOf(0);
   const unitLabel = unit === "qty" ? "예상체결량(주)" : "예상대금(억)";
+  const isFocusWaiting = focusSeries !== null && focusSeries.source === "flow" && focusSeries.points.length === 0;
+  const isFocusLive = focusSeries !== null && focusSeries.source === "flow" && focusSeries.points.length > 0;
+  const lastFocusPt = focusSeries && focusSeries.points.length > 0 ? focusSeries.points[focusSeries.points.length - 1]! : null;
 
   const bandPolygonPoints = useMemo(() => {
     if (bgStyle === "lines" || pastSeries.length < 2 || historicalBand.length < 2) return null;
@@ -125,12 +133,60 @@ export function OverlayChart({
       .join(" ");
   }, [pastSeries.length, historicalBand, geom]);
 
+  const focusVolArea = useMemo(() => {
+    if (!focusSeries || focusSeries.points.length < 2) return null;
+    const pts = focusSeries.points;
+    const topPts = pts.map((p) => `${geom.xOf(p.secOfDay).toFixed(1)},${geom.yVolOf(pointVolumeValue(p, unit)).toFixed(1)}`);
+    const firstX = geom.xOf(pts[0]!.secOfDay).toFixed(1);
+    const lastX = geom.xOf(pts[pts.length - 1]!.secOfDay).toFixed(1);
+    const botY = geom.plotBottom.toFixed(1);
+    const dropSegments: { readonly key: string; readonly poly: string; readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }[] = [];
+    for (let i = 1; i < pts.length; i++) {
+      if ((focusDeltas[i] ?? 0) < 0) {
+        const pPrev = pts[i - 1]!;
+        const pCurr = pts[i]!;
+        const x0 = geom.xOf(pPrev.secOfDay);
+        const y0 = geom.yVolOf(pointVolumeValue(pPrev, unit));
+        const x1 = geom.xOf(pCurr.secOfDay);
+        const y1 = geom.yVolOf(pointVolumeValue(pCurr, unit));
+        dropSegments.push({
+          key: `${pPrev.secOfDay}-${pCurr.secOfDay}`,
+          poly: `${x0.toFixed(1)},${botY} ${x0.toFixed(1)},${y0.toFixed(1)} ${x1.toFixed(1)},${y1.toFixed(1)} ${x1.toFixed(1)},${botY}`,
+          x0,
+          y0,
+          x1,
+          y1,
+        });
+      }
+    }
+    return {
+      poly: `${firstX},${botY} ${topPts.join(" ")} ${lastX},${botY}`,
+      contour: topPts.join(" "),
+      dropSegments,
+    };
+  }, [focusSeries, focusDeltas, geom, unit]);
+
+  const spotVolArea = useMemo(() => {
+    if (!spotSeries || spotSeries.points.length < 2) return null;
+    const pts = spotSeries.points;
+    const topPts = pts.map((p) => `${geom.xOf(p.secOfDay).toFixed(1)},${geom.yVolOf(pointVolumeValue(p, unit)).toFixed(1)}`);
+    const firstX = geom.xOf(pts[0]!.secOfDay).toFixed(1);
+    const lastX = geom.xOf(pts[pts.length - 1]!.secOfDay).toFixed(1);
+    const botY = geom.plotBottom.toFixed(1);
+    return {
+      poly: `${firstX},${botY} ${topPts.join(" ")} ${lastX},${botY}`,
+      contour: topPts.join(" "),
+    };
+  }, [spotSeries, geom, unit]);
+
   const hoveredFocusIndex = useMemo(() => {
     if (hoverSec === null || !focusSeries || focusSeries.points.length === 0) return -1;
+    const lastSec = focusSeries.points[focusSeries.points.length - 1]!.secOfDay;
+    if (isFocusLive && hoverSec > lastSec) return -1;
     const pt = nearestPointAt(focusSeries.points, hoverSec);
     if (!pt) return -1;
     return focusSeries.points.indexOf(pt);
-  }, [hoverSec, focusSeries]);
+  }, [hoverSec, focusSeries, isFocusLive]);
 
   const hoveredFocusPt = hoveredFocusIndex >= 0 && focusSeries ? focusSeries.points[hoveredFocusIndex]! : null;
   const hoveredFocusDelta = hoveredFocusIndex >= 0 ? (focusDeltas[hoveredFocusIndex] ?? 0) : 0;
@@ -157,6 +213,15 @@ export function OverlayChart({
   const hoverPctDiff =
     hoveredFocusPt && hoveredBand ? hoveredFocusPt.expectedReturnPct - hoveredBand.median : null;
 
+  const endPillPos = useMemo(() => {
+    if (!lastFocusPt) return null;
+    const lx = geom.xOf(lastFocusPt.secOfDay);
+    const ly = geom.yOf(lastFocusPt.expectedReturnPct);
+    const pillX = Math.min(geom.plotRight - 52, lx + 8);
+    const pillY = Math.max(geom.plotTop + 12, Math.min(geom.plotBottom - 12, ly));
+    return { lx, ly, pillX, pillY };
+  }, [lastFocusPt, geom]);
+
   return (
     <div className="pm-chart-pane" data-testid="premarket-compare-pane">
       <div className="pm-chart-wrap" data-testid="premarket-chart-wrap">
@@ -164,8 +229,10 @@ export function OverlayChart({
           <div className="pm-legend-group">
             {focusSeries && (
               <span className="pm-legend-item">
-                <span className="pm-legend-line" data-role="focus" aria-hidden="true" />
-                <strong className="pm-legend-strong">{formatShortDate(focusSeries.date)} 기준</strong>
+                <span className="pm-legend-line" data-role={isFocusWaiting ? "wait" : "focus"} aria-hidden="true" />
+                <strong className="pm-legend-strong">
+                  {formatShortDate(focusSeries.date)} {isFocusWaiting ? "대기" : isFocusLive ? "실시간" : "기준"}
+                </strong>
               </span>
             )}
             {pinnedSeries.map((day, idx) => (
@@ -195,11 +262,11 @@ export function OverlayChart({
           </div>
           <div className="pm-legend-group">
             <span className="pm-legend-item">
-              <span className="pm-legend-bar" data-delta="in" aria-hidden="true" />
-              <span>유입</span>
+              <span className="pm-legend-area" data-delta="in" aria-hidden="true" />
+              <span>{unit === "qty" ? "예상체결량(면)" : "예상대금(면)"}</span>
             </span>
             <span className="pm-legend-item">
-              <span className="pm-legend-bar" data-delta="out" aria-hidden="true" />
+              <span className="pm-legend-area" data-delta="out" aria-hidden="true" />
               <span>이탈(Δ-)</span>
             </span>
             {volAvgLinePoints !== null && (
@@ -225,6 +292,21 @@ export function OverlayChart({
             onPointerLeave={() => setHoverSec(null)}
             onMouseLeave={() => setHoverSec(null)}
           >
+            <defs>
+              <linearGradient id={volAreaGradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" className="pm-stop-vol-top" />
+                <stop offset="100%" className="pm-stop-vol-bot" />
+              </linearGradient>
+              <linearGradient id={volDropGradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" className="pm-stop-drop-top" />
+                <stop offset="100%" className="pm-stop-drop-bot" />
+              </linearGradient>
+              <linearGradient id={volSpotGradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" className="pm-stop-spot-top" />
+                <stop offset="100%" className="pm-stop-spot-bot" />
+              </linearGradient>
+            </defs>
+
             <rect
               className="pm-spoof-zone"
               x={spoofX}
@@ -232,14 +314,29 @@ export function OverlayChart({
               width={spoofW}
               height={geom.plotBottom - geom.plotTop}
             />
+            <line
+              className="pm-spoof-border"
+              x1={spoofX}
+              y1={geom.plotTop}
+              x2={spoofX}
+              y2={geom.plotBottom}
+            />
             <text
               className="pm-spoof-label"
               x={spoofX + spoofW / 2}
               y={geom.plotTop + 12}
               textAnchor="middle"
             >
-              08:58 막판
+              막판 2분
             </text>
+
+            <line
+              className="pm-vol-sep"
+              x1={geom.plotLeft}
+              y1={geom.volTop}
+              x2={geom.plotRight}
+              y2={geom.volTop}
+            />
 
             {geom.yTicks.map((tick) => {
               const y = geom.yOf(tick);
@@ -279,38 +376,41 @@ export function OverlayChart({
               );
             })}
 
-            {focusSeries?.points.map((pt, idx) => {
-              const v = pointVolumeValue(pt, unit);
-              const dv = focusDeltas[idx] ?? 0;
-              const y = geom.yVolOf(v);
-              const h = Math.max(1, geom.plotBottom - y);
-              const deltaTone = dv < 0 ? "out" : dv > geom.maxVol * 0.045 ? "surge" : "in";
-              return (
-                <rect
-                  key={`${pt.secOfDay}-${idx}`}
-                  className="pm-vol-rect"
-                  data-delta={deltaTone}
-                  data-hover={idx === hoveredFocusIndex}
-                  x={geom.xOf(pt.secOfDay) - geom.barWidth / 2}
-                  y={y}
-                  width={geom.barWidth}
-                  height={h}
-                  rx={1.5}
-                />
-              );
-            })}
+            {focusSeries && focusSeries.points.length === 1 && (
+              <rect
+                className="pm-vol-single"
+                data-testid="premarket-vol-area"
+                x={geom.xOf(focusSeries.points[0]!.secOfDay) - 5}
+                y={geom.yVolOf(pointVolumeValue(focusSeries.points[0]!, unit))}
+                width={10}
+                height={Math.max(2, geom.plotBottom - geom.yVolOf(pointVolumeValue(focusSeries.points[0]!, unit)))}
+                rx={3}
+                fill={`url(#${volAreaGradId})`}
+              />
+            )}
+
+            {focusVolArea !== null && (
+              <g data-testid="premarket-vol-area">
+                <polygon points={focusVolArea.poly} fill={`url(#${volAreaGradId})`} />
+                <polyline className="pm-vol-contour" points={focusVolArea.contour} />
+                {focusVolArea.dropSegments.map((seg) => (
+                  <g key={seg.key}>
+                    <polygon points={seg.poly} fill={`url(#${volDropGradId})`} />
+                    <line className="pm-vol-drop-edge" x1={seg.x0} y1={seg.y0} x2={seg.x1} y2={seg.y1} />
+                  </g>
+                ))}
+              </g>
+            )}
 
             {volAvgLinePoints !== null && (
               <polyline className="pm-vol-avg-line" points={volAvgLinePoints} />
             )}
 
-            {spotSeries && spotSeries.points.length > 1 && (
-              <polyline
-                className="pm-vol-spot-line"
-                points={spotSeries.points
-                  .map((p) => `${geom.xOf(p.secOfDay).toFixed(1)},${geom.yVolOf(pointVolumeValue(p, unit)).toFixed(1)}`)
-                  .join(" ")}
-              />
+            {spotVolArea !== null && (
+              <g>
+                <polygon points={spotVolArea.poly} fill={`url(#${volSpotGradId})`} />
+                <polyline className="pm-vol-spot-line" points={spotVolArea.contour} />
+              </g>
             )}
 
             {bandPolygonPoints !== null && (
@@ -408,18 +508,9 @@ export function OverlayChart({
               )
             )}
 
-            {focusSeries && focusSeries.points.length > 0 && (
-              focusSeries.points.length === 1 ? (
-                <circle
-                  className="pm-focus-dot"
-                  data-testid={`premarket-single-point-${focusSeries.date}`}
-                  data-date={focusSeries.date}
-                  cx={geom.xOf(focusSeries.points[0]!.secOfDay)}
-                  cy={geom.yOf(focusSeries.points[0]!.expectedReturnPct)}
-                  r={4.2}
-                />
-              ) : (
-                <g>
+            {focusSeries && lastFocusPt && endPillPos && (
+              <g>
+                {focusSeries.points.length > 1 && (
                   <polyline
                     className="pm-focus-line"
                     data-date={focusSeries.date}
@@ -427,14 +518,34 @@ export function OverlayChart({
                       .map((p) => `${geom.xOf(p.secOfDay).toFixed(1)},${geom.yOf(p.expectedReturnPct).toFixed(1)}`)
                       .join(" ")}
                   />
-                  <circle
-                    className="pm-focus-dot"
-                    cx={geom.xOf(focusSeries.points[focusSeries.points.length - 1]!.secOfDay)}
-                    cy={geom.yOf(focusSeries.points[focusSeries.points.length - 1]!.expectedReturnPct)}
-                    r={4}
-                  />
+                )}
+                {isFocusLive && (
+                  <>
+                    <line
+                      className="pm-live-guide"
+                      x1={endPillPos.lx}
+                      y1={geom.plotTop}
+                      x2={endPillPos.lx}
+                      y2={geom.plotBottom}
+                    />
+                    <circle className="pm-live-pulse" cx={endPillPos.lx} cy={endPillPos.ly} r={8.5} />
+                  </>
+                )}
+                <circle
+                  className="pm-focus-dot"
+                  data-testid={focusSeries.points.length === 1 ? `premarket-single-point-${focusSeries.date}` : undefined}
+                  data-date={focusSeries.date}
+                  cx={endPillPos.lx}
+                  cy={endPillPos.ly}
+                  r={4.3}
+                />
+                <g transform={`translate(${endPillPos.pillX.toFixed(1)}, ${endPillPos.pillY.toFixed(1)})`}>
+                  <rect className="pm-end-pill-bg" x={0} y={-9.5} width={48} height={19} rx={9.5} />
+                  <text className="pm-end-pill-text" x={24} y={3.5} textAnchor="middle">
+                    {formatSignedPct(lastFocusPt.expectedReturnPct, 1)}
+                  </text>
                 </g>
-              )
+              </g>
             )}
 
             {hoverSec !== null && (
@@ -447,12 +558,21 @@ export function OverlayChart({
                   y2={geom.plotBottom}
                 />
                 {hoveredFocusPt && (
-                  <circle
-                    className="pm-focus-dot"
-                    cx={geom.xOf(hoveredFocusPt.secOfDay)}
-                    cy={geom.yOf(hoveredFocusPt.expectedReturnPct)}
-                    r={4.6}
-                  />
+                  <>
+                    <circle
+                      className="pm-focus-dot"
+                      cx={geom.xOf(hoveredFocusPt.secOfDay)}
+                      cy={geom.yOf(hoveredFocusPt.expectedReturnPct)}
+                      r={4.6}
+                    />
+                    <circle
+                      className="pm-vol-hover-dot"
+                      data-delta={hoveredFocusDelta < 0 ? "out" : "in"}
+                      cx={geom.xOf(hoveredFocusPt.secOfDay)}
+                      cy={geom.yVolOf(pointVolumeValue(hoveredFocusPt, unit))}
+                      r={3.8}
+                    />
+                  </>
                 )}
                 {hoveredPinned.map(({ date, idx, point }) =>
                   point === null ? null : (
@@ -470,6 +590,16 @@ export function OverlayChart({
             )}
           </svg>
 
+          {isFocusWaiting && focusSeries && (
+            <div className="pm-waiting-pill" data-testid="premarket-waiting-pill">
+              <span className="pm-live-dot" aria-hidden="true" />
+              <strong className="pm-waiting-strong">
+                {formatShortDate(focusSeries.date)}({formatKoreanWeekday(focusSeries.date)}) 08:30 예상체결 대기 중
+              </strong>
+              {pastSeries.length > 0 && <span>· 과거 {pastSeries.length}일 분포 기준</span>}
+            </div>
+          )}
+
           {hoverSec !== null && focusSeries && (
             <div
               className="pm-tooltip"
@@ -484,17 +614,23 @@ export function OverlayChart({
               </div>
 
               <div className="pm-tooltip-row" data-role="focus" data-date={focusSeries.date}>
-                <span className="pm-day-dot" data-role="focus" aria-hidden="true" />
+                <span className="pm-day-dot" data-role={isFocusWaiting ? "wait" : "focus"} aria-hidden="true" />
                 <span className="pm-tooltip-date">{formatShortDate(focusSeries.date)}★</span>
-                <span className="pm-tooltip-pct pm-val" data-tone={valueTone(hoveredFocusPt?.expectedReturnPct)}>
-                  {hoveredFocusPt ? formatSignedPct(hoveredFocusPt.expectedReturnPct) : "—"}
-                </span>
-                <span className="pm-tooltip-vol">
-                  {hoveredFocusPt ? formatVolumeValue(pointVolumeValue(hoveredFocusPt, unit), unit) : "—"}
-                </span>
-                <span className="pm-tooltip-price">
-                  {hoveredFocusPt ? `${formatWon(hoveredFocusPt.expectedPriceWon)}원` : "—"}
-                </span>
+                {hoveredFocusPt ? (
+                  <>
+                    <span className="pm-tooltip-pct pm-val" data-tone={valueTone(hoveredFocusPt.expectedReturnPct)}>
+                      {formatSignedPct(hoveredFocusPt.expectedReturnPct)}
+                    </span>
+                    <span className="pm-tooltip-vol">
+                      {formatVolumeValue(pointVolumeValue(hoveredFocusPt, unit), unit)}
+                    </span>
+                    <span className="pm-tooltip-price">{formatWon(hoveredFocusPt.expectedPriceWon)}원</span>
+                  </>
+                ) : (
+                  <span className="pm-tooltip-wait">
+                    {isFocusWaiting ? "08:30 예상체결 대기 중" : "미도래 시각"}
+                  </span>
+                )}
               </div>
 
               {hoveredPinned.map(({ date, idx, point }) => (
@@ -514,12 +650,17 @@ export function OverlayChart({
               ))}
 
               <div className="pm-tooltip-summary">
-                <div className="pm-tooltip-stat">
-                  <span className="pm-tooltip-stat-label">직전 대비 물량 Δ</span>
-                  <span className="pm-val" data-tone={hoveredFocusDelta > 0 ? "accent" : hoveredFocusDelta < 0 ? "warn" : "flat"}>
-                    {hoveredFocusPt ? formatVolumeDelta(hoveredFocusDelta, unit) : "—"}
-                  </span>
-                </div>
+                {hoveredFocusPt && (
+                  <div className="pm-tooltip-stat">
+                    <span className="pm-tooltip-stat-label">직전 대비 물량 Δ</span>
+                    <span
+                      className="pm-val"
+                      data-tone={hoveredFocusDelta > 0 ? "accent" : hoveredFocusDelta < 0 ? "warn" : "flat"}
+                    >
+                      {formatVolumeDelta(hoveredFocusDelta, unit)}
+                    </span>
+                  </div>
+                )}
                 {hoveredBand && pastSeries.length > 0 && (
                   <>
                     <div className="pm-tooltip-stat">
