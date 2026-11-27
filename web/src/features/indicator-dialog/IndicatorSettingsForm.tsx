@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from "react";
 import type { MaMethod } from "../../api/generated/MaMethod";
 import { INDICATOR_COLORS, indicatorCssColor, KINDS, type IndicatorColor, type IndicatorToken } from "../../chart/indicators/kinds";
 import { loadValidator } from "../../chart/indicators/validate";
-import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, type LineWidth } from "../../chart/settings";
+import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, DEFAULT_ICHIMOKU_STYLE, ICHIMOKU_CLOUD_OPACITY_MAX, ICHIMOKU_CLOUD_OPACITY_MIN, type IchimokuStyle, type LineWidth } from "../../chart/settings";
 import { isHexColor, type HexColor } from "../../lib/colors";
 import { Errors, Row, Segment } from "../dialog/DialogParts";
 import { ColorStyleTrigger } from "../color/ColorStylePopover";
@@ -23,6 +23,20 @@ const WIDTHS = [
 ] as const satisfies readonly (readonly [LineWidth, string])[];
 
 const PERIOD_PRESETS = ["5", "20", "60", "120"] as const;
+
+const ICHIMOKU_PERIOD_PRESETS = [
+  { label: "표준 (9·26·52)", conversion: "9", base: "26", spanB: "52", displacement: "26" },
+  { label: "단기 (7·22·44)", conversion: "7", base: "22", spanB: "44", displacement: "22" },
+] as const;
+
+const ICHIMOKU_TOGGLES: readonly (readonly [key: keyof Omit<IchimokuStyle, "cloudOpacity">, label: string])[] = [
+  ["showCloud", "구름대"],
+  ["showConversion", "전환선"],
+  ["showBase", "기준선"],
+  ["showSpanA", "선행스팬 1"],
+  ["showSpanB", "선행스팬 2"],
+  ["showLagging", "후행스팬"],
+];
 
 const THEME_SWATCHES: readonly ThemeSwatch<IndicatorToken>[] = INDICATOR_COLORS.map((token, i) => ({ name: `테마 ${i + 1}`, value: token, css: indicatorCssColor(token) }));
 
@@ -77,6 +91,42 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
       <section aria-labelledby={`${ids}-values`} className={usePopover ? "ic-card" : "flex min-w-0 flex-col gap-3"}>
         <h4 id={`${ids}-values`} className={usePopover ? "ic-card-title" : "text-xs text-text-3"}>설정값</h4>
         {KINDS[kind].fields.length === 0 && <p className="text-s text-text-3">정할 값이 없는 지표입니다.</p>}
+        {kind === "ichimoku" && (
+          <Row label="기간 프리셋">
+            <span role="group" aria-label="일목균형표 기간 프리셋" className="flex flex-wrap items-center gap-1.5">
+              {ICHIMOKU_PERIOD_PRESETS.map((preset) => {
+                const active =
+                  draft.form.text.conversion === preset.conversion
+                  && draft.form.text.base === preset.base
+                  && draft.form.text.spanB === preset.spanB
+                  && draft.form.text.displacement === preset.displacement;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    aria-pressed={active}
+                    className="h-7 rounded-s border border-line bg-bg px-2.5 text-xs text-text-2 hover:text-text aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-accent-ink"
+                    onClick={() => onChange({
+                      ...draft,
+                      form: {
+                        ...draft.form,
+                        text: {
+                          ...draft.form.text,
+                          conversion: preset.conversion,
+                          base: preset.base,
+                          spanB: preset.spanB,
+                          displacement: preset.displacement,
+                        },
+                      },
+                    })}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </span>
+          </Row>
+        )}
         {KINDS[kind].fields.map((f) => {
           const errors = placed.byField[f.key] ?? [];
           const inputId = `${ids}-${f.key}`;
@@ -182,6 +232,69 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
             <output htmlFor={`${ids}-opacity`} className="w-10 flex-none text-right text-s tabular-nums text-text-2">{percent(draft.barOpacity)}%</output>
           </span>
         </Row>}
+        {kind === "ichimoku" && (() => {
+          const ichi = draft.ichimoku ?? DEFAULT_ICHIMOKU_STYLE;
+          const minimal = ichi.showCloud && !ichi.showConversion && !ichi.showBase && !ichi.showLagging;
+          return <>
+          <Row label="보기 프리셋">
+            <span role="group" aria-label="일목균형표 보기 모드" className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                aria-pressed={!minimal}
+                className="h-7 rounded-s border border-line bg-bg px-2.5 text-xs text-text-2 hover:text-text aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-accent-ink"
+                onClick={() => onChange({ ...draft, ichimoku: { ...ichi, showCloud: true, showConversion: true, showBase: true, showSpanA: true, showSpanB: true, showLagging: true } })}
+              >
+                전체 보기
+              </button>
+              <button
+                type="button"
+                aria-pressed={minimal}
+                className="h-7 rounded-s border border-line bg-bg px-2.5 text-xs text-text-2 hover:text-text aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-accent-ink"
+                onClick={() => onChange({ ...draft, ichimoku: { ...ichi, showCloud: true, showConversion: false, showBase: false, showSpanA: true, showSpanB: true, showLagging: false } })}
+              >
+                구름대만 보기
+              </button>
+            </span>
+          </Row>
+          <Row label="구름대 불투명도" labelFor={`${ids}-cloud-opacity`}>
+            <span className="flex min-h-[30px] min-w-0 items-center gap-2">
+              <input
+                id={`${ids}-cloud-opacity`}
+                type="range"
+                min={Math.round(ICHIMOKU_CLOUD_OPACITY_MIN * 100)}
+                max={Math.round(ICHIMOKU_CLOUD_OPACITY_MAX * 100)}
+                step={1}
+                value={percent(ichi.cloudOpacity)}
+                aria-valuetext={`${percent(ichi.cloudOpacity)}%`}
+                className="min-w-0 flex-1 accent-[var(--accent)]"
+                onChange={(e) => onChange({ ...draft, ichimoku: { ...ichi, cloudOpacity: Number(e.target.value) / 100 } })}
+              />
+              <output htmlFor={`${ids}-cloud-opacity`} className="w-10 flex-none text-right text-s tabular-nums text-text-2">{percent(ichi.cloudOpacity)}%</output>
+            </span>
+          </Row>
+          <Row label="표시 요소">
+            <div className="grid grid-cols-2 gap-1.5">
+              {ICHIMOKU_TOGGLES.map(([key, label]) => {
+                const checked = ichi[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="switch"
+                    aria-label={label}
+                    aria-checked={checked}
+                    className="ui-switch min-h-[var(--size-30)] text-s"
+                    onClick={() => onChange({ ...draft, ichimoku: { ...ichi, [key]: !checked } })}
+                  >
+                    <span className="flex-1 text-left">{label}</span>
+                    <span aria-hidden="true" className="ui-switch-track"><span /></span>
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+        </>;
+        })()}
       </section>
       {lined && (usePopover ? (
         <section aria-labelledby={`${ids}-line`} className="ic-card">

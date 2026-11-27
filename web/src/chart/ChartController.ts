@@ -766,6 +766,16 @@ export class ChartController {
     if (changed) this.paneLayoutDirty = true;
   }
 
+  private rightOffset(): number {
+    let offset = RIGHT_OFFSET;
+    for (const config of this.view?.settings.indicators ?? []) {
+      if (config.panel === "price" && config.visible && config.spec.kind === "ichimoku") {
+        offset = Math.max(offset, Math.min(config.spec.displacement + 4, 32));
+      }
+    }
+    return offset;
+  }
+
   private chartOptions(): DeepPartial<ChartOptions> {
     const t = this.tokens;
     const percentage = axisPriceFormat("%", 0.01, this.priceAxisGeometry(true));
@@ -788,7 +798,7 @@ export class ChartController {
       rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: this.priceTopMargin, bottom: PRICE_BOTTOM_MARGIN } },
       timeScale: {
         borderColor: t.line,
-        rightOffset: RIGHT_OFFSET,
+        rightOffset: this.rightOffset(),
         timeVisible: isIntraday(this.period()),
         secondsVisible: false,
         tickMarkFormatter: (time: Time, type: TickMarkType) => formatTickMark(time as UTCTimestamp, type, this.period()),
@@ -1040,7 +1050,7 @@ export class ChartController {
   }
 
   private fitInitialRange(): IRange<number> | null {
-    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: this.narrow });
+    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: this.narrow, rightOffset: this.rightOffset() });
   }
 
   private rightEdgeT(): UnixSeconds | null {
@@ -1201,7 +1211,7 @@ export class ChartController {
       period: this.period(),
       visibleBars: this.view?.settings.visibleBars ?? null,
       narrow: this.narrow,
-      rightOffset: shown === -1 ? undefined : 0,
+      rightOffset: shown === -1 ? this.rightOffset() : 0,
     });
   }
 

@@ -13,12 +13,34 @@ export type IndicatorAxis = "auto" | "right" | "left" | "overlay";
 export const MAX_INDICATORS_PER_PANEL = 4;
 export const MERGED_PANEL_MIN_STRETCH = 0.34;
 
+export interface IchimokuStyle {
+  showCloud: boolean;
+  showConversion: boolean;
+  showBase: boolean;
+  showSpanA: boolean;
+  showSpanB: boolean;
+  showLagging: boolean;
+  cloudOpacity: number;
+}
+
+export const ICHIMOKU_CLOUD_OPACITY_MIN = 0.08;
+export const ICHIMOKU_CLOUD_OPACITY_MAX = 0.35;
+export const DEFAULT_ICHIMOKU_STYLE: IchimokuStyle = {
+  showCloud: true,
+  showConversion: true,
+  showBase: true,
+  showSpanA: true,
+  showSpanB: true,
+  showLagging: true,
+  cloudOpacity: 0.18,
+};
+
 export interface IndicatorConfig {
   id: string;
   spec: IndicatorSpec;
   panel: "price" | Panel["id"];
   visible: boolean;
-  style: { colors: IndicatorColor[]; width: LineWidth; barOpacity?: number };
+  style: { colors: IndicatorColor[]; width: LineWidth; barOpacity?: number; ichimoku?: IchimokuStyle };
   axis?: IndicatorAxis;
 }
 
@@ -27,7 +49,31 @@ export const BAR_OPACITY_MIN = 0.1;
 export const BAR_OPACITY_MAX = 1;
 
 export const barOpacityOf = (style: IndicatorConfig["style"]): number => style.barOpacity ?? DEFAULT_BAR_OPACITY;
+export const ichimokuStyleOf = (style: IndicatorConfig["style"]): IchimokuStyle => style.ichimoku ?? DEFAULT_ICHIMOKU_STYLE;
 const isBarOpacity = (x: unknown): x is number => isNum(x) && x >= BAR_OPACITY_MIN && x <= BAR_OPACITY_MAX;
+const isIchimokuCloudOpacity = (x: unknown): x is number => isNum(x) && x >= ICHIMOKU_CLOUD_OPACITY_MIN && x <= ICHIMOKU_CLOUD_OPACITY_MAX;
+
+function readIchimokuStyle(raw: unknown): IchimokuStyle | null {
+  if (!isRecord(raw)) return null;
+  if (
+    typeof raw.showCloud !== "boolean"
+    || typeof raw.showConversion !== "boolean"
+    || typeof raw.showBase !== "boolean"
+    || typeof raw.showSpanA !== "boolean"
+    || typeof raw.showSpanB !== "boolean"
+    || typeof raw.showLagging !== "boolean"
+    || !isIchimokuCloudOpacity(raw.cloudOpacity)
+  ) return null;
+  return {
+    showCloud: raw.showCloud,
+    showConversion: raw.showConversion,
+    showBase: raw.showBase,
+    showSpanA: raw.showSpanA,
+    showSpanB: raw.showSpanB,
+    showLagging: raw.showLagging,
+    cloudOpacity: raw.cloudOpacity,
+  };
+}
 
 export const placementOfConfig = (config: Pick<IndicatorConfig, "panel">): Placement => config.panel === "price" ? "price" : "panel";
 
@@ -180,6 +226,8 @@ function readIndicator(raw: unknown): IndicatorConfig | null {
   if (!Array.isArray(colors) || !colors.every(isIndicatorColor)) return null;
   const barOpacity = style.barOpacity;
   if (barOpacity !== undefined && !isBarOpacity(barOpacity)) return null;
+  const ichimoku = style.ichimoku === undefined ? undefined : readIchimokuStyle(style.ichimoku);
+  if (style.ichimoku !== undefined && ichimoku === null) return null;
   const axis = raw.axis;
   if (axis !== undefined && !isOneOf(INDICATOR_AXES, axis)) return null;
   return {
@@ -187,7 +235,12 @@ function readIndicator(raw: unknown): IndicatorConfig | null {
     spec,
     panel: raw.panel,
     visible: raw.visible,
-    style: { colors, width: style.width, ...(barOpacity === undefined ? {} : { barOpacity }) },
+    style: {
+      colors,
+      width: style.width,
+      ...(barOpacity === undefined ? {} : { barOpacity }),
+      ...(ichimoku === undefined || ichimoku === null ? {} : { ichimoku }),
+    },
     ...(axis === undefined || axis === "auto" ? {} : { axis }),
   };
 }
