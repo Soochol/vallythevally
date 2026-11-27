@@ -1,5 +1,5 @@
 import { Popover } from "../overlay/Popover";
-import { type ReactNode, type Ref, useState } from "react";
+import { type CSSProperties, type ReactNode, type Ref, useState } from "react";
 
 const FOCUSABLE = "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea, [tabindex='0']";
 
@@ -31,6 +31,7 @@ interface FrameProps {
   width: string;
   onClose(reason?: "escape" | "outside"): void;
   panelRef?: Ref<HTMLDivElement>;
+  panelStyle?: CSSProperties;
   variant?: "command" | "drawer";
   size?: "default" | "compact";
   solid?: boolean;
@@ -41,7 +42,7 @@ interface FrameProps {
 
 const OPEN_FRAME = ".ui-dialog-backdrop:not([data-command-frame])";
 
-export function DialogFrame({ labelledBy, width, onClose, panelRef, children, variant, size = "default", solid, scrim = true, placement = "center" }: FrameProps) {
+export function DialogFrame({ labelledBy, width, onClose, panelRef, panelStyle, children, variant, size = "default", solid, scrim = true, placement = "center" }: FrameProps) {
   const [nested] = useState(() => typeof document !== "undefined" && document.querySelector(OPEN_FRAME) !== null);
   return (
     <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} data-nested={nested ? "" : undefined} data-no-scrim={scrim ? undefined : ""} data-placement={placement === "center" ? undefined : placement} onClose={onClose}
@@ -49,6 +50,7 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, children, va
     >
       <div
         ref={panelRef}
+        style={panelStyle}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}

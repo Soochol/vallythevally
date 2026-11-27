@@ -43,6 +43,17 @@ export function useBookReplayAvailable(enabled: boolean): boolean {
   return active && data === true;
 }
 
+export function useBookReplayLockAvailable(enabled: boolean): boolean {
+  const publicMode = usePublicMode();
+  const active = enabled && !publicMode;
+  const { data } = useQuery({
+    ...accessQueryOptions(active),
+    select: (access) => access.available,
+    notifyOnChangeProps: ["data"],
+  });
+  return active && data !== false;
+}
+
 export const bookReplayAvailable = (access: ReturnType<typeof useBookReplayAccess>): boolean => access.data?.available === true;
 
 export function useBookReplayDay(code: SymbolCode, date: string | null, options: { readonly enabled: boolean }) {

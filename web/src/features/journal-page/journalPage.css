@@ -455,7 +455,7 @@
   user-select: none;
 }
 
-.jrn-chart-box canvas {
+.jrn-chart-host {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -467,6 +467,7 @@
   top: 10px;
   left: 14px;
   right: 78px;
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -478,6 +479,35 @@
 
 .jrn-chart-legend b { font-weight: 600; color: var(--text); margin-left: 3px; }
 .jrn-chart-fill-note { color: var(--text-2); font-weight: 600; }
+
+.jrn-chart-notice {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: var(--fs-s);
+}
+
+.jrn-chart-older-banner {
+  position: absolute;
+  top: 34px;
+  left: 14px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: var(--r-s);
+  background: var(--raised);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
 
 .jrn-d-foot {
   display: grid;

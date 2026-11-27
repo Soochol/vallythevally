@@ -24,7 +24,7 @@ use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::{Access, KiwoomRest};
 use server::kiwoom::stream::KiwoomStream;
 use server::market_overview::KiwoomOverview;
-use server::market_source::{KiwoomHandle, OverviewFeature, OverviewSource, Priority, StreakSide};
+use server::market_source::{DayRange, KiwoomHandle, OverviewFeature, OverviewSource, Priority, StreakSide};
 use server::symbols::{Directory, SymbolDirectory};
 use support::ScriptedTransport;
 use tower::ServiceExt;
@@ -492,13 +492,26 @@ async fn the_kis_feature_set_has_no_streaks_and_the_kiwoom_one_has_it() {
     let h = Harness::start(at(10, 0, 0), route).await;
     let kis = h.source.features();
     assert!(!kis.contains(OverviewFeature::Streaks));
+    assert!(!kis.contains(OverviewFeature::StockProgramDaily));
     assert_eq!(kis.iter().collect::<Vec<_>>(), SUPPORTED_OVERVIEW_FEATURES.to_vec());
-    assert!(KiwoomOverview::new(KiwoomHandle::absent()).features().contains(OverviewFeature::Streaks));
-    for feature in OverviewFeature::ALL.into_iter().filter(|f| *f != OverviewFeature::Streaks) {
+    let kiwoom = KiwoomOverview::new(KiwoomHandle::absent()).features();
+    assert!(kiwoom.contains(OverviewFeature::Streaks));
+    assert!(kiwoom.contains(OverviewFeature::StockProgramDaily));
+    for feature in OverviewFeature::ALL.into_iter().filter(|f| !matches!(f, OverviewFeature::Streaks | OverviewFeature::StockProgramDaily)) {
         assert!(kis.contains(feature), "{feature:?}");
     }
     let refused = h.source.streaks(StreakSide::Buying, server::api::Market::Kospi, Priority::Screen).await.unwrap_err();
     assert!(refused.to_string().contains("시장 개요 연속 매매"), "{refused}");
+    let refused_program = h
+        .source
+        .stock_program_daily(domain::StockCode::parse(SAMSUNG).unwrap(), DayRange::new(monday(), monday()).unwrap(), at(10, 0, 0), Priority::Background)
+        .await
+        .unwrap_err();
+    assert!(refused_program.to_string().contains("종목 일별 프로그램매매"), "{refused_program}");
+    assert!(matches!(
+        refused_program,
+        server::market_source::SourceError::Failed(failure) if failure.reason == server::api::ApiErrorReason::UnsupportedBySource
+    ));
     let card = h.ok("/api/market-overview/streaks?market=kospi").await;
     assert_eq!((card["buying"]["status"].as_str(), card["buying"]["error"]["reason"].as_str()), (Some("failed"), Some("unsupported_by_source")));
     assert_eq!(h.kis.total(), 0, "받을 수 없는 칸은 요청을 보내지 않는다");

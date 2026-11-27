@@ -194,7 +194,7 @@ function WatchRowFrame({ list, code, groupId, index, last, columns, template, va
           }
         }}
         style={template}
-        className={`grid gap-x-2 ${LIST_ROW_HEIGHT} w-full items-center ${grouped ? "pl-5" : "pl-3"} pr-3 text-left outline-none max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
+        className={`grid gap-x-2 ${LIST_ROW_HEIGHT} w-full items-center ${grouped ? "pl-5" : "pl-3"} pr-3 text-left outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] max-md:h-auto max-md:min-h-[56px] max-md:px-4 max-md:py-2 ${
           editing ? (grouped ? "max-md:pr-[220px]" : "max-md:pr-[176px]") : ""
         }`}
       >

@@ -205,10 +205,17 @@ export function WhaleWindow({ id }: { id: WindowId }) {
                   return (
                     <tr
                       key={ev.id}
+                      tabIndex={0}
                       data-symbol={ev.symbol}
                       data-selected={watched === ev.symbol ? "" : undefined}
                       {...symbolDragProps({ code: ev.symbol, name: nameOf(ev.symbol), sourceWindow: id })}
                       onClick={() => selectSymbol(ev.symbol)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          selectSymbol(ev.symbol);
+                        }
+                      }}
                     >
                       <td>{formatWhaleTime(ev.at)}</td>
                       <td>
@@ -256,28 +263,46 @@ export function WhaleWindow({ id }: { id: WindowId }) {
                   className="wh-center"
                   data-sortable=""
                   data-sort-active={rankSort === "count" ? "" : undefined}
-                  onClick={() => setRankSort("count")}
-                  data-testid="whale-sort-count"
+                  aria-sort={rankSort === "count" ? "descending" : "none"}
                 >
-                  횟수{rankSort === "count" ? " ▼" : ""}
+                  <button
+                    type="button"
+                    className="wh-sort-btn"
+                    onClick={() => setRankSort("count")}
+                    data-testid="whale-sort-count"
+                  >
+                    횟수{rankSort === "count" ? " ▼" : ""}
+                  </button>
                 </th>
                 <th
                   className="wh-num"
                   data-sortable=""
                   data-sort-active={rankSort === "net" ? "" : undefined}
-                  onClick={() => setRankSort("net")}
-                  data-testid="whale-sort-net"
+                  aria-sort={rankSort === "net" ? "descending" : "none"}
                 >
-                  순매수{rankSort === "net" ? " ▼" : ""}
+                  <button
+                    type="button"
+                    className="wh-sort-btn"
+                    onClick={() => setRankSort("net")}
+                    data-testid="whale-sort-net"
+                  >
+                    순매수{rankSort === "net" ? " ▼" : ""}
+                  </button>
                 </th>
                 <th
                   className="wh-num"
                   data-sortable=""
                   data-sort-active={rankSort === "total" ? "" : undefined}
-                  onClick={() => setRankSort("total")}
-                  data-testid="whale-sort-total"
+                  aria-sort={rankSort === "total" ? "descending" : "none"}
                 >
-                  총대금{rankSort === "total" ? " ▼" : ""}
+                  <button
+                    type="button"
+                    className="wh-sort-btn"
+                    onClick={() => setRankSort("total")}
+                    data-testid="whale-sort-total"
+                  >
+                    총대금{rankSort === "total" ? " ▼" : ""}
+                  </button>
                 </th>
               </tr>
             </thead>
@@ -285,10 +310,17 @@ export function WhaleWindow({ id }: { id: WindowId }) {
               {rankRows.map((row, idx) => (
                 <tr
                   key={row.symbol}
+                  tabIndex={0}
                   data-symbol={row.symbol}
                   data-selected={watched === row.symbol ? "" : undefined}
                   {...symbolDragProps({ code: row.symbol, name: row.name, sourceWindow: id })}
                   onClick={() => selectSymbol(row.symbol)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      selectSymbol(row.symbol);
+                    }
+                  }}
                 >
                   <td className="wh-center">{idx + 1}</td>
                   <td>

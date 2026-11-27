@@ -1,6 +1,6 @@
 import { type ChangeEvent, type FocusEvent, type KeyboardEvent, memo, type MouseEvent, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { ALL_SELLING_TEXT } from "./holdingSummary";
-import { type BuyingPower, maxBuyQuantity, quantityForAmount, quantityForRatio, RATIO_PRESETS } from "./orderRules";
+import { type BuyingPower, buyQuantityForRatio, type BuyRatioPercent, maxBuyQuantity, quantityForAmount, quantityForRatio, RATIO_PRESETS } from "./orderRules";
 import { AMOUNT_UNIT_WON, PRESET_MODES, type PresetMode } from "./orderSettings";
 
 const NO_REFERENCE_PRICE_TEXT = "현재가를 아직 받지 못했습니다";
@@ -17,6 +17,7 @@ const PRESET_GROUP_LABEL: Readonly<Record<PresetMode, string>> = {
 interface Props {
   readonly input: string;
   readonly mode: PresetMode;
+  readonly buyRatio: BuyRatioPercent | null;
   readonly amountPresets: readonly number[];
   readonly referencePrice: number | null;
   readonly buying: BuyingPower | null;
@@ -24,21 +25,32 @@ interface Props {
   readonly hasHolding: boolean;
   readonly onMode: (mode: PresetMode) => void;
   readonly onInput: (input: string) => void;
-  readonly onPreset: (input: string, buyFull: boolean) => void;
+  readonly onBuyRatio: (ratio: BuyRatioPercent | null) => void;
   readonly trailing?: ReactNode;
 }
 
-interface PresetButton {
-  readonly key: string;
-  readonly label: string;
-  readonly quantity: number;
-  readonly disabled: boolean;
-  readonly title: string | undefined;
-}
+type PresetButton =
+  | {
+    readonly kind: "fill";
+    readonly key: string;
+    readonly label: string;
+    readonly quantity: number;
+    readonly disabled: boolean;
+    readonly title: string | undefined;
+  }
+  | {
+    readonly kind: "buyRatio";
+    readonly key: string;
+    readonly label: string;
+    readonly percent: BuyRatioPercent;
+    readonly disabled: boolean;
+    readonly title: string | undefined;
+  };
 
 function buildAmountButtons(amountPresets: readonly number[], referencePrice: number | null): PresetButton[] {
   const noPrice = referencePrice === null || !(referencePrice > 0);
   return amountPresets.map((man) => ({
+    kind: "fill",
     key: `amount:${man}`,
     label: `${man.toLocaleString("ko-KR")}만`,
     quantity: quantityForAmount(man * AMOUNT_UNIT_WON, referencePrice) ?? 0,
@@ -52,7 +64,7 @@ function buildBuyRatioButtons(referencePrice: number | null, buying: BuyingPower
   const maxQuantity = !noPrice && buying !== null ? maxBuyQuantity(referencePrice, buying.amount) : null;
   const policyText = buying?.policy === "allow_margin" ? "미수 포함" : "현금";
   return RATIO_PRESETS.map(({ percent, label }) => {
-    const quantity = maxQuantity === null ? 0 : quantityForRatio(maxQuantity, percent);
+    const quantity = !noPrice && buying !== null ? buyQuantityForRatio(referencePrice, buying.amount, percent) : 0;
     const title = noPrice
       ? NO_REFERENCE_PRICE_TEXT
       : buying === null
@@ -61,8 +73,8 @@ function buildBuyRatioButtons(referencePrice: number | null, buying: BuyingPower
           ? NO_BUYABLE_QUANTITY_TEXT
           : quantity === 0
             ? `${label} 계산 결과가 1주 미만입니다`
-            : `${policyText} 매수가능 ${label} · ${quantity.toLocaleString("ko-KR")}주`;
-    return { key: `buy:${percent}`, label, quantity, disabled: quantity <= 0, title };
+            : `${policyText} 매수가능 ${label} · 클릭 호가 기준 (현재가 약 ${quantity.toLocaleString("ko-KR")}주)`;
+    return { kind: "buyRatio", key: `buy:${percent}`, label, percent, disabled: noPrice || buying === null || quantity <= 0, title };
   });
 }
 
@@ -77,11 +89,11 @@ function buildSellRatioButtons(sellableRemaining: number | null, hasHolding: boo
         : quantity === 0
           ? `${label} 계산 결과가 1주 미만입니다`
           : `매도가능 ${available.toLocaleString("ko-KR")}주의 ${label} · ${quantity.toLocaleString("ko-KR")}주`;
-    return { key: `sell:${percent}`, label, quantity, disabled: quantity <= 0, title };
+    return { kind: "fill", key: `sell:${percent}`, label, quantity, disabled: quantity <= 0, title };
   });
 }
 
-export const QuantityRow = memo(function QuantityRow({ input, mode, amountPresets, referencePrice, buying, sellableRemaining, hasHolding, onMode, onInput, onPreset, trailing }: Props) {
+export const QuantityRow = memo(function QuantityRow({ input, mode, buyRatio, amountPresets, referencePrice, buying, sellableRemaining, hasHolding, onMode, onInput, onBuyRatio, trailing }: Props) {
   const field = useRef<HTMLInputElement>(null);
   const digitsBeforeCaret = useRef<number | null>(null);
   const [picked, setPicked] = useState<{ readonly mode: PresetMode; readonly key: string; readonly value: string } | null>(null);
@@ -104,6 +116,11 @@ export const QuantityRow = memo(function QuantityRow({ input, mode, amountPreset
     onInput(digits);
   };
   const nudge = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (buyRatio !== null && /^[0-9]$/.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      setPicked(null);
+      onBuyRatio(null);
+      return;
+    }
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
     const step = (event.key === "ArrowUp" ? 1 : -1) * (event.shiftKey ? 10 : 1);
@@ -116,9 +133,14 @@ export const QuantityRow = memo(function QuantityRow({ input, mode, amountPreset
       ? buildBuyRatioButtons(referencePrice, buying)
       : buildSellRatioButtons(sellableRemaining, hasHolding);
   const pickPreset = (button: PresetButton) => {
+    if (button.kind === "buyRatio") {
+      setPicked(null);
+      onBuyRatio(buyRatio === button.percent ? null : button.percent);
+      return;
+    }
     const nextValue = String(button.quantity);
     setPicked({ mode, key: button.key, value: nextValue });
-    onPreset(nextValue, button.key === "buy:100");
+    onInput(nextValue);
   };
   const selectAllOnFocus = (event: FocusEvent<HTMLInputElement>) => {
     event.currentTarget.select();
@@ -129,7 +151,7 @@ export const QuantityRow = memo(function QuantityRow({ input, mode, amountPreset
   };
   return (
     <div className="od-qty" data-testid="order-quantity-row" data-preset-mode={mode}>
-      <input ref={field} className="od-qty-input" aria-label="수량" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} onFocus={selectAllOnFocus} onClick={selectAllOnClick} />
+      <input ref={field} className="od-qty-input" data-ratio-active={mode === "buy" && buyRatio !== null ? "" : undefined} aria-label="수량" inputMode="numeric" autoComplete="off" value={input} onChange={change} onKeyDown={nudge} onFocus={selectAllOnFocus} onClick={selectAllOnClick} />
       <div className="ui-seg od-preset-mode" data-size="sm" role="group" aria-label="프리셋 기준">
         {PRESET_MODES.map((option) => (
           <button
@@ -148,20 +170,27 @@ export const QuantityRow = memo(function QuantityRow({ input, mode, amountPreset
         ))}
       </div>
       <div className="od-presets" role="group" aria-label={PRESET_GROUP_LABEL[mode]}>
-        {buttons.map((button) => (
-          <button
-            key={button.key}
-            type="button"
-            className="od-preset"
-            data-side-tone={mode === "amount" ? undefined : mode}
-            data-picked={picked !== null && picked.mode === mode && picked.key === button.key && picked.value === input ? "" : undefined}
-            disabled={button.disabled}
-            title={button.title}
-            onClick={() => pickPreset(button)}
-          >
-            {button.label}
-          </button>
-        ))}
+        {buttons.map((button) => {
+          const isBuyRatio = button.kind === "buyRatio";
+          const active = isBuyRatio
+            ? buyRatio === button.percent
+            : picked !== null && picked.mode === mode && picked.key === button.key && picked.value === input;
+          return (
+            <button
+              key={button.key}
+              type="button"
+              className="od-preset"
+              data-side-tone={mode === "amount" ? undefined : mode}
+              aria-pressed={isBuyRatio ? active : undefined}
+              data-picked={active ? "" : undefined}
+              disabled={button.disabled}
+              title={button.title}
+              onClick={() => pickPreset(button)}
+            >
+              {button.label}
+            </button>
+          );
+        })}
       </div>
       {trailing}
     </div>

@@ -1,13 +1,25 @@
 import { useEffect, useMemo } from "react";
-import { TODAY_REFETCH_MS, useBookReplayDay } from "../../api/bookReplay";
+import { TODAY_REFETCH_MS, useBookReplayDay, useBookReplayLockAvailable } from "../../api/bookReplay";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
+import { useBookReplayStore } from "../../stores/bookReplay";
 import { serverNow, useServerClock } from "../../stores/serverClock";
+import { useBookReplayPref, useUiStore } from "../../stores/ui";
 import { REPLAY_REASON, replayView, todayRefreshDelayMs, type ReplayView } from "./replay";
 import { useBookReplayEnabled, useWorkspaceReplayCursor } from "./useWorkspaceReplayCursor";
 
 const LIVE_VIEW: ReplayView = { kind: "live" };
 
 export { useBookReplayEnabled };
+
+export function disableBookReplay(): void {
+  useUiStore.getState().setBookReplay(false);
+  useBookReplayStore.getState().clear();
+}
+
+export function useBookReplayOrderLock(): boolean {
+  const pref = useBookReplayPref();
+  return useBookReplayLockAvailable(pref);
+}
 
 export function useBookReplay(code: SymbolCode): ReplayView {
   const cursor = useWorkspaceReplayCursor(code);

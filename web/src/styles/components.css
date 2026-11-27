@@ -18,6 +18,8 @@
   .ui-badge[data-tone=success] { border-color:color-mix(in srgb, var(--success) 45%, transparent); background:transparent; color:var(--success); }
   .ui-badge[data-tone=warning] { border-color:color-mix(in srgb, var(--warning) 45%, transparent); background:transparent; color:var(--warning); }
   .ui-badge[data-tone=danger] { border-color:color-mix(in srgb, var(--danger) 45%, transparent); background:transparent; color:var(--danger); }
+  .ui-badge[data-tone=up] { border-color:color-mix(in srgb, var(--up) 45%, transparent); background:transparent; color:var(--up); }
+  .ui-badge[data-tone=down] { border-color:color-mix(in srgb, var(--down) 45%, transparent); background:transparent; color:var(--down); }
 
   .ui-kbd { display:inline-grid; place-items:center; min-width:var(--size-18); height:var(--size-18); }
 

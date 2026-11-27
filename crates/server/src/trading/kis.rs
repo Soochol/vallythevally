@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::num::NonZeroU64;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -244,6 +244,8 @@ struct DailyFillsReply {
 
 #[derive(Deserialize, Default)]
 struct DailyFillRow {
+    #[serde(default)]
+    ord_dt: String,
     #[serde(default)]
     odno: String,
     #[serde(default)]
@@ -506,10 +508,16 @@ impl Trading {
     }
 
     pub(super) async fn kis_executions(&self, desk: &KisDesk, day: KstDate, priority: Priority) -> Result<Vec<api::TradingExecution>, TradingError> {
-        let day_text = day.yyyymmdd();
+        let mut by_day = self.kis_executions_range(desk, day, day, priority).await?;
+        Ok(by_day.remove(&day).unwrap_or_default())
+    }
+
+    pub(super) async fn kis_executions_range(&self, desk: &KisDesk, from: KstDate, to: KstDate, priority: Priority) -> Result<BTreeMap<KstDate, Vec<api::TradingExecution>>, TradingError> {
+        let from_text = from.yyyymmdd();
+        let to_text = to.yyyymmdd();
         let query = [
-            ("INQR_STRT_DT", day_text.as_str()),
-            ("INQR_END_DT", day_text.as_str()),
+            ("INQR_STRT_DT", from_text.as_str()),
+            ("INQR_END_DT", to_text.as_str()),
             ("SLL_BUY_DVSN_CD", "00"),
             ("PDNO", ""),
             ("CCLD_DVSN", "01"),
@@ -523,15 +531,19 @@ impl Trading {
         .into_iter()
         .map(|(k, v)| (k, v.to_owned()))
         .collect();
-        let mut executions = Vec::new();
+        let mut by_day: BTreeMap<KstDate, Vec<api::TradingExecution>> = BTreeMap::new();
         for row in self.kis_pages::<DailyFillsReply>(desk, KisTradingApiId::DailyFills, query, true, priority).await?.into_iter().flat_map(|page| page.output1) {
             let quantity = unsigned(&row.tot_ccld_qty)?;
             if quantity == 0 {
                 continue;
             }
+            let row_day = match row.ord_dt.trim() {
+                "" if from == to => from,
+                raw => KstDate::parse_yyyymmdd(raw).ok_or(TradingError::Unreadable("주문일자"))?,
+            };
             let order_no = kis_order_number(&row.odno).ok_or(TradingError::Unreadable("주문번호"))?;
-            let venue = self.fill_venues.of(order_no.as_str(), day).or_else(|| route_of(&row.excg_id_dvsn_cd).map(venue_of)).ok_or(TradingError::Unreadable("거래소구분"))?;
-            executions.push(api::TradingExecution {
+            let venue = self.fill_venues.of(order_no.as_str(), row_day).or_else(|| route_of(&row.excg_id_dvsn_cd).map(venue_of)).ok_or(TradingError::Unreadable("거래소구분"))?;
+            by_day.entry(row_day).or_default().push(api::TradingExecution {
                 order_no: order_no.as_str().to_owned(),
                 code: stock_code(&row.pdno)?,
                 name: row.prdt_name.trim().to_owned(),
@@ -542,7 +554,7 @@ impl Trading {
                 venue: venue.into(),
             });
         }
-        Ok(executions)
+        Ok(by_day)
     }
 
     pub(super) async fn kis_send_once(&self, desk: &KisDesk, outbound: &KisOutbound) -> (Result<KisPage, KisError>, bool) {

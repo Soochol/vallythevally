@@ -16,6 +16,7 @@ import {
   formatPct,
   formatPeriodLabel,
   formatWon,
+  isPeriodAtToday,
   resolveNote,
   toneClass,
   tradePnl,
@@ -24,6 +25,7 @@ import {
 import { useJournalStore } from "./journalStore";
 import {
   DEFAULT_TAGS,
+  JOURNAL_TFS,
   STYLE_LABELS,
   STYLE_SHORT,
   type JournalFill,
@@ -41,6 +43,10 @@ interface Props {
   readonly range: readonly [string, string];
   readonly today: string;
   readonly hasRealTrades: boolean;
+  readonly isSyncingHistory: boolean;
+  readonly pendingDays: number;
+  readonly historyError: string | null;
+  readonly onRetryHistory: () => void;
 }
 
 export function JournalStudioView({
@@ -52,6 +58,10 @@ export function JournalStudioView({
   range,
   today,
   hasRealTrades,
+  isSyncingHistory,
+  pendingDays,
+  historyError,
+  onRetryHistory,
 }: Props) {
   const navigate = useNavigate();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -156,8 +166,8 @@ export function JournalStudioView({
         const delta = e.key === "ArrowDown" || e.key === "j" ? 1 : -1;
         const nextIdx = clamp((curIdx < 0 ? 0 : curIdx) + delta, 0, sortedList.length - 1);
         selectTrade(sortedList[nextIdx]!.id);
-      } else if (e.key === "1" || e.key === "5" || e.key.toLowerCase() === "d") {
-        setTf(e.key.toUpperCase() as "1" | "5" | "D");
+      } else if (e.key === "1" || e.key === "3" || e.key === "5" || e.key.toLowerCase() === "d") {
+        setTf(e.key.toUpperCase() as "1" | "3" | "5" | "D");
       } else if (e.key === "0") {
         setResetTick((v) => v + 1);
       }
@@ -176,7 +186,7 @@ export function JournalStudioView({
 
   const selectedNote = selectedTrade ? resolveNote(selectedTrade, notes) : null;
   const sumTone = toneClass(summary.net);
-  const isAtToday = range[1] >= today;
+  const isAtToday = isPeriodAtToday(period, range, today);
 
   const triggerFlash = () => {
     setSavedFlash(true);
@@ -272,6 +282,16 @@ export function JournalStudioView({
             )}
           </div>
           <span className="jrn-grow" />
+          {isSyncingHistory && (
+            <span className="jrn-mute jrn-fs-xs" data-testid="journal-sync-status">
+              {pendingDays > 0 ? `과거 체결 불러오는 중 (${pendingDays}일 남음)` : "체결 불러오는 중…"}
+            </span>
+          )}
+          {historyError !== null && (
+            <button type="button" className="jrn-txt-btn" data-testid="journal-retry-history" onClick={onRetryHistory}>
+              {`${historyError} · 다시 시도`}
+            </button>
+          )}
           {demoMode && (
             <button type="button" className="jrn-txt-btn" onClick={() => setDemoMode(false)}>
               예시 데이터 닫기
@@ -331,9 +351,11 @@ export function JournalStudioView({
               {sortedList.length === 0 ? (
                 <div className="jrn-empty" data-testid="journal-empty-state">
                   <p>
-                    {tokens.length > 0 || quick !== "all"
-                      ? "이 조건에 맞는 거래가 없습니다"
-                      : "이 기간에 청산한 거래가 없습니다"}
+                    {isSyncingHistory
+                      ? "이 기간의 체결 내역을 불러오는 중입니다"
+                      : tokens.length > 0 || quick !== "all"
+                        ? "이 조건에 맞는 거래가 없습니다"
+                        : "이 기간에 청산한 거래가 없습니다"}
                   </p>
                   <div className="jrn-empty-actions">
                     {tokens.length > 0 || quick !== "all" ? (
@@ -424,7 +446,7 @@ export function JournalStudioView({
 
             <div className="jrn-keys">
               <span><kbd>↑</kbd><kbd>↓</kbd>이동</span>
-              <span><kbd>1</kbd><kbd>5</kbd><kbd>D</kbd>봉 주기</span>
+              <span><kbd>1</kbd><kbd>3</kbd><kbd>5</kbd><kbd>D</kbd>봉 주기</span>
               <span><kbd>0</kbd>맞춤</span>
               <span><kbd>Esc</kbd>조건 해제</span>
             </div>
@@ -456,9 +478,9 @@ export function JournalStudioView({
                       </span>
                     </div>
                     <div className="jrn-seg" role="group" aria-label="봉 주기">
-                      {(["1", "5", "D"] as const).map((tf) => (
+                      {JOURNAL_TFS.map(({ tf, label }) => (
                         <button key={tf} type="button" aria-pressed={activeTf === tf} onClick={() => setTf(tf)}>
-                          {tf === "1" ? "1분" : tf === "5" ? "5분" : "일봉"}
+                          {label}
                         </button>
                       ))}
                     </div>
@@ -495,6 +517,7 @@ export function JournalStudioView({
                 <JournalCandleChart
                   trade={selectedTrade}
                   tf={activeTf}
+                  today={today}
                   isAutoTf={tfOverride === null}
                   afterCost={afterCost}
                   highlightFill={highlightFill}

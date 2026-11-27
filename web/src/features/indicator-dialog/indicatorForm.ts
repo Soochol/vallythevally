@@ -196,7 +196,7 @@ export function indicatorPeriodNotice(kind: IndicatorKind): string | null {
   if (isFinancial(spec)) return "분기봉·연봉의 보고기간별 자료입니다. DPS는 연간 전용이며 다른 봉 주기에서는 설정을 보존하고 숨깁니다.";
   if (isQuote(spec)) return "주식·ETF 분봉의 호가 자료입니다. 일봉 이상이나 지수에서는 설정을 보존하고 숨깁니다.";
   if (isInvestorFlow(spec)) return "주식·ETF 일봉 이상(일·주·월·분기·연봉)의 투자자별 순매수 자료입니다. 억 원 단위는 일별 순매수 주수에 종가를 곱한 추정치이며, 분봉이나 지수에서는 설정을 보존하고 안내 문구만 보입니다.";
-  if (isProgramFlow(spec)) return "주식·ETF 분봉(0w 수집·실시간)과 일봉 이상(일별 수집 집계)의 프로그램 순매수 자료입니다. 지수에서는 안내 문구만 보입니다.";
+  if (isProgramFlow(spec)) return "주식·ETF 분봉(0w 수집·실시간)과 일봉 이상(일별 프로그램 매매·당일 실시간)의 프로그램 순매수 자료입니다. 지수에서는 안내 문구만 보입니다.";
   if (isTickCvd(spec)) return "주식·ETF 분봉의 체결 수급 자료입니다. 일봉 이상이나 지수에서는 안내 문구만 보입니다.";
   return null;
 }

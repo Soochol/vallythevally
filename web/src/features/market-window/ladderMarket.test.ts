@@ -47,6 +47,28 @@ describe("resolveLadderMarket", () => {
     expect(resolved.pastRows).toHaveLength(0);
   });
 
+  it("locks orders immediately when replayEnabled is true even while replay view is still live", () => {
+    const resolved = resolveLadderMarket({
+      book: LIVE_BOOK,
+      afterHours: null,
+      lastPrice: 70_000,
+      previousClose: 69_500,
+      fundamentals: { lowerLimit: 48_650, upperLimit: 90_350 } as never,
+      symbolKind: "common",
+      replay: { kind: "live" },
+      replayEnabled: true,
+      vi: null,
+      nowSeconds: 1_764_032_400,
+      serverNowSeconds: 1_764_032_400,
+      skipSpreadGap: false,
+    });
+
+    expect(resolved.replayLocked).toBe(true);
+    expect(resolved.view).toBe(LIVE_VIEW);
+    expect(resolved.headPrice).toBe(70_000);
+    expect(resolved.totals).toEqual({ ask: 1_000, bid: 2_000, source: "regular", description: null });
+  });
+
   it("clears previousClose and bounds for a prior-day replay and builds pastRows", () => {
     const pastReplay: ReplayView = {
       kind: "past",

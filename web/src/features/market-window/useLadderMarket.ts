@@ -10,7 +10,7 @@ import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useSymbolVi } from "../../stores/symbolVi";
 import { type BookFeed, useBookFeed } from "../book/useBookFeed";
 import type { ReplayView } from "../book-replay/replay";
-import { useBookReplay, useBookReplayEnabled } from "../book-replay/useBookReplay";
+import { useBookReplay, useBookReplayEnabled, useBookReplayOrderLock } from "../book-replay/useBookReplay";
 import type { LastTrade, TradeRow } from "../trades/tape";
 import { useTradeTape } from "../trades/useTradeTape";
 import { useFeedDownSince } from "./FeedStrip";
@@ -62,6 +62,7 @@ export interface LadderMarket extends ResolvedLadderMarket {
 export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGap: boolean): LadderMarket {
   const venue = useShownVenue(code);
   const replayEnabled = useBookReplayEnabled();
+  const replayOrderLock = useBookReplayOrderLock();
   const replay = useBookReplay(code);
   const liveEnabled = replay.kind === "live";
   const { state: tapeState, dispatch: tapeDispatch } = useTradeTape(marketSocket, code, venue, HISTORY_PAGES, liveEnabled);
@@ -103,6 +104,7 @@ export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGa
         fundamentals,
         symbolKind: symbolInfo?.kind ?? null,
         replay,
+        replayEnabled: replayOrderLock,
         vi,
         nxtVi,
         venue,
@@ -111,7 +113,7 @@ export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGa
         serverNowSeconds,
         skipSpreadGap,
       }),
-    [feed.book, feed.afterHours, feed.lastPrice, feed.previousClose, fundamentals, symbolInfo?.kind, replay, vi, nxtVi, venue, nxtEnabled, nowSeconds, serverNowSeconds, skipSpreadGap],
+    [feed.book, feed.afterHours, feed.lastPrice, feed.previousClose, fundamentals, symbolInfo?.kind, replay, replayOrderLock, vi, nxtVi, venue, nxtEnabled, nowSeconds, serverNowSeconds, skipSpreadGap],
   );
 
   const viInfo = useViInfo({ code, vi, shown: pager.page === 1, regularSession: resolved.regularSession, now: nowSeconds, tickRule: resolved.tickRule });

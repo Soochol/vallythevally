@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { Venue } from "../../api/generated/Venue";
@@ -11,11 +11,12 @@ import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useCallAuctionSession } from "../../stores/callAuctionSession";
 import { useViSession } from "../../stores/viSession";
-import { FeedStrip } from "../market-window/FeedStrip";
+import { disableBookReplay } from "../book-replay/useBookReplay";
+import { ClockIcon } from "../icons";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
-import { FooterRatioBar, TotalFigure, TotalRatioToggle } from "../market-window/parts";
+import { LadderFooter, TotalFigure } from "../market-window/parts";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
 import { EmptyState, ErrorState } from "../overlay/State";
@@ -28,18 +29,19 @@ import { HoldingSummary } from "./HoldingSummary";
 import { FALLBACK_NOTICE, type OrderAccountChoice } from "./orderAccount";
 import { orderEntryKey } from "./orderEntries";
 import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
-import { typedQuantity } from "./orderRules";
+import { type BuyRatioPercent, type PriceGroup, type PriceKey, typedQuantity } from "./orderRules";
 import { ladderRowHeightPx, type PresetMode } from "./orderSettings";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { OrderStatusBar } from "./OrderStatusBar";
 import { OrderTotalCell } from "./OrderTotals";
 import { fullRangePrices } from "./priceRange";
 import { QuantityRow } from "./QuantityRow";
+import { REPLAY_LOCKED_TEXT, REPLAY_UNLOCK_LABEL, statusOfReplayLocked } from "./statusText";
 import { useAccountBalance } from "./useAccountBalance";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderCommands } from "./useOrderCommands";
 import { type OrderAccess, useOrderAccess, useOrderData } from "./useOrderData";
-import { useOrderDrag } from "./useOrderDrag";
+import { type OrderDrag, useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
 import { ExpectedHeaderBar } from "./ExpectedHeaderBar";
 import { ViOrderOverlay } from "./ViOrderOverlay";
@@ -55,6 +57,42 @@ function useHeldWhile<T>(value: T, hold: boolean, same: (a: T, b: T) => boolean 
 
 const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boolean =>
   a === b || (a !== null && b !== null && a.sidesSplit === b.sidesSplit && a.prices.length === b.prices.length && a.prices.every((price, row) => price === b.prices[row]));
+
+interface OrderFooterProps {
+  readonly ask: number | null;
+  readonly bid: number | null;
+  readonly afterHours: boolean;
+  readonly description: string | null;
+  readonly groups: ReadonlyMap<string, PriceGroup>;
+  readonly writable: boolean;
+  readonly replayLocked: boolean;
+  readonly onReplayBlocked: () => void;
+  readonly actions: { cancelOne(orderNo: string): void; cancelGroups(keys: readonly PriceKey[]): void };
+  readonly drag: OrderDrag;
+}
+
+const OrderFooter = memo(function OrderFooter({ ask, bid, afterHours, description, groups, writable, replayLocked, onReplayBlocked, actions, drag }: OrderFooterProps) {
+  return (
+    <LadderFooter
+      className="od-footer"
+      testId="order-totals"
+      ask={ask}
+      bid={bid}
+      left={(
+        <>
+          <OrderTotalCell side="sell" groups={groups} writable={writable} replayLocked={replayLocked} onReplayBlocked={onReplayBlocked} actions={actions} drag={drag} />
+          <TotalFigure testId="order-total-ask" tone="down" value={ask} afterHours={afterHours} description={description} hideAfterHoursTag />
+        </>
+      )}
+      right={(
+        <>
+          <TotalFigure testId="order-total-bid" tone="up" value={bid} afterHours={afterHours} description={description} hideAfterHoursTag />
+          <OrderTotalCell side="buy" groups={groups} writable={writable} replayLocked={replayLocked} onReplayBlocked={onReplayBlocked} actions={actions} drag={drag} />
+        </>
+      )}
+    />
+  );
+});
 
 function OrderBody({
   id,
@@ -86,7 +124,7 @@ function OrderBody({
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
   const [kept] = useState(() => { const { prefs } = useUiStore.getState(); return prefs.orderSettings.keepLastEntry ? prefs.orderEntries[entryKey] ?? null : null; });
   const [input, setInput] = useState(kept === null ? String(DEFAULT_ORDER_QUANTITY) : String(kept.quantity));
-  const [buyFull, setBuyFull] = useState(false);
+  const [buyRatio, setBuyRatio] = useState<BuyRatioPercent | null>(null);
   const [hover] = useState(() => createValueStore<HoverCell | null>(null));
   const [exploring, setExploring] = useState(false);
   const [profitUnit, setProfitUnit] = useState<ProfitUnit>("won");
@@ -97,10 +135,14 @@ function OrderBody({
   const liveLadder = liveQuotes ? defaultLadderPrices({ ...liveQuotes, bounds, tickRule, skipSpreadGap: settings.skipSpreadGap }) : null;
   const referencePrice = feed.lastPrice ?? feed.previousClose ?? liveBase;
   const fullPrices = useMemo(() => fullRangePrices(bounds, tickRule), [bounds.lower, bounds.upper, tickRule]);
-  const explorerOn = !replayLocked && exploring && fullPrices !== null;
+  const replayViewingPast = replay.kind !== "live";
+  const explorerOn = !replayViewingPast && exploring && fullPrices !== null;
 
   const data = useOrderData(accountRef, code, access.open, referencePrice, balance);
-  const writes = useOrderWrites(choice.current, code, orderVenue, id);
+  const writes = useOrderWrites(choice.current, code, orderVenue, id, {
+    blocked: replayLocked,
+    onBlocked: () => statusOfReplayLocked(disableBookReplay),
+  });
   const fellBack = choice.fellBack;
   useEffect(() => {
     if (!fellBack) return;
@@ -108,11 +150,16 @@ function OrderBody({
     const { prefs } = useUiStore.getState();
     setSettings({ ...prefs.orderSettings, account: null });
   }, [fellBack]);
+  useEffect(() => {
+    if (!replayLocked && writes.status?.text === REPLAY_LOCKED_TEXT) writes.dismiss();
+  }, [replayLocked, writes.status?.text, writes.dismiss]);
 
   const holding = useMemo(() => atLivePrice(holdingOf(data.balance?.holdings ?? [], code), feed.lastPrice), [data.balance, code, feed.lastPrice]);
   const writable = access.open && !data.blocked && writes.status?.unknown !== true;
+  const canOrder = writable && !replayLocked;
   const quantity = typedQuantity(input);
-  const buyFullActive = buyFull && settings.presetMode === "buy";
+  const buyRatioActive = settings.presetMode === "buy" ? buyRatio : null;
+  const clearBuyRatio = useCallback(() => setBuyRatio(null), []);
 
   const commands = useOrderCommands(
     {
@@ -124,7 +171,7 @@ function OrderBody({
       nxtNotTraded,
       replayLocked,
       quantity,
-      buyFull: buyFullActive,
+      buyRatio: buyRatioActive,
       keepLastEntry: settings.keepLastEntry,
       capacity: data.capacity,
       groups: data.groups,
@@ -132,6 +179,8 @@ function OrderBody({
     },
     writes,
     (nextQuantity, usedAt) => rememberEntry(entryKey, { quantity: nextQuantity, usedAt }),
+    clearBuyRatio,
+    disableBookReplay,
   );
 
   const drag = useOrderDrag(ladder, (source, outcome) => commands.drop(source, outcome));
@@ -154,27 +203,26 @@ function OrderBody({
 
   const pickAccount = useStableCallback((account: string) => setSettings({ ...settings, account }));
   const changePresetMode = useStableCallback((presetMode: PresetMode) => {
-    setBuyFull(false);
+    setBuyRatio(null);
     const { prefs } = useUiStore.getState();
     setSettings({ ...prefs.orderSettings, presetMode });
   });
-  const applyInput = useStableCallback((nextInput: string, nextBuyFull: boolean) => {
-    setBuyFull(nextBuyFull);
+  const changeInput = useStableCallback((nextInput: string) => {
+    setBuyRatio(null);
     setInput(nextInput);
     if (!useUiStore.getState().prefs.orderSettings.keepLastEntry) return;
     const nextQuantity = typedQuantity(nextInput);
     if (nextQuantity > 0) rememberEntry(entryKey, { quantity: nextQuantity, usedAt: Date.now() });
   });
-  const changeInput = useStableCallback((nextInput: string) => applyInput(nextInput, false));
   const toggleProfitUnit = useCallback(() => setProfitUnit(toggledUnit), []);
   const toggleExplorer = useStableCallback(() => {
-    if (replayLocked) return;
+    if (replayViewingPast) return;
     setExploring((was) => !was);
   });
 
   const ladderActions = useMemo<LadderActions>(
-    () => ({ place: commands.place, cancelOne: commands.cancelLadderOne, cancelGroups: commands.cancelLadderGroups }),
-    [commands.place, commands.cancelLadderOne, commands.cancelLadderGroups],
+    () => ({ place: commands.place, cancelOne: commands.cancelOne, cancelGroups: commands.cancelGroups }),
+    [commands.place, commands.cancelOne, commands.cancelGroups],
   );
   const totalsActions = useMemo(
     () => ({ cancelOne: commands.cancelOne, cancelGroups: commands.cancelGroups }),
@@ -195,13 +243,26 @@ function OrderBody({
     : undefined;
 
   const rowHeightPx = ladderRowHeightPx(settings.ladderDensity);
+  const feedStatus = useMemo(
+    () => ({ connected: feed.connected, rejected: feed.rejected, downSince: market.downSince }),
+    [feed.connected, feed.rejected, market.downSince],
+  );
 
   return (
-    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-ladder-density={settings.ladderDensity} data-replay={replay.kind === "live" ? undefined : replay.kind}>
+    <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={canOrder ? "" : undefined} data-replay-locked={replayLocked ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-ladder-density={settings.ladderDensity} data-replay={replay.kind === "live" ? undefined : replay.kind}>
       {access.reason && (
         <div className="od-gate" role="status" data-testid="order-gate">
           <span>{access.reason}</span>
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
+        </div>
+      )}
+      {replayLocked && (
+        <div className="od-replay-banner" role="status" data-testid="order-replay-banner">
+          <span className="od-replay-banner-icon" aria-hidden="true"><ClockIcon size={14} /></span>
+          <span className="od-replay-banner-text">호가 복기 중 · 주문 잠금 (해제해야 주문 가능)</span>
+          <button type="button" className="od-replay-unlock" data-testid="order-replay-unlock" onClick={disableBookReplay}>
+            {REPLAY_UNLOCK_LABEL}
+          </button>
         </div>
       )}
       <AccountBand
@@ -216,7 +277,8 @@ function OrderBody({
         balance={data.balance}
         holding={holding}
         executions={data.executions}
-        writable={writable}
+        writable={canOrder}
+        cancelDisabledTitle={replayLocked ? REPLAY_LOCKED_TEXT : undefined}
         mock={mock}
         onCancel={commands.cancelOne}
         panel={accountPanel}
@@ -227,6 +289,7 @@ function OrderBody({
       <QuantityRow
         input={input}
         mode={settings.presetMode}
+        buyRatio={buyRatioActive}
         amountPresets={settings.amountPresets}
         referencePrice={referencePrice}
         buying={data.capacity.buying}
@@ -234,14 +297,13 @@ function OrderBody({
         hasHolding={hasHolding}
         onMode={changePresetMode}
         onInput={changeInput}
-        onPreset={applyInput}
+        onBuyRatio={setBuyRatio}
       />
-      {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} headerOverlay={headerOverlay} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable} replayLocked={replayLocked} onReplayBlocked={commands.notifyReplayLocked} previewQuantity={quantity} buyRatio={buyRatioActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayViewingPast || referencePrice === null || fullPrices === null} explorerTitle={replayViewingPast ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} headerOverlay={headerOverlay} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (
@@ -249,19 +311,19 @@ function OrderBody({
         )}
         <ViOrderOverlay band="bottom" state={viState} previousClose={market.headPreviousClose} />
       </div>
-      <div className="od-footer" data-testid="order-totals">
-        <FooterRatioBar ask={totals.ask} bid={totals.bid} />
-        <div className="od-footer-side">
-          <OrderTotalCell side="sell" groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
-          <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-        </div>
-        <TotalRatioToggle ask={totals.ask} bid={totals.bid} />
-        <div className="od-footer-side">
-          <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-          <OrderTotalCell side="buy" groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
-        </div>
-      </div>
-      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} replay={market.replayEnabled ? replay : null} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
+      <OrderFooter
+        ask={totals.ask}
+        bid={totals.bid}
+        afterHours={totals.source === "afterHours"}
+        description={totals.description}
+        groups={data.groups}
+        writable={writable}
+        replayLocked={replayLocked}
+        onReplayBlocked={commands.notifyReplayLocked}
+        actions={totalsActions}
+        drag={drag}
+      />
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} feed={feedStatus} replay={market.replayEnabled ? replay : null} onUndo={commands.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       <DragGhost drag={drag} />
       {commands.confirm && <HighValueConfirm request={commands.confirm} onClose={commands.clearConfirm} />}
     </div>

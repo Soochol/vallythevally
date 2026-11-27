@@ -11,7 +11,14 @@ export const MARGIN_SETTLEMENT_TEXT = "결제일(D+2)까지 입금";
 
 export const MOCK_KRX_ONLY_TEXT = "모의투자는 KRX 주문만 됩니다";
 
-export const REPLAY_LOCKED_TEXT = "과거 호가를 보는 동안에는 주문할 수 없습니다";
+export const REPLAY_LOCKED_TEXT = "호가 복기를 해제해야 주문이 들어갑니다";
+export const REPLAY_UNLOCK_LABEL = "호가 복기 해제";
+
+export const statusOfReplayLocked = (onUnlock: () => void): OrderStatus => ({
+  tone: "error",
+  text: REPLAY_LOCKED_TEXT,
+  action: { label: REPLAY_UNLOCK_LABEL, run: onUnlock },
+});
 
 export const REJECT_TEXT: Readonly<Record<OrderRejectReason, string>> = {
   orders_off: "주문 사용이 꺼져 있습니다",

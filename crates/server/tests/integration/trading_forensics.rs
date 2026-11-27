@@ -382,7 +382,7 @@ async fn forensics_endpoint_returns_uncollected_fallback_without_collector_data(
 }
 
 #[tokio::test]
-async fn forensics_endpoint_returns_empty_items_for_mismatched_past_date() {
+async fn forensics_endpoint_fetches_past_date_executions_and_mismatched_day_stays_empty() {
     let tmp = tempfile::tempdir().unwrap();
     let hoga = tmp.path().join("hoga");
     let past_date = KstDate::parse_yyyymmdd("20261119").unwrap();
@@ -400,13 +400,34 @@ async fn forensics_endpoint_returns_empty_items_for_mismatched_past_date() {
         )],
     );
 
-    let executions = vec![execution_row("0000301", "005930", "삼성전자", "buy", 10, 70_000, "09:30:00")];
+    let executions = vec![execution_row("0000301", "005930", "삼성전자", "buy", 10, 65_000, "09:30:00")];
     let h = Harness::start(now, Some(hoga), executions, &[("005930", "삼성전자")]).await;
 
     let (status, body) = h.get("/api/trading/executions/forensics?date=20261119").await;
     assert_eq!(status, 200);
     assert_eq!(body["date"], "20261119");
-    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["collected"], true);
+
+    let today_fills = h.state.accounts.executions(None).await.unwrap();
+    let cache = server::trading::forensics::ForensicsCache::new();
+    let mismatched = server::trading::forensics::compute_forensics(server::trading::forensics::ForensicsInputs {
+        collected: &h.state.collected,
+        micro_events: &h.state.micro_events,
+        db: &h.state.db,
+        symbols: &h.state.symbols,
+        cache: &cache,
+        paths: h.state.collector_paths.snapshot(),
+        date: past_date,
+        date_str: "20261119",
+        account_query: None,
+        executions: &today_fills,
+        now,
+    })
+    .await
+    .unwrap();
+    assert!(mismatched.items.is_empty());
 }
 
 #[tokio::test]

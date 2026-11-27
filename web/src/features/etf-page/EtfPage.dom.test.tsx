@@ -186,6 +186,7 @@ test("ETF 변경 이력 타임라인, 쌍 선택, CU 보정 토글, 단일 수�
 
   const table = await screen.findByRole("table", { name: "종목별 증감 표" });
   expect(within(table).getByText("SK하이닉스")).toBeTruthy();
+  expect(within(table).getByText("늘림").getAttribute("data-tone")).toBe("up");
   expect(table.textContent).toContain("+27.7%");
   expect(table.textContent).toContain("유지");
 
@@ -208,10 +209,12 @@ test("자금 유입(flows) 및 ETF 매수 축적(accumulation) 탭 전환과 상
   const { client } = renderEtf("/etf?code=444200&tab=flows");
 
   expect((await screen.findAllByText("KODEX AI반도체")).length).toBeGreaterThanOrEqual(1);
+  expect((await screen.findByText("▲ 3일")).getAttribute("data-tone")).toBe("up");
 
   fireEvent.click(screen.getByRole("tab", { name: "동시 매집" }));
   const toggleBtn = await screen.findByRole("button", { name: "SK하이닉스 매집 ETF 펼치기" });
   fireEvent.click(toggleBtn);
   expect((await screen.findAllByText("KODEX AI반도체")).length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByText("늘림").getAttribute("data-tone")).toBe("up");
   client.clear();
 });

@@ -380,14 +380,49 @@ test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 �
   await expect(page.getByTestId("replay-ladder-clock")).toHaveText("09:00:10");
 
   await page.getByRole("group", { name: "프리셋 기준" }).getByRole("button", { name: "매수", exact: true }).click();
-  await page.getByRole("group", { name: "주문 수량 프리셋" }).getByRole("button", { name: "전량", exact: true }).click();
-
+  const qtyInput = page.getByTestId("replay-sim-qty-input");
+  const presetGroup = page.getByRole("group", { name: "주문 수량 프리셋" });
+  const btn50 = presetGroup.getByRole("button", { name: "50%", exact: true });
+  const btnFull = presetGroup.getByRole("button", { name: "전량", exact: true });
   const higherAskBuyCell = page.locator('[data-testid="replay-sim-buy-cell"][data-price="71300"]');
+  const bidBuyCell = page.locator('[data-testid="replay-sim-buy-cell"][data-price="71000"]');
+
+  await expect(qtyInput).toHaveValue("50");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveValue("50");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
+  await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 210");
+  await expect(bidBuyCell.locator(".od-preview")).toHaveText("매수 211");
+
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 50");
+
+  await btnFull.click();
+  await expect(btnFull).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveValue("50");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
   await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 420");
   await expect(higherAskBuyCell.locator(".od-preview")).not.toHaveAttribute("data-over", "");
   await higherAskBuyCell.click();
   await expect(page.getByTestId("replay-sim-qty")).toHaveText("420주");
   await expect(page.getByTestId("replay-sim-status")).toHaveAttribute("data-tone", "ok");
+  await expect(btnFull).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await expect(qtyInput).toHaveValue("50");
+
+  await page.getByTestId("replay-sim-reset").click();
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
+  await qtyInput.fill("25");
+  await expect(btn50).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 25");
 
   const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");
@@ -562,4 +597,208 @@ test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵
 
   await brokersPane.getByTestId("replay-broker-view-board").click();
   await expect(brokersPane.getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "복합", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("체결창 수동 스크롤 고정·새 체결 배지·과거 대량 체결 소급 백필과 차트 헤더 범위 버튼 제거가 동작한다", async ({ page, scenario }) => {
+  const m545 = 545 * 60_000;
+  const m550 = 550 * 60_000;
+  const span540Big = new Uint8Array(
+    encodeHogaSpan({
+      date: 20261125,
+      startMinute: 540,
+      lengthMinutes: 5,
+      symbol: `${CODE}_AL`,
+      streams: [
+        {
+          kind: "trades",
+          columns: {
+            recv_ms: [M540 + 15_000],
+            t_s: [32_415],
+            price: [70_000],
+            qty: [2_000],
+            venue: [1],
+          },
+        },
+      ],
+    }),
+  );
+  const span545Big = new Uint8Array(
+    encodeHogaSpan({
+      date: 20261125,
+      startMinute: 545,
+      lengthMinutes: 5,
+      symbol: `${CODE}_AL`,
+      streams: [
+        {
+          kind: "trades",
+          columns: {
+            recv_ms: [m545 + 20_000],
+            t_s: [32_720],
+            price: [70_000],
+            qty: [-600],
+            venue: [1],
+          },
+        },
+      ],
+    }),
+  );
+  const smallCount = 120;
+  const span550Recv = Array.from({ length: smallCount + 2 }, (_, i) =>
+    i < smallCount ? m550 + (i + 1) * 400 : m550 + 62_000 + (i - smallCount) * 1_000,
+  );
+  const span550Ts = span550Recv.map((ms) => Math.floor(ms / 1000));
+  const span550Price = Array.from({ length: smallCount + 2 }, () => 71_000);
+  const span550Qty = Array.from({ length: smallCount + 2 }, (_, i) => (i % 2 === 0 ? 15 : -10));
+  const span550Venue = Array.from({ length: smallCount + 2 }, () => 1);
+  const span550Many = new Uint8Array(
+    encodeHogaSpan({
+      date: 20261125,
+      startMinute: 550,
+      lengthMinutes: 5,
+      symbol: `${CODE}_AL`,
+      streams: [
+        {
+          kind: "book",
+          columns: {
+            recv_ms: [m550],
+            t_s: [33_000],
+            ask_px1: [71_100],
+            bid_px1: [71_000],
+            ask_qty1: [1_000],
+            bid_qty1: [1_000],
+            ask_total: [1_000],
+            bid_total: [1_000],
+          },
+        },
+        {
+          kind: "trades",
+          columns: {
+            recv_ms: span550Recv,
+            t_s: span550Ts,
+            price: span550Price,
+            qty: span550Qty,
+            venue: span550Venue,
+          },
+        },
+      ],
+    }),
+  );
+
+  const metaMulti: BookReplayMeta = {
+    symbol: CODE,
+    date: DATE,
+    coverage: "collected",
+    resolution: "tick",
+    spanMinutes: 5,
+    covered: [[540, 554]],
+    gapsMs: [],
+    spans: [
+      { startMinute: 540, bookRows: 0, tradeRows: 1, programRows: 0 },
+      { startMinute: 545, bookRows: 0, tradeRows: 1, programRows: 0 },
+      { startMinute: 550, bookRows: 1, tradeRows: smallCount + 2, programRows: 0 },
+    ],
+    minutes: [
+      {
+        minute: 550,
+        open: 71_000,
+        high: 71_000,
+        low: 71_000,
+        close: 71_000,
+        volume: 1_500,
+        cumVol: 2_600,
+        cumVal: 182_000_000,
+        cumBuyQty: 2_000,
+        cumSellQty: 600,
+        dayOpen: 70_000,
+        dayHigh: 71_000,
+        dayLow: 70_000,
+        totalAsk: 1_000,
+        totalBid: 1_000,
+        programNetQty: null,
+        programNetAmtMillion: null,
+        singlePrice: false,
+      },
+      {
+        minute: 551,
+        open: 71_000,
+        high: 71_000,
+        low: 71_000,
+        close: 71_000,
+        volume: 25,
+        cumVol: 4_100,
+        cumVal: 288_500_000,
+        cumBuyQty: 2_900,
+        cumSellQty: 1_200,
+        dayOpen: 70_000,
+        dayHigh: 71_000,
+        dayLow: 70_000,
+        totalAsk: 1_000,
+        totalBid: 1_000,
+        programNetQty: null,
+        programNetAmtMillion: null,
+        singlePrice: false,
+      },
+    ],
+  };
+
+  seedCommon(scenario);
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay/meta` && url.searchParams.get("date") === DATE,
+    { body: metaMulti },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay/span` && url.searchParams.get("startMinute") === "540",
+    { body: span540Big },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay/span` && url.searchParams.get("startMinute") === "545",
+    { body: span545Big },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay/span` && url.searchParams.get("startMinute") === "550",
+    { body: span550Many },
+  );
+
+  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
+  await expect(page.getByTestId("replay-page")).toBeVisible();
+  await expect(page.getByRole("group", { name: "차트 범위" })).toHaveCount(0);
+  await expect(page.getByTestId("replay-deck").getByRole("button", { name: "±5분 정밀", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "+1m", exact: true }).click();
+  await expect(page.getByTestId("replay-clock")).toHaveText("09:11:00.000");
+
+  const tape = page.getByTestId("replay-tape");
+  await expect.poll(() => tape.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+
+  await tape.evaluate((el) => {
+    el.scrollTop = 360;
+    el.dispatchEvent(new Event("scroll"));
+  });
+  await expect(tape).toHaveAttribute("data-pinned", "true");
+  const returnTopBtn = page.getByTestId("replay-tape-return-top");
+  await expect(returnTopBtn).toHaveText("↑ 맨 위로");
+
+  const frozenFirstTime = await page.getByTestId("replay-tape-row").first().locator(".tr-time").textContent();
+
+  await page.getByTestId("replay-mode-switch").getByRole("button", { name: "틱 단위", exact: true }).click();
+  await page.getByRole("group", { name: "틱 대상 선택" }).getByRole("button", { name: "체결만", exact: true }).click();
+  await page.getByRole("button", { name: "+1틱", exact: true }).click();
+  await page.getByRole("button", { name: "+1틱", exact: true }).click();
+
+  await expect(returnTopBtn).toHaveText("↑ 새 체결 2건 · 맨 위로");
+  await expect(page.getByTestId("replay-tape-row").first().locator(".tr-time")).toHaveText(frozenFirstTime!);
+
+  await returnTopBtn.click();
+  await expect(tape).toHaveAttribute("data-pinned", "false");
+  await expect(returnTopBtn).toHaveCount(0);
+  await expect(page.getByTestId("replay-tape-row").first().locator(".tr-time")).toHaveText("09:11:03");
+
+  await page.getByRole("group", { name: "체결 금액 필터" }).getByRole("button", { name: "3천만", exact: true }).click();
+  await expect(page.getByTestId("replay-tape-row")).toHaveCount(2);
+  await expect(page.getByTestId("replay-tape-row").nth(0).locator(".tr-time")).toHaveText("09:05:20");
+  await expect(page.getByTestId("replay-tape-row").nth(1).locator(".tr-time")).toHaveText("09:00:15");
+
+  await page.getByRole("group", { name: "체결 금액 필터" }).getByRole("button", { name: "1억", exact: true }).click();
+  await expect(page.getByTestId("replay-tape-row")).toHaveCount(1);
+  await expect(page.getByTestId("replay-tape-row").first().locator(".tr-time")).toHaveText("09:00:15");
 });

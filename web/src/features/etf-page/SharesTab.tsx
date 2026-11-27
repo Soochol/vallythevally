@@ -343,7 +343,7 @@ function SharesComboChart({
               ) : (
                 <Badge
                   tone={
-                    hovered.netFlowWon > 0 ? "success" : hovered.netFlowWon < 0 ? "danger" : "neutral"
+                    hovered.netFlowWon > 0 ? "up" : hovered.netFlowWon < 0 ? "down" : "neutral"
                   }
                 >
                   {hovered.netFlowWon > 0 ? "설정 유입" : hovered.netFlowWon < 0 ? "환매 유출" : "변동 없음"}

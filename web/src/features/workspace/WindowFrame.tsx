@@ -14,7 +14,7 @@ export type FrameBindings = {
 
 const HANDLES: readonly ResizeHandle[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
 
-export function WindowFrame({ id, name, rect, layer, panelId, overflow, header, bindings, maximized, active, front = false, surface = "canvas" }: {
+export function WindowFrame({ id, name, rect, layer, panelId, overflow, header, bindings, maximized, active, front = false, surface = "canvas", activeResizeHandle = null }: {
   surface?: "canvas" | "dock-float";
   id: WindowId;
   name: string;
@@ -27,6 +27,7 @@ export function WindowFrame({ id, name, rect, layer, panelId, overflow, header, 
   maximized: boolean;
   active: boolean;
   front?: boolean;
+  activeResizeHandle?: ResizeHandle | null;
 }) {
   const frame = useRef<HTMLElement>(null);
   const activate = useEffectEvent((event: globalThis.PointerEvent) => bindings.activate(event));
@@ -72,10 +73,12 @@ export function WindowFrame({ id, name, rect, layer, panelId, overflow, header, 
   }, [id, kind, canDrop]);
   return (
     <section ref={frame} data-canvas-window={surface === "canvas" ? id : undefined} data-dock-float={surface === "dock-float" ? id : undefined} data-kind={kind ?? undefined} data-active-cell={active ? "" : undefined} data-front={front ? "" : undefined} data-maximized={maximized ? "" : undefined} data-chart-escape-owner={maximized ? "" : undefined} data-symbol-drop-active={dropActive ? "" : undefined} aria-label={`${name} 창`} className="window-frame" style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h, zIndex: layer }}>
-      <div tabIndex={0} role="group" aria-label={`${name} 창 머리`} data-window-header={id} data-chart-control="" className="window-head" {...bindings.header}>{header}</div>
-      <div id={panelId} className={`window-panel overflow-${overflow}`} />
-      {dropActive && dragPayload && kind && <SymbolDropOverlay kind={kind} payload={dragPayload} />}
-      {!maximized && HANDLES.map((handle) => <div key={handle} data-chart-control="" data-resize-handle={handle} aria-label={`${name} 창 크기 ${handle}`} className={`window-resize window-resize-${handle}`} onPointerDown={bindings.resize(handle)} onLostPointerCapture={bindings.header.onLostPointerCapture} />)}
+      <div className="window-surface">
+        <div tabIndex={0} role="group" aria-label={`${name} 창 머리`} data-window-header={id} data-chart-control="" className="window-head" {...bindings.header}>{header}</div>
+        <div id={panelId} className={`window-panel overflow-${overflow}`} />
+        {dropActive && dragPayload && kind && <SymbolDropOverlay kind={kind} payload={dragPayload} />}
+      </div>
+      {!maximized && HANDLES.map((handle) => <div key={handle} data-chart-control="" data-resize-handle={handle} data-active-handle={activeResizeHandle === handle ? "" : undefined} aria-label={`${name} 창 크기 ${handle}`} className={`window-resize window-resize-${handle}`} onPointerDown={bindings.resize(handle)} onLostPointerCapture={bindings.header.onLostPointerCapture} />)}
     </section>
   );
 }

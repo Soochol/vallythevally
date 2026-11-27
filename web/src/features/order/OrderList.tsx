@@ -7,9 +7,9 @@ import type { OrderDrag } from "./useOrderDrag";
 export type OrderListItem =
   | { kind: "heading"; label: string }
   | { kind: "separator" }
-  | { kind: "order"; label: string; order: TradingOpenOrder; disabled: boolean; onSelect(): void }
-  | { kind: "cancelRow"; label: string; order: TradingOpenOrder; disabled: boolean; onSelect(): void }
-  | { kind: "action"; label: string; danger?: boolean; disabled: boolean; onSelect(): void };
+  | { kind: "order"; label: string; order: TradingOpenOrder; disabled: boolean; title?: string; onBlockedDrag?: () => void; onSelect(): void }
+  | { kind: "cancelRow"; label: string; order: TradingOpenOrder; disabled: boolean; title?: string; onBlockedDrag?: () => void; onSelect(): void }
+  | { kind: "action"; label: string; danger?: boolean; disabled: boolean; title?: string; onSelect(): void };
 
 interface Props {
   label: string;
@@ -84,19 +84,25 @@ export function OrderList({ label, items, drag, root, point, placement, onClose 
           onClose();
         };
         if (item.kind === "action") {
-          return <button key={i} ref={register} type="button" role="menuitem" disabled={item.disabled} className={`${ITEM_CLASS} ${item.danger ? "text-danger" : ""}`} onClick={pick}>
+          return <button key={i} ref={register} type="button" role="menuitem" disabled={item.disabled} title={item.disabled ? item.title : undefined} className={`${ITEM_CLASS} ${item.danger ? "text-danger" : ""}`} onClick={pick}>
             <span className="group-disabled:opacity-40">{item.label}</span>
           </button>;
         }
         if (item.kind === "cancelRow") {
-          return <div key={i} role="presentation" className="od-list-row od-list-order" data-testid="order-list-row"
-            onPointerDown={(e) => { if (!item.disabled) drag.begin({ source: { kind: "order", order: item.order }, origin: e.currentTarget.closest("[role=menu]")?.getBoundingClientRect() ?? null, onMoved: onClose }, e); }}>
+          return <div key={i} role="presentation" className="od-list-row od-list-order" data-testid="order-list-row" data-disabled={item.disabled ? "" : undefined} title={item.disabled ? item.title : undefined}
+            onPointerDown={(e) => {
+              if (!item.disabled) drag.begin({ source: { kind: "order", order: item.order }, origin: e.currentTarget.closest("[role=menu]")?.getBoundingClientRect() ?? null, onMoved: onClose }, e);
+              else if (e.button === 0) item.onBlockedDrag?.();
+            }}>
             <span className="od-list-value">{item.label}</span>
-            <button ref={register} type="button" role="menuitem" disabled={item.disabled} aria-label={`${item.label} 취소`} className="od-list-cancel" onClick={pick}>취소</button>
+            <button ref={register} type="button" role="menuitem" disabled={item.disabled} title={item.disabled ? item.title : undefined} aria-label={`${item.label} 취소`} className="od-list-cancel" onClick={pick}>취소</button>
           </div>;
         }
-        return <button key={i} ref={register} type="button" role="menuitem" disabled={item.disabled} className={`${ITEM_CLASS} od-list-order`} onClick={pick}
-          onPointerDown={(e) => { if (!item.disabled) drag.begin({ source: { kind: "order", order: item.order }, origin: e.currentTarget.closest("[role=menu]")?.getBoundingClientRect() ?? null, onMoved: onClose }, e); }}>
+        return <button key={i} ref={register} type="button" role="menuitem" disabled={item.disabled} title={item.disabled ? item.title : undefined} className={`${ITEM_CLASS} od-list-order`} onClick={pick}
+          onPointerDown={(e) => {
+            if (!item.disabled) drag.begin({ source: { kind: "order", order: item.order }, origin: e.currentTarget.closest("[role=menu]")?.getBoundingClientRect() ?? null, onMoved: onClose }, e);
+            else if (e.button === 0) item.onBlockedDrag?.();
+          }}>
           <span className="group-disabled:opacity-40">{item.label}</span>
         </button>;
       })}

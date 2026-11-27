@@ -8,7 +8,15 @@ export type JournalGrain = "day" | "month" | "year" | "sym";
 export type JournalDistMode = "hold" | "ret";
 export type JournalSort = "time" | "pnl" | "ret";
 export type JournalQuickFilter = "all" | "intraday" | "swing" | "scaled";
-export type JournalTf = "1" | "5" | "D";
+export type JournalTf = "1" | "3" | "5" | "10" | "D";
+
+export const JOURNAL_TFS: readonly { readonly tf: JournalTf; readonly label: string }[] = [
+  { tf: "1", label: "1분" },
+  { tf: "3", label: "3분" },
+  { tf: "5", label: "5분" },
+  { tf: "10", label: "10분" },
+  { tf: "D", label: "일봉" },
+];
 
 export interface JournalPeriod {
   readonly type: JournalPeriodType;
@@ -195,6 +203,8 @@ export const EMPTY_FILTERS: JournalFilters = {
 
 export const TF_TO_PERIOD: Record<JournalTf, Period> = {
   "1": "1m",
+  "3": "3m",
   "5": "5m",
+  "10": "10m",
   D: "D",
 };

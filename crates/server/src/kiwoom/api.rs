@@ -62,6 +62,7 @@ pub enum ApiId {
     Ka90001,
     Ka90002,
     Ka10054,
+    Ka90013,
 }
 
 impl ApiId {
@@ -86,7 +87,7 @@ impl ApiId {
             | ApiId::Ka10035
             | ApiId::Ka10020
             | ApiId::Ka10033 => "/api/dostk/rkinfo",
-            ApiId::Ka10004 | ApiId::Ka90008 | ApiId::Ka90005 | ApiId::Ka90010 => "/api/dostk/mrkcond",
+            ApiId::Ka10004 | ApiId::Ka90008 | ApiId::Ka90005 | ApiId::Ka90010 | ApiId::Ka90013 => "/api/dostk/mrkcond",
             ApiId::Ka10008 | ApiId::Ka10131 => "/api/dostk/frgnistt",
             ApiId::Ka90001 | ApiId::Ka90002 => "/api/dostk/thme",
             ApiId::Ka20003 | ApiId::Ka10051 => "/api/dostk/sect",
@@ -144,6 +145,7 @@ impl ApiId {
             ApiId::Ka90001 => "ka90001",
             ApiId::Ka90002 => "ka90002",
             ApiId::Ka10054 => "ka10054",
+            ApiId::Ka90013 => "ka90013",
         }
     }
 }
@@ -497,6 +499,25 @@ impl sealed::Sealed for StockProgramTrades {}
 impl MarketRequest for StockProgramTrades {
     const API_ID: ApiId = ApiId::Ka90008;
     type Response = wire::StockProgramTradesResponse;
+}
+
+#[derive(Serialize)]
+pub struct StockProgramDaily {
+    amt_qty_tp: &'static str,
+    stk_cd: String,
+    date: String,
+}
+
+impl StockProgramDaily {
+    pub fn new(code: StockCode, date: KstDate) -> Self {
+        StockProgramDaily { amt_qty_tp: PROGRAM_AMOUNT, stk_cd: kiwoom_stock_code(code, Venue::Combined), date: date.yyyymmdd() }
+    }
+}
+
+impl sealed::Sealed for StockProgramDaily {}
+impl MarketRequest for StockProgramDaily {
+    const API_ID: ApiId = ApiId::Ka90013;
+    type Response = wire::StockProgramDailyResponse;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1391,6 +1412,8 @@ mod tests {
         assert_eq!((<StockOrderBook as MarketRequest>::API_ID.as_str(), ApiId::Ka10004.path()), ("ka10004", "/api/dostk/mrkcond"));
         assert_eq!((<StockTrades as MarketRequest>::API_ID.as_str(), ApiId::Ka10003.path()), ("ka10003", "/api/dostk/stkinfo"));
         assert_eq!((<StockProgramTrades as MarketRequest>::API_ID.as_str(), ApiId::Ka90008.path()), ("ka90008", "/api/dostk/mrkcond"));
+        assert_eq!(serde_json::to_value(StockProgramDaily::new(c, today())).unwrap(), json!({"amt_qty_tp": "1", "stk_cd": "005930_AL", "date": "20261109"}));
+        assert_eq!((<StockProgramDaily as MarketRequest>::API_ID.as_str(), ApiId::Ka90013.path()), ("ka90013", "/api/dostk/mrkcond"));
     }
 
     #[test]

@@ -689,6 +689,45 @@ impl DayPage for StockInvestorNetSharesResponse {
     }
 }
 
+#[derive(Debug, PartialEq, Deserialize)]
+pub struct StockProgramDailyResponse {
+    stk_daly_prm_trde_trnsn: Vec<ProgramDailyRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct ProgramDailyRow {
+    dt: String,
+    cur_prc: String,
+    trde_qty: String,
+    prm_sell_amt: String,
+    prm_buy_amt: String,
+    prm_netprps_amt: String,
+    prm_sell_qty: String,
+    prm_buy_qty: String,
+    prm_netprps_qty: String,
+}
+
+impl DayPage for StockProgramDailyResponse {
+    type Day = api::StockProgramDailyDay;
+
+    fn days(&self) -> PageDays<api::StockProgramDailyDay> {
+        page_days(&self.stk_daly_prm_trde_trnsn, |r| r.dt.as_str(), |day, r| {
+            Ok(api::StockProgramDailyDay {
+                day: api::KstDate(day),
+                close_won: field("closeWon", "cur_prc", &r.cur_prc, unsigned)?,
+                volume: field("volume", "trde_qty", &r.trde_qty, unsigned)?,
+                sell_amount_million_won: field("sellAmountMillionWon", "prm_sell_amt", &r.prm_sell_amt, unsigned)?,
+                buy_amount_million_won: field("buyAmountMillionWon", "prm_buy_amt", &r.prm_buy_amt, unsigned)?,
+                net_buy_amount_million_won: field("netBuyAmountMillionWon", "prm_netprps_amt", &r.prm_netprps_amt, signed_quantity)?,
+                sell_qty: field("sellQty", "prm_sell_qty", &r.prm_sell_qty, unsigned)?,
+                buy_qty: field("buyQty", "prm_buy_qty", &r.prm_buy_qty, unsigned)?,
+                net_buy_qty: field("netBuyQty", "prm_netprps_qty", &r.prm_netprps_qty, signed_quantity)?,
+            })
+        })
+    }
+}
+
 const ORDER_BOOK_LEVELS: usize = 10;
 
 /// ka10004 응답. 호가 40여 개 필드가 납작하게 오므로 이름으로 읽는다.
@@ -3267,6 +3306,71 @@ mod tests {
         );
         assert_eq!(days.rows[1].1.as_ref().unwrap_err().field, "individual");
         assert_eq!((days.rows.len(), days.oldest()), (2, Some(KstDate::new(2024, 11, 6).unwrap())));
+    }
+
+    #[test]
+    fn stock_program_daily_parses_fixtures_double_minus_and_malformed_rows() {
+        let p1: StockProgramDailyResponse = serde_json::from_str(&fixture("ka90013_005930_AL_p1")).unwrap();
+        let d1 = p1.days();
+        assert!(d1.undated.is_empty());
+        assert_eq!(d1.oldest(), Some(KstDate::new(2026, 11, 20).unwrap()));
+        let ok_p1: Vec<_> = d1.rows.iter().map(|(_, row)| row.clone().unwrap()).collect();
+        assert_eq!(
+            ok_p1,
+            [
+                api::StockProgramDailyDay {
+                    day: api::KstDate(KstDate::new(2026, 11, 24).unwrap()),
+                    close_won: 72_500,
+                    volume: 10_000_000,
+                    sell_amount_million_won: 12_340,
+                    buy_amount_million_won: 15_812,
+                    net_buy_amount_million_won: 3_472,
+                    sell_qty: 170_200,
+                    buy_qty: 218_100,
+                    net_buy_qty: 47_900,
+                },
+                api::StockProgramDailyDay {
+                    day: api::KstDate(KstDate::new(2026, 11, 23).unwrap()),
+                    close_won: 71_000,
+                    volume: 8_000_000,
+                    sell_amount_million_won: 14_000,
+                    buy_amount_million_won: 10_528,
+                    net_buy_amount_million_won: -3_472,
+                    sell_qty: 197_180,
+                    buy_qty: 182_940,
+                    net_buy_qty: -14_240,
+                },
+                api::StockProgramDailyDay {
+                    day: api::KstDate(KstDate::new(2026, 11, 20).unwrap()),
+                    close_won: 0,
+                    volume: 0,
+                    sell_amount_million_won: 0,
+                    buy_amount_million_won: 0,
+                    net_buy_amount_million_won: 0,
+                    sell_qty: 0,
+                    buy_qty: 0,
+                    net_buy_qty: 0,
+                },
+            ]
+        );
+
+        let p2: StockProgramDailyResponse = serde_json::from_str(&fixture("ka90013_005930_AL_p2")).unwrap();
+        let d2 = p2.days();
+        assert_eq!(d2.rows.len(), 2);
+        assert_eq!(d2.rows[0].1.as_ref().unwrap().net_buy_amount_million_won, -6);
+        assert_eq!(d2.rows[0].1.as_ref().unwrap().net_buy_qty, -19);
+        assert_eq!(d2.rows[1].1.as_ref().unwrap().net_buy_amount_million_won, 250);
+
+        let malformed = json!({"stk_daly_prm_trde_trnsn": [
+            {"dt": "20261119", "cur_prc": "+70000", "trde_qty": "100", "prm_sell_amt": "bad", "prm_buy_amt": "10", "prm_netprps_amt": "--6", "prm_sell_qty": "1", "prm_buy_qty": "2", "prm_netprps_qty": "1"},
+            {"dt": "not-a-date", "cur_prc": "70000", "trde_qty": "100", "prm_sell_amt": "1", "prm_buy_amt": "2", "prm_netprps_amt": "1", "prm_sell_qty": "1", "prm_buy_qty": "2", "prm_netprps_qty": "1"}
+        ], "return_code": 0});
+        let parsed = serde_json::from_value::<StockProgramDailyResponse>(malformed).unwrap().days();
+        assert_eq!(parsed.rows.len(), 1);
+        assert_eq!(parsed.rows[0].1.as_ref().unwrap_err().field, "sellAmountMillionWon");
+        assert_eq!(parsed.undated.len(), 1);
+        assert_eq!(parsed.undated[0].dt, "not-a-date");
+        assert!(serde_json::from_value::<StockProgramDailyResponse>(json!({"return_code": 0})).is_err());
     }
 
     #[test]

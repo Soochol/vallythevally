@@ -54,6 +54,11 @@ export interface PlaceRequest {
   readonly margin?: number;
 }
 
+export interface OrderWriteGuard {
+  readonly blocked: boolean;
+  readonly onBlocked: () => OrderStatus;
+}
+
 export interface OrderWrites {
   readonly status: OrderStatus | null;
   readonly queued: number;
@@ -69,10 +74,18 @@ export interface OrderWrites {
 const openOrderOf = (orderNo: string, code: string, venue: Venue, side: OrderSide, price: number, quantity: number): TradingOpenOrder =>
   ({ orderNo, code, name: "", side, quantity, price, openQuantity: quantity, status: "접수", orderedAt: "", originalOrderNo: null, venue });
 
-export function useOrderWrites(account: CurrentAccount | null, code: string, venue: Venue, windowId: string): OrderWrites {
+export function useOrderWrites(
+  account: CurrentAccount | null,
+  code: string,
+  venue: Venue,
+  windowId: string,
+  guard?: OrderWriteGuard,
+): OrderWrites {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<OrderStatus | null>(null);
   const [queued, setQueued] = useState(0);
+  const guardRef = useRef(guard);
+  guardRef.current = guard;
   useEffect(() => {
     if (status?.tone !== "ok" && status?.fades !== true) return;
     const timer = setTimeout(() => setStatus(null), OK_STATUS_MS);
@@ -86,6 +99,10 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
   useEffect(() => () => pendingWrites.clear(code), [code, writeScope]);
 
   const enqueue: <T>(plan: Plan<T>) => void = useCallback(<T,>(plan: Plan<T>) => {
+    if (guardRef.current?.blocked) {
+      setStatus(guardRef.current.onBlocked());
+      return;
+    }
     const ledgerKey = actionInAccount(plan.action, accountRef);
     const coalesced = plan.coalesce ? orderLedger.issue(ledgerKey) : null;
     if (coalesced && !coalesced.send) return;
@@ -93,6 +110,14 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
     pendingWrites.begin(plan.mark);
     setQueued((n) => n + 1);
     tail.current = tail.current.then(async () => {
+      if (guardRef.current?.blocked) {
+        pendingWrites.resolve(plan.mark.key, []);
+        if (coalesced) orderLedger.settle(ledgerKey, "answered");
+        else orderLedger.settleEach(windowId, ledgerKey, commandId, "answered");
+        setQueued((n) => n - 1);
+        setStatus(guardRef.current.onBlocked());
+        return;
+      }
       let settlement: Settlement = "answered";
       setStatus(plan.starting);
       try {
@@ -189,5 +214,7 @@ export function useOrderWrites(account: CurrentAccount | null, code: string, ven
     });
   }, [queryClient, accountRef]);
 
-  return { status, queued, place, modifyAll, cancelOne, cancelAtPrice, reconcile, say: setStatus, dismiss: () => setStatus(null) };
+  const dismiss = useCallback(() => setStatus(null), []);
+
+  return { status, queued, place, modifyAll, cancelOne, cancelAtPrice, reconcile, say: setStatus, dismiss };
 }

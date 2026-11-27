@@ -1,7 +1,7 @@
 import { bookReplayAvailable, useBookReplayAccess } from "../../api/bookReplay";
-import { useBookReplayStore } from "../../stores/bookReplay";
 import { useBookReplayPref, useUiStore } from "../../stores/ui";
 import { ClockIcon } from "../icons";
+import { disableBookReplay } from "./useBookReplay";
 
 export function BookReplayToggle() {
   const access = useBookReplayAccess();
@@ -9,9 +9,8 @@ export function BookReplayToggle() {
   const setBookReplay = useUiStore((state) => state.setBookReplay);
   if (!bookReplayAvailable(access)) return null;
   const toggle = () => {
-    const next = !enabled;
-    setBookReplay(next);
-    if (!next) useBookReplayStore.getState().clear();
+    if (enabled) disableBookReplay();
+    else setBookReplay(true);
   };
   return (
     <button

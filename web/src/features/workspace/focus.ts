@@ -29,7 +29,7 @@ function exposed(target: HTMLElement) {
 
 export function focusAfterClose(active: WindowId) {
   const preferred = document.querySelector<HTMLElement>(`[data-window-header="${active}"]`);
-  const headers = Array.from(document.querySelectorAll<HTMLElement>("[data-window-header]")).sort((first, second) => Number(second.parentElement?.style.zIndex ?? 0) - Number(first.parentElement?.style.zIndex ?? 0));
+  const headers = Array.from(document.querySelectorAll<HTMLElement>("[data-window-header]")).sort((first, second) => Number(second.closest<HTMLElement>(".window-frame")?.style.zIndex ?? 0) - Number(first.closest<HTMLElement>(".window-frame")?.style.zIndex ?? 0));
   const header = [preferred, ...headers].find((target) => target !== null && exposed(target));
   if (header) { focusWithoutActivation(header); return; }
   const preferredTab = document.getElementById(`window-tab-${active}`);

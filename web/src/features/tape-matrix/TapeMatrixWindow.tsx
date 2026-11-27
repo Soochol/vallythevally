@@ -54,6 +54,13 @@ export function addSymbolToTapeMatrix(id: WindowId, code: SymbolCode): TapeMatri
   return "added";
 }
 
+export function priceToneClass(price: number, prevClose: number | null): string {
+  if (prevClose === null || prevClose <= 0) return "";
+  if (price > prevClose) return "tm-up";
+  if (price < prevClose) return "tm-down";
+  return "";
+}
+
 function TapeCard({
   code,
   index,
@@ -119,7 +126,7 @@ function TapeCard({
                 <div className="tm-bar-ask" style={{ width: `${width}%` }} />
                 <span className="tm-qty">{qty > 0 ? qty.toLocaleString() : "-"}</span>
               </div>
-              <span className="tm-px tm-down">{level.price.toLocaleString()}</span>
+              <span className={`tm-px ${priceToneClass(level.price, prevClose)}`}>{level.price.toLocaleString()}</span>
               <span />
             </div>
           );
@@ -130,7 +137,7 @@ function TapeCard({
           return (
             <div key={`b-${i}`} className="tm-lvl">
               <span />
-              <span className="tm-px tm-up">{level.price.toLocaleString()}</span>
+              <span className={`tm-px ${priceToneClass(level.price, prevClose)}`}>{level.price.toLocaleString()}</span>
               <div className="tm-bar-wrap">
                 <div className="tm-bar-bid" style={{ width: `${width}%` }} />
                 <span className="tm-qty">{qty > 0 ? qty.toLocaleString() : "-"}</span>

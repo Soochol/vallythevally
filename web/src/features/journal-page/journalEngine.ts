@@ -24,6 +24,7 @@ export const MINUS = "−";
 export const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"] as const;
 const FEE_RATE = 0.00015;
 const TAX_RATE = 0.0018;
+const SWING_LOOKBACK_DAYS = 14;
 
 export const pad2 = (n: number): string => String(n).padStart(2, "0");
 export const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
@@ -95,15 +96,25 @@ export function tradingDaysBetween(d0: string, d1: string): number {
   return count;
 }
 
-export function parseTimeToMinutes(raw: string): number {
+export function parseTimeToSeconds(raw: string): number {
   const clean = raw.replace(/\D/g, "");
+  if (clean.length >= 6) {
+    const h = Number(clean.slice(0, 2));
+    const m = Number(clean.slice(2, 4));
+    const s = Number(clean.slice(4, 6));
+    if (Number.isFinite(h) && Number.isFinite(m) && Number.isFinite(s)) return h * 3600 + m * 60 + s;
+  }
   if (clean.length >= 4) {
     const h = Number(clean.slice(0, 2));
     const m = Number(clean.slice(2, 4));
-    if (Number.isFinite(h) && Number.isFinite(m)) return h * 60 + m;
+    if (Number.isFinite(h) && Number.isFinite(m)) return h * 3600 + m * 60;
   }
   const parts = raw.split(":").map(Number);
-  return (parts[0] ?? 9) * 60 + (parts[1] ?? 0);
+  return (parts[0] ?? 9) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0);
+}
+
+export function parseTimeToMinutes(raw: string): number {
+  return Math.floor(parseTimeToSeconds(raw) / 60);
 }
 
 export function formatMinutes(minutes: number): string {
@@ -146,9 +157,20 @@ export function retBucketOf(retPct: number): number {
   return i;
 }
 
+export function tfStepMinutes(tf: JournalTf): number {
+  if (tf === "1") return 1;
+  if (tf === "3") return 3;
+  if (tf === "5") return 5;
+  if (tf === "10") return 10;
+  return 1440;
+}
+
 export function autoTfOf(trade: JournalTrade): JournalTf {
   if (trade.swing) return "D";
-  return trade.holdMin <= 40 ? "1" : "5";
+  if (trade.holdMin <= 15) return "1";
+  if (trade.holdMin <= 40) return "3";
+  if (trade.holdMin <= 120) return "5";
+  return "10";
 }
 
 export function formatHoldDuration(trade: JournalTrade): string {
@@ -197,11 +219,12 @@ export function buildRoundTrips(history: readonly StoredDayExecutions[]): readon
     const dayMs = parseDayUtcMs(dayEntry.day);
     for (const ex of dayEntry.executions) {
       if (ex.quantity <= 0 || ex.price <= 0) continue;
-      const minutes = parseTimeToMinutes(ex.time);
+      const seconds = parseTimeToSeconds(ex.time);
+      const minutes = Math.floor(seconds / 60);
       allFills.push({
         day: dayEntry.day,
         minutes,
-        ord: Math.floor(dayMs / 864e5) * 1440 + minutes,
+        ord: Math.floor(dayMs / 864e5) * 86400 + seconds,
         code: ex.code,
         name: ex.name,
         side: ex.side,
@@ -216,7 +239,12 @@ export function buildRoundTrips(history: readonly StoredDayExecutions[]): readon
     }
   }
 
-  allFills.sort((a, b) => a.ord - b.ord || a.orderNo.localeCompare(b.orderNo));
+  allFills.sort(
+    (a, b) =>
+      a.ord - b.ord ||
+      a.orderNo.localeCompare(b.orderNo, undefined, { numeric: true }) ||
+      (a.side === b.side ? 0 : a.side === "buy" ? -1 : 1),
+  );
 
   interface OpenLot {
     fill: JournalFill;
@@ -424,6 +452,56 @@ export function computePeriodRange(
   }
   const y = dt.getUTCFullYear();
   return [`${y}-01-01`, `${y}-12-31`];
+}
+
+function shiftIsoDay(day: string, deltaDays: number): string {
+  return formatUtcMsToDay(parseDayUtcMs(day) + deltaDays * 864e5);
+}
+
+function latestWeekday(day: string): string {
+  let ms = parseDayUtcMs(day);
+  while (new Date(ms).getUTCDay() === 0 || new Date(ms).getUTCDay() === 6) {
+    ms -= 864e5;
+  }
+  return formatUtcMsToDay(ms);
+}
+
+export function isPeriodAtToday(
+  period: JournalPeriod,
+  range: readonly [string, string],
+  today: string,
+): boolean {
+  if (period.type === "all") return true;
+  if (period.type === "week") {
+    const [, currentWeekEnd] = computePeriodRange({ type: "week", anchor: today }, [], today);
+    return range[1] >= currentWeekEnd;
+  }
+  if (period.type === "day") {
+    return range[1] >= latestWeekday(today);
+  }
+  return range[1] >= today;
+}
+
+export function computeHistoryQueryRange(
+  period: JournalPeriod,
+  today: string,
+): readonly [string, string] | null {
+  if (period.type === "all") return null;
+  const anchor = period.anchor || today;
+  const ms = parseDayUtcMs(anchor);
+  const dt = new Date(ms);
+  const y = dt.getUTCFullYear();
+  if (period.type === "year") return [shiftIsoDay(`${y}-01-01`, -SWING_LOOKBACK_DAYS), `${y}-12-31`];
+  const m = dt.getUTCMonth();
+  const monthFirst = formatUtcMsToDay(Date.UTC(y, m, 1));
+  const monthLast = formatUtcMsToDay(Date.UTC(y, m + 1, 0));
+  if (period.type === "week") {
+    const [weekStart, weekEnd] = computePeriodRange(period, [], today);
+    const start = weekStart < monthFirst ? weekStart : monthFirst;
+    const end = weekEnd > monthLast ? weekEnd : monthLast;
+    return [shiftIsoDay(start, -SWING_LOOKBACK_DAYS), end];
+  }
+  return [shiftIsoDay(monthFirst, -SWING_LOOKBACK_DAYS), monthLast];
 }
 
 export function stepPeriodAnchor(period: JournalPeriod, dir: -1 | 1, today: string): string {
@@ -876,7 +954,8 @@ export function generateDemoTrades(anchorToday: string): readonly JournalTrade[]
 
 export function synthesizeDemoBars(trade: JournalTrade, tf: JournalTf): readonly JournalBar[] {
   const seed = trade.demoSeed ?? 1234567;
-  const r = seededRng(seed ^ (tf === "D" ? 911 : tf === "5" ? 505 : 101));
+  const tfSalt = tf === "D" ? 911 : tf === "10" ? 1009 : tf === "5" ? 505 : tf === "3" ? 303 : 101;
+  const r = seededRng(seed ^ tfSalt);
   const bars: JournalBar[] = [];
   const basePx = trade.buys[0]?.price ?? trade.avgBuy;
   const endPx = trade.sells[trade.sells.length - 1]?.price ?? trade.avgSell;
@@ -921,13 +1000,13 @@ export function synthesizeDemoBars(trade: JournalTrade, tf: JournalTf): readonly
       const h = snapTick(Math.max(o, c) + r() * scale * 0.9);
       const l = snapTick(Math.min(o, c) - r() * scale * 0.9);
       const day = days[i]!;
-      bars.push({ t: Math.floor(parseDayUtcMs(day) / 1000), o, h, l, c, v: Math.round(800 + r() * 2400), day, minutes: 540 });
+      bars.push({ t: Math.floor(parseDayUtcMs(day) / 1000) - 9 * 3600, o, h, l, c, v: Math.round(800 + r() * 2400), day, minutes: 540 });
       px = c;
     }
     return bars;
   }
 
-  const step = tf === "5" ? 5 : 1;
+  const step = tfStepMinutes(tf);
   const entryM = Math.floor(trade.entryMin / step) * step;
   const exitM = Math.max(entryM + step, Math.floor((trade.swing ? trade.entryMin + step * 16 : trade.exitMin) / step) * step);
   const preCount = 18;

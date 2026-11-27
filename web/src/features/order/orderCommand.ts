@@ -11,6 +11,8 @@ import { withDirectionJosa } from "./josa";
 import { accountNumberText, type CurrentAccount } from "./orderAccount";
 import {
   buyBlock,
+  buyRatioLabel,
+  type BuyRatioPercent,
   type Capacity,
   capacityProblem,
   type DragOutcome,
@@ -26,7 +28,7 @@ import {
 } from "./orderRules";
 import { routeLabel } from "./orderSettings";
 import type { PendingWrite } from "./pendingWrites";
-import { CANCEL_REFUSAL, type OrderStatus, REJECT_TEXT, REPLAY_LOCKED_TEXT } from "./statusText";
+import { CANCEL_REFUSAL, type OrderStatus, REJECT_TEXT, statusOfReplayLocked } from "./statusText";
 import type { PlaceRequest } from "./useOrderWrites";
 
 export interface OrderCommandContext {
@@ -38,7 +40,7 @@ export interface OrderCommandContext {
   readonly nxtNotTraded: boolean;
   readonly replayLocked: boolean;
   readonly quantity: number;
-  readonly buyFull?: boolean;
+  readonly buyRatio?: BuyRatioPercent | null;
   readonly keepLastEntry: boolean;
   readonly capacity: Capacity;
   readonly groups: ReadonlyMap<string, PriceGroup>;
@@ -53,6 +55,8 @@ export interface OrderCommandSink {
   readonly say: (status: OrderStatus) => void;
   readonly setConfirm: (request: HighValueRequest) => void;
   readonly rememberEntry: (quantity: number, usedAt: number) => void;
+  readonly clearBuyRatio: () => void;
+  readonly disableBookReplay: () => void;
   readonly readPending: () => readonly PendingWrite[];
   readonly nowMs: () => number;
 }
@@ -62,15 +66,18 @@ export interface OrderCommands {
   readonly modifyOrders: (side: OrderSide, price: number, orders: readonly TradingOpenOrder[], to: number) => void;
   readonly cancelOne: (orderNo: string) => void;
   readonly cancelGroups: (keys: readonly PriceKey[]) => void;
-  readonly cancelLadderOne: (orderNo: string) => void;
-  readonly cancelLadderGroups: (keys: readonly PriceKey[]) => void;
   readonly drop: (source: DragSource, outcome: DragOutcome) => void;
+  readonly notifyReplayLocked: () => void;
 }
 
 export function createOrderCommands(readContext: () => OrderCommandContext, sink: OrderCommandSink): OrderCommands {
+  const notifyReplayLocked = (): void => {
+    sink.say(statusOfReplayLocked(sink.disableBookReplay));
+  };
+
   const guardReplayLock = (action: () => void): void => {
     if (readContext().replayLocked) {
-      sink.say({ tone: "error", text: REPLAY_LOCKED_TEXT });
+      notifyReplayLocked();
       return;
     }
     action();
@@ -84,7 +91,7 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
     mock: ctx.mock,
   });
 
-  const submit = (ctx: OrderCommandContext, side: OrderSide, price: number, quantity: number) => {
+  const submit = (ctx: OrderCommandContext, side: OrderSide, price: number, quantity: number, usedBuyRatio: boolean) => {
     const margin = side === "buy" ? marginOf(orderAmount(price, quantity), ctx.capacity.buying) : 0;
     const send = (confirmHighValue: boolean) => {
       guardReplayLock(() => {
@@ -92,7 +99,8 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
         const listedWhenIn =
           side === "sell" ? sellQuantityAtPrice(latest.groups, sink.readPending(), latest.code, price, latest.openOrdersListedAt) + quantity : 0;
         sink.place({ side, price, quantity, confirmHighValue, margin, listedWhenIn });
-        if (latest.keepLastEntry) sink.rememberEntry(quantity, sink.nowMs());
+        if (usedBuyRatio) sink.clearBuyRatio();
+        else if (latest.keepLastEntry) sink.rememberEntry(quantity, sink.nowMs());
       });
     };
     if (needsHighValueConfirm(price, quantity)) {
@@ -120,14 +128,17 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
         sink.say({ tone: "error", text: ETF_ETN_AFTER_HOURS_TEXT });
         return;
       }
-      const dynamicBuyFull = cappedQuantity === undefined && side === "buy" && ctx.buyFull === true && ctx.capacity.buying !== null;
-      const orderQuantity = cappedQuantity ?? orderQuantityForPrice(side, price, ctx.quantity, ctx.capacity.buying, ctx.buyFull === true);
-      if (dynamicBuyFull && orderQuantity === 0) {
+      const activeBuyRatio = cappedQuantity === undefined && side === "buy" ? (ctx.buyRatio ?? null) : null;
+      const dynamicBuyRatio = activeBuyRatio !== null && ctx.capacity.buying !== null;
+      const orderQuantity = cappedQuantity ?? orderQuantityForPrice(side, price, ctx.quantity, ctx.capacity.buying, activeBuyRatio);
+      if (dynamicBuyRatio && orderQuantity === 0) {
         const block = buyBlock(price, 1, ctx.capacity.buying);
         if (block) {
           sink.say({ tone: "error", text: block.text });
           return;
         }
+        sink.say({ tone: "error", text: `${buyRatioLabel(activeBuyRatio)} 계산 결과가 1주 미만입니다` });
+        return;
       }
       const problem = capacityProblem(side, orderQuantity, ctx.capacity);
       if (problem) {
@@ -143,7 +154,7 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
         });
         return;
       }
-      submit(ctx, side, price, orderQuantity);
+      submit(ctx, side, price, orderQuantity, dynamicBuyRatio);
     });
   };
 
@@ -177,38 +188,32 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
   };
 
   const cancelGroups = (keys: readonly PriceKey[]) => {
-    const ctx = readContext();
-    const plan = planCancel(ctx.groups, sink.readPending(), ctx.code, keys);
-    if (plan.kind === "ready") plan.targets.forEach((group) => sink.cancelAtPrice(group.side, group.price));
-    else sink.say(CANCEL_REFUSAL[plan.kind]);
+    guardReplayLock(() => {
+      const ctx = readContext();
+      const plan = planCancel(ctx.groups, sink.readPending(), ctx.code, keys);
+      if (plan.kind === "ready") plan.targets.forEach((group) => sink.cancelAtPrice(group.side, group.price));
+      else sink.say(CANCEL_REFUSAL[plan.kind]);
+    });
   };
 
   const cancelOne = (orderNo: string) => {
-    sink.cancelOne(orderNo);
-  };
-
-  const cancelLadderOne = (orderNo: string) => {
     guardReplayLock(() => sink.cancelOne(orderNo));
-  };
-
-  const cancelLadderGroups = (keys: readonly PriceKey[]) => {
-    guardReplayLock(() => cancelGroups(keys));
   };
 
   const drop = (source: DragSource, outcome: DragOutcome) => {
     if (outcome.kind === "abort") return;
-    if (source.kind === "chip") {
-      guardReplayLock(() => {
+    guardReplayLock(() => {
+      if (source.kind === "chip") {
         if (outcome.kind === "cancel") cancelGroups([source.group]);
         else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
-      });
-    } else if (source.kind === "order") {
-      if (outcome.kind === "cancel") sink.cancelOne(source.order.orderNo);
-      else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
-    } else {
-      cancelGroups(source.groups);
-    }
+      } else if (source.kind === "order") {
+        if (outcome.kind === "cancel") sink.cancelOne(source.order.orderNo);
+        else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
+      } else {
+        cancelGroups(source.groups);
+      }
+    });
   };
 
-  return { place, modifyOrders, cancelOne, cancelGroups, cancelLadderOne, cancelLadderGroups, drop };
+  return { place, modifyOrders, cancelOne, cancelGroups, drop, notifyReplayLocked };
 }
