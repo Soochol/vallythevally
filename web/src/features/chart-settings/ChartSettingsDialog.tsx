@@ -200,16 +200,12 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
         </header>
         {renderForm()}
       </div>
-      <footer className="cs-foot-bar">
-        {compact ? (
-          <>
-            <button type="button" className="cs-reset-btn cs-reset-compact" disabled={!anyModified} onClick={resetDefaults}>기본값 복원</button>
-            <span className="cs-foot">자동 저장</span>
-          </>
-        ) : (
-          <p className="cs-foot">자동 저장 · Esc로 되돌리고 닫기</p>
-        )}
-      </footer>
+      {compact && (
+        <footer className="cs-foot-bar">
+          <button type="button" className="cs-reset-btn cs-reset-compact" disabled={!anyModified} onClick={resetDefaults}>기본값 복원</button>
+          <span className="cs-foot">자동 저장</span>
+        </footer>
+      )}
     </section>
   );
 
@@ -246,13 +242,17 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
               key={s.id}
               type="button"
               role="tab"
+              aria-label={s.label}
               aria-selected={activeSection === s.id}
               data-modified={isSectionModified(s.id, settings, indicatorWindow) ? "true" : undefined}
               className="cs-nav-item"
               onClick={() => setActiveSection(s.id)}
             >
               <span className="cs-nav-icon"><SectionIcon sectionId={s.id} /></span>
-              <span className="cs-nav-label">{s.label}</span>
+              <span className="cs-nav-text">
+                <span className="cs-nav-label">{s.label}</span>
+                <span className="cs-nav-sub">{SCOPE_LABEL[s.scope]}</span>
+              </span>
               <span aria-hidden="true" className="cs-mod-dot" />
             </button>
           ))}
@@ -268,6 +268,9 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
         </div>
       </aside>
       {panelContent}
+      <footer className="cs-foot-bar">
+        <p className="cs-foot">자동 저장 · Esc로 되돌리고 닫기</p>
+      </footer>
     </div>
   );
 }

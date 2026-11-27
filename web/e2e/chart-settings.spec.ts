@@ -115,7 +115,7 @@ test("좌측 사이드바 메뉴와 우측 내용이 2단으로 배치되고 각
 
 test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async ({ page }) => {
   await open(page);
-  const dialog = await openSettings(page, "봉 · 축");
+  await openSettings(page, "봉 · 축");
   const bars = section(page, "봉 · 축");
   for (const name of ["봉 모양", "가격 축", "화면에 보이는 봉"]) await expect(bars.getByRole("group", { name })).toBeVisible();
   await expect(bars.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
@@ -133,7 +133,7 @@ test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async (
 
   await chooseSettingsMenu(page, "창 · 동작");
   await expect(section(page, "창 · 동작").getByRole("group", { name: "지표 창" })).toBeVisible();
-  await expect(dialog.getByText("모든 차트", { exact: true })).toHaveCount(1);
+  await expect(section(page, "창 · 동작").getByText("모든 차트", { exact: true })).toHaveCount(1);
   await expect(section(page, "창 · 동작").getByRole("group", { name: "가격 축" })).toHaveCount(0);
 });
 
