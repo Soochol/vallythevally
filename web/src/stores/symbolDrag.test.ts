@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
 import { windowId } from "../layout/kinds";
-import { DEFAULT_LAYOUT, useLayoutStore } from "./layout";
+import { DEFAULT_LAYOUT, linkedWindowSymbol, useLayoutStore } from "./layout";
 import { addSymbolToTapeMatrix, loadTapeMatrixConfig } from "../features/tape-matrix/TapeMatrixWindow";
 import { applySymbolDrop, isSymbolDropKind, useSymbolDragStore } from "./symbolDrag";
 
@@ -24,7 +24,10 @@ describe("symbolDrag", () => {
       windows: [
         { id: windowId("chart-a1"), link: "a", kind: "chart", symbol: "005930", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
         { id: windowId("chart-a2"), link: "a", kind: "chart", symbol: "005930", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
+        { id: windowId("chart-b1"), link: "b", kind: "chart", symbol: "005930", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
         { id: windowId("order-b"), link: "b", kind: "order", venue: "krx" },
+        { id: windowId("book-b-pinned"), link: "b", kind: "book", symbol: "035420" },
+        { id: windowId("chart-none"), link: null, kind: "chart", symbol: "005930", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
         { id: windowId("brokers-none"), link: null, kind: "brokers" },
         { id: windowId("watchlist"), link: "a", kind: "watchlist" },
         { id: windowId("scanner"), link: null, kind: "scanner" },
@@ -48,24 +51,45 @@ describe("symbolDrag", () => {
     expect(isSymbolDropKind("indicators")).toBe(false);
   });
 
-  it("detaches a linked chart to ungrouped and changes only that chart", () => {
+  it("updates all charts in the same link group without detaching", () => {
     const res = useLayoutStore.getState().dropSymbolOnWindow(windowId("chart-a1"), { code: "000660", name: "SK하이닉스" });
-    expect(res.changed).toEqual([windowId("chart-a1")]);
+    expect(res.changed).toEqual([windowId("chart-a1"), windowId("chart-a2")]);
     const windows = useLayoutStore.getState().layout.windows;
     const c1 = windows.find((w) => w.id === windowId("chart-a1"));
     const c2 = windows.find((w) => w.id === windowId("chart-a2"));
-    expect(c1 && c1.kind === "chart" ? { symbol: c1.symbol, link: c1.link } : null).toEqual({ symbol: "000660", link: null });
-    expect(c2 && c2.kind === "chart" ? { symbol: c2.symbol, link: c2.link } : null).toEqual({ symbol: "005930", link: "a" });
+    expect(c1 && c1.kind === "chart" ? { symbol: c1.symbol, link: c1.link } : null).toEqual({ symbol: "000660", link: "a" });
+    expect(c2 && c2.kind === "chart" ? { symbol: c2.symbol, link: c2.link } : null).toEqual({ symbol: "000660", link: "a" });
   });
 
-  it("pins symbol on linked and ungrouped pinnable windows while preserving link group", () => {
+  it("updates the whole link group when dropping on an unpinned linked auxiliary window without auto-pinning", () => {
     useLayoutStore.getState().dropSymbolOnWindow(windowId("order-b"), { code: "000660", name: "SK하이닉스" });
+    const layout = useLayoutStore.getState().layout;
+    const chartB = layout.windows.find((w) => w.id === windowId("chart-b1"));
+    const orderB = layout.windows.find((w) => w.id === windowId("order-b"));
+    expect(chartB && chartB.kind === "chart" ? chartB.symbol : null).toBe("000660");
+    expect(orderB && orderB.kind === "order" ? orderB.symbol : null).toBeUndefined();
+    expect(linkedWindowSymbol(layout, windowId("order-b"), windowId("chart-a1"))).toBe("000660");
+    expect(linkedWindowSymbol(layout, windowId("book-b-pinned"), windowId("chart-a1"))).toBe("035420");
+  });
+
+  it("ignores drops directly on an explicitly pinned linked window", () => {
+    const res = useLayoutStore.getState().dropSymbolOnWindow(windowId("book-b-pinned"), { code: "000660", name: "SK하이닉스" });
+    expect(res.changed).toEqual([]);
+    const layout = useLayoutStore.getState().layout;
+    const chartB = layout.windows.find((w) => w.id === windowId("chart-b1"));
+    const bookPinned = layout.windows.find((w) => w.id === windowId("book-b-pinned"));
+    expect(chartB && chartB.kind === "chart" ? chartB.symbol : null).toBe("005930");
+    expect(bookPinned && bookPinned.kind === "book" ? bookPinned.symbol : null).toBe("035420");
+  });
+
+  it("updates only the target window when ungrouped", () => {
+    useLayoutStore.getState().dropSymbolOnWindow(windowId("chart-none"), { code: "000660", name: "SK하이닉스" });
     useLayoutStore.getState().dropSymbolOnWindow(windowId("brokers-none"), { code: "035420", name: "NAVER" });
     const windows = useLayoutStore.getState().layout.windows;
-    const order = windows.find((w) => w.id === windowId("order-b"));
-    const brokers = windows.find((w) => w.id === windowId("brokers-none"));
-    expect(order && order.kind === "order" ? { symbol: order.symbol, link: order.link } : null).toEqual({ symbol: "000660", link: "b" });
-    expect(brokers && brokers.kind === "brokers" ? { symbol: brokers.symbol, link: brokers.link } : null).toEqual({ symbol: "035420", link: null });
+    const chartNone = windows.find((w) => w.id === windowId("chart-none"));
+    const brokersNone = windows.find((w) => w.id === windowId("brokers-none"));
+    expect(chartNone && chartNone.kind === "chart" ? { symbol: chartNone.symbol, link: chartNone.link } : null).toEqual({ symbol: "000660", link: null });
+    expect(brokersNone && brokersNone.kind === "brokers" ? { symbol: brokersNone.symbol, link: brokersNone.link } : null).toEqual({ symbol: "035420", link: null });
   });
 
   it("adds symbols to tape_matrix and reports duplicates", () => {
