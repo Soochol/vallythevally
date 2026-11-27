@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Popover } from "../overlay/Popover";
 
 interface Props {
   readonly days: readonly string[];
@@ -43,31 +44,13 @@ export function ReplayDatePicker({ days, activeDate, onSelect }: Props) {
     return { year: now.getFullYear(), month: now.getMonth() + 1 };
   });
 
-  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!activeDate) return;
     const parsed = parseYmd(activeDate);
     if (parsed) setViewMonth({ year: parsed.year, month: parsed.month });
   }, [activeDate]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    window.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", onPointerDown);
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
 
   if (sortedDays.length === 0 || activeDate === null) return null;
 
@@ -82,7 +65,7 @@ export function ReplayDatePicker({ days, activeDate, onSelect }: Props) {
   };
 
   return (
-    <div ref={rootRef} className="rp-cal-control" data-testid="replay-date-picker">
+    <div className="rp-cal-control" data-testid="replay-date-picker">
       <button
         type="button"
         className="rp-cal-nav"
@@ -98,6 +81,7 @@ export function ReplayDatePicker({ days, activeDate, onSelect }: Props) {
       </button>
 
       <button
+        ref={triggerRef}
         type="button"
         className="rp-cal-trigger rp-mono"
         data-testid="replay-date-trigger"
@@ -125,7 +109,16 @@ export function ReplayDatePicker({ days, activeDate, onSelect }: Props) {
       </button>
 
       {open && (
-        <div className="rp-cal-popover" role="dialog" aria-label="관측일 달력" data-testid="replay-date-popover">
+        <Popover
+          anchor={triggerRef}
+          solid
+          placement="bottom"
+          role="dialog"
+          aria-label="관측일 달력"
+          data-testid="replay-date-popover"
+          className="rp-cal-popover"
+          onClose={() => setOpen(false)}
+        >
           <div className="rp-cal-pop-head">
             <button type="button" className="rp-cal-nav" aria-label="이전 달" onClick={() => shiftMonth(-1)}>
               ‹
@@ -178,7 +171,7 @@ export function ReplayDatePicker({ days, activeDate, onSelect }: Props) {
             </span>
             <span className="rp-mono">{`${sortedDays.length}일 수집`}</span>
           </div>
-        </div>
+        </Popover>
       )}
     </div>
   );

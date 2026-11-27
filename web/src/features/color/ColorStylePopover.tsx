@@ -290,6 +290,16 @@ export function ColorStylePopover<T extends string = never>({
               onPointerUp={(e) => {
                 if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
               }}
+              onKeyDown={(e) => {
+                const step = e.shiftKey ? 0.1 : 0.01;
+                if (e.key === "ArrowLeft") changeHsv({ ...hsv, s: Math.max(0, hsv.s - step) });
+                else if (e.key === "ArrowRight") changeHsv({ ...hsv, s: Math.min(1, hsv.s + step) });
+                else if (e.key === "ArrowUp") changeHsv({ ...hsv, v: Math.min(1, hsv.v + step) });
+                else if (e.key === "ArrowDown") changeHsv({ ...hsv, v: Math.max(0, hsv.v - step) });
+                else return;
+                e.preventDefault();
+                e.stopPropagation();
+              }}
             >
               <i style={{ left: `${hsv.s * 100}%`, top: `${(1 - hsv.v) * 100}%` }} />
             </div>

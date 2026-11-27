@@ -53,21 +53,13 @@ function isLightColor(hex: string | undefined): boolean {
 }
 
 export function ichimokuPalette(tokens: ThemeTokens): IchimokuPalette {
-  if (isLightColor(tokens.chartBg)) {
-    return {
-      conversion: "#0284c7",
-      base: "#d97706",
-      spanA: "#059669",
-      spanB: "#e11d48",
-      lagging: "#7c3aed",
-    };
-  }
+  const light = isLightColor(tokens.chartBg);
   return {
-    conversion: "#38bdf8",
-    base: "#f59e0b",
-    spanA: "#10b981",
-    spanB: "#f43f5e",
-    lagging: "#a78bfa",
+    conversion: tokens.ind["ind-3"] || (light ? "#1A6E5C" : "#73D0BD"),
+    base: tokens.ind["ind-1"] || (light ? "#8C6214" : "#E3BE76"),
+    spanA: tokens.up || (light ? "#B61E31" : "#FF7272"),
+    spanB: tokens.down || (light ? "#1453BD" : "#6FABFF"),
+    lagging: tokens.ind["ind-2"] || (light ? "#463599" : "#B9A6FF"),
   };
 }
 
@@ -190,8 +182,8 @@ export class IchimokuCloudView implements ICustomSeriesPaneView<Time, IchimokuCl
   defaultOptions(): IchimokuCloudOptions {
     return {
       ...customSeriesDefaultOptions,
-      bullColor: "#10b981",
-      bearColor: "#f43f5e",
+      bullColor: "#FF7272",
+      bearColor: "#6FABFF",
       opacity: 0.18,
     };
   }

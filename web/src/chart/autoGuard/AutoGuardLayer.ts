@@ -123,7 +123,7 @@ export class AutoGuardLayer implements ChartExtension {
       this.appendDraggableLine({
         leg: "sl",
         y: ySl,
-        color: "#f43f5e",
+        color: "var(--down)",
         label: `SL ${formatPct(slPrice, rule.entryPrice)} | ${formatWonMan((slPrice - rule.entryPrice) * rule.remainingQuantity)} | ${ORDER_TYPE_LABEL[rule.orderType]}${rule.trailingEnabled ? ` · 트레일-${rule.trailingPct}%` : ""}`,
         rule,
         yieldToDrawing,
@@ -135,7 +135,7 @@ export class AutoGuardLayer implements ChartExtension {
       this.appendDraggableLine({
         leg: "tp1",
         y: yTp1,
-        color: "#10b981",
+        color: "var(--up)",
         label: `TP1 ${formatPct(tp1Price, rule.entryPrice)} | ${formatWonMan((tp1Price - rule.entryPrice) * q1)} | ${rule.tp1Ratio}%${rule.breakevenOnTp1 ? " · 본절" : ""}`,
         rule,
         yieldToDrawing,
@@ -147,7 +147,7 @@ export class AutoGuardLayer implements ChartExtension {
       this.appendDraggableLine({
         leg: "tp2",
         y: yTp2,
-        color: "#10b981",
+        color: "var(--up)",
         label: `TP2 ${formatPct(tp2Price, rule.entryPrice)} | ${formatWonMan((tp2Price - rule.entryPrice) * q2)} | ${100 - rule.tp1Ratio}%`,
         rule,
         yieldToDrawing,
@@ -162,9 +162,9 @@ export class AutoGuardLayer implements ChartExtension {
 
   private appendEntryLine(y: number, entryPrice: number): void {
     const line = document.createElement("div");
-    line.style.cssText = `position:absolute;left:0;right:68px;top:${y}px;height:1px;border-top:1px dashed #3b82f6;pointer-events:none;`;
+    line.style.cssText = `position:absolute;left:0;right:68px;top:${y}px;height:1px;border-top:1px dashed var(--accent);pointer-events:none;`;
     const tag = document.createElement("span");
-    tag.style.cssText = "position:absolute;left:10px;top:-11px;padding:1px 7px;border-radius:5px;background:#3b82f6;color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;";
+    tag.style.cssText = "position:absolute;left:10px;top:-11px;padding:1px 7px;border-radius:var(--r-s);background:var(--accent);color:var(--accent-ink);font-size:var(--fs-xs);font-weight:700;font-variant-numeric:tabular-nums;";
     tag.textContent = `평단 ${entryPrice.toLocaleString("ko-KR")}`;
     line.appendChild(tag);
     this.root.appendChild(line);
@@ -187,7 +187,7 @@ export class AutoGuardLayer implements ChartExtension {
     strip.appendChild(bar);
 
     const pill = document.createElement("div");
-    pill.style.cssText = `position:absolute;right:8px;top:-4px;height:24px;display:inline-flex;align-items:center;border-radius:6px;background:${opts.color};color:#fff;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;box-shadow:0 3px 10px rgba(0,0,0,0.35);overflow:hidden;`;
+    pill.style.cssText = `position:absolute;right:8px;top:-4px;height:24px;display:inline-flex;align-items:center;border-radius:var(--r-s);background:${opts.color};color:var(--on-data);font-size:var(--fs-xs);font-weight:700;font-variant-numeric:tabular-nums;box-shadow:var(--shadow-s);overflow:hidden;`;
 
     const textBtn = document.createElement("span");
     textBtn.style.cssText = "padding:0 8px;cursor:pointer;";
@@ -199,7 +199,7 @@ export class AutoGuardLayer implements ChartExtension {
     });
 
     const closeBtn = document.createElement("span");
-    closeBtn.style.cssText = "padding:0 7px;border-left:1px solid rgba(255,255,255,0.25);cursor:pointer;";
+    closeBtn.style.cssText = "padding:0 7px;border-left:1px solid color-mix(in srgb, var(--on-data) 28%, transparent);cursor:pointer;";
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -260,7 +260,7 @@ export class AutoGuardLayer implements ChartExtension {
 
   private appendPopover(leg: DragLeg, y: number, rule: AutoOrderRule): void {
     const pop = document.createElement("div");
-    pop.style.cssText = `position:absolute;right:80px;top:${Math.max(8, y + 14)}px;width:220px;padding:10px;border-radius:8px;background:var(--surface);border:1px solid var(--line);color:var(--text);font-size:11.5px;box-shadow:0 10px 28px rgba(0,0,0,0.45);pointer-events:auto;z-index:25;`;
+    pop.style.cssText = `position:absolute;right:80px;top:${Math.max(8, y + 14)}px;width:220px;padding:10px;border-radius:var(--r-m);background:var(--surface);border:1px solid var(--line-strong);color:var(--text);font-size:var(--fs-xs);box-shadow:var(--shadow);pointer-events:auto;z-index:25;`;
 
     const title = document.createElement("div");
     title.style.cssText = "font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;";

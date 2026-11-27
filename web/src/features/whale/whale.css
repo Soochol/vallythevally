@@ -180,6 +180,16 @@
   cursor: pointer;
 }
 
+.wh-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: inherit;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
 .wh-table th[data-sort-active] {
   color: var(--accent);
 }
@@ -191,6 +201,11 @@
 
 .wh-table tbody tr:hover {
   background: var(--hover);
+}
+
+.wh-table tbody tr:focus-visible {
+  outline: var(--size-2) solid var(--accent);
+  outline-offset: calc(-1 * var(--size-2));
 }
 
 .wh-table tbody tr[data-selected] {

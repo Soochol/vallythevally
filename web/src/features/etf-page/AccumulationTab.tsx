@@ -143,9 +143,9 @@ const DIRECTION_COPY: Record<EtfAccumulationDirection, DirectionCopy> = {
 
 const CONTRIBUTOR_BADGE: Record<EtfChangeKind, { tone: BadgeTone; label: string }> = {
   added: { tone: "accent", label: "편입" },
-  increased: { tone: "success", label: "늘림" },
+  increased: { tone: "up", label: "늘림" },
   removed: { tone: "warning", label: "편출" },
-  decreased: { tone: "danger", label: "줄임" },
+  decreased: { tone: "down", label: "줄임" },
   unchanged: { tone: "neutral", label: "유지" },
 };
 

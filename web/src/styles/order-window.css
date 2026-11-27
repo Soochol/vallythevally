@@ -49,9 +49,9 @@
 .od-chip[data-dragging] { opacity:.4; }
 .od-chip[data-disabled] { cursor:not-allowed; }
 .od-chip-state { font-weight:500; }
-.od-chip[data-pending] { cursor:default; border:var(--size-1) dashed var(--on-data); }
-.od-chip[data-pending][data-side=sell] { background:color-mix(in srgb, var(--down) 60%, var(--surface)); }
-.od-chip[data-pending][data-side=buy] { background:color-mix(in srgb, var(--up) 60%, var(--surface)); }
+.od-chip[data-pending] { cursor:default; border:var(--size-1) dashed var(--on-data); color:var(--on-data); }
+.od-chip[data-pending][data-side=sell] { background:var(--down); }
+.od-chip[data-pending][data-side=buy] { background:var(--up); }
 .od-ghost { position:fixed; z-index:60; transform:translate(var(--size-10), var(--size-10)); padding:var(--size-2) var(--s3); border-radius:var(--r-m); background:var(--raised); box-shadow:var(--shadow-s); color:var(--text); font-size:var(--fs-xs); pointer-events:none; white-space:nowrap; }
 .od-ghost[data-cancel] { border:var(--size-1) solid var(--danger); background:var(--danger-soft); color:var(--danger); font-weight:700; }
 .od-ghost[data-side=sell] b { color:var(--down); } .od-ghost[data-side=buy] b { color:var(--up); }

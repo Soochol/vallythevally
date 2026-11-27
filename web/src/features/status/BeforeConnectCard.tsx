@@ -33,7 +33,7 @@ function Waiting({ retryAt }: { retryAt: number | null }) {
 
 export function BeforeConnectCard({ notice }: { notice: BeforeConnect }) {
   return (
-    <div className="pointer-events-none absolute inset-0 z-[5] grid place-items-center p-4">
+    <div className="pointer-events-none absolute inset-0 z-[15] grid place-items-center p-4">
       <section aria-label="키움 연결 안내" className="pointer-events-auto flex w-[min(440px,100%)] flex-col items-center gap-2 rounded-m border border-line bg-surface px-5 py-4 text-center shadow-[var(--shadow-s)]">
         <h3 className="text-l font-semibold text-text">{notice.title}</h3>
         {notice.waitingUntil ? <Waiting retryAt={notice.waitingUntil.retryAt} /> : <p className="line-clamp-2 text-m text-text-2" title={notice.detail}>{notice.detail}</p>}
