@@ -128,6 +128,8 @@ export class QuoteDepthHeatmap implements ISeriesPrimitive<Time> {
           bid,
           maxOpacity: layer.spec.maxOpacity,
           topLevels: layer.spec.topLevels,
+          dynamicContrast: layer.spec.dynamicContrast !== false,
+          outlierBorder: normalizeHex(tokens.ind?.["ind-1"] ?? "") ?? normalizeHex("#F59E0B")!,
         },
       );
       if ((layer.spec.showSpoof === true || layer.spec.showIceberg === true) && layer.microEvents && layer.microEvents.length > 0) {
