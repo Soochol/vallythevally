@@ -119,7 +119,7 @@ test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async (
   const bars = section(page, "봉 · 축");
   for (const name of ["봉 모양", "가격 축", "화면에 보이는 봉"]) await expect(bars.getByRole("group", { name })).toBeVisible();
   await expect(bars.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
-  await expect(bars.getByRole("switch")).toHaveCount(0);
+  await expect(bars.getByRole("switch", { name: /^정규장만 보기/ })).toBeVisible();
 
   await chooseSettingsMenu(page, "범례 · 표시");
   const display = section(page, "범례 · 표시");
