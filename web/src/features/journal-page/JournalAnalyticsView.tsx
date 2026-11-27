@@ -14,6 +14,7 @@ import {
   formatPeriodLabel,
   formatUtcMsToDay,
   formatWon,
+  isPeriodAtToday,
   MINUS,
   pad2,
   parseDayUtcMs,
@@ -114,7 +115,7 @@ export function JournalAnalyticsView({
   }, [allTrades]);
 
   const tokens = useMemo(() => activeFilterTokens(filters, symbolNames), [filters, symbolNames]);
-  const isAtToday = range[1] >= today;
+  const isAtToday = isPeriodAtToday(period, range, today);
 
   const tradingDaysInRange = useMemo(() => {
     const out: string[] = [];

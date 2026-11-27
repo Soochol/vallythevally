@@ -16,6 +16,7 @@ import {
   formatPct,
   formatPeriodLabel,
   formatWon,
+  isPeriodAtToday,
   resolveNote,
   toneClass,
   tradePnl,
@@ -185,7 +186,7 @@ export function JournalStudioView({
 
   const selectedNote = selectedTrade ? resolveNote(selectedTrade, notes) : null;
   const sumTone = toneClass(summary.net);
-  const isAtToday = range[1] >= today;
+  const isAtToday = isPeriodAtToday(period, range, today);
 
   const triggerFlash = () => {
     setSavedFlash(true);

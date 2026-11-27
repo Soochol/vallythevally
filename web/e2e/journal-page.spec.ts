@@ -183,7 +183,7 @@ test("/journal과 /journal/analytics에서 과거 기간(주·월·이전월·�
   await expect(page.getByTestId("journal-period-label")).toContainText("2026년 10월");
   await expect(page.getByTestId("journal-list-count")).toHaveText("거래 1건");
   await expect(page.getByTestId("journal-trade-row-042700")).toBeVisible();
-  expect(requests.some((r) => r.from === "2026-10-01" && r.to === "2026-10-31")).toBe(true);
+  expect(requests.some((r) => r.from === "2026-09-17" && r.to === "2026-10-31")).toBe(true);
 
   await page.getByTestId("journal-go-analytics").click();
   await expect(page).toHaveURL(/\/journal\/analytics$/);
@@ -217,7 +217,7 @@ test("장기 과거 기간이 pendingDays로 나눠 동기화되면 자동으로
       const url = new URL(request.url());
       const from = url.searchParams.get("from");
       const to = url.searchParams.get("to");
-      if (from === "2026-01-01" && to === "2026-12-31") {
+      if (from === "2025-12-18" && to === "2026-12-31") {
         yearCalls += 1;
         if (yearCalls === 1) {
           return {
@@ -361,4 +361,50 @@ test("매매복기 차트가 1·3·5·10분·일봉을 모두 지원하고 왼�
   await page.mouse.up();
 
   await expect.poll(async () => Number(await chart.getAttribute("data-visible-from"))).toBeLessThan(initialFrom);
+});
+
+test("과거일 분봉 점프가 비어 있으면 당일 봉이나 합성 봉을 그리지 않고 안내를 띄우며, 월 경계 스윙 거래도 표시한다", async ({ page, scenario }) => {
+  const crossMonthDays: readonly HistoryDayFixture[] = [
+    {
+      day: "2026-10-30",
+      executions: [
+        { orderNo: "SW1", code: "035420", name: "NAVER", side: "buy", quantity: 10, price: 180_000, time: "14:30:00", venue: "krx" },
+      ],
+    },
+    {
+      day: "2026-11-02",
+      executions: [
+        { orderNo: "SW2", code: "035420", name: "NAVER", side: "sell", quantity: 10, price: 192_000, time: "09:20:00", venue: "krx" },
+      ],
+    },
+  ];
+  seedJournalHistory(scenario, crossMonthDays);
+
+  scenario.on(
+    (url) => url.pathname === "/api/bars/jump",
+    (request) => {
+      const url = new URL(request.url());
+      return {
+        status: 200,
+        body: {
+          symbol: url.searchParams.get("symbol") ?? "035420",
+          venue: url.searchParams.get("venue") ?? "krx",
+          period: url.searchParams.get("period") ?? "1m",
+          date: url.searchParams.get("date") ?? "2026-11-02",
+          bars: [],
+          nextBefore: null,
+          unadjustedDays: [],
+        },
+      };
+    },
+  );
+
+  await page.goto("/journal");
+  await expect(page.getByTestId("journal-list-count")).toHaveText("거래 1건");
+  await expect(page.getByTestId("journal-trade-row-035420")).toBeVisible();
+
+  await page.getByRole("group", { name: "봉 주기" }).getByRole("button", { name: "1분", exact: true }).click();
+  await expect(page.getByTestId("journal-chart-notice")).toBeVisible();
+  await expect(page.getByTestId("journal-chart-notice")).toContainText("2026-11-02 분봉 데이터가 없습니다");
+  await expect(page.getByTestId("journal-candle-chart")).toHaveAttribute("data-bar-count", "0");
 });

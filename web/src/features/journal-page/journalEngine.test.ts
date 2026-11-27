@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { findBarIndexForFill } from "./journalChartOverlay";
 import {
   aggregateSummary,
   autoTfOf,
@@ -7,13 +8,14 @@ import {
   buildTableGroups,
   computeHistoryQueryRange,
   computePeriodRange,
+  isPeriodAtToday,
   matchTradeFilter,
   synthesizeDemoBars,
   tfStepMinutes,
 } from "./journalEngine";
 import { combineDayExecutionsWithForensics } from "./journalNotes";
 import { useJournalStore } from "./journalStore";
-import { EMPTY_FILTERS, JOURNAL_TFS, TF_TO_PERIOD, type StoredDayExecutions } from "./journalTypes";
+import { EMPTY_FILTERS, JOURNAL_TFS, TF_TO_PERIOD, type JournalBar, type JournalFill, type StoredDayExecutions } from "./journalTypes";
 
 const SAMPLE_HISTORY: readonly StoredDayExecutions[] = [
   {
@@ -164,12 +166,56 @@ describe("journalEngine", () => {
     expect(bySym[1]!.summary.net).toBe(-60_000);
   });
 
-  it("기간별 이력 조회 범위를 계산하고 월 경계 주간·전체 기간을 빠짐없이 포함한다", () => {
-    expect(computeHistoryQueryRange({ type: "day", anchor: "2026-11-27" }, "2026-11-27")).toEqual(["2026-11-01", "2026-11-30"]);
-    expect(computeHistoryQueryRange({ type: "month", anchor: "2026-10-15" }, "2026-11-27")).toEqual(["2026-10-01", "2026-10-31"]);
-    expect(computeHistoryQueryRange({ type: "week", anchor: "2026-12-02" }, "2026-12-02")).toEqual(["2026-11-30", "2026-12-31"]);
-    expect(computeHistoryQueryRange({ type: "year", anchor: "2025-06-15" }, "2026-11-27")).toEqual(["2025-01-01", "2025-12-31"]);
+  it("기간별 이력 조회 범위를 계산하고 월 경계 스윙·주간·전체 기간을 빠짐없이 포함한다", () => {
+    expect(computeHistoryQueryRange({ type: "day", anchor: "2026-11-27" }, "2026-11-27")).toEqual(["2026-10-18", "2026-11-30"]);
+    expect(computeHistoryQueryRange({ type: "month", anchor: "2026-10-15" }, "2026-11-27")).toEqual(["2026-09-17", "2026-10-31"]);
+    expect(computeHistoryQueryRange({ type: "week", anchor: "2026-12-02" }, "2026-12-02")).toEqual(["2026-11-16", "2026-12-31"]);
+    expect(computeHistoryQueryRange({ type: "year", anchor: "2025-06-15" }, "2026-11-27")).toEqual(["2024-12-18", "2025-12-31"]);
     expect(computeHistoryQueryRange({ type: "all", anchor: "2026-11-27" }, "2026-11-27")).toBeNull();
+  });
+
+  it("같은 분 안의 초 단위 단타와 숫자형 주문번호 순서를 정확히 매칭한다", () => {
+    const trades = buildRoundTrips([
+      {
+        day: "2026-11-27",
+        executions: [
+          { orderNo: "10", code: "005930", name: "삼성전자", side: "sell", quantity: 10, price: 71_000, time: "09:05:45", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "9", code: "005930", name: "삼성전자", side: "buy", quantity: 10, price: 70_000, time: "09:05:10", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+        ],
+      },
+    ]);
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.gross).toBe(10_000);
+  });
+
+  it("주말 기준일에서도 주간·일간 현재 기간 판정이 오늘로 유지된다", () => {
+    const sat = "2026-11-28";
+    const weekPeriod = { type: "week" as const, anchor: sat };
+    const weekRange = computePeriodRange(weekPeriod, [], sat);
+    expect(isPeriodAtToday(weekPeriod, weekRange, sat)).toBe(true);
+
+    const prevWeek = { type: "week" as const, anchor: "2026-11-21" };
+    expect(isPeriodAtToday(prevWeek, computePeriodRange(prevWeek, [], sat), sat)).toBe(false);
+
+    const friDay = { type: "day" as const, anchor: "2026-11-27" };
+    expect(isPeriodAtToday(friDay, computePeriodRange(friDay, [], sat), sat)).toBe(true);
+  });
+
+  it("체결 마커 위치 탐색은 일봉 실제 날짜 거리와 분봉 당일 일치 조건을 지킨다", () => {
+    const dailyBars: JournalBar[] = [
+      { t: 1, o: 100, h: 110, l: 90, c: 105, v: 10, day: "2026-11-01", minutes: 0 },
+      { t: 2, o: 105, h: 115, l: 95, c: 110, v: 10, day: "2026-11-20", minutes: 0 },
+      { t: 3, o: 110, h: 120, l: 100, c: 115, v: 10, day: "2026-11-23", minutes: 0 },
+    ];
+    const fillOnSat: JournalFill = { side: "buy", day: "2026-11-21", minutes: 545, timeLabel: "09:05", price: 108, qty: 10, orderNo: "1", fillAt: null };
+    expect(findBarIndexForFill(dailyBars, fillOnSat, "D")).toBe(1);
+
+    const exitDayBars: JournalBar[] = [
+      { t: 100, o: 100, h: 105, l: 99, c: 102, v: 10, day: "2026-11-27", minutes: 540 },
+      { t: 160, o: 102, h: 106, l: 101, c: 104, v: 10, day: "2026-11-27", minutes: 545 },
+    ];
+    const earlierDayFill: JournalFill = { side: "buy", day: "2026-11-25", minutes: 545, timeLabel: "09:05", price: 98, qty: 10, orderNo: "2", fillAt: null };
+    expect(findBarIndexForFill(exitDayBars, earlierDayFill, "1")).toBe(-1);
   });
 
   it("체결 해부 지표는 같은 날짜의 동일 주문번호에만 병합된다", () => {

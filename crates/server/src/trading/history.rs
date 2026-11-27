@@ -50,6 +50,21 @@ fn execution_of(row: &sqlx::sqlite::SqliteRow) -> Result<(KstDate, TradingExecut
 
 async fn write_day_in(conn: &mut SqliteConnection, account_ref: &str, day: KstDate, finalized: bool, executions: &[TradingExecution], synced_at: i64) -> Result<(), JournalError> {
     let day_text = day.to_string();
+    let existing: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT finalized, synced_at FROM trading_execution_days WHERE account_ref = ? AND day = ?",
+    )
+    .bind(account_ref)
+    .bind(&day_text)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some((was_finalized, prev_synced_at)) = existing {
+        if was_finalized == 1 {
+            return Ok(());
+        }
+        if !finalized && prev_synced_at > synced_at {
+            return Ok(());
+        }
+    }
     sqlx::query("DELETE FROM trading_executions WHERE account_ref = ? AND day = ?")
         .bind(account_ref)
         .bind(&day_text)
@@ -178,6 +193,27 @@ impl ExecutionHistoryStore {
         let mut tx = self.db.begin_write().await?;
         for (day, finalized, executions) in days {
             write_day_in(&mut tx, account_ref, *day, *finalized, executions, synced_at).await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn mark_finalized_preserving_existing(&self, account_ref: &str, days: &[KstDate], synced_at: i64) -> Result<(), JournalError> {
+        if days.is_empty() {
+            return Ok(());
+        }
+        let mut tx = self.db.begin_write().await?;
+        for day in days {
+            let day_text = day.to_string();
+            sqlx::query(
+                "INSERT INTO trading_execution_days (account_ref, day, finalized, synced_at) VALUES (?, ?, 1, ?) \
+                 ON CONFLICT(account_ref, day) DO UPDATE SET finalized = 1, synced_at = MAX(synced_at, excluded.synced_at)",
+            )
+            .bind(account_ref)
+            .bind(&day_text)
+            .bind(synced_at)
+            .execute(&mut *tx)
+            .await?;
         }
         tx.commit().await?;
         Ok(())

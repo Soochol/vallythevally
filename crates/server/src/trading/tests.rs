@@ -1088,10 +1088,10 @@ async fn executions_history_fetches_past_days_with_continuation_caches_closed_da
 async fn executions_history_chunks_long_kiwoom_ranges_and_stops_on_business_rejected_cutoff() {
     let today = KstDate::new(2026, 11, 9).unwrap();
     let (app, _state, _fake, _dir) = history_fixture(today, move |ord_dt, _| {
-        if ord_dt < "20260925" {
+        if ord_dt < "20260825" {
             return ok(json!({"return_code": 20, "return_msg": "[2000](500001:조회 가능 기간 초과)"}), None);
         }
-        if ord_dt == "20260928" || ord_dt == "20261109" {
+        if ord_dt == "20260828" || ord_dt == "20261109" {
             return ok(
                 json!({"acnt_ord_cntr_prps_dtl": [kt00007_row("0040001", "005930", "삼성전자", "buy", 2, 70_000, "09:10:00")], "return_code": 0, "return_msg": "정상"}),
                 None,
@@ -1101,16 +1101,110 @@ async fn executions_history_chunks_long_kiwoom_ranges_and_stops_on_business_reje
     })
     .await;
 
-    let (status, chunk1) = get(&app, "/api/trading/executions/history?from=2026-09-01&to=2026-11-09").await;
+    let (status, chunk1) = get(&app, "/api/trading/executions/history?from=2026-08-01&to=2026-11-09").await;
     assert_eq!(status, StatusCode::OK, "{chunk1}");
     let pending1 = chunk1["pendingDays"].as_u64().unwrap();
-    assert!(pending1 > 0, "25거래일 넘는 장기 구간은 나눠서 동기화한다: {chunk1}");
+    assert!(pending1 > 0, "한 번에 조회하는 거래일 수를 넘는 장기 구간은 나눠서 동기화한다: {chunk1}");
 
-    let (status, chunk2) = get(&app, "/api/trading/executions/history?from=2026-09-01&to=2026-11-09").await;
+    let (status, chunk2) = get(&app, "/api/trading/executions/history?from=2026-08-01&to=2026-11-09").await;
     assert_eq!(status, StatusCode::OK, "{chunk2}");
     assert_eq!(chunk2["pendingDays"], 0, "증권사 기간 제한(BusinessRejected)에 닿으면 오류 없이 중단한다: {chunk2}");
     let days: Vec<&str> = chunk2["days"].as_array().unwrap().iter().map(|d| d["day"].as_str().unwrap()).collect();
-    assert_eq!(days, vec!["2026-09-28", "2026-11-09"]);
+    assert_eq!(days, vec!["2026-08-28", "2026-11-09"]);
+}
+
+#[tokio::test]
+async fn executions_history_continues_past_kiwoom_holidays_and_handles_weekend_and_holiday_today() {
+    let holiday_today = KstDate::new(2026, 11, 9).unwrap();
+    let (app, _state, fake, _dir) = history_fixture(holiday_today, move |ord_dt, _| {
+        match ord_dt {
+            "20261109" | "20261105" => ok(json!({"return_code": 20, "return_msg": "[2000](571489:장이 열리지 않는 날입니다)"}), None),
+            "20261103" => ok(
+                json!({"acnt_ord_cntr_prps_dtl": [kt00007_row("0050001", "005930", "삼성전자", "buy", 4, 70_000, "09:15:00")], "return_code": 0, "return_msg": "정상"}),
+                None,
+            ),
+            _ => ok(json!({"acnt_ord_cntr_prps_dtl": [], "return_code": 0, "return_msg": "정상"}), None),
+        }
+    })
+    .await;
+
+    let (status, body) = get(&app, "/api/trading/executions/history?from=2026-11-02&to=2026-11-09").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["pendingDays"], 0);
+    let days: Vec<&str> = body["days"].as_array().unwrap().iter().map(|d| d["day"].as_str().unwrap()).collect();
+    assert_eq!(days, vec!["2026-11-03"], "휴장일 571489 이후에도 이전 거래일을 계속 동기화한다");
+    let before_retry = kt00007_dates_sent(&fake).len();
+    let (status, _) = get(&app, "/api/trading/executions/history?from=2026-11-02&to=2026-11-09").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(kt00007_dates_sent(&fake)[before_retry..], vec!["20261109"], "과거 휴장일 571489는 확정 캐시돼 재조회하지 않는다");
+
+    let saturday = KstDate::new(2026, 11, 14).unwrap();
+    let (sat_app, _sat_state, sat_fake, _sat_dir) = history_fixture(saturday, move |ord_dt, _| {
+        match ord_dt {
+            "20261114" => ok(json!({"return_code": 20, "return_msg": "[2000](571489:장이 열리지 않는 날입니다)"}), None),
+            "20261113" => ok(
+                json!({"acnt_ord_cntr_prps_dtl": [kt00007_row("0060001", "005930", "삼성전자", "buy", 2, 71_000, "09:10:00")], "return_code": 0, "return_msg": "정상"}),
+                None,
+            ),
+            _ => ok(json!({"acnt_ord_cntr_prps_dtl": [], "return_code": 0, "return_msg": "정상"}), None),
+        }
+    })
+    .await;
+    let (status, sat_body) = get(&sat_app, "/api/trading/executions/history?from=2026-11-12&to=2026-11-14").await;
+    assert_eq!(status, StatusCode::OK, "{sat_body}");
+    assert_eq!(sat_body["days"].as_array().unwrap().len(), 1);
+    assert!(!kt00007_dates_sent(&sat_fake).contains(&"20261114".to_owned()), "토요일 당일은 kt00007을 호출하지 않는다");
+}
+
+#[tokio::test]
+async fn executions_cutoff_persists_finalized_preserves_sqlite_rows_and_guards_stale_overwrites() {
+    let today = KstDate::new(2026, 11, 9).unwrap();
+    let (app, state, fake, _dir) = history_fixture(today, move |ord_dt, _| {
+        if ord_dt <= "20261104" {
+            return ok(json!({"return_code": 20, "return_msg": "[2000](500001:조회 가능 기간 초과)"}), None);
+        }
+        ok(json!({"acnt_ord_cntr_prps_dtl": [], "return_code": 0, "return_msg": "정상"}), None)
+    })
+    .await;
+
+    let account_ref = state.accounts.status(None).unwrap().account_ref.unwrap();
+    let store = super::history::ExecutionHistoryStore::new(state.db.clone());
+    let preserved_day = KstDate::new(2026, 11, 3).unwrap();
+    let preserved_fill = crate::api::TradingExecution {
+        order_no: "0070001".into(),
+        code: "005930".into(),
+        name: "삼성전자".into(),
+        side: OrderSide::Buy,
+        quantity: 6,
+        price: 69_000,
+        time: "09:05:00".into(),
+        venue: crate::api::Venue::Nxt,
+    };
+    store.save_day(&account_ref, preserved_day, false, std::slice::from_ref(&preserved_fill), 100).await.unwrap();
+
+    let (status, single) = get(&app, "/api/trading/executions?date=2026-11-03").await;
+    assert_eq!(status, StatusCode::OK, "{single}");
+    assert_eq!(single["executions"].as_array().unwrap().len(), 1, "보관 한도 초과 시 기존 SQLite 체결을 보존해 돌려준다");
+    assert_eq!(single["executions"][0]["venue"], "nxt");
+
+    let (status, forensics) = get(&app, "/api/trading/executions/forensics?date=20261103").await;
+    assert_eq!(status, StatusCode::OK, "{forensics}");
+
+    let (status, first_hist) = get(&app, "/api/trading/executions/history?from=2026-11-02&to=2026-11-06").await;
+    assert_eq!(status, StatusCode::OK, "{first_hist}");
+    assert_eq!(first_hist["pendingDays"], 0);
+    assert_eq!(first_hist["days"][0]["day"], "2026-11-03");
+
+    let sent_after_first = kt00007_dates_sent(&fake).len();
+    let (status, second_hist) = get(&app, "/api/trading/executions/history?from=2026-11-02&to=2026-11-06").await;
+    assert_eq!(status, StatusCode::OK, "{second_hist}");
+    assert_eq!(kt00007_dates_sent(&fake).len(), sent_after_first, "기간 제한에 걸린 과거일은 확정 기록돼 재조회하지 않는다");
+
+    let finalized_day = KstDate::new(2026, 10, 20).unwrap();
+    store.save_day(&account_ref, finalized_day, true, std::slice::from_ref(&preserved_fill), 200).await.unwrap();
+    store.save_day(&account_ref, finalized_day, false, &[], 300).await.unwrap();
+    assert!(store.is_finalized(&account_ref, finalized_day).await.unwrap());
+    assert_eq!(store.load_day(&account_ref, finalized_day).await.unwrap().len(), 1, "확정된 과거일은 이후 비확정 쓰기로 덮어쓰지 않는다");
 }
 
 #[tokio::test]

@@ -807,3 +807,55 @@ async fn kis_executions_history_fetches_multi_day_range_with_continuation_and_ca
     assert!(!clamped_calls.is_empty());
     assert!(clamped_calls.iter().all(|s| s.query("INQR_STRT_DT").unwrap() >= "20260812"), "TTTC0081R 3개월 한도를 넘겨 요청하지 않는다: {clamped_calls:?}");
 }
+
+#[tokio::test]
+async fn kis_executions_history_preserves_already_finalized_days_within_a_wider_sync_window() {
+    let f = kis_fixture(Some(KIS_ACCOUNT), None).await;
+    let (_, reference_b) = f.enable_both().await;
+    let store = super::history::ExecutionHistoryStore::new(f.state.db.clone());
+    let finalized_day = domain::KstDate::new(2026, 11, 5).unwrap();
+    store
+        .save_day(
+            &reference_b,
+            finalized_day,
+            true,
+            &[crate::api::TradingExecution {
+                order_no: "0000019999".into(),
+                code: "005930".into(),
+                name: "삼성전자".into(),
+                side: crate::api::OrderSide::Buy,
+                quantity: 3,
+                price: 70_000,
+                time: "09:15:00".into(),
+                venue: crate::api::Venue::Nxt,
+            }],
+            100,
+        )
+        .await
+        .unwrap();
+
+    *f.kis.fills_hook.lock().unwrap() = Some(Box::new(|_sent| {
+        Ok(HttpResponse {
+            status: 200,
+            tr_cont: None,
+            body: json!({
+                "rt_cd": "0",
+                "msg_cd": "KIOK0000",
+                "msg1": "정상",
+                "ctx_area_fk100": "",
+                "ctx_area_nk100": "",
+                "output1": [
+                    {"ord_dt": "20261104", "odno": "0000010010", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "02", "tot_ccld_qty": "2", "avg_prvs": "69500", "ord_tmd": "091000", "excg_id_dvsn_Cd": "KRX"},
+                    {"ord_dt": "20261105", "odno": "0000019999", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "02", "tot_ccld_qty": "3", "avg_prvs": "70000", "ord_tmd": "091500", "excg_id_dvsn_Cd": "SOR"},
+                    {"ord_dt": "20261106", "odno": "0000010011", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "01", "tot_ccld_qty": "5", "avg_prvs": "71000", "ord_tmd": "102000", "excg_id_dvsn_Cd": "KRX"}
+                ]
+            })
+            .to_string(),
+        })
+    }));
+
+    let (status, history) = get(&f.app, &format!("/api/trading/executions/history?account={reference_b}&from=2026-11-04&to=2026-11-06")).await;
+    assert_eq!(status, StatusCode::OK, "{history}");
+    let day_5 = history["days"].as_array().unwrap().iter().find(|d| d["day"] == "2026-11-05").unwrap();
+    assert_eq!(day_5["executions"][0]["venue"], "nxt", "이미 확정된 과거일의 NXT 거래소 기록을 넓은 구간 동기화가 덮어쓰지 않는다");
+}

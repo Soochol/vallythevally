@@ -28,7 +28,8 @@ use crate::kis::rest::KisError;
 
 const VERIFY_TTL_SECS: i64 = 60;
 const MAX_PAGES: usize = 100;
-const MAX_KIWOOM_SYNC_DAYS_PER_REQUEST: usize = 25;
+const MAX_KIWOOM_SYNC_DAYS_PER_REQUEST: usize = 35;
+const KIWOOM_MARKET_CLOSED_REASON: u32 = 571489;
 const DEFAULT_ALL_LOOKBACK_DAYS: i64 = 365;
 const KIS_MAX_LOOKBACK_DAYS: i64 = 89;
 const ACCOUNT_DIGITS: usize = 10;
@@ -702,7 +703,22 @@ impl Trading {
             }
             self.kis_executions(&self.kis_desk_of(&account)?, day, priority).await?
         } else {
-            self.kiwoom_executions_on(day, priority).await?
+            match self.kiwoom_executions_on(day, priority).await {
+                Ok(executions) => executions,
+                Err(TradingError::Kiwoom(KiwoomError::Failed(ref failure))) if is_kiwoom_market_closed(failure) => {
+                    if day < today {
+                        self.history.mark_finalized_preserving_existing(&account.account_ref, &[day], now.unix()).await?;
+                    }
+                    let executions = self.history.load_day(&account.account_ref, day).await?;
+                    return Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions });
+                }
+                Err(TradingError::Kiwoom(KiwoomError::Failed(ref failure))) if day < today && failure.category() == KiwoomCategory::BusinessRejected => {
+                    self.history.mark_finalized_preserving_existing(&account.account_ref, &[day], now.unix()).await?;
+                    let executions = self.history.load_day(&account.account_ref, day).await?;
+                    return Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions });
+                }
+                Err(err) => return Err(err),
+            }
         };
         self.history.save_day(&account.account_ref, day, day < today, &executions, now.unix()).await?;
         Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions })
@@ -783,7 +799,11 @@ impl Trading {
         let mut day = fetch_from;
         while day <= fetch_to {
             let fills = fetched.remove(&day).unwrap_or_default();
-            if is_sync_day(day, today) || !fills.is_empty() {
+            if day < today && finalized.contains(&day) {
+                day = day.add_days(1);
+                continue;
+            }
+            if is_sync_day(day) || !fills.is_empty() {
                 to_save.push((day, day < today, fills));
             }
             day = day.add_days(1);
@@ -799,13 +819,20 @@ impl Trading {
         let batch_len = missing.len().min(MAX_KIWOOM_SYNC_DAYS_PER_REQUEST);
         let mut pending_days = missing.len().saturating_sub(batch_len) as u32;
         let bulk_priority = if batch_len > 5 { Priority::ScreenBulk } else { priority };
-        for day in missing.into_iter().take(batch_len) {
+        for (idx, &day) in missing.iter().take(batch_len).enumerate() {
             let day_priority = if day == today { priority } else { bulk_priority };
             match self.kiwoom_executions_on(day, day_priority).await {
                 Ok(executions) => {
                     self.history.save_day(&account.account_ref, day, day < today, &executions, synced_at).await?;
                 }
+                Err(TradingError::Kiwoom(KiwoomError::Failed(ref failure))) if is_kiwoom_market_closed(failure) => {
+                    if day < today {
+                        self.history.mark_finalized_preserving_existing(&account.account_ref, &[day], synced_at).await?;
+                    }
+                }
                 Err(TradingError::Kiwoom(KiwoomError::Failed(ref failure))) if day < today && failure.category() == KiwoomCategory::BusinessRejected => {
+                    let cutoff_days: Vec<KstDate> = missing[idx..].iter().copied().filter(|d| *d < today).collect();
+                    self.history.mark_finalized_preserving_existing(&account.account_ref, &cutoff_days, synced_at).await?;
                     pending_days = 0;
                     break;
                 }
@@ -1008,15 +1035,20 @@ fn venue(labels: &[&str]) -> Result<Venue, TradingError> {
     Err(TradingError::Unreadable("거래소구분"))
 }
 
-fn is_sync_day(day: KstDate, today: KstDate) -> bool {
-    day == today || !matches!(day.weekday(), Weekday::Sat | Weekday::Sun)
+fn is_kiwoom_market_closed(failure: &crate::kiwoom::error::Failure) -> bool {
+    failure.category() == KiwoomCategory::BusinessRejected
+        && failure.vendor_reason().map(|reason| reason.number()) == Some(KIWOOM_MARKET_CLOSED_REASON)
+}
+
+fn is_sync_day(day: KstDate) -> bool {
+    !matches!(day.weekday(), Weekday::Sat | Weekday::Sun)
 }
 
 fn sync_candidate_days(from: KstDate, to: KstDate, today: KstDate, finalized: &HashSet<KstDate>) -> Vec<KstDate> {
     let mut out = Vec::new();
     let mut day = from;
     while day <= to {
-        if is_sync_day(day, today) && (day == today || !finalized.contains(&day)) {
+        if is_sync_day(day) && (day == today || !finalized.contains(&day)) {
             out.push(day);
         }
         day = day.add_days(1);

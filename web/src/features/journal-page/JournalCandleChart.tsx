@@ -148,13 +148,20 @@ function chartOptionsOf(tokens: ThemeTokens, period: Period) {
   };
 }
 
+interface ChartNotice {
+  readonly kind: "empty" | "error";
+  readonly message: string;
+}
+
 function computeTradeFocusRange(bars: readonly JournalBar[], trade: JournalTrade, tf: JournalTf): { from: number; to: number } {
   const n = bars.length;
   if (n === 0) return { from: 0, to: 1 };
   const firstBuy = trade.buys[0];
   const lastSell = trade.sells[trade.sells.length - 1];
-  const entryIdx = firstBuy ? findBarIndexForFill(bars, firstBuy, tf) : 0;
-  const exitIdx = lastSell ? findBarIndexForFill(bars, lastSell, tf) : n - 1;
+  const rawEntry = firstBuy ? findBarIndexForFill(bars, firstBuy, tf) : -1;
+  const rawExit = lastSell ? findBarIndexForFill(bars, lastSell, tf) : -1;
+  const entryIdx = rawEntry >= 0 ? rawEntry : rawExit >= 0 ? rawExit : 0;
+  const exitIdx = rawExit >= 0 ? rawExit : rawEntry >= 0 ? rawEntry : n - 1;
   const lo = Math.max(0, Math.min(entryIdx, exitIdx));
   const hi = Math.max(0, Math.max(entryIdx, exitIdx));
   if (tf === "D") {
@@ -191,6 +198,9 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
   propsRef.current = { trade, tf, today, afterCost, highlightFill };
 
   const [legend, setLegend] = useState<LegendState | null>(null);
+  const [chartNotice, setChartNotice] = useState<ChartNotice | null>(null);
+  const [olderError, setOlderError] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
   const period = TF_TO_PERIOD[tf];
   const venueParam: Venue = trade.venue;
@@ -203,6 +213,34 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
     const bar = bars[clamped]!;
     const { trade: curTrade, tf: curTf } = propsRef.current;
     setLegend(buildLegendState(bar, curTrade, curTf, bars, clamped));
+  };
+
+  const clearChartData = () => {
+    const candle = candleRef.current;
+    const volume = volumeRef.current;
+    const overlay = overlayRef.current;
+    barsRef.current = [];
+    if (candle && volume) {
+      settingDataRef.current = true;
+      try {
+        candle.setData([]);
+        volume.setData([]);
+      } finally {
+        settingDataRef.current = false;
+      }
+    }
+    if (overlay) {
+      const { trade: curTrade, tf: curTf, afterCost: curAfterCost, highlightFill: curHighlight } = propsRef.current;
+      overlay.setState({ trade: curTrade, tf: curTf, bars: [], afterCost: curAfterCost, highlightFill: curHighlight });
+    }
+    daySepsRef.current?.sync();
+    setLegend(null);
+    const box = boxRef.current;
+    if (box) {
+      box.dataset.barCount = "0";
+      box.dataset.firstBarT = "";
+      box.dataset.lastBarT = "";
+    }
   };
 
   const applyBars = (bars: readonly JournalBar[], shiftLogicalBy: number | null) => {
@@ -409,6 +447,8 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
     chart.applyOptions(chartOptionsOf(tokensRef.current, period));
     feedRef.current?.dispose();
     feedRef.current = null;
+    setChartNotice(null);
+    setOlderError(false);
 
     if (isDemo) {
       applyBars(synthesizeDemoBars(trade, tf), null);
@@ -418,41 +458,69 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
     let disposed = false;
     let initialPages = 0;
 
+    const loadOlderToEntry = (feed: JumpableFeed) => {
+      void feed.olderUntil((h) => {
+        initialPages += 1;
+        const list = displayBars(h);
+        if (list.length === 0 || initialPages >= MAX_INITIAL_OLDER_PAGES) return true;
+        const firstDay = toJournalBars([list[0]!])[0]!.day;
+        return firstDay <= trade.entryDay;
+      }).then(() => {
+        if (!disposed && chartRef.current && barsRef.current.length > 0) {
+          chartRef.current.timeScale().setVisibleLogicalRange(
+            computeTradeFocusRange(barsRef.current, propsRef.current.trade, propsRef.current.tf),
+          );
+        }
+      });
+    };
+
+    const jumpToExitDay = (feed: JumpableFeed) => {
+      void feed.enterMode(trade.exitDay).then((outcome) => {
+        if (disposed || outcome === "entered" || outcome === "cancelled") return;
+        clearChartData();
+        setChartNotice({
+          kind: outcome === "failed" ? "error" : "empty",
+          message:
+            outcome === "failed"
+              ? `${trade.exitDay} 분봉을 불러오지 못했습니다`
+              : `${trade.exitDay} 분봉 데이터가 없습니다`,
+        });
+      });
+    };
+
     const handleHistory = (history: History, mode: "reset" | "prepended" | "jump", added = 0) => {
       if (disposed) return;
       const raw = displayBars(history);
       if (raw.length === 0) {
+        if (mode === "reset" && tf !== "D" && trade.exitDay < today) {
+          jumpToExitDay(feed);
+          return;
+        }
         if (mode === "reset" || mode === "jump") {
-          applyBars(synthesizeDemoBars({ ...trade, demoSeed: 777123 }, tf), null);
+          clearChartData();
+          setChartNotice({
+            kind: "empty",
+            message: mode === "jump" ? `${trade.exitDay} 분봉 데이터가 없습니다` : "봉 데이터가 없습니다",
+          });
         }
         return;
       }
       const converted = toJournalBars(raw);
       if (mode === "prepended") {
+        setOlderError(false);
         applyBars(converted, added);
         return;
       }
+      const earliestDay = converted[0]!.day;
+      if (mode === "reset" && tf !== "D" && trade.exitDay < earliestDay && trade.exitDay < today) {
+        jumpToExitDay(feed);
+        return;
+      }
+      setChartNotice(null);
       applyBars(converted, null);
 
-      const earliestDay = converted[0]!.day;
-      if (mode === "reset") {
-        if (tf === "D" && trade.entryDay < earliestDay && history.nextBefore !== null) {
-          void feed.olderUntil((h) => {
-            initialPages += 1;
-            const list = displayBars(h);
-            if (list.length === 0 || initialPages >= MAX_INITIAL_OLDER_PAGES) return true;
-            const firstDay = toJournalBars([list[0]!])[0]!.day;
-            return firstDay <= trade.entryDay;
-          }).then(() => {
-            if (!disposed && chartRef.current && barsRef.current.length > 0) {
-              chartRef.current.timeScale().setVisibleLogicalRange(
-                computeTradeFocusRange(barsRef.current, propsRef.current.trade, propsRef.current.tf),
-              );
-            }
-          });
-        } else if (tf !== "D" && trade.exitDay < earliestDay && trade.exitDay < today) {
-          void feed.enterMode(trade.exitDay);
-        }
+      if (trade.entryDay < earliestDay && history.nextBefore !== null) {
+        loadOlderToEntry(feed);
       }
     };
 
@@ -464,9 +532,13 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
         jumpEntered: (history) => handleHistory(history, "jump"),
         prepended: (history, added) => handleHistory(history, "prepended", added),
         failed: () => {
-          if (!disposed) applyBars(synthesizeDemoBars({ ...trade, demoSeed: 777123 }, tf), null);
+          if (disposed) return;
+          clearChartData();
+          setChartNotice({ kind: "error", message: "봉 데이터를 불러오지 못했습니다" });
         },
-        olderFailed: () => {},
+        olderFailed: () => {
+          if (!disposed) setOlderError(true);
+        },
         live: () => {},
         confirmed: () => {},
         subError: () => {},
@@ -481,7 +553,7 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
       feed.dispose();
       if (feedRef.current === feed) feedRef.current = null;
     };
-  }, [trade.id, trade.code, trade.exitDay, trade.entryDay, venueParam, period, tf, isDemo, today]);
+  }, [trade.id, trade.code, trade.exitDay, trade.entryDay, venueParam, period, tf, isDemo, today, reloadTick]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -519,6 +591,29 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
           <span>종<b className={toneClass(legend.chgPct) ? `jrn-${toneClass(legend.chgPct)}` : ""}>{formatWon(legend.c, false)}</b></span>
           <span className={toneClass(legend.chgPct) ? `jrn-${toneClass(legend.chgPct)}` : ""}>{formatPct(legend.chgPct)}</span>
           {legend.fillNote !== "" && <span className="jrn-chart-fill-note">{legend.fillNote}</span>}
+        </div>
+      )}
+      {olderError && chartNotice === null && (
+        <div className="jrn-chart-older-banner" data-testid="journal-chart-older-error">
+          <span>과거 봉을 더 불러오지 못했습니다</span>
+          <button
+            type="button"
+            className="jrn-txt-btn"
+            onClick={() => {
+              setOlderError(false);
+              feedRef.current?.retryOlder();
+            }}
+          >
+            다시 시도
+          </button>
+        </div>
+      )}
+      {chartNotice !== null && (
+        <div className="jrn-chart-notice" data-testid="journal-chart-notice" data-kind={chartNotice.kind}>
+          <span>{chartNotice.message}</span>
+          <button type="button" className="jrn-txt-btn" onClick={() => setReloadTick((v) => v + 1)}>
+            다시 시도
+          </button>
         </div>
       )}
     </div>

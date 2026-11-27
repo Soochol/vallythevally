@@ -8,7 +8,7 @@ import type {
   Time,
 } from "lightweight-charts";
 import { toChartTime } from "../../chart/time";
-import { clamp, formatPct, formatWon, tfStepMinutes, tradePnl } from "./journalEngine";
+import { clamp, formatPct, formatWon, parseDayUtcMs, tfStepMinutes, tradePnl } from "./journalEngine";
 import type { JournalBar, JournalFill, JournalTf, JournalTrade } from "./journalTypes";
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
@@ -26,10 +26,11 @@ export function findBarIndexForFill(bars: readonly JournalBar[], fill: JournalFi
   if (tf === "D") {
     const exact = bars.findIndex((b) => b.day === fill.day);
     if (exact >= 0) return exact;
+    const targetMs = parseDayUtcMs(fill.day);
     let best = 0;
     let bestDiff = Infinity;
     for (let i = 0; i < bars.length; i += 1) {
-      const diff = Math.abs(bars[i]!.day.localeCompare(fill.day));
+      const diff = Math.abs(parseDayUtcMs(bars[i]!.day) - targetMs);
       if (diff < bestDiff) {
         bestDiff = diff;
         best = i;
@@ -41,12 +42,12 @@ export function findBarIndexForFill(bars: readonly JournalBar[], fill: JournalFi
   const bucketMin = Math.floor(fill.minutes / step) * step;
   const exact = bars.findIndex((b) => b.day === fill.day && b.minutes === bucketMin);
   if (exact >= 0) return exact;
-  let best = 0;
+  let best = -1;
   let bestDist = Infinity;
   for (let i = 0; i < bars.length; i += 1) {
     const b = bars[i]!;
-    const dayPenalty = b.day === fill.day ? 0 : 100_000;
-    const dist = dayPenalty + Math.abs(b.minutes - fill.minutes);
+    if (b.day !== fill.day) continue;
+    const dist = Math.abs(b.minutes - fill.minutes);
     if (dist < bestDist) {
       bestDist = dist;
       best = i;
