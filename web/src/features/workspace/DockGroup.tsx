@@ -16,7 +16,6 @@ import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
 import { closeWindow, LAST_CHART_REASON } from "./manage";
-import { WindowSymbol } from "./WindowSymbol";
 import { SymbolDropOverlay } from "./SymbolDragOverlay";
 import { focusWithoutActivation, revealTab, tabLabel } from "./focus";
 
@@ -233,7 +232,6 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
                     <TabLabel window={window} />
                   </button>
                   <LinkDot window={window} selected={selected} />
-                  <WindowSymbol window={window} selected={selected} />
                   <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
                 </span>
               );

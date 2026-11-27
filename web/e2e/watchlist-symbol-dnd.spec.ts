@@ -81,7 +81,7 @@ test("관심종목에서 비활성 연동 보조창 탭에 드롭하면 고정 �
   await expect(bookTab).toHaveAttribute("aria-selected", "true");
   await expect(page.locator("#window-tab-chart-1")).toContainText("삼성전자우");
   await expect(page.locator("#window-tab-chart-2")).toContainText("삼성전자우");
-  await expect(page.locator('[data-dock-group="g-charts"] .dock-tab-group[data-selected] .window-symbol[data-pinned]')).toHaveCount(0);
+  await expect(page.locator('[data-dock-group="g-charts"] .dock-tab-group[data-selected] .link-dot[data-locked]')).toHaveCount(0);
 });
 
 test("명시적으로 고정된 보조창 탭에 드롭하면 종목이 바뀌지 않는다", async ({ scenario, page }) => {
@@ -93,7 +93,7 @@ test("명시적으로 고정된 보조창 탭에 드롭하면 종목이 바뀌�
   await dragSymbolTo(watchRow(page, "086520"), pinnedTab);
 
   await expect(page.locator("#window-tab-chart-1")).toContainText("삼성전자");
-  await expect(page.locator('[data-dock-group="g-charts"] .dock-tab-group[data-selected] .window-symbol[data-pinned]')).toBeVisible();
+  await expect(page.locator('[data-dock-group="g-charts"] .dock-tab-group[data-selected] .link-dot[data-locked]')).toBeVisible();
 });
 
 test("관심종목에서 호가 미니 그리드 탭에 드롭하면 종목 카드가 추가된다", async ({ scenario, page }) => {
