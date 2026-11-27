@@ -7,6 +7,8 @@ import {
   type IndicatorConfig,
   clampVisibleBars,
   DEFAULT_CHART_SETTINGS,
+  DEFAULT_ICHIMOKU_STYLE,
+  ichimokuStyleOf,
   MAX_INDICATORS_PER_PANEL,
   MERGED_PANEL_MIN_STRETCH,
   mergeIndicatorIntoPanel,
@@ -17,6 +19,7 @@ import {
   removeCompare,
   removeIndicator,
   reorderPanel,
+  sameIchimokuStyle,
   setIndicatorAxis,
   setIndicatorPlacement,
   setPanelStretches,
@@ -483,4 +486,35 @@ test("패널당 최대 지표 개수를 넘겨 합치지 않는다", () => {
     panels: [{ id: "p-full", stretch: 0.4 }, { id: "p-extra", stretch: 0.25 }],
   };
   expect(mergeIndicatorIntoPanel(full, `r${MAX_INDICATORS_PER_PANEL}`, "p-full")).toBe(full);
+});
+
+test("sameIchimokuStyle은 모든 필드가 같을 때만 true를 돌려주고 일목 스타일은 저장·복원된다", () => {
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE })).toBe(true);
+  expect(sameIchimokuStyle(ichimokuStyleOf({ colors: ["ind-1"], width: 1 }), DEFAULT_ICHIMOKU_STYLE)).toBe(true);
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE, showCloud: false })).toBe(false);
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE, showConversion: false })).toBe(false);
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE, showBase: false })).toBe(false);
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE, showSpanA: false })).toBe(false);
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE, showSpanB: false })).toBe(false);
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE, showLagging: false })).toBe(false);
+  expect(sameIchimokuStyle(DEFAULT_ICHIMOKU_STYLE, { ...DEFAULT_ICHIMOKU_STYLE, cloudOpacity: 0.3 })).toBe(false);
+
+  const custom = {
+    ...DEFAULT_CHART_SETTINGS,
+    indicators: [
+      ...DEFAULT_CHART_SETTINGS.indicators,
+      {
+        id: "ichi-1",
+        spec: { kind: "ichimoku" as const, conversion: 9, base: 26, spanB: 52, displacement: 26 },
+        panel: "price" as const,
+        visible: true,
+        style: {
+          colors: ["ind-2" as const],
+          width: 1 as const,
+          ichimoku: { ...DEFAULT_ICHIMOKU_STYLE, showConversion: false, showLagging: false, cloudOpacity: 0.28 },
+        },
+      },
+    ],
+  };
+  expect(parseChartSettings(custom)).toEqual(custom);
 });

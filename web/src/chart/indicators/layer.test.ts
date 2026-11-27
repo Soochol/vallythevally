@@ -1106,3 +1106,51 @@ test("reset 호출 시 미세 수급 범위를 무효화해 재조회하고, 일
   expect(layer.rows(at(0))[0]?.values[0]?.text).toBe("초대형 +2.00억");
   layer.dispose();
 });
+
+test("일목균형표 style.ichimoku 토글과 구름 불투명도 변경은 시리즈 재생성 없이 옵션과 범례에 반영된다", () => {
+  const f = fixture("1m", [ICHIMOKU], []);
+  f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
+  f.reply(created(1));
+  const cloud = f.series[LINES.length]!;
+  const createdSeriesCount = f.series.length;
+  const workerCreatesBefore = f.sent.filter((m) => m.type === "create").length;
+
+  expect(LINES.map((id) => optionOf(f.line(id), "visible"))).toEqual([true, true, true, true, true]);
+  expect(optionOf(cloud, "visible")).toBe(true);
+  expect(optionOf(cloud, "opacity")).toBe(0.18);
+
+  const cloudOnly: IndicatorConfig = {
+    ...ICHIMOKU,
+    style: {
+      ...ICHIMOKU.style,
+      ichimoku: {
+        showCloud: true,
+        showConversion: false,
+        showBase: false,
+        showSpanA: true,
+        showSpanB: true,
+        showLagging: false,
+        cloudOpacity: 0.3,
+      },
+    },
+  };
+  f.layer.setConfigs([cloudOnly], []);
+
+  expect(f.series).toHaveLength(createdSeriesCount);
+  expect(f.sent.filter((m) => m.type === "create")).toHaveLength(workerCreatesBefore);
+  expect(LINES.map((id) => optionOf(f.line(id), "visible"))).toEqual([false, false, true, true, false]);
+  expect(optionOf(cloud, "visible")).toBe(true);
+  expect(optionOf(cloud, "opacity")).toBe(0.3);
+  expect(f.layer.rows(at(10))[0]?.values).toHaveLength(3);
+
+  const cloudOff: IndicatorConfig = {
+    ...cloudOnly,
+    style: {
+      ...cloudOnly.style,
+      ichimoku: { ...cloudOnly.style.ichimoku!, showCloud: false, showSpanA: false, showSpanB: false },
+    },
+  };
+  f.layer.setConfigs([cloudOff], []);
+  expect(LINES.map((id) => optionOf(f.line(id), "visible"))).toEqual([false, false, false, false, false]);
+  expect(optionOf(cloud, "visible")).toBe(false);
+});

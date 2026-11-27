@@ -57,6 +57,17 @@ export const defaultBarOpacity = (kind?: IndicatorKind): number =>
 export const barOpacityOf = (style: IndicatorConfig["style"], kind?: IndicatorKind): number =>
   style.barOpacity ?? defaultBarOpacity(kind);
 export const ichimokuStyleOf = (style: IndicatorConfig["style"]): IchimokuStyle => style.ichimoku ?? DEFAULT_ICHIMOKU_STYLE;
+export function sameIchimokuStyle(a: IchimokuStyle, b: IchimokuStyle): boolean {
+  return a === b || (
+    a.showCloud === b.showCloud
+    && a.showConversion === b.showConversion
+    && a.showBase === b.showBase
+    && a.showSpanA === b.showSpanA
+    && a.showSpanB === b.showSpanB
+    && a.showLagging === b.showLagging
+    && a.cloudOpacity === b.cloudOpacity
+  );
+}
 const isBarOpacity = (x: unknown): x is number => isNum(x) && x >= BAR_OPACITY_MIN && x <= BAR_OPACITY_MAX;
 const isIchimokuCloudOpacity = (x: unknown): x is number => isNum(x) && x >= ICHIMOKU_CLOUD_OPACITY_MIN && x <= ICHIMOKU_CLOUD_OPACITY_MAX;
 
