@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
 import type { Venue } from "../../api/generated/Venue";
@@ -11,11 +11,10 @@ import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useCallAuctionSession } from "../../stores/callAuctionSession";
 import { useViSession } from "../../stores/viSession";
-import { FeedStrip } from "../market-window/FeedStrip";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
-import { FooterRatioBar, TotalFigure, TotalRatioToggle } from "../market-window/parts";
+import { LadderFooter, TotalFigure } from "../market-window/parts";
 import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
 import { EmptyState, ErrorState } from "../overlay/State";
@@ -28,7 +27,7 @@ import { HoldingSummary } from "./HoldingSummary";
 import { FALLBACK_NOTICE, type OrderAccountChoice } from "./orderAccount";
 import { orderEntryKey } from "./orderEntries";
 import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
-import { type BuyRatioPercent, typedQuantity } from "./orderRules";
+import { type BuyRatioPercent, type PriceGroup, type PriceKey, typedQuantity } from "./orderRules";
 import { ladderRowHeightPx, type PresetMode } from "./orderSettings";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
 import { OrderStatusBar } from "./OrderStatusBar";
@@ -39,7 +38,7 @@ import { useAccountBalance } from "./useAccountBalance";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderCommands } from "./useOrderCommands";
 import { type OrderAccess, useOrderAccess, useOrderData } from "./useOrderData";
-import { useOrderDrag } from "./useOrderDrag";
+import { type OrderDrag, useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
 import { ExpectedHeaderBar } from "./ExpectedHeaderBar";
 import { ViOrderOverlay } from "./ViOrderOverlay";
@@ -55,6 +54,40 @@ function useHeldWhile<T>(value: T, hold: boolean, same: (a: T, b: T) => boolean 
 
 const sameLadderPrices = (a: LadderPrices | null, b: LadderPrices | null): boolean =>
   a === b || (a !== null && b !== null && a.sidesSplit === b.sidesSplit && a.prices.length === b.prices.length && a.prices.every((price, row) => price === b.prices[row]));
+
+interface OrderFooterProps {
+  readonly ask: number | null;
+  readonly bid: number | null;
+  readonly afterHours: boolean;
+  readonly description: string | null;
+  readonly groups: ReadonlyMap<string, PriceGroup>;
+  readonly writable: boolean;
+  readonly actions: { cancelOne(orderNo: string): void; cancelGroups(keys: readonly PriceKey[]): void };
+  readonly drag: OrderDrag;
+}
+
+const OrderFooter = memo(function OrderFooter({ ask, bid, afterHours, description, groups, writable, actions, drag }: OrderFooterProps) {
+  return (
+    <LadderFooter
+      className="od-footer"
+      testId="order-totals"
+      ask={ask}
+      bid={bid}
+      left={(
+        <>
+          <OrderTotalCell side="sell" groups={groups} writable={writable} actions={actions} drag={drag} />
+          <TotalFigure testId="order-total-ask" tone="down" value={ask} afterHours={afterHours} description={description} hideAfterHoursTag />
+        </>
+      )}
+      right={(
+        <>
+          <TotalFigure testId="order-total-bid" tone="up" value={bid} afterHours={afterHours} description={description} hideAfterHoursTag />
+          <OrderTotalCell side="buy" groups={groups} writable={writable} actions={actions} drag={drag} />
+        </>
+      )}
+    />
+  );
+});
 
 function OrderBody({
   id,
@@ -196,6 +229,10 @@ function OrderBody({
     : undefined;
 
   const rowHeightPx = ladderRowHeightPx(settings.ladderDensity);
+  const feedStatus = useMemo(
+    () => ({ connected: feed.connected, rejected: feed.rejected, downSince: market.downSince }),
+    [feed.connected, feed.rejected, market.downSince],
+  );
 
   return (
     <div className="od" data-testid="order-window" data-symbol={code} data-venue={orderVenue} data-quote-venue={market.venue} data-writable={writable ? "" : undefined} data-rate-hidden={settings.rate ? undefined : ""} data-ladder-density={settings.ladderDensity} data-replay={replay.kind === "live" ? undefined : replay.kind}>
@@ -238,7 +275,6 @@ function OrderBody({
         onInput={changeInput}
         onBuyRatio={setBuyRatio}
       />
-      {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
@@ -251,19 +287,17 @@ function OrderBody({
         )}
         <ViOrderOverlay band="bottom" state={viState} previousClose={market.headPreviousClose} />
       </div>
-      <div className="od-footer" data-testid="order-totals">
-        <FooterRatioBar ask={totals.ask} bid={totals.bid} />
-        <div className="od-footer-side">
-          <OrderTotalCell side="sell" groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
-          <TotalFigure testId="order-total-ask" tone="down" value={totals.ask} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-        </div>
-        <TotalRatioToggle ask={totals.ask} bid={totals.bid} />
-        <div className="od-footer-side">
-          <TotalFigure testId="order-total-bid" tone="up" value={totals.bid} afterHours={totals.source === "afterHours"} description={totals.description} hideAfterHoursTag />
-          <OrderTotalCell side="buy" groups={data.groups} writable={writable} actions={totalsActions} drag={drag} />
-        </div>
-      </div>
-      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} replay={market.replayEnabled ? replay : null} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
+      <OrderFooter
+        ask={totals.ask}
+        bid={totals.bid}
+        afterHours={totals.source === "afterHours"}
+        description={totals.description}
+        groups={data.groups}
+        writable={writable}
+        actions={totalsActions}
+        drag={drag}
+      />
+      <OrderStatusBar status={writes.status} queued={writes.queued} blocked={data.blocked} feed={feedStatus} replay={market.replayEnabled ? replay : null} onUndo={writes.cancelOne} onReconcile={writes.reconcile} onDismiss={writes.dismiss} />
       <DragGhost drag={drag} />
       {commands.confirm && <HighValueConfirm request={commands.confirm} onClose={commands.clearConfirm} />}
     </div>
