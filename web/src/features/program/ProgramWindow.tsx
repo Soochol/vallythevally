@@ -10,7 +10,7 @@ import { marketSocket } from "../../stores/realtime";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { formatMonthDay, kstDateOf } from "../brokers/history";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
-import { MarketHead, useDayQuote } from "../market-window/MarketHead";
+import { MarketSymbolName, useDayQuote } from "../market-window/MarketHead";
 import { priceTone } from "../market-window/PriceLadder";
 import { formatQuantity, withSign } from "../market-window/format";
 import { useWindowedRows } from "../market-window/useWindowedRows";
@@ -52,7 +52,7 @@ function useWidestColumns(rows: readonly ProgramRow[]): ColumnWidths {
   }, [rows]);
 }
 
-function Summary({ latest, trend, fallbackDate }: { latest: ProgramRow | undefined; trend: readonly number[]; fallbackDate: string | null }) {
+function Summary({ code, latest, trend, fallbackDate }: { code: SymbolCode; latest: ProgramRow | undefined; trend: readonly number[]; fallbackDate: string | null }) {
   const net = latest?.netQty ?? 0;
   const amount = eokFromMillionWon(latest?.netAmountMillionWon ?? 0);
   const direction = net > 0 ? "up" : net < 0 ? "down" : "flat";
@@ -60,22 +60,24 @@ function Summary({ latest, trend, fallbackDate }: { latest: ProgramRow | undefin
   const buy = latest?.buyQty ?? 0;
   const sell = latest?.sellQty ?? 0;
   return (
-    <div className="pg-head" data-direction={direction}>
-      <div className="pg-net">
+    <div className="mw-head pg-head" data-direction={direction} title={`매수 ${formatQuantity(buy)}주 · 매도 ${formatQuantity(sell)}주`}>
+      <MarketSymbolName code={code} />
+      <span className="mw-head-div" aria-hidden="true" />
+      <span className="pg-net">
         <span className="pg-cap">순매수</span>
         <b data-testid="program-net-qty">{withSign(net, formatQuantity(Math.abs(net)))}</b>
         <span className="pg-unit">주</span>
         <span className="pg-amount" data-testid="program-net-amount">{withSign(amount, formatEokAmount(Math.abs(amount)))}</span>
-        <svg className="pg-spark" viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label="순매수 누적 추이" data-testid="program-trend">
-          {points && <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />}
-        </svg>
-      </div>
-      <div className="pg-totals">
-        <span>매수 <b data-testid="program-buy-qty">{formatQuantity(buy)}</b>주 · 매도 <b data-testid="program-sell-qty">{formatQuantity(sell)}</b>주</span>
-        {fallbackDate !== null && (
-          <span className="pg-date" data-testid="program-fallback-date">{formatMonthDay(fallbackDate)} 마감</span>
-        )}
-      </div>
+      </span>
+      <span className="pg-totals">
+        <span>매수 <b data-testid="program-buy-qty">{formatQuantity(buy)}</b> · 매도 <b data-testid="program-sell-qty">{formatQuantity(sell)}</b></span>
+      </span>
+      {fallbackDate !== null && (
+        <span className="pg-date" data-testid="program-fallback-date">{formatMonthDay(fallbackDate)} 마감</span>
+      )}
+      <svg className="pg-spark" viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`} preserveAspectRatio="none" role="img" aria-label="순매수 누적 추이" data-testid="program-trend">
+        {points && <polyline points={points} fill="none" vectorEffect="non-scaling-stroke" />}
+      </svg>
     </div>
   );
 }
@@ -158,18 +160,14 @@ function ProgramBody({ code }: { code: SymbolCode }) {
   );
   const latest = live.latest ?? keptHistory.at(-1);
   const { previousClose } = useDayQuote(code, "combined");
+  const showData = !(history.isPending && !hasLive) && !(history.isError && !hasLive) && !(history.isSuccess && past.length === 0 && !hasLive);
   const content = history.isPending && !hasLive ? <Skeleton label="프로그램 매매 불러오는 중" />
     : history.isError && !hasLive ? <ErrorState message="프로그램 매매를 불러오지 못했습니다" retry={() => void history.refetch()} />
     : history.isSuccess && past.length === 0 && !hasLive ? <EmptyState title="이 종목은 프로그램 매매 자료가 없습니다" />
-    : (
-      <div className="pg" data-testid="program-window" data-symbol={code}>
-        <Summary latest={latest} trend={trend} fallbackDate={fallbackDate} />
-        <Table lines={lines} previousClose={previousClose} />
-      </div>
-    );
+    : <Table lines={lines} previousClose={previousClose} />;
   return (
-    <div className="mw-frame">
-      <MarketHead code={code} venue="combined" />
+    <div className="mw-frame pg" data-testid="program-window" data-symbol={code}>
+      {showData ? <Summary code={code} latest={latest} trend={trend} fallbackDate={fallbackDate} /> : <div className="mw-head"><MarketSymbolName code={code} /></div>}
       {content}
     </div>
   );

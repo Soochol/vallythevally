@@ -1,4 +1,4 @@
-.tr-window { display:flex; flex:1; flex-direction:column; min-height:0; font-variant-numeric:tabular-nums; }
+.tr-window { container:tr / inline-size; display:flex; flex:1; flex-direction:column; min-height:0; font-variant-numeric:tabular-nums; }
 .tr-body { position:relative; display:flex; flex:1; min-height:0; }
 .tr-tape { flex:1; min-height:0; overflow:hidden auto; }
 .tr-head, .tr-row { display:grid; grid-template-columns:var(--size-72) 1fr 1fr; align-items:center; padding:0 var(--s4); }
@@ -12,21 +12,32 @@
 .tr-price[data-dir=up] { color:var(--up); }
 .tr-price[data-dir=down] { color:var(--down); }
 .tr-row[data-big] .tr-qty { font-weight:700; }
-.tr-strips { flex:none; container: strips / inline-size; }
-.tr-window[data-compact-strips] .tr-strips { box-sizing:border-box; display:flex; align-items:center; height:var(--size-24); overflow:hidden; border-bottom:var(--size-1) solid var(--line); }
-.tr-window[data-compact-strips] .tr-strips > .mw-strip { flex:none; flex-wrap:nowrap; gap:var(--s3); min-width:0; padding:0 var(--s3); border:0; white-space:nowrap; }
-.tr-window[data-compact-strips] .tr-strips > .mw-strip:first-child { flex:1 1 0; overflow:hidden; }
-.tr-window[data-compact-strips] .tr-strips .mw-ratio { min-width:var(--size-24); }
-.tr-window[data-compact-strips] .tr-strips .ui-seg { padding:0; gap:0; overflow:hidden; border-radius:var(--r-s); }
-.tr-window[data-compact-strips] .tr-strips .ui-seg .ui-seg-item { min-width:0; }
-.tr-window[data-compact-strips] .tr-strips .tr-figure { display:inline-flex; flex:0 1 auto; gap:var(--size-4); min-width:0; }
-.tr-window[data-compact-strips] .tr-strips .tr-figure[data-figure="strength"] { flex-shrink:0; }
-.tr-window[data-compact-strips] .tr-strips .tr-figure b { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-@container strips (width < 420px) { .tr-window[data-compact-strips] .tr-strips .mw-ratio { display:none; } }
-@container strips (width < 360px) {
-  .tr-window[data-compact-strips] .tr-strips .tr-name, .tr-window[data-compact-strips] .tr-strips .tr-detail { position:absolute; width:var(--size-1); height:var(--size-1); margin:calc(-1 * var(--size-1)); padding:0; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; }
-  .tr-window[data-compact-strips] .tr-strips > .mw-strip { gap:var(--size-4); padding:0 var(--size-4); }
-  .tr-window[data-compact-strips] .tr-strips .ui-seg .ui-seg-item { padding:0 var(--size-4); }
+.tr-strips { overflow:hidden; color:var(--text-3); }
+.tr-strip-metrics { display:flex; flex:1 1 0; align-items:center; gap:var(--size-6); min-width:0; overflow:hidden; white-space:nowrap; }
+.tr-strip-controls { display:flex; flex:none; align-items:center; gap:var(--size-5); margin-left:auto; white-space:nowrap; }
+.tr-strips .mw-ratio { flex:0 0 var(--size-34); min-width:var(--size-20); }
+.tr-figure { display:inline-flex; flex:0 1 auto; align-items:center; gap:var(--size-3); min-width:0; }
+.tr-figure[data-figure="strength"] { flex-shrink:0; }
+.tr-figure b { min-width:0; overflow:hidden; color:var(--text); font-size:var(--fs-xs); font-weight:700; text-overflow:ellipsis; }
+.tr-min-label { position:absolute; width:var(--size-1); height:var(--size-1); margin:calc(-1 * var(--size-1)); padding:0; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; }
+@container tr (width < 480px) {
+  .tr-strips { gap:var(--size-4); }
+  .tr-strips .mw-ratio { flex:0 0 var(--size-24); }
+}
+@container tr (width < 420px) {
+  .tr-strips .mw-ratio { display:none; }
+}
+@container tr (width < 360px) {
+  .tr-strips { gap:var(--size-3); padding:0 var(--size-4); }
+  .tr-strips .mw-head-div { display:none; }
+  .tr-strip-metrics { gap:var(--size-4); }
+  .tr-strip-controls { gap:var(--size-3); }
+  .tr-strips .tr-name, .tr-strips .tr-detail { position:absolute; width:var(--size-1); height:var(--size-1); margin:calc(-1 * var(--size-1)); padding:0; overflow:hidden; clip:rect(0, 0, 0, 0); white-space:nowrap; }
+  .tr-strips .ui-seg { padding:0; gap:0; }
+  .tr-strips .ui-seg .ui-seg-item { padding:0 var(--size-3); }
+}
+@container tr (width < 280px) {
+  .tr-strips .mw-head-name { display:none; }
 }
 .tr-gap { display:flex; align-items:center; justify-content:center; box-sizing:border-box; height:var(--size-24); padding:0 var(--s4); border-block:var(--size-1) dashed var(--line); overflow:hidden; color:var(--text-3); font-size:var(--fs-xs); white-space:nowrap; }
 .tr-empty { margin:0; padding:var(--s6) var(--s4); color:var(--text-3); font-size:var(--fs-xs); text-align:center; }
