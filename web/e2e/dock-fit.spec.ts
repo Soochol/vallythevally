@@ -114,6 +114,33 @@ test("세 묶음을 다 담을 수 없으면 호가주문을 탭으로 접고 �
 });
 
 test("빈 레이아웃에 창 열 가지를 차례로 더해도 어느 묶음도 고른 탭 창 종류의 최소 높이보다 낮지 않다", async ({ page, scenario }) => {
+  scenario.on("/api/kiwoom-themes", () => ({
+    status: 200,
+    body: {
+      periodDays: 1,
+      fetchedAt: 1_764_200_000,
+      themes: [],
+      pages: 1,
+      complete: true,
+      skipped: 0,
+    },
+  }));
+  for (const code of ["005930", "000660", "035420", "035720"]) {
+    scenario.on(`/api/symbols/${code}/order-book`, () => ({
+      status: 200,
+      body: {
+        symbol: code,
+        venue: "krx",
+        t: 1_764_200_000,
+        asks: [],
+        bids: [],
+        totalAsk: 0,
+        totalBid: 0,
+        expected: null,
+        afterHours: null,
+      },
+    }));
+  }
   seed(scenario, [CHART], null);
   await open(page);
   for (const kind of WINDOW_KIND_LIST) {

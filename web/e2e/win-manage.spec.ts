@@ -3,6 +3,7 @@ import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import type { Layout } from "../src/api/generated/Layout";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { STAGING_PREFIX } from "../src/chart/drawings/journal";
+import { WINDOW_KIND_LIST, WINDOW_KINDS } from "../src/layout/kinds";
 import { findSymbol } from "../dev/fakeMarket";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, fixedWait, test, pollSaved } from "./harness";
 
@@ -551,8 +552,10 @@ test("창 더하기 메뉴와 탭의 닫기 버튼을 키보드만으로 쓴다"
   await page.keyboard.press("Enter");
   await expect(kindItem(page, "차트")).toBeFocused();
   await page.keyboard.press("End");
-  await expect(kindItem(page, "장전 동시호가")).toBeFocused();
-  for (let up = 0; up < 7; up++) await page.keyboard.press("ArrowUp");
+  const lastKind = WINDOW_KIND_LIST[WINDOW_KIND_LIST.length - 1]!;
+  await expect(kindItem(page, WINDOW_KINDS[lastKind].name)).toBeFocused();
+  const stepsToIndicators = WINDOW_KIND_LIST.length - 1 - WINDOW_KIND_LIST.indexOf("indicators");
+  for (let up = 0; up < stepsToIndicators; up++) await page.keyboard.press("ArrowUp");
   await expect(kindItem(page, "지표")).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(tab(page, "지표")).toHaveAttribute("aria-selected", "true");
