@@ -41,6 +41,32 @@ test("맨 아래 단축키 단추는 단축키 판을 연다", async ({ page }) 
   await expect(page).toHaveURL(/\/market$/);
 });
 
+test("레일 하단에서 시스템 설정을 열고 위 막대에는 없으며 활성 메뉴에 세로 선이 없다", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "시스템 설정", exact: true })).toHaveCount(0);
+  await expect(railLink(page, "작업 영역")).toHaveCSS("box-shadow", "none");
+  await rail(page).getByRole("button", { name: "시스템 설정", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "시스템 설정", exact: true })).toBeVisible();
+});
+
+test("레일 하단 색상 모드 토글은 현재 스타일을 유지한 채 라이트와 다크만 전환한다", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("vally.theme", "bento-dark"));
+  await page.goto("/");
+  const html = page.locator("html");
+  await expect(html).toHaveAttribute("data-style", "bento");
+  await expect(html).toHaveAttribute("data-theme", "dark");
+
+  await rail(page).getByRole("button", { name: "화이트 모드로 전환", exact: true }).click();
+  await expect(html).toHaveAttribute("data-style", "bento");
+  await expect(html).toHaveAttribute("data-theme", "light");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("vally.theme"))).toBe("bento-light");
+
+  await rail(page).getByRole("button", { name: "다크 모드로 전환", exact: true }).click();
+  await expect(html).toHaveAttribute("data-style", "bento");
+  await expect(html).toHaveAttribute("data-theme", "dark");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("vally.theme"))).toBe("bento-dark");
+});
+
 test("시장 종합에서 새로 고침해도 그 주소이고, 뒤로 가기로 작업 영역에 돌아온다", async ({ page }) => {
   await page.goto("/");
   await railLink(page, "시장 종합").click();

@@ -44,8 +44,6 @@
   .desktop-topbar .topbar-search-slot { min-width:var(--size-220); }
   .desktop-topbar .tb-sep { display:none; }
   .desktop-topbar .venue-picker-prefix, .desktop-topbar .topbar-label-xl { display:none; }
-  .desktop-topbar .system-btn { width:var(--size-24); padding-inline:0; justify-content:center; }
-  .system-btn .conn-dot { position:absolute; top:var(--size-4); right:var(--size-2); }
 }
 @media (width < 64rem) {
   .shell-search kbd, .desktop-topbar .topbar-label-lg { display:none; }

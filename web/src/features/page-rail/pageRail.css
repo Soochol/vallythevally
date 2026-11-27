@@ -5,12 +5,15 @@
 }
 .page-rail-spacer { flex: 1; }
 .page-rail-item {
+  position: relative;
   display: flex; flex-direction: column; align-items: center; gap: var(--size-4);
-  width: 100%; padding: var(--size-8) 0 var(--size-5); border-radius: 0; color: var(--text-3);
+  width: calc(100% - var(--size-10)); padding: var(--size-8) 0 var(--size-5); border-radius: var(--r-m); color: var(--text-3);
 }
 .page-rail-item span { font-size: var(--fs-xs); line-height: 1.1; white-space: nowrap; letter-spacing: -0.02em; }
-.page-rail-item:hover { background: transparent; color: var(--text); }
-.page-rail-item[aria-current="page"] { background: transparent; color: var(--text); font-weight: 600; box-shadow: inset calc(-1 * var(--size-2)) 0 0 var(--accent); }
+.page-rail-item:hover { background: var(--hover); color: var(--text); }
+.page-rail-item[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; box-shadow: none; }
+.page-rail-item.system-btn .conn-dot { position: absolute; top: var(--size-6); right: var(--size-8); }
+.page-rail-item.system-btn .conn-flag { position: absolute; top: var(--size-4); right: var(--size-5); }
 
 .page-topbar-slot { display: contents; }
 .page-topbar .page-find kbd { flex: none; }
