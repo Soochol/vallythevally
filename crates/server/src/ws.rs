@@ -36,6 +36,7 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
     let mut setup_changes = st.system.account().subscribe_setup_changes();
     let mut collector_notices = st.system.collector().map(|board| board.subscribe_notices());
     let mut trading_changes = st.accounts.subscribe_changes();
+    let mut auto_order_changes = st.auto_orders.subscribe();
     hub.send_to(conn, ServerMessage::KiwoomLink { status: kiwoom_status(&st) });
     let mut market_source_changes = st.market_control.subscribe();
     let mut market_source_sent = st.market_control.snapshot();
@@ -61,6 +62,14 @@ async fn serve(socket: WebSocket, st: Arc<AppState>, hub: HubHandle) {
             },
             changed = trading_changes.recv() => match changed {
                 Ok(changed) => hub.send_to(conn, ServerMessage::TradingAccountChanged { account_ref: changed.account_ref, fill: changed.fill }),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
+            changed = auto_order_changes.recv() => match changed {
+                Ok(crate::trading::AutoOrderBroadcast::Updated(rule)) => hub.send_to(conn, ServerMessage::AutoOrderUpdated { rule: Box::new(rule) }),
+                Ok(crate::trading::AutoOrderBroadcast::Triggered { rule, event }) => hub.send_to(conn, ServerMessage::AutoOrderTriggered { rule: Box::new(rule), event: Box::new(event) }),
+                Ok(crate::trading::AutoOrderBroadcast::Removed(id)) => hub.send_to(conn, ServerMessage::AutoOrderRemoved { id }),
+                Ok(crate::trading::AutoOrderBroadcast::MasterChanged(enabled)) => hub.send_to(conn, ServerMessage::AutoOrderMasterChanged { enabled }),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },

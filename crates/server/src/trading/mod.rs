@@ -1,4 +1,5 @@
 mod accounts;
+pub mod auto_orders;
 pub mod forensics;
 mod journal;
 mod kis;
@@ -14,6 +15,7 @@ mod tr;
 
 pub use routes::routes;
 pub use accounts::Accounts;
+pub use auto_orders::{AutoOrderBroadcast, AutoOrderEngine};
 pub use service::{AccountChanged, Trading, TradingError};
 pub use switch::{ORDER_SWITCH_FILE_NAME, SwitchStore};
 pub use kis_account::{HtsId, KisAccountNumber, KisAccountSettings};

@@ -40,6 +40,7 @@ pub struct AppState {
     pub registered: tokio::sync::watch::Receiver<crate::market_source::stream::DesiredFeeds>,
     pub seat_rules: Arc<dyn crate::market_source::stream::SeatRules>,
     pub accounts: Arc<crate::trading::Accounts>,
+    pub auto_orders: Arc<crate::trading::AutoOrderEngine>,
     pub rankings: crate::rankings::RankingCache,
     pub market_overview: crate::market_overview::MarketOverview,
     pub etf: crate::etf::EtfBook,

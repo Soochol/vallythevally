@@ -293,6 +293,142 @@ pub enum ServerMessage {
         summary: WhaleStockSummary,
         watched_count: u32,
     },
+    AutoOrderUpdated { rule: Box<AutoOrderRule> },
+    AutoOrderTriggered { rule: Box<AutoOrderRule>, event: Box<AutoOrderEvent> },
+    AutoOrderRemoved { id: String },
+    AutoOrderMasterChanged { enabled: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AutoOrderType {
+    Market,
+    Limit,
+    LimitOffset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AutoOrderState {
+    Watching,
+    Tp1Filled,
+    ViHeld,
+    Paused,
+    Completed,
+    Stopped,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AutoOrderRule {
+    pub id: String,
+    pub symbol: String,
+    pub name: String,
+    pub account_ref: String,
+    #[ts(type = "number")]
+    pub entry_price: u64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub remaining_quantity: u64,
+    #[ts(type = "number")]
+    pub stop_loss_price: u64,
+    #[ts(type = "number | null")]
+    pub take_profit_1_price: Option<u64>,
+    #[ts(type = "number")]
+    pub take_profit_2_price: u64,
+    pub tp1_ratio: u8,
+    pub tp1_done: bool,
+    pub breakeven_on_tp1: bool,
+    pub trailing_enabled: bool,
+    pub trailing_pct: f64,
+    #[ts(type = "number")]
+    pub high_water_mark: u64,
+    pub order_type: AutoOrderType,
+    pub tick_offset: i32,
+    pub state: AutoOrderState,
+    pub command_id: Option<String>,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AutoOrderEvent {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub rule_id: String,
+    pub symbol: String,
+    pub kind: String,
+    pub message: String,
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AutoOrderList {
+    pub master_enabled: bool,
+    pub rules: Vec<AutoOrderRule>,
+    pub events: Vec<AutoOrderEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AutoOrderUpsertInput {
+    pub symbol: String,
+    pub name: String,
+    #[serde(default)]
+    pub account_ref: Option<String>,
+    #[ts(type = "number")]
+    pub entry_price: u64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    #[ts(type = "number")]
+    pub stop_loss_price: u64,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub take_profit_1_price: Option<u64>,
+    #[ts(type = "number")]
+    pub take_profit_2_price: u64,
+    #[serde(default)]
+    pub tp1_ratio: Option<u8>,
+    #[serde(default)]
+    pub breakeven_on_tp1: Option<bool>,
+    #[serde(default)]
+    pub trailing_enabled: Option<bool>,
+    #[serde(default)]
+    pub trailing_pct: Option<f64>,
+    #[serde(default)]
+    pub order_type: Option<AutoOrderType>,
+    #[serde(default)]
+    pub tick_offset: Option<i32>,
+    #[serde(default)]
+    pub paused: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AutoOrderMasterInput {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AutoOrderMasterState {
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]

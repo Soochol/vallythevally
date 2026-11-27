@@ -190,7 +190,7 @@ fn sub_of(msg: &ServerMessage) -> Option<&str> {
         | ServerMessage::FeedMicro { .. }
         | ServerMessage::FeedOfi { .. }
         | ServerMessage::FeedLink { .. }
-        | ServerMessage::CollectorDaemon { .. } | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::MarketSource { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } | ServerMessage::TradingAccountChanged { .. } | ServerMessage::ViSnapshot { .. } | ServerMessage::ViUpdate { .. } | ServerMessage::ViExpectedSnapshot { .. } | ServerMessage::WhaleSnapshot { .. } | ServerMessage::WhaleTick { .. } => None,
+        | ServerMessage::CollectorDaemon { .. } | ServerMessage::Hello { .. } | ServerMessage::Status { .. } | ServerMessage::Quotes { .. } | ServerMessage::WatchLimited { .. } | ServerMessage::KiwoomLink { .. } | ServerMessage::MarketSource { .. } | ServerMessage::Account { .. } | ServerMessage::SetupChanged { .. } | ServerMessage::TradingAccountChanged { .. } | ServerMessage::ViSnapshot { .. } | ServerMessage::ViUpdate { .. } | ServerMessage::ViExpectedSnapshot { .. } | ServerMessage::WhaleSnapshot { .. } | ServerMessage::WhaleTick { .. } | ServerMessage::AutoOrderUpdated { .. } | ServerMessage::AutoOrderTriggered { .. } | ServerMessage::AutoOrderRemoved { .. } | ServerMessage::AutoOrderMasterChanged { .. } => None,
     }
 }
 
