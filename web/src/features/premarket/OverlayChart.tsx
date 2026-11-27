@@ -17,7 +17,6 @@ import {
   nearestPointAt,
   pointVolumeValue,
   PREMARKET_END_SEC,
-  PREMARKET_START_SEC,
   SPOOF_WATCH_START_SEC,
   valueTone,
   type BackgroundStyle,
@@ -204,7 +203,7 @@ export function OverlayChart({
   );
 
   const alignTooltipRight =
-    hoverSec !== null && hoverSec < PREMARKET_START_SEC + (PREMARKET_END_SEC - PREMARKET_START_SEC) * 0.42;
+    hoverSec !== null && hoverSec < geom.startSec + (PREMARKET_END_SEC - geom.startSec) * 0.42;
 
   const hoverVolRatio =
     hoveredFocusPt && hoveredBand && hoveredBand.avgVolume > 0
@@ -616,7 +615,7 @@ export function OverlayChart({
             <div className="pm-waiting-pill" data-testid="premarket-waiting-pill">
               <span className="pm-live-dot" aria-hidden="true" />
               <strong className="pm-waiting-strong">
-                {formatShortDate(focusSeries.date)}({formatKoreanWeekday(focusSeries.date)}) 08:30 예상체결 대기 중
+                {formatShortDate(focusSeries.date)}({formatKoreanWeekday(focusSeries.date)}) 08:50 예상체결 대기 중
               </strong>
               {pastSeries.length > 0 && <span>· 과거 {pastSeries.length}일 분포 기준</span>}
             </div>
@@ -650,7 +649,7 @@ export function OverlayChart({
                   </>
                 ) : (
                   <span className="pm-tooltip-wait">
-                    {isFocusWaiting ? "08:30 예상체결 대기 중" : "미도래 시각"}
+                    {isFocusWaiting ? "08:50 예상체결 대기 중" : "미도래 시각"}
                   </span>
                 )}
               </div>

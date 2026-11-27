@@ -32,8 +32,8 @@ function buildSamsungSeries(): Readonly<Record<string, PreMarketDaySeries>> {
       date,
       source: "store",
       points: [
-        { secOfDay: 30600, expectedPriceWon: 70000 + idx * 200, expectedReturnPct: 0.4, expectedQty: 12000 + idx * 1000, expectedTurnoverMillionWon: 840 + idx * 80 },
-        { secOfDay: 32000, expectedPriceWon: 72000 + idx * 300, expectedReturnPct: peakPct, expectedQty: midQty, expectedTurnoverMillionWon: Number(((midQty * 72000) / 1_000_000).toFixed(1)) },
+        { secOfDay: 31800, expectedPriceWon: 70000 + idx * 200, expectedReturnPct: 0.4, expectedQty: 12000 + idx * 1000, expectedTurnoverMillionWon: 840 + idx * 80 },
+        { secOfDay: 32100, expectedPriceWon: 72000 + idx * 300, expectedReturnPct: peakPct, expectedQty: midQty, expectedTurnoverMillionWon: Number(((midQty * 72000) / 1_000_000).toFixed(1)) },
         { secOfDay: 32390, expectedPriceWon: 71000 + idx * 250, expectedReturnPct: basePct, expectedQty: endQty, expectedTurnoverMillionWon: Number(((endQty * 71000) / 1_000_000).toFixed(1)) },
       ],
       lateDropPct: idx === 9 ? -4.9 : 0.2,
@@ -54,7 +54,7 @@ const HYNIX_SERIES: Readonly<Record<string, PreMarketDaySeries>> = {
     date: "20261127",
     source: "store",
     points: [
-      { secOfDay: 30600, expectedPriceWon: 204000, expectedReturnPct: 2.0, expectedQty: 15000, expectedTurnoverMillionWon: 3060 },
+      { secOfDay: 31800, expectedPriceWon: 204000, expectedReturnPct: 2.0, expectedQty: 15000, expectedTurnoverMillionWon: 3060 },
       { secOfDay: 32390, expectedPriceWon: 208000, expectedReturnPct: 4.0, expectedQty: 22000, expectedTurnoverMillionWon: 4576 },
     ],
     lateDropPct: 0.0,
@@ -141,6 +141,9 @@ test("장전 동시호가 창에서 2주 이중 Y축 차트, 좌측 세로 날�
   await expect(page.getByTestId("premarket-day-chip-20261120")).toHaveAttribute("data-role", "pin-1");
 
   const svg = page.getByTestId("premarket-overlay-chart");
+  await expect(svg).toContainText("08:50");
+  await expect(svg).toContainText("08:52");
+  await expect(svg).toContainText("09:00");
   await expect(page.getByTestId("premarket-vol-area")).toBeVisible();
   const box = await svg.boundingBox();
   expect(box).not.toBeNull();
@@ -276,7 +279,7 @@ test("실시간 flow 모드에서는 비교 자료를 주기적으로 갱신하�
         date: "20261127",
         source: "flow",
         points: [
-          { secOfDay: 30600, expectedPriceWon: 71400, expectedReturnPct: 2.0, expectedQty: 10000, expectedTurnoverMillionWon: 714 },
+          { secOfDay: 31800, expectedPriceWon: 71400, expectedReturnPct: 2.0, expectedQty: 10000, expectedTurnoverMillionWon: 714 },
           { secOfDay: 32390, expectedPriceWon: flowCompareHits >= 2 ? 73150 : 71400, expectedReturnPct: latePct, expectedQty: 20000, expectedTurnoverMillionWon: 1463 },
         ],
         lateDropPct: flowCompareHits >= 2 ? 2.5 : 0.0,
@@ -393,8 +396,8 @@ test("08:00 대기 상태에서 당일이 기준일로 표시되고 08:30 틱이
               date: "20261127",
               source: "flow",
               points: [
-                { secOfDay: 30600, expectedPriceWon: 71400, expectedReturnPct: 2.0, expectedQty: 14000, expectedTurnoverMillionWon: 999.6 },
-                { secOfDay: 30900, expectedPriceWon: 72450, expectedReturnPct: 3.5, expectedQty: 26000, expectedTurnoverMillionWon: 1883.7 },
+                { secOfDay: 31800, expectedPriceWon: 71400, expectedReturnPct: 2.0, expectedQty: 14000, expectedTurnoverMillionWon: 999.6 },
+                { secOfDay: 32040, expectedPriceWon: 72450, expectedReturnPct: 3.5, expectedQty: 26000, expectedTurnoverMillionWon: 1883.7 },
               ],
               lateDropPct: 0,
               classification: "genuineGap",

@@ -2,13 +2,13 @@ import type { PreMarketDaySeries } from "../../api/generated/PreMarketDaySeries"
 import type { PreMarketPoint } from "../../api/generated/PreMarketPoint";
 import type { PreMarketSignal } from "../../api/generated/PreMarketSignal";
 
-export const PREMARKET_START_SEC = 8 * 3600 + 30 * 60;
+export const PREMARKET_EARLIEST_SEC = 8 * 3600 + 30 * 60;
+export const PREMARKET_START_SEC = 8 * 3600 + 50 * 60;
 export const PREMARKET_END_SEC = 9 * 3600;
 export const SPOOF_WATCH_START_SEC = 8 * 3600 + 58 * 60;
 export const MAX_COMPARE_DATES = 10;
 export const MAX_PINNED_DATES = 2;
 export const BAND_SAMPLE_STEP_SEC = 30;
-export const BAND_SAMPLE_COUNT = (PREMARKET_END_SEC - PREMARKET_START_SEC) / BAND_SAMPLE_STEP_SEC + 1;
 
 export const CHART_VIEW_W = 940;
 export const CHART_VIEW_H = 380;
@@ -41,6 +41,7 @@ export interface HistoricalBandPoint {
 }
 
 export interface ChartGeometry {
+  readonly startSec: number;
   readonly plotLeft: number;
   readonly plotRight: number;
   readonly plotTop: number;
@@ -249,15 +250,50 @@ function quantile(sorted: readonly number[], q: number): number {
   return loVal + (hiVal - loVal) * (pos - lo);
 }
 
+export function resolveChartStartSec(series: readonly PreMarketDaySeries[]): number {
+  let minSec = PREMARKET_START_SEC;
+  for (const s of series) {
+    for (const pt of s.points) {
+      if (pt.secOfDay < minSec) minSec = pt.secOfDay;
+    }
+  }
+  if (minSec >= PREMARKET_START_SEC) return PREMARKET_START_SEC;
+  const floored = Math.floor(minSec / 300) * 300;
+  return Math.max(PREMARKET_EARLIEST_SEC, floored);
+}
+
+function buildXTicks(startSec: number): readonly number[] {
+  if (startSec >= PREMARKET_START_SEC) {
+    return [
+      8 * 3600 + 50 * 60,
+      8 * 3600 + 52 * 60,
+      8 * 3600 + 54 * 60,
+      8 * 3600 + 56 * 60,
+      SPOOF_WATCH_START_SEC,
+      PREMARKET_END_SEC,
+    ];
+  }
+  const span = PREMARKET_END_SEC - startSec;
+  const step = span > 1200 ? 600 : 300;
+  const ticks: number[] = [startSec];
+  for (let sec = startSec + step; sec < SPOOF_WATCH_START_SEC; sec += step) {
+    if (SPOOF_WATCH_START_SEC - sec >= 120) ticks.push(sec);
+  }
+  ticks.push(SPOOF_WATCH_START_SEC, PREMARKET_END_SEC);
+  return ticks;
+}
+
 export function computeHistoricalBand(
   pastSeries: readonly PreMarketDaySeries[],
   unit: VolumeUnit,
 ): readonly HistoricalBandPoint[] {
   const populated = pastSeries.filter((s) => s.points.length > 0);
   if (populated.length === 0) return [];
+  const startSec = resolveChartStartSec(populated);
+  const sampleCount = Math.floor((PREMARKET_END_SEC - startSec) / BAND_SAMPLE_STEP_SEC) + 1;
   const result: HistoricalBandPoint[] = [];
-  for (let i = 0; i < BAND_SAMPLE_COUNT; i++) {
-    const sec = PREMARKET_START_SEC + i * BAND_SAMPLE_STEP_SEC;
+  for (let i = 0; i < sampleCount; i++) {
+    const sec = startSec + i * BAND_SAMPLE_STEP_SEC;
     const pcts: number[] = [];
     let volSum = 0;
     for (const day of populated) {
@@ -336,11 +372,12 @@ export function buildChartGeometry(
   const volTop = plotBottom - volH;
   const priceBottom = volTop - laneGap;
   const priceH = Math.max(1, priceBottom - plotTop);
-  const xSpan = PREMARKET_END_SEC - PREMARKET_START_SEC;
+  const startSec = resolveChartStartSec(series);
+  const xSpan = PREMARKET_END_SEC - startSec;
   const ySpan = Math.max(0.5, hi - lo);
 
   const xOf = (sec: number) => {
-    const ratio = (sec - PREMARKET_START_SEC) / xSpan;
+    const ratio = (sec - startSec) / xSpan;
     return plotLeft + Math.max(0, Math.min(1, ratio)) * plotW;
   };
   const yOf = (pct: number) => {
@@ -353,7 +390,7 @@ export function buildChartGeometry(
   };
   const secOfX = (x: number) => {
     const ratio = Math.max(0, Math.min(1, (x - plotLeft) / plotW));
-    return Math.round(PREMARKET_START_SEC + ratio * xSpan);
+    return Math.round(startSec + ratio * xSpan);
   };
 
   const yTicks: number[] = [];
@@ -361,17 +398,12 @@ export function buildChartGeometry(
     yTicks.push(Math.round((hi - ((hi - lo) * i) / 4) * 10) / 10);
   }
   const volTicks = [0, maxVol * 0.5, maxVol];
-  const xTicks = [
-    PREMARKET_START_SEC,
-    8 * 3600 + 40 * 60,
-    8 * 3600 + 50 * 60,
-    SPOOF_WATCH_START_SEC,
-    PREMARKET_END_SEC,
-  ];
+  const xTicks = buildXTicks(startSec);
   const pointCount = Math.max(12, focusSeries?.points.length ?? 60);
   const barWidth = Math.max(3, Math.min(14, (plotW / pointCount) * 0.68));
 
   return {
+    startSec,
     plotLeft,
     plotRight,
     plotTop,

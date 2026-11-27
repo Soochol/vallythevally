@@ -19,6 +19,7 @@ import {
   nearestPointAt,
   PREMARKET_END_SEC,
   PREMARKET_START_SEC,
+  resolveChartStartSec,
   selectRangeDates,
   signalMeta,
   togglePinnedDate,
@@ -46,7 +47,7 @@ function makeDay(date: string, pts: readonly { sec: number; pct: number; qty: nu
 
 describe("premarket logic", () => {
   test("formats time, date, weekday, pct, qty, turnover, and signals", () => {
-    expect(formatSecOfDay(PREMARKET_START_SEC)).toBe("08:30:00");
+    expect(formatSecOfDay(PREMARKET_START_SEC)).toBe("08:50:00");
     expect(formatSecOfDay(PREMARKET_END_SEC, false)).toBe("09:00");
     expect(formatShortDate("20261127")).toBe("11/27");
     expect(formatKoreanWeekday("20261127")).toBe("금");
@@ -93,16 +94,16 @@ describe("premarket logic", () => {
 
   test("computes volume deltas, historical band, dual-axis geometry, and nearest lookup", () => {
     const d1 = makeDay("20261125", [
-      { sec: 30600, pct: 0.0, qty: 10000, turnover: 700 },
+      { sec: 31800, pct: 0.0, qty: 10000, turnover: 700 },
       { sec: 32400, pct: 2.0, qty: 30000, turnover: 2100 },
     ]);
     const d2 = makeDay("20261126", [
-      { sec: 30600, pct: 1.0, qty: 20000, turnover: 1400 },
+      { sec: 31800, pct: 1.0, qty: 20000, turnover: 1400 },
       { sec: 32400, pct: 4.0, qty: 50000, turnover: 3500 },
     ]);
     const focus = makeDay("20261127", [
-      { sec: 30600, pct: 1.5, qty: 15000, turnover: 1050 },
-      { sec: 31800, pct: 5.0, qty: 45000, turnover: 3150 },
+      { sec: 31800, pct: 1.5, qty: 15000, turnover: 1050 },
+      { sec: 32100, pct: 5.0, qty: 45000, turnover: 3150 },
       { sec: 32400, pct: 1.0, qty: 20000, turnover: 1400 },
     ]);
 
@@ -114,6 +115,8 @@ describe("premarket logic", () => {
     expect(startBand?.avgVolume).toBeCloseTo(15000, 3);
 
     const geom = buildChartGeometry([d1, d2, focus], focus, band, null, "qty", [d2]);
+    expect(geom.startSec).toBe(PREMARKET_START_SEC);
+    expect(geom.xTicks).toEqual([31800, 31920, 32040, 32160, 32280, 32400]);
     expect(geom.xOf(PREMARKET_START_SEC)).toBeCloseTo(geom.plotLeft, 3);
     expect(geom.xOf(PREMARKET_END_SEC)).toBeCloseTo(geom.plotRight, 3);
     expect(geom.secOfX(geom.plotLeft)).toBe(PREMARKET_START_SEC);
@@ -124,8 +127,17 @@ describe("premarket logic", () => {
     expect(geom.yVolOf(0)).toBeCloseTo(geom.plotBottom, 3);
     expect(geom.yVolOf(geom.maxVol)).toBeCloseTo(geom.volTop, 3);
     expect(geom.maxVol).toBeGreaterThanOrEqual(50000);
-    expect(nearestPointAt(focus.points, 31750)?.secOfDay).toBe(31800);
+    expect(nearestPointAt(focus.points, 32050)?.secOfDay).toBe(32100);
     expect(nearestPointAt(focus.points, 32390)?.secOfDay).toBe(32400);
+
+    const earlyDay = makeDay("20261124", [
+      { sec: 31200, pct: 0.5, qty: 8000, turnover: 560 },
+      { sec: 32400, pct: 1.0, qty: 20000, turnover: 1400 },
+    ]);
+    expect(resolveChartStartSec([earlyDay, focus])).toBe(31200);
+    const expandedGeom = buildChartGeometry([earlyDay, focus], focus, [], null, "qty");
+    expect(expandedGeom.startSec).toBe(31200);
+    expect(expandedGeom.xOf(31200)).toBeCloseTo(expandedGeom.plotLeft, 3);
   });
 
   test("identifies KST weekday premarket boundary poll window and date string", () => {
