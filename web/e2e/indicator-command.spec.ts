@@ -14,6 +14,7 @@ test("입력창에서 Enter로 연속 추가하고 Shift+Enter로 닫은 뒤 숨
   await cell(page).focus();
   await page.keyboard.press("i");
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
   for (const query of ["이평 7", "bb 12 2"]) {
     await input.fill(query);
@@ -66,6 +67,7 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 검사기가 준�
   await page.route("**/*.wasm", async (route) => { await wasmReleased; await route.fallback(); });
   await page.getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
   await input.fill("이평 20");
   await expect(dialog).toContainText("미리보기 준비 중");
@@ -87,6 +89,7 @@ test("설정 검사기를 받기 전에 누른 Shift+Enter는 그 뒤 다른 후
   await page.route("**/*.wasm", async (route) => { await wasmReleased; await route.fallback(); });
   await page.getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
   await input.fill("이평 20");
   await expect(dialog).toContainText("미리보기 준비 중");
@@ -108,6 +111,7 @@ test("입력창 설정 미리보기는 실제 선을 바꾸고 추가 버튼 전
   await expect.poll(customLines).toHaveLength(0);
   await page.getByRole("button", { name: "지표", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
   await dialog.getByRole("combobox").fill("이평 7");
   await expect.poll(customLines).toHaveLength(1);
   const first = await customLines();
@@ -135,6 +139,7 @@ test("지표 창은 띄운 지표·지표 추가 두 탭으로 열고 통합 이
   await expect(dialog.getByRole("listbox")).toContainText("아래 패널");
   await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
   await expect(dialog.getByRole("option", { name: /추가 후보$/ })).toHaveCount(0);
+  await tab(/^지표 추가$/).click();
   await input.fill("이평 20");
   await expect(tab(/^지표 추가$/)).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByRole("option", { name: "이동평균 단순 20 추가 후보", exact: true })).toHaveAttribute("aria-selected", "true");
@@ -200,4 +205,29 @@ test("지표 창 선택 행은 왼쪽 세로 막대 없이 배경으로 구분�
   await dialog.getByRole("button", { name: "RSI 14 추가", exact: true }).click();
   await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "rsi"]);
   await expect(dialog.getByRole("tab", { name: "이 칸에 띄운 지표 2개", exact: true })).toBeVisible();
+});
+
+test("이 칸에 띄운 지표 탭과 지표 추가 탭에서 각각 현재 탭 목록만 검색한다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await page.getByRole("button", { name: "지표", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
+
+  await expect(dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ })).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveAttribute("placeholder", /띄운 지표 검색/);
+  await input.fill("거래량");
+  await expect(dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
+
+  await input.fill("rsi");
+  await expect(dialog.getByRole("tab", { name: /^이 칸에 띄운 지표/ })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toHaveCount(0);
+
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
+  await expect(input).toHaveAttribute("placeholder", /추가할 지표 검색/);
+  await input.fill("rsi 14");
+  await expect(dialog.getByRole("tab", { name: "지표 추가", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("option", { name: "RSI 14 추가 후보", exact: true })).toBeVisible();
 });

@@ -1,5 +1,5 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { isFinancial, isQuote, KINDS } from "../../chart/indicators/kinds";
+import { isFinancial, isQuote, KINDS, specName } from "../../chart/indicators/kinds";
 import type { ChartSettings, IndicatorConfig } from "../../chart/settings";
 import type { IndicatorCommandMode } from "../../stores/selection";
 import type { SearchList } from "../search/searchList";
@@ -80,8 +80,18 @@ export function selectedDialogRow(rows: readonly DialogRow[], chosen: string): D
   return rows.find((row) => row.kind === "maGroup" || row.kind === "candidate" || row.kind === "current" || (row.kind === "symbol" && row.selectable));
 }
 
-export function modeAfterInput(mode: IndicatorCommandMode, input: string): IndicatorCommandMode {
-  return mode === "current" && input.trim() !== "" ? "add" : mode;
+export function modeAfterInput(mode: IndicatorCommandMode, _input: string): IndicatorCommandMode {
+  return mode;
+}
+
+function matchesCurrentIndicator(config: IndicatorConfig, input: string, matchedKinds: ReadonlySet<string>): boolean {
+  const q = input.trim().toLowerCase();
+  if (q === "") return true;
+  if (matchedKinds.has(config.spec.kind)) return true;
+  const label = KINDS[config.spec.kind].label.toLowerCase();
+  const full = specName(config.spec).toLowerCase();
+  const kind = config.spec.kind.toLowerCase();
+  return full.includes(q) || label.includes(q) || kind.includes(q);
 }
 
 export function candidateGroup(candidate: IndicatorCandidate): string {
@@ -97,8 +107,14 @@ const byGroup = (rows: CommandRow[]) => rows.sort((a, b) => GROUP_ORDER.indexOf(
 
 export function commandRows(settings: ChartSettings, input: string, mode: IndicatorCommandMode, symbols: SearchList): CommandRow[] {
   switch (mode) {
-    case "current":
-      return byGroup(settings.indicators.map((config) => ({ kind: "current", key: currentKey(config.id), group: config.panel === "price" ? PRICE_GROUP : BELOW_GROUP, config })));
+    case "current": {
+      const matchedKinds = input.trim() === "" ? new Set<string>() : new Set<string>(parseIndicatorInput(input).map((c) => c.kind));
+      return byGroup(
+        settings.indicators
+          .filter((config) => matchesCurrentIndicator(config, input, matchedKinds))
+          .map((config) => ({ kind: "current", key: currentKey(config.id), group: config.panel === "price" ? PRICE_GROUP : BELOW_GROUP, config })),
+      );
+    }
     case "add":
       return byGroup(parseIndicatorInput(input).map((candidate) => ({ kind: "candidate", key: `new:${candidate.kind}:${input}`, group: candidateGroup(candidate), candidate })));
     case "compare":
