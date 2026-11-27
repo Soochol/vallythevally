@@ -41,13 +41,13 @@ function DockDetailEditor({ cellId, config, onBack }: { cellId: WindowId; config
 }
 
 function DockMaGroupDetail({ cellId, onBack }: { cellId: WindowId; onBack(): void }) {
-  const maLines = useLayoutStore((s) => chartWindows(s.layout).find((c) => c.id === cellId)?.chartSettings.indicators.filter(isMaConfig) ?? []);
+  const maCount = useLayoutStore((s) => chartWindows(s.layout).find((c) => c.id === cellId)?.chartSettings.indicators.filter(isMaConfig).length ?? 0);
   return (
     <div className="cd-detail">
       <div className="cd-detail-head">
         <button type="button" className="cd-back-btn" onClick={onBack}>← 지표 목록</button>
       </div>
-      <h3 className="text-m font-semibold">이동평균선 ({maLines.length})</h3>
+      <h3 className="text-m font-semibold">이동평균선 ({maCount})</h3>
       <MaGroupEditor cellId={cellId} />
     </div>
   );
