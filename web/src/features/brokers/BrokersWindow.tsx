@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
@@ -13,10 +13,12 @@ import { formatClock } from "../market-window/format";
 import { Segmented, type SegmentOption } from "../market-window/parts";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { pageOfPath } from "../page-rail/pages";
+import { useWindowVisible } from "../workspace/windowVisibility";
 import { BoardView } from "./BoardView";
 import { DetailTable } from "./DetailTable";
 import { ListView } from "./ListView";
 import { TableView } from "./TableView";
+import { TransferView } from "./TransferView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "./board";
 import { type BrokerSyncTarget, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
 import { formatMonthDay, kstDateOf, priceAt } from "./history";
@@ -27,6 +29,7 @@ const VIEW_OPTIONS: readonly SegmentOption<BrokerView>[] = [
   { value: "board", label: "입체" },
   { value: "list", label: "거래원" },
   { value: "table", label: "기본" },
+  { value: "transfer", label: "이동" },
 ];
 
 const CARD_OPTIONS: readonly SegmentOption<BrokerCards>[] = [
@@ -61,14 +64,17 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const [clockTick, setClockTick] = useState(0);
 
   const onWorkspace = (pageOfPath(useLocation().pathname) ?? "workspace") === "workspace";
+  const windowVisible = useWindowVisible();
+  const feedActive = onWorkspace && windowVisible;
 
   useEffect(() => {
+    if (!feedActive) return;
     const timer = setInterval(() => setClockTick((tick) => tick + 1), CLOCK_TICK_MS);
     return () => clearInterval(timer);
-  }, []);
+  }, [feedActive]);
 
   const serverTimeOrigin = useServerClock((s) => s.serverTimeOrigin);
-  const nowMs = serverNow(serverTimeOrigin);
+  const nowMs = useMemo(() => serverNow(serverTimeOrigin), [serverTimeOrigin, clockTick, feedActive]);
   const today = kstDateOf(nowMs);
 
   const pointed = useBrokerChartPointer(code, chartSync);
@@ -83,13 +89,6 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const syncedCursor = syncTarget.kind === "synced" ? syncTarget.cursor : null;
   const effectiveCursor = localCursor ?? syncedCursor;
 
-  const day = useBrokerDay(code, activeDate, isToday, onWorkspace, allowFallback);
-  const isFallback = day.mode === "fallback" && day.date !== null;
-  const displayDate = isFallback ? day.date : activeDate;
-  const displayIsToday = isToday && !isFallback;
-  const minuteBarsEnabled = !chartSync || selected !== null || localCursor !== null;
-  const bars = useBrokerMinuteBars(code, displayDate, displayIsToday, onWorkspace && day.source !== "store", minuteBarsEnabled);
-
   const view = useLayoutStore((s) => {
     const win = s.layout.windows.find((w) => w.id === id);
     return win?.kind === "brokers" ? (win.view ?? "board") : "board";
@@ -101,6 +100,13 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const setBrokersView = useLayoutStore((s) => s.setBrokersView);
   const setBrokersCards = useLayoutStore((s) => s.setBrokersCards);
 
+  const day = useBrokerDay(code, activeDate, isToday, feedActive, allowFallback);
+  const isFallback = day.mode === "fallback" && day.date !== null;
+  const displayDate = isFallback ? day.date : activeDate;
+  const displayIsToday = isToday && !isFallback;
+  const minuteBarsEnabled = !chartSync || selected !== null || localCursor !== null || view === "transfer";
+  const bars = useBrokerMinuteBars(code, displayDate, displayIsToday, feedActive && day.source !== "store", minuteBarsEnabled);
+
   const grid = day.state.grid;
   const staleDay = day.mode === "collected" && day.date !== null && day.date !== activeDate;
   const displayCursor = staleDay ? null : effectiveCursor;
@@ -108,8 +114,8 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const tracks = useMemo(() => brokerTracks(grid), [grid]);
   const runsByCode = useMemo(() => (view === "list" ? trackRuns(grid) : EMPTY_RUNS), [grid, view]);
   const axis = useMemo(
-    () => boardAxis(grid.times, Math.floor(serverNow(serverTimeOrigin) / 1000)),
-    [grid.times, serverTimeOrigin, clockTick],
+    () => boardAxis(grid.times, Math.floor(nowMs / 1000)),
+    [grid.times, nowMs],
   );
   const selectedTrack = selected === null ? null : (tracks.find((track) => track.code === selected) ?? null);
   const shownTime = effectiveCursor ?? grid.times[grid.times.length - 1] ?? null;
@@ -135,9 +141,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     setLocalCursor(null);
   };
 
-  const toggleSelected = (brokerCode: string) => {
+  const toggleSelected = useCallback((brokerCode: string) => {
     setSelected((current) => (current === brokerCode ? null : brokerCode));
-  };
+  }, []);
 
   const failed = day.failed;
   const retry = day.retry;
@@ -225,6 +231,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       )}
       {showContent && view === "table" && (
         <TableView snapshots={grid.snapshots} cursor={displayCursor} />
+      )}
+      {showContent && view === "transfer" && (
+        <TransferView snapshots={grid.snapshots} gapBefore={grid.gapBefore} gaps={gaps} bars={bars} axis={axis} />
       )}
     </div>
   );

@@ -301,7 +301,7 @@ test("% 축에서 같은 봉에 체결이 더 와도, 가격 패널 선마다 �
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   type Row = { time: number; value?: number; close?: number; base?: number };
   const snap = async () => (await page.evaluate(() => window.frameProbe.snapshot())) as unknown as { type: string; data: Row[] }[];
-  await expect.poll(async () => (await snap()).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(9);
+  await expect.poll(async () => (await snap()).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(10);
   const chart = chartOf(cell(page));
   const lagging = async () => {
     const s = await snap();
@@ -321,7 +321,7 @@ test("% 축에서 같은 봉에 체결이 더 와도, 가격 패널 선마다 �
   const main = s.find((x) => x.type === "Candlestick")!.data.at(-1)!;
   const atMain = s.filter((x) => x.type === "Custom").flatMap((x) => x.data.filter((r) => r.time === main.time));
   expect(main.close).toBe(207_000);
-  expect(atMain).toHaveLength(8);
+  expect(atMain).toHaveLength(9);
   expect(atMain.map((r) => r.base)).toEqual(atMain.map(() => main.close));
   expect(errors).toEqual([]);
 });

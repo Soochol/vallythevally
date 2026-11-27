@@ -531,7 +531,7 @@ impl Bridge {
         let before = cumulative.and_then(|now| self.index_cumulative.insert(code, now));
         let qty = cumulative.zip(before).map_or(0, |(now, before)| now.saturating_sub(before));
         let change_centi = record.change_centi(3, 4);
-        let day = change_centi.zip(cumulative).map(|(change_centi, cumulative)| DayTotals { change_centi, cumulative: Volume(cumulative) });
+        let day = change_centi.zip(cumulative).map(|(change_centi, cumulative)| DayTotals { change_centi, cumulative: Volume(cumulative), traded_million_won: None });
         let tick = RealTick {
             symbol: Symbol::Index(code),
             hhmmss: record.time(1).unwrap_or_else(|| received_at.kst_time_of_day()),
@@ -553,7 +553,8 @@ fn stock_symbol(record: &Record) -> Option<Symbol> {
 
 fn trade(record: &Record, venue: Venue, received_at: KstTime) -> Option<StreamEvent> {
     let qty = record.quantity(12).filter(|qty| *qty > 0)?;
-    let day = record.change_centi(3, 4).zip(record.quantity(13)).map(|(change_centi, cumulative)| DayTotals { change_centi, cumulative: Volume(cumulative) });
+    let traded_million_won = record.quantity(14).map(|won| won / 1_000_000);
+    let day = record.change_centi(3, 4).zip(record.quantity(13)).map(|(change_centi, cumulative)| DayTotals { change_centi, cumulative: Volume(cumulative), traded_million_won });
     let side = match record.text(21) {
         Some("1") => Some(TradeSide::Buy),
         Some("5") => Some(TradeSide::Sell),

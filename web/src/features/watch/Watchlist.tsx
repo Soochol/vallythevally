@@ -28,6 +28,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { watchMicroBook } from "../../stores/watchMicro";
 import { chooseWatchlist, useWatchlistStore, useWindowWatchlist } from "../../stores/watchlist";
+import { useWindowVisible } from "../workspace/windowVisibility";
 import { ChevronIcon, CloseIcon, CopyIcon, PlusIcon } from "../icons";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { Kbd } from "../ui/Kbd";
@@ -265,7 +266,8 @@ function WatchList({ variant, sender, editing, naming, onNaming, columns }: Watc
   const symbols = list.symbols;
   const collapsed = useUiStore((s) => s.prefs.collapsedWatchGroups);
   const desktop = useMediaQuery(DESKTOP_QUERY);
-  const onScreen = variant === "desktop" ? desktop : !desktop;
+  const windowVisible = useWindowVisible();
+  const onScreen = windowVisible && (variant === "desktop" ? desktop : !desktop);
   const [hover, setHover] = useState<{ target: DropTarget; how: DropHow } | null>(null);
   const [dragged, setDragged] = useState<WatchRowRef | null>(null);
   const [slotHover, setSlotHover] = useState<"move" | "copy" | null>(null);

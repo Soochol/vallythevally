@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { colorsFrom, firstUnusedColor, isFinancial, isMicro, isProgramFlow, isQuote, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
+import { colorsFrom, firstUnusedColor, isFinancial, isFlow, isForeignFlow, isInstitutionFlow, isInvestorFlow, isMicro, isProgramFlow, isQuote, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
 
 test("기본값은 backend.md §9.5 표를 따른다", () => {
   expect(KIND_ORDER.map((k) => KINDS[k].defaults)).toEqual([
@@ -11,7 +11,9 @@ test("기본값은 backend.md §9.5 표를 따른다", () => {
     { kind: "macd", fast: 12, slow: 26, signal: 9 },
     { kind: "stochSlow", k: 5, d: 3, smooth: 3 },
     { kind: "tickCvd", showWhale: true, showLarge: false, showMid: false, showRetail: true },
-    { kind: "programFlow", showShare: false },
+    { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: false },
+    { kind: "foreignFlow", displayMode: "histogram", aggregation: "bar", unit: "eok" },
+    { kind: "institutionFlow", displayMode: "histogram", aggregation: "bar", unit: "eok" },
     { kind: "quoteTotals" },
     { kind: "quoteDepth", source: "priceMax", topLevels: null, maxOpacity: 0.7, aboveBars: false, askColor: null, bidColor: null, showSpoof: false, showIceberg: false, microLabelMode: "clean" },
     ...["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"].map((kind) => ({ kind })),
@@ -95,8 +97,23 @@ test("계층별 CVD와 프로그램 수급은 아래 패널의 미세 수급 지
   const prog = KINDS.programFlow.defaults;
   expect(KINDS.programFlow.label).toBe("프로그램 수급");
   expect(specName(prog)).toBe("프로그램 수급");
-  expect(specLines(prog)).toEqual(["programNet"]);
-  expect(specLines({ kind: "programFlow", showShare: true })).toEqual(["programNet", "programShare"]);
+  expect(specLines(prog)).toEqual(["flowBar"]);
+  expect(specLines({ ...prog, displayMode: "line" })).toEqual(["flowLine"]);
+  expect(specLines({ ...prog, displayMode: "both" })).toEqual(["flowBar", "flowCum"]);
+  expect(specLines({ ...prog, showShare: true })).toEqual(["flowBar", "programShare"]);
+  expect(colorLine(prog)).toBeNull();
+  expect(colorLine({ ...prog, showShare: true })).toBe(1);
+  expect(colorLine({ ...prog, displayMode: "line" })).toBe(0);
+  expect(colorLine({ ...prog, displayMode: "both" })).toBe(1);
   expect(placementsOf("programFlow")).toEqual(["panel"]);
-  expect([isMicro(prog), isProgramFlow(prog), isTickCvd(prog), isTechnical(prog)]).toEqual([true, true, false, false]);
+  expect([isMicro(prog), isFlow(prog), isProgramFlow(prog), isInvestorFlow(prog), isTechnical(prog)]).toEqual([true, true, true, false, false]);
+
+  const foreign = KINDS.foreignFlow.defaults;
+  const inst = KINDS.institutionFlow.defaults;
+  expect(KINDS.foreignFlow.label).toBe("외국인 순매수");
+  expect(KINDS.institutionFlow.label).toBe("기관 순매수");
+  expect(specLines(foreign)).toEqual(["flowBar"]);
+  expect(specLines({ ...inst, displayMode: "both" })).toEqual(["flowBar", "flowCum"]);
+  expect([isInvestorFlow(foreign), isForeignFlow(foreign), isInstitutionFlow(foreign), isFlow(foreign), isTechnical(foreign), isMicro(foreign)]).toEqual([true, true, false, true, false, false]);
+  expect([isInvestorFlow(inst), isInstitutionFlow(inst), isForeignFlow(inst), isFlow(inst), isTechnical(inst)]).toEqual([true, true, false, true, false]);
 });

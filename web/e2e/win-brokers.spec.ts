@@ -1,18 +1,57 @@
 import type { Page } from "@playwright/test";
+import type { Bar } from "../src/api/generated/Bar";
+import type { BarsPage } from "../src/api/generated/BarsPage";
+import type { BrokerDay } from "../src/api/generated/BrokerDay";
 import type { FeedBrokers } from "../src/api/generated/FeedBrokers";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, pickDesktopVenue, test, windowTabs, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
+const TODAY = "20261109";
 const at = (clock: string) => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
 test.use({ clockStart: "20261109093230" });
 
 const entry = (code: string, name: string, qty: number) => ({ code, name, qty, qtyChange: 0 });
+const brokerDay = (patch: Partial<BrokerDay>): BrokerDay => ({
+  symbol: "005930",
+  date: TODAY,
+  source: "none",
+  snapshots: [],
+  gaps: [],
+  live: true,
+  cursor: "",
+  reset: true,
+  ...patch,
+});
 
 const FIRST: FeedBrokers = { t: at("09:30:00"), buys: [entry("151", "키움", 100), entry("152", "미래", 40)], sells: [entry("141", "삼성", 90)] };
 const SECOND: FeedBrokers = { t: at("09:31:00"), buys: [entry("151", "키움", 400), entry("152", "미래", 60)], sells: [entry("141", "삼성", 120)] };
 const FOREIGN: FeedBrokers = { t: at("09:33:00"), buys: [entry("151", "키움", 700), entry("033", "JP모간", 250)], sells: [entry("141", "삼성", 130), entry("143", "한투", 500)] };
 const LIVE: FeedBrokers = { t: at("09:32:00"), buys: [entry("151", "키움", 700)], sells: [entry("141", "삼성", 130), entry("143", "한투", 500)] };
+
+const TRANSFER_SNAPSHOTS: readonly FeedBrokers[] = [
+  { t: at("09:20:00"), sells: [entry("141", "삼성", 100), entry("042", "모간서울", 60)], buys: [entry("151", "키움", 100), entry("033", "JP모간", 60), entry("152", "미래", 40)] },
+  { t: at("09:22:00"), sells: [entry("141", "삼성", 150), entry("042", "모간서울", 90)], buys: [entry("151", "키움", 150), entry("033", "JP모간", 90), entry("152", "미래", 40)] },
+  { t: at("09:24:00"), sells: [entry("141", "삼성", 200), entry("042", "모간서울", 120)], buys: [entry("151", "키움", 200), entry("033", "JP모간", 120), entry("152", "미래", 40)] },
+  { t: at("09:26:00"), sells: [entry("141", "삼성", 250), entry("042", "모간서울", 150)], buys: [entry("151", "키움", 250), entry("033", "JP모간", 150), entry("152", "미래", 40)] },
+  { t: at("09:28:00"), sells: [entry("141", "삼성", 450), entry("042", "모간서울", 750)], buys: [entry("151", "키움", 850), entry("033", "JP모간", 150), entry("152", "미래", 240)] },
+  { t: at("09:30:00"), sells: [entry("141", "삼성", 500), entry("042", "모간서울", 780)], buys: [entry("151", "키움", 900), entry("033", "JP모간", 180), entry("152", "미래", 240)] },
+  { t: at("09:32:00"), sells: [entry("141", "삼성", 550), entry("042", "모간서울", 810)], buys: [entry("151", "키움", 950), entry("033", "JP모간", 210), entry("152", "미래", 240)] },
+];
+
+const TRANSFER_BARS: readonly Bar[] = Array.from({ length: 13 }, (_, index) => {
+  const minute = 20 + index;
+  const surge = minute === 27 || minute === 28;
+  const price = surge ? 71_500 : 71_000;
+  return {
+    t: at(`09:${String(minute).padStart(2, "0")}:00`),
+    o: price,
+    h: price + 100,
+    l: price - 100,
+    c: price,
+    v: surge ? 500 : 60,
+  };
+});
 
 function linkedChart(scenario: Scenario) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -23,13 +62,17 @@ function linkedChart(scenario: Scenario) {
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
 }
 
-async function openBrokers(page: Page, scenario: Scenario) {
+async function openBrokersWindow(page: Page, scenario: Scenario) {
   linkedChart(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
   await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^거래원 입체분석/ }).click();
   await expect(windowTabs(page).getByRole("tab", { name: /^거래원 입체분석/ })).toHaveCount(1);
+}
+
+async function openBrokers(page: Page, scenario: Scenario) {
+  await openBrokersWindow(page, scenario);
   await pollSaved(() => scenario.live.messages.some((m) => m.type === "subscribe_feed" && m.kind === "brokers")).toBe(true);
 }
 
@@ -141,7 +184,7 @@ test("기본 보기는 매도·매수 상위 5개 표와 외국계 순매수를 
   await openWithThree(page, scenario);
   send(scenario, FOREIGN);
   const viewGroup = window_(page).getByRole("group", { name: "보기" });
-  await expect(viewGroup.getByRole("button")).toHaveText(["입체", "거래원", "기본"]);
+  await expect(viewGroup.getByRole("button")).toHaveText(["입체", "거래원", "기본", "이동"]);
   await viewGroup.getByRole("button", { name: "기본", exact: true }).click();
 
   await expect(window_(page).getByTestId("broker-table")).toBeVisible();
@@ -160,4 +203,79 @@ test("기본 보기는 매도·매수 상위 5개 표와 외국계 순매수를 
   await pollSaved(() => savedBrokers(scenario)).toMatchObject({ kind: "brokers", view: "table" });
   await page.reload();
   await expect(window_(page).getByRole("group", { name: "보기" }).getByRole("button", { name: "기본", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("이동 보기는 추정 물량 이동과 이벤트를 보이고 새로고침 뒤에도 기억한다", async ({ page, scenario }) => {
+  scenario.on((url) => url.pathname === "/api/symbols/005930/brokers", (request) => {
+    const after = new URL(request.url()).searchParams.get("after");
+    if (after === null) {
+      return { body: brokerDay({ source: "flow", snapshots: [...TRANSFER_SNAPSHOTS], cursor: "f:1:7" }) };
+    }
+    return { body: brokerDay({ source: "flow", cursor: "f:1:7", reset: false }) };
+  });
+  scenario.on((url) => url.pathname === "/api/bars" && url.searchParams.get("period") === "1m", () => {
+    const body: BarsPage = {
+      symbol: "005930",
+      venue: "combined",
+      period: "1m",
+      bars: [...TRANSFER_BARS],
+      current: null,
+      nextBefore: null,
+      seq: null,
+    };
+    return { body };
+  });
+
+  await openBrokersWindow(page, scenario);
+  const win = window_(page);
+  await expect(win.getByTestId("broker-card")).toHaveCount(5);
+
+  await win.getByRole("group", { name: "보기" }).getByRole("button", { name: "이동", exact: true }).click();
+
+  await expect(win.getByTestId("broker-transfer-view")).toBeVisible();
+  await expect(win.getByTestId("broker-transfer-kpi")).toBeVisible();
+  await expect(win.getByTestId("broker-transfer-confidence")).toBeVisible();
+  await expect(win.getByTestId("broker-transfer-confidence")).toHaveAttribute("data-level", "high");
+  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await expect(win.getByTestId("broker-transfer-node").first()).toBeVisible();
+  await expect(win.getByTestId("broker-transfer-link").first()).toBeVisible();
+  await expect(win.getByTestId("broker-transfer-brush")).toBeVisible();
+  await expect(win.getByTestId("broker-transfer-pairs")).toBeVisible();
+
+  const toggleOther = win.getByTestId("broker-transfer-toggle-other");
+  await expect(toggleOther).toHaveAttribute("aria-pressed", "true");
+  await toggleOther.click();
+  await expect(toggleOther).toHaveAttribute("aria-pressed", "false");
+  await toggleOther.click();
+  await expect(toggleOther).toHaveAttribute("aria-pressed", "true");
+
+  const levelGroup = win.getByRole("group", { name: "집계 단위" });
+  const modeGroup = win.getByRole("group", { name: "계산 모드" });
+  await levelGroup.getByRole("button", { name: "주체 그룹", exact: true }).click();
+  await expect(levelGroup.getByRole("button", { name: "주체 그룹", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
+  await expect(modeGroup.getByRole("button", { name: "총량", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
+  await levelGroup.getByRole("button", { name: "개별 창구", exact: true }).click();
+  await modeGroup.getByRole("button", { name: "순이동", exact: true }).click();
+
+  const firstNode = win.getByTestId("broker-transfer-node").first();
+  await firstNode.locator("rect").click();
+  await expect(win.getByTestId("broker-transfer-focus")).toBeVisible();
+  await win.getByTestId("broker-transfer-focus").getByRole("button", { name: "해제", exact: true }).click();
+  await expect(win.getByTestId("broker-transfer-focus")).toHaveCount(0);
+
+  const rangeTag = win.getByTestId("broker-transfer-range");
+  const fullRangeText = await rangeTag.innerText();
+  const firstEvent = win.getByTestId("broker-transfer-event-item").first();
+  await expect(firstEvent).toBeVisible();
+  await firstEvent.click();
+  await expect(firstEvent).toHaveAttribute("aria-pressed", "true");
+  await expect(rangeTag).not.toHaveText(fullRangeText);
+
+  await pollSaved(() => savedBrokers(scenario)).toMatchObject({ kind: "brokers", view: "transfer" });
+  await page.reload();
+  await expect(win.getByRole("group", { name: "보기" }).getByRole("button", { name: "이동", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(win.getByTestId("broker-transfer-view")).toBeVisible();
 });

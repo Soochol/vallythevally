@@ -55,7 +55,7 @@ const CVD_CONFIG: IndicatorConfig = {
 
 const PROGRAM_CONFIG: IndicatorConfig = {
   id: "prog",
-  spec: { kind: "programFlow", showShare: false },
+  spec: { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: false },
   panel: "p-prog",
   visible: true,
   style: { colors: ["ind-3"], width: 1 },
@@ -218,10 +218,16 @@ describe("MicroIndicatorController", () => {
     expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["순매수 +3.50억"]);
 
     ctl.setTarget({ symbol: "005930", period: "D" });
+    await Promise.resolve();
+    await Promise.resolve();
     expect(cvdCalls).toBe(1);
-    expect(programCalls).toBe(1);
+    expect(programCalls).toBe(2);
     expect(ctl.tickCvdRow(CVD_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 분봉 전용"]);
-    expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 분봉 전용"]);
+    expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["순매수 +2.00억"]);
+
+    ctl.setTarget({ symbol: "IDX:001", period: "D" });
+    expect(ctl.tickCvdRow(CVD_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 분봉 전용"]);
+    expect(ctl.programFlowRow(PROGRAM_CONFIG, t0, TOKENS, null).values.map((v) => v.text)).toEqual(["주식·ETF 전용"]);
     ctl.dispose();
   });
 
@@ -349,7 +355,10 @@ describe("MicroIndicatorController", () => {
   test("seeds mid-day programSharePct from HTTP turnover without tickCvd and avoids 100% spike", async () => {
     const t0 = Math.floor(Date.parse("2026-11-24T13:00:00+09:00") / 1000);
     const bars: Bar[] = [{ t: t0, o: 70000, h: 70500, l: 69900, c: 70200, v: 1000 }];
-    const shareConfig: IndicatorConfig = { ...PROGRAM_CONFIG, spec: { kind: "programFlow", showShare: true } };
+    const shareConfig: IndicatorConfig = {
+      ...PROGRAM_CONFIG,
+      spec: { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: true },
+    };
     let resolveProgram!: (page: ProgramSeriesPage) => void;
 
     const ctl = new MicroIndicatorController(
@@ -560,5 +569,39 @@ describe("MicroIndicatorController", () => {
     expect(
       validateNonTechnicalSpec({ kind: "tickCvd", showWhale: false, showLarge: false, showMid: false, showRetail: true }).ok,
     ).toBe(true);
+  });
+
+  test("applyLiveTrades batches notifications and stops buffering pendingLive after fetch failure", async () => {
+    const t0 = Math.floor(Date.parse("2026-11-24T09:05:00+09:00") / 1000);
+    const bars: Bar[] = [{ t: t0, o: 100, h: 101, l: 99, c: 100, v: 1000 }];
+    let cvdChangedCalls = 0;
+    const ctl = new MicroIndicatorController(
+      {
+        bars: () => bars,
+        tokens: () => TOKENS,
+        configs: () => [CVD_CONFIG],
+        onTickCvdChanged: () => { cvdChangedCalls++; },
+        onProgramChanged: () => {},
+      },
+      {
+        fetchTickCvd: async () => Promise.reject(new Error("boom")),
+      },
+    );
+
+    ctl.setTarget({ symbol: "005930", period: "1m" });
+    await Promise.resolve();
+    await Promise.resolve();
+    cvdChangedCalls = 0;
+
+    const ok = ctl.applyLiveTrades("005930", [
+      { t: t0 + 1, price: 100_000, qty: 1_200, venue: "krx", strength: null },
+      { t: t0 + 2, price: 100_000, qty: 1_500, venue: "krx", strength: null },
+      { t: t0 + 61, price: 100_000, qty: 1_000, venue: "krx", strength: null },
+    ]);
+    expect(ok).toBe(true);
+    expect(cvdChangedCalls).toBe(1);
+    expect(ctl.cvdPointAt(t0)?.whaleNetMillionWon).toBeCloseTo(270, 5);
+    expect(ctl.cvdPointAt(t0 + 60)?.whaleNetMillionWon).toBeCloseTo(370, 5);
+    ctl.dispose();
   });
 });

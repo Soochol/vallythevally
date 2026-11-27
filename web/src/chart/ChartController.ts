@@ -17,7 +17,9 @@ import { AXIS_WIDTH, axisPriceFormat, invalidateAxisMeasureCache, priceAxisWidth
 import type { LastPriceHost } from "./lastPriceTag";
 import { fetchBarsPage, fetchJumpPage } from "../api/bars";
 import type { Bar } from "../api/generated/Bar";
+import type { DayHistory } from "../api/generated/DayHistory";
 import type { FinancialsPage } from "../api/generated/FinancialsPage";
+import type { InvestorNetSharesDay } from "../api/generated/InvestorNetSharesDay";
 import type { KstDate } from "../api/generated/KstDate";
 import type { Period } from "../api/generated/Period";
 import type { ProgramSeriesPage } from "../api/generated/ProgramSeriesPage";
@@ -156,6 +158,7 @@ export interface ControllerDeps {
   fetchQuoteDepth?: (key: QuoteKey, range: QuoteRange, signal: AbortSignal) => Promise<QuoteDepthPage>;
   fetchTickCvd?: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<TickCvdPage>;
   fetchProgramSeries?: (symbol: SymbolCode, period: Period, range: MicroRange, signal: AbortSignal) => Promise<ProgramSeriesPage>;
+  fetchInvestorNetShares?: (symbol: SymbolCode, from: KstDate, to: KstDate, signal: AbortSignal) => Promise<DayHistory<InvestorNetSharesDay>>;
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
@@ -309,6 +312,7 @@ export class ChartController {
       deps.indicators ?? openIndicatorPort,
       { fetchQuoteTotals: deps.fetchQuoteTotals, fetchQuoteDepth: deps.fetchQuoteDepth, now: nowSeconds },
       { fetchTickCvd: deps.fetchTickCvd, fetchProgramSeries: deps.fetchProgramSeries },
+      { fetchInvestorNetShares: deps.fetchInvestorNetShares },
     );
     this.indicators.attachMainSeries(this.main.api);
     this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor) => deps.onIndicatorCommand?.(id, command, anchor), () => this.legend.fit("content"));
@@ -466,6 +470,7 @@ export class ChartController {
     if (targetChanged) {
       this.indicators.setQuoteTarget({ symbol: next.symbol, venue: next.venue, period: next.period }, !configsChanged);
       this.indicators.setMicroTarget({ symbol: next.symbol, period: next.period }, !configsChanged);
+      this.indicators.setInvestorTarget({ symbol: next.symbol, period: next.period }, !configsChanged);
     }
     if (configsChanged) {
       this.paneLayoutDirty = true;
@@ -766,6 +771,16 @@ export class ChartController {
     if (changed) this.paneLayoutDirty = true;
   }
 
+  private rightOffset(): number {
+    let offset = RIGHT_OFFSET;
+    for (const config of this.view?.settings.indicators ?? []) {
+      if (config.panel === "price" && config.visible && config.spec.kind === "ichimoku") {
+        offset = Math.max(offset, Math.min(config.spec.displacement + 4, 32));
+      }
+    }
+    return offset;
+  }
+
   private chartOptions(): DeepPartial<ChartOptions> {
     const t = this.tokens;
     const percentage = axisPriceFormat("%", 0.01, this.priceAxisGeometry(true));
@@ -788,7 +803,7 @@ export class ChartController {
       rightPriceScale: { minimumWidth: this.axisWidth(), alignLabels: true, entireTextOnly: true, borderColor: t.line, scaleMargins: { top: this.priceTopMargin, bottom: PRICE_BOTTOM_MARGIN } },
       timeScale: {
         borderColor: t.line,
-        rightOffset: RIGHT_OFFSET,
+        rightOffset: this.rightOffset(),
         timeVisible: isIntraday(this.period()),
         secondsVisible: false,
         tickMarkFormatter: (time: Time, type: TickMarkType) => formatTickMark(time as UTCTimestamp, type, this.period()),
@@ -872,7 +887,35 @@ export class ChartController {
     this.scheduleFrame();
   }
 
+  private active = true;
+  private dirtyWhileInactive = false;
   private reportedCorner = { width: 0, height: 0 };
+
+  setActive(active: boolean): void {
+    if (this.active === active) return;
+    this.active = active;
+    this.legend.setActive(active);
+    this.indicators.setActive(active);
+    if (!active) {
+      if (this.frame !== null) {
+        cancelAnimationFrame(this.frame);
+        this.frame = null;
+        this.dirtyWhileInactive = true;
+      }
+      if (this.legendFrame !== null) {
+        cancelAnimationFrame(this.legendFrame);
+        this.legendFrame = null;
+        this.dirtyWhileInactive = true;
+      }
+      this.stopMicroFeeds();
+      return;
+    }
+    this.syncMicroFeeds();
+    if (this.dirtyWhileInactive) {
+      this.dirtyWhileInactive = false;
+      this.scheduleFrame();
+    }
+  }
   private reportCorner(): void {
     const width = this.chart.priceScale("right").width();
     const height = this.chart.timeScale().height();
@@ -883,7 +926,12 @@ export class ChartController {
 
   private scheduleFrame(): void {
     this.cancelLegendFrame();
-    if (this.frame !== null || this.disposed) return;
+    if (this.disposed) return;
+    if (!this.active) {
+      this.dirtyWhileInactive = true;
+      return;
+    }
+    if (this.frame !== null) return;
     this.frame = requestAnimationFrame((time) => {
       this.frame = null;
       this.drawFrame(time);
@@ -891,7 +939,12 @@ export class ChartController {
   }
 
   private scheduleLegendPaint(): void {
-    if (this.frame !== null || this.legendFrame !== null || this.disposed) return;
+    if (this.disposed) return;
+    if (!this.active) {
+      this.dirtyWhileInactive = true;
+      return;
+    }
+    if (this.frame !== null || this.legendFrame !== null) return;
     this.legendFrame = requestAnimationFrame(() => {
       this.legendFrame = null;
       this.paintLegend();
@@ -1040,7 +1093,7 @@ export class ChartController {
   }
 
   private fitInitialRange(): IRange<number> | null {
-    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: this.narrow });
+    return this.initialRange.fit({ bars: this.bars, period: this.period(), visibleBars: this.view?.settings.visibleBars ?? null, narrow: this.narrow, rightOffset: this.rightOffset() });
   }
 
   private rightEdgeT(): UnixSeconds | null {
@@ -1133,7 +1186,7 @@ export class ChartController {
     const socket = this.socket;
     const liveAllowed = this.feed.activeDate === null;
     this.indicators.setMicroLive(liveAllowed);
-    const eligible = liveAllowed && view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
+    const eligible = this.active && liveAllowed && view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
     const wantTrades = eligible && view.settings.indicators.some(
       (c) => c.visible && (isTickCvd(c.spec) || (isProgramFlow(c.spec) && c.spec.showShare)),
     );
@@ -1148,7 +1201,7 @@ export class ChartController {
       const venue = view.venue;
       const stop = socket.subscribeFeed({ symbol, kind: "trades", venue: venue ?? "combined" }, (m) => {
         if (this.disposed || m.type !== "feed_trades") return;
-        for (const trade of m.trades) this.indicators.applyLiveTrade(symbol, trade);
+        this.indicators.applyLiveTrades(symbol, m.trades);
       });
       this.tradeFeedSub = { symbol, venue, stop };
     }
@@ -1201,7 +1254,7 @@ export class ChartController {
       period: this.period(),
       visibleBars: this.view?.settings.visibleBars ?? null,
       narrow: this.narrow,
-      rightOffset: shown === -1 ? undefined : 0,
+      rightOffset: shown === -1 ? this.rightOffset() : 0,
     });
   }
 

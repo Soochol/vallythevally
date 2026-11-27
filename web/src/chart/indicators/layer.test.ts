@@ -635,7 +635,7 @@ function prependedAfterFirstDraw() {
   f.reply({ type: "created", chart: 1, results: [{ id: RSI.id, gen: 1, ok: true, lines: [{ id: "rsi", shift: 0 }], draws: [set(range(5, 19), 50)] }] });
   f.layer.flush();
   const pointsBefore = realPoints(f);
-  const rsiLine = f.series[LINES.length + 1]!;
+  const rsiLine = f.series[LINES.length + 2]!;
   const rsiBefore = rsiLine.data;
   const allSetsBefore = f.series.map((s) => s.setDataCalls);
   const legendBefore = f.layer.rows(at(10))[0];
@@ -643,7 +643,7 @@ function prependedAfterFirstDraw() {
   const drawnAfterPrepend = perLine((id) => f.line(id).data);
   const setsAfterPrepend = perLine((id) => f.line(id).setDataCalls);
   const emptySetsInPrepend = f.series.flatMap((s, i) => s.sets.slice(allSetsBefore[i])).filter((rows) => rows.length === 0).length;
-  return { ...f, pointsBefore, rsiLine, rsiBefore, drawnAfterPrepend, emptySetsInPrepend, hiddenLine: f.series[LINES.length]!, volumeLine: f.series.at(-1)!, legendBefore, request: latestCreate(f), setsSincePrepend: () => perLine((id) => f.line(id).setDataCalls - setsAfterPrepend[id]) };
+  return { ...f, pointsBefore, rsiLine, rsiBefore, drawnAfterPrepend, emptySetsInPrepend, hiddenLine: f.series[LINES.length + 1]!, volumeLine: f.series.at(-1)!, legendBefore, request: latestCreate(f), setsSincePrepend: () => perLine((id) => f.line(id).setDataCalls - setsAfterPrepend[id]) };
 }
 
 test("과거 페이지를 붙이는 동안 워커 지표의 선과 범례 값은 직전 그대로이고, 새 세대 응답이 오면 선마다 한 번에 바꾼다", () => {
@@ -757,7 +757,7 @@ test("가격 범례 원천은 pending·hidden·error·패널 이동과 재계산
   };
   expect(check()[0]?.slots).toEqual([]);
   f.reply(created(1));
-  expect(check()[0]?.slots).toHaveLength(5);
+  expect(check()[0]?.slots).toHaveLength(6);
   f.layer.setConfigs([{ ...ICHIMOKU, visible: false }], []);
   expect(f.layer.rows(at(0))[0]?.state).toBe("hidden");
   expect(check()[0]?.slots).toEqual([]);
@@ -984,11 +984,11 @@ test("히트맵 범례는 가장 두꺼운 매도·매수 단을 알린다", () 
 test("히트맵은 선을 만들지 않고 설정을 바꿔도 다른 선을 다시 만들지 않는다", () => {
   const f = fixture("1m", [ICHIMOKU, DEPTH], []);
   f.layer.reset({ bars: CONFIRMED, current: null, nextBefore: null });
-  expect(f.series).toHaveLength(LINES.length);
+  expect(f.series).toHaveLength(LINES.length + 1);
   for (const maxOpacity of [0.5, 0.3, 0.9]) f.layer.setConfigs([ICHIMOKU, { ...DEPTH, spec: { ...DEPTH.spec, maxOpacity } as IndicatorConfig["spec"] }], []);
   f.layer.setConfigs([ICHIMOKU, { ...DEPTH, visible: false }], []);
-  expect(f.series).toHaveLength(LINES.length);
-  expect(f.active).toHaveLength(LINES.length);
+  expect(f.series).toHaveLength(LINES.length + 1);
+  expect(f.active).toHaveLength(LINES.length + 1);
   expect(f.sent.filter((m) => m.type === "create").every((m) => m.type === "create" && m.engines.every((engine) => engine.id === "ichi"))).toBe(true);
 });
 
@@ -997,7 +997,7 @@ test("분봉과 일봉 전환으로 히트맵이나 끝 패널 총잔량이 드�
   const intradayConfigs: IndicatorConfig[] = [ICHIMOKU, DEPTH, VOLUME, TOTALS];
   const dailyConfigs: IndicatorConfig[] = [ICHIMOKU, VOLUME];
   const f = fixture("1m", intradayConfigs, intradayPanels);
-  const keptBefore = [...f.active.slice(0, LINES.length + 1)];
+  const keptBefore = [...f.active.slice(0, LINES.length + 2)];
   const totalCreated = f.series.length;
 
   f.layer.setConfigs(dailyConfigs, VOLUME_PANELS);
@@ -1005,8 +1005,8 @@ test("분봉과 일봉 전환으로 히트맵이나 끝 패널 총잔량이 드�
   expect(f.series).toHaveLength(totalCreated);
 
   f.layer.setConfigs(intradayConfigs, intradayPanels);
-  expect(f.active.slice(0, LINES.length + 1)).toEqual(keptBefore);
-  expect(f.active).toHaveLength(LINES.length + 3);
+  expect(f.active.slice(0, LINES.length + 2)).toEqual(keptBefore);
+  expect(f.active).toHaveLength(LINES.length + 4);
   expect(f.active.slice(-2).map((s) => s.pane)).toEqual([2, 2]);
   expect(f.series).toHaveLength(totalCreated + 2);
 });
@@ -1031,7 +1031,7 @@ test("계층별 CVD의 모든 계층이 꺼져도 빈 패널의 pane 자리를 �
   };
   const program: IndicatorConfig = {
     id: "prog",
-    spec: { kind: "programFlow", showShare: false },
+    spec: { kind: "programFlow", displayMode: "histogram", aggregation: "cumulative", unit: "eok", showShare: false },
     panel: "p-prog",
     visible: true,
     style: { colors: ["ind-2"], width: 1 },

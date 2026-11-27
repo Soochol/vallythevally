@@ -46,7 +46,7 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const row = page.locator('[data-indicator-row="i1"]');
   await expect(row).toContainText("일목균형표 3 5 8 6");
-  await expect.poll(async () => (await series(page)).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(5);
+  await expect.poll(async () => (await series(page)).filter((s) => s.type === "Custom" && s.data.length > 0).length).toBe(6);
 
   await expect(async () => {
     await trade(scenario, page, delivered, 201_000, "100031");
@@ -62,13 +62,13 @@ test("후행스팬이 있는 칸에서 체결을 흘려도 모든 선의 update�
   const beforeSameClose = delivered.length;
   await trade(scenario, page, delivered, 203_500, "100103");
   await pollSaved(() => delivered.length).toBeGreaterThan(beforeSameClose);
-  const updatedLast = async () => (await series(page)).filter((s) => s.type === "Custom").map((l) => Number(l.updates.at(-1)?.time) === Number(l.data.at(-1)?.time));
+  const updatedLast = async () => (await series(page)).filter((s) => s.type === "Custom" && !("spanA" in (s.data.at(-1) ?? {}))).map((l) => Number(l.updates.at(-1)?.time) === Number(l.data.at(-1)?.time));
   await expect.poll(updatedLast).toEqual([true, true, true, true, true]);
 
   const snap = await series(page);
   const main = snap.find((s) => s.type === "Candlestick")!;
   const lastMain = Number(main.data.at(-1)!.time);
-  const lines = snap.filter((s) => s.type === "Custom");
+  const lines = snap.filter((s) => s.type === "Custom" && !("spanA" in (s.data.at(-1) ?? {})));
   expect(lines).toHaveLength(5);
   for (const line of lines) {
     const times = line.updates.map((u) => Number(u.time));
@@ -297,7 +297,7 @@ test.describe("체결 없던 분 뒤", () => {
       const lastMain = Number(snap.find((s) => s.type === "Candlestick")!.data.at(-1)!.time);
       return { lastMain, lines: snap.filter((s) => s.type !== "Candlestick" && s.data.length > 0) };
     };
-    await expect.poll(async () => (await drawn()).lines.length).toBe(10);
+    await expect.poll(async () => (await drawn()).lines.length).toBe(11);
     const lagging = async () => {
       const { lastMain, lines } = await drawn();
       const behind = lines.filter((l) => Number(l.data.at(-1)!.time) < lastMain);
@@ -329,9 +329,10 @@ test.describe("체결 없던 분 뒤", () => {
     }
     const ends = lines.map((l) => Number(l.data.at(-1)!.time));
     const ahead = ends.filter((t) => t > lastMain);
-    expect(ahead).toHaveLength(2);
+    expect(ahead).toHaveLength(3);
     expect(ahead[0]).toBe(ahead[1]);
-    expect(ends.filter((t) => t === lastMain)).toHaveLength(lines.length - 3);
+    expect(ahead[1]).toBe(ahead[2]);
+    expect(ends.filter((t) => t === lastMain)).toHaveLength(lines.length - 4);
     expect(await lagging()).toEqual([203_000]);
   });
 });

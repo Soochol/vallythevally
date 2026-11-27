@@ -3,7 +3,7 @@ import type { BrokerDaySource } from "../../api/generated/BrokerDaySource";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { FeedEvent } from "../../api/socket";
-import { appendSnapshots, type BrokerEvent, type BrokerState, EMPTY_BROKER_STATE, reduceBrokerEvents } from "./model";
+import { appendSnapshots, type BrokerEvent, type BrokerState, compactBrokerState, EMPTY_BROKER_STATE, reduceBrokerEvents } from "./model";
 
 export const TODAY_POLL_MS = 2_000;
 export const FALLBACK_RECHECK_MS = 30_000;
@@ -78,7 +78,7 @@ function sameGaps(
 
 function applyCollected(previous: BrokerDaySnapshot, reply: BrokerDay): BrokerDaySnapshot {
   const base = reply.reset || previous.mode !== "collected" ? EMPTY_BROKER_STATE : previous.state;
-  const nextState = appendSnapshots(base, reply.snapshots, reply.gaps);
+  const nextState = compactBrokerState(appendSnapshots(base, reply.snapshots, reply.gaps));
   const nextGaps = sameGaps(previous.gaps, reply.gaps) ? previous.gaps : reply.gaps;
   if (
     previous.mode === "collected" &&
@@ -98,7 +98,7 @@ function toFallbackSnapshot(reply: BrokerDay): BrokerDaySnapshot {
     mode: "fallback",
     date: reply.date,
     source: reply.source,
-    state: appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps),
+    state: compactBrokerState(appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps)),
     gaps: reply.gaps,
     failed: false,
   };

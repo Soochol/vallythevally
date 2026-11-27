@@ -1495,6 +1495,11 @@ mod tests {
             LayoutWindow {
                 id: window_id("b4"),
                 link: None,
+                content: WindowContent::Brokers { symbol: None, view: Some(crate::api::BrokerView::Transfer), cards: None },
+            },
+            LayoutWindow {
+                id: window_id("b5"),
+                link: None,
                 content: WindowContent::Brokers { symbol: None, view: None, cards: None },
             },
         ];

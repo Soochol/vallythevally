@@ -77,26 +77,37 @@ const BoxTrade = memo(function BoxTrade({ row, previousClose }: { row: TradeRow;
   );
 });
 
+const INITIAL_BOX_TRADES = 60;
+const BOX_TRADE_STEP = 60;
+const BOX_EXPAND_THRESHOLD_PX = 120;
+
 const TradeBox = memo(function TradeBox({ trades, strength, hold, release, previousClose }: TradeBoxProps) {
   const [held, setHeld] = useState(false);
+  const [limit, setLimit] = useState(INITIAL_BOX_TRADES);
   const heldRef = useRef(false);
   const releaseRef = useRef(release);
   releaseRef.current = release;
   useEffect(() => () => {
     if (heldRef.current) releaseRef.current();
   }, []);
-  const onScroll = (scrollTop: number) => {
-    const action = scrollAction(scrollTop);
-    if ((action === "hold") === heldRef.current) return;
-    heldRef.current = action === "hold";
-    setHeld(heldRef.current);
-    (action === "hold" ? hold : release)();
+  const onScroll = (element: HTMLDivElement) => {
+    const action = scrollAction(element.scrollTop);
+    if ((action === "hold") !== heldRef.current) {
+      heldRef.current = action === "hold";
+      setHeld(heldRef.current);
+      if (!heldRef.current) setLimit(INITIAL_BOX_TRADES);
+      (action === "hold" ? hold : release)();
+    }
+    if (heldRef.current && element.scrollTop + element.clientHeight >= element.scrollHeight - BOX_EXPAND_THRESHOLD_PX) {
+      setLimit((current) => (current >= trades.length ? current : Math.min(trades.length, current + BOX_TRADE_STEP)));
+    }
   };
+  const visibleTrades = trades.length > limit ? trades.slice(0, limit) : trades;
   return (
     <div className="mw-tbox">
       <div className="mw-slot mw-strength" data-testid="ladder-strength"><span className="mw-strength-name">체결강도</span> <b>{formatStrength(strength)}</b></div>
-      <div className="mw-tscroll" data-testid="ladder-trades" data-held={held ? "" : undefined} onScroll={(event) => onScroll(event.currentTarget.scrollTop)}>
-        {trades.map((row) => <BoxTrade key={row.key} row={row} previousClose={previousClose} />)}
+      <div className="mw-tscroll" data-testid="ladder-trades" data-held={held ? "" : undefined} onScroll={(event) => onScroll(event.currentTarget)}>
+        {visibleTrades.map((row) => <BoxTrade key={row.key} row={row} previousClose={previousClose} />)}
       </div>
     </div>
   );

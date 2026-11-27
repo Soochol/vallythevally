@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import {
+  type Direction,
   direction,
   formatChange,
   formatMillionWonCompact,
@@ -12,6 +13,7 @@ import {
 } from "../../lib/format";
 import { isIndexCode } from "../../lib/symbol";
 import { isMicroWatchColumn, type WatchColumn } from "../../lib/watchlist";
+import { appliedThemeKey } from "../../persist/theme";
 import { useWatchMicro, type WatchMicroEntry } from "../../stores/watchMicro";
 import { useWatchQuote } from "../../stores/watchQuote";
 import { DIRECTION_TEXT, RateBadge } from "../list/listRow";
@@ -54,18 +56,42 @@ export function parseDurationMs(raw: string): number {
   return text.endsWith("ms") ? amount : text.endsWith("s") ? amount * MILLISECONDS_PER_SECOND : 0;
 }
 
-let tickDurationMs: number | undefined;
+type PriceToneKey = Direction | "muted" | "price";
 
-function tickDuration(): number {
-  if (tickDurationMs !== undefined) return tickDurationMs;
-  const parsed = parseDurationMs(getComputedStyle(document.documentElement).getPropertyValue("--dur"));
-  if (parsed > 0) tickDurationMs = parsed;
-  return parsed;
+interface TickThemeTokens {
+  readonly key: string;
+  readonly duration: number;
+  readonly up: string;
+  readonly down: string;
+  readonly flat: string;
+  readonly muted: string;
+  readonly price: string;
+}
+
+let cachedTickTheme: TickThemeTokens | null = null;
+
+function readTickTheme(): TickThemeTokens {
+  const key = appliedThemeKey();
+  if (cachedTickTheme !== null && cachedTickTheme.key === key) return cachedTickTheme;
+  const style = getComputedStyle(document.documentElement);
+  const duration = parseDurationMs(style.getPropertyValue("--dur"));
+  const text = style.getPropertyValue("--text").trim();
+  const tokens: TickThemeTokens = {
+    key,
+    duration,
+    up: style.getPropertyValue("--up").trim(),
+    down: style.getPropertyValue("--down").trim(),
+    flat: text,
+    muted: style.getPropertyValue("--text-2").trim() || text,
+    price: style.getPropertyValue("--text-price").trim() || text,
+  };
+  if (duration > 0) cachedTickTheme = tokens;
+  return tokens;
 }
 
 const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-function useTickColor(code: SymbolCode, price: number | undefined) {
+function useTickColor(code: SymbolCode, price: number | undefined, tone: PriceToneKey) {
   const element = useRef<HTMLSpanElement>(null);
   const previous = useRef<{ code: SymbolCode; price: number | undefined }>({ code, price });
   useEffect(() => {
@@ -77,13 +103,13 @@ function useTickColor(code: SymbolCode, price: number | undefined) {
     const node = element.current;
     if (!node) return;
     for (const animation of node.getAnimations()) animation.cancel();
-    const duration = tickDuration();
-    if (duration <= 0) return;
-    const fromColor = getComputedStyle(document.documentElement).getPropertyValue(price > before.price ? "--up" : "--down").trim();
-    const toColor = getComputedStyle(node).color.trim();
+    const theme = readTickTheme();
+    if (theme.duration <= 0) return;
+    const fromColor = price > before.price ? theme.up : theme.down;
+    const toColor = theme[tone];
     if (!fromColor || !toColor) return;
-    node.animate([{ color: fromColor }, { color: toColor }], { duration, easing: "ease-out" });
-  }, [code, price]);
+    node.animate([{ color: fromColor }, { color: toColor }], { duration: theme.duration, easing: "ease-out" });
+  }, [code, price, tone]);
   return element;
 }
 
@@ -101,9 +127,10 @@ export function QuoteCells({ code, columns, ids }: QuoteCellsProps) {
   const micro = useWatchMicro(code, needsMicro);
   const isIndex = isIndexCode(code);
   const isExpected = quote?.source === "expected";
-  const priceTick = useTickColor(code, quote?.price);
   const rowDirection = quote ? direction(quote.change) : "flat";
   const directionOnPrice = !limited && !columns.includes("changeRate") && !columns.includes("change");
+  const priceTone: PriceToneKey = directionOnPrice ? rowDirection : limited ? "muted" : "price";
+  const priceTick = useTickColor(code, quote?.price, priceTone);
 
   return (
     <>

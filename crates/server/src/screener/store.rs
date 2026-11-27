@@ -98,6 +98,13 @@ pub struct MicroSums {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DailyMicroProgramRow {
+    pub date: KstDate,
+    pub program_net_won: i64,
+    pub program_share_bps: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Summary {
     pub last_day: Option<KstDate>,
     pub listed: u32,
@@ -653,6 +660,49 @@ impl Store {
         }
         Ok(by_days)
     }
+
+    pub fn daily_micro_program_series(
+        &self,
+        code: StockCode,
+        from: Option<KstDate>,
+        to: Option<KstDate>,
+    ) -> Result<Vec<DailyMicroProgramRow>, StoreError> {
+        if let (Some(start), Some(end)) = (from, to)
+            && start > end
+        {
+            return Ok(Vec::new());
+        }
+        let from_int = from.map_or(i32::MIN, yyyymmdd);
+        let to_int = to.map_or(i32::MAX, yyyymmdd);
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT date, COALESCE(program_net_won, 0), COALESCE(program_share_bps, 0)
+             FROM daily_micro
+             WHERE symbol = ? AND date >= ? AND date <= ?
+             ORDER BY date ASC",
+        )?;
+        let rows = stmt.query_map(params![code.as_str(), from_int, to_int], |row| {
+            Ok((row.get::<_, i32>(0)?, row.get::<_, i64>(1)?, row.get::<_, i32>(2)?))
+        })?;
+        rows.map(|row| {
+            let (raw_date, program_net_won, program_share_bps) = row?;
+            Ok(DailyMicroProgramRow {
+                date: date_from_yyyymmdd(raw_date)?,
+                program_net_won,
+                program_share_bps,
+            })
+        })
+        .collect()
+    }
+
+    pub fn has_daily_micro_for_symbol(&self, code: StockCode) -> Result<bool, StoreError> {
+        let conn = self.conn();
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM daily_micro WHERE symbol = ?)",
+            params![code.as_str()],
+            |row| row.get(0),
+        )?)
+    }
 }
 
 fn anchored_latest_day(conn: &Connection) -> Result<Option<KstDate>, StoreError> {
@@ -762,6 +812,16 @@ pub(super) fn date_of(days: i32) -> KstDate {
 
 fn yyyymmdd(day: KstDate) -> i32 {
     day.year() * 10_000 + i32::from(day.month()) * 100 + i32::from(day.day())
+}
+
+fn date_from_yyyymmdd(value: i32) -> Result<KstDate, StoreError> {
+    if value < 10_000_000 {
+        return Err(StoreError(format!("저장된 일별 미시 날짜가 틀렸습니다: {value}")));
+    }
+    let year = value / 10_000;
+    let month = ((value / 100) % 100) as u8;
+    let day = (value % 100) as u8;
+    KstDate::new(year, month, day).ok_or_else(|| StoreError(format!("저장된 일별 미시 날짜가 틀렸습니다: {value}")))
 }
 
 pub(super) fn price_of(centi: u64) -> Result<Price, StoreError> {
@@ -909,5 +969,81 @@ mod refetch_migration_tests {
         assert_eq!(upgraded.ingest_daily_micro(dir.path()).unwrap(), 0);
         let version: i32 = upgraded.conn().query_row("SELECT schema_version FROM store_meta", [], |row| row.get(0)).unwrap();
         assert_eq!(version, 7);
+    }
+}
+
+#[cfg(test)]
+mod daily_micro_program_series_tests {
+    use super::*;
+
+    fn write_parquet(shared: &Path, date: i32, rows: &[(&str, i64, i32)]) {
+        let micro_dir = daily_micro_dir(shared);
+        std::fs::create_dir_all(&micro_dir).unwrap();
+        let path = micro_dir.join(format!("{date}.parquet"));
+        let config = Config::default().enable_autoload_extension(false).unwrap();
+        let conn = Connection::open_in_memory_with_flags(config).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE tmp (date INTEGER, symbol VARCHAR, whale_net_won BIGINT, program_net_won BIGINT, program_share_bps INTEGER, foreign_est_net_qty BIGINT, spoof_cancel_rate_bps INTEGER, vi_count INTEGER, vwap_close_gap_bps INTEGER);",
+        )
+        .unwrap();
+        let mut appender = conn.appender("tmp").unwrap();
+        for &(symbol, program_net_won, program_share_bps) in rows {
+            appender.append_row(params![date, symbol, 0i64, program_net_won, program_share_bps, 0i64, 0i32, 0i32, 0i32]).unwrap();
+        }
+        appender.flush().unwrap();
+        drop(appender);
+        let escaped = path.to_string_lossy().replace('\'', "''");
+        conn.execute_batch(&format!("COPY tmp TO '{escaped}' (FORMAT PARQUET);")).unwrap();
+    }
+
+    #[test]
+    fn queries_ordered_rows_with_date_filters_and_missing_symbol() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("screener.duckdb")).unwrap();
+        let shared = dir.path().join("shared");
+        write_parquet(&shared, 20_261_110, &[("005930", 300_000_000, 1_500), ("000660", -50_000_000, 500)]);
+        write_parquet(&shared, 20_261_104, &[("005930", -100_000_000, 800)]);
+        write_parquet(&shared, 20_261_106, &[("005930", 250_000_000, 0)]);
+        assert_eq!(store.ingest_daily_micro(&shared).unwrap(), 3);
+
+        let samsung = StockCode::parse("005930").unwrap();
+        let missing = StockCode::parse("035420").unwrap();
+        let d04 = KstDate::new(2026, 11, 4).unwrap();
+        let d06 = KstDate::new(2026, 11, 6).unwrap();
+        let d10 = KstDate::new(2026, 11, 10).unwrap();
+
+        assert!(store.has_daily_micro_for_symbol(samsung).unwrap());
+        assert!(!store.has_daily_micro_for_symbol(missing).unwrap());
+
+        let all = store.daily_micro_program_series(samsung, None, None).unwrap();
+        assert_eq!(
+            all,
+            vec![
+                DailyMicroProgramRow { date: d04, program_net_won: -100_000_000, program_share_bps: 800 },
+                DailyMicroProgramRow { date: d06, program_net_won: 250_000_000, program_share_bps: 0 },
+                DailyMicroProgramRow { date: d10, program_net_won: 300_000_000, program_share_bps: 1_500 },
+            ]
+        );
+
+        assert_eq!(
+            store.daily_micro_program_series(samsung, Some(d06), None).unwrap(),
+            vec![
+                DailyMicroProgramRow { date: d06, program_net_won: 250_000_000, program_share_bps: 0 },
+                DailyMicroProgramRow { date: d10, program_net_won: 300_000_000, program_share_bps: 1_500 },
+            ]
+        );
+        assert_eq!(
+            store.daily_micro_program_series(samsung, None, Some(d06)).unwrap(),
+            vec![
+                DailyMicroProgramRow { date: d04, program_net_won: -100_000_000, program_share_bps: 800 },
+                DailyMicroProgramRow { date: d06, program_net_won: 250_000_000, program_share_bps: 0 },
+            ]
+        );
+        assert_eq!(
+            store.daily_micro_program_series(samsung, Some(d06), Some(d06)).unwrap(),
+            vec![DailyMicroProgramRow { date: d06, program_net_won: 250_000_000, program_share_bps: 0 }]
+        );
+        assert!(store.daily_micro_program_series(samsung, Some(d10), Some(d04)).unwrap().is_empty());
+        assert!(store.daily_micro_program_series(missing, None, None).unwrap().is_empty());
     }
 }
