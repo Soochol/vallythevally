@@ -33,8 +33,12 @@ export function useProgramReplay(code: SymbolCode, cursor: WorkspaceReplayCursor
     if (pointed === null || !pointed.isToday || query.isFetching) return null;
     if (query.isError) return Math.max(0, TODAY_REFETCH_MS - Math.max(0, Date.now() - query.errorUpdatedAt));
     if (query.data === undefined) return null;
-    const uncollected = query.data.coverage !== "collected" || query.data.rows.length === 0;
-    if (!uncollected) return null;
+    const lastRowSec = query.data.rows.length > 0 ? query.data.rows[query.data.rows.length - 1]!.secondOfDay : -1;
+    const needsRefresh =
+      query.data.coverage !== "collected" ||
+      lastRowSec < pointed.secondOfDay ||
+      gapContaining(query.data.gaps, pointed.at) !== null;
+    if (!needsRefresh) return null;
     return Math.max(0, TODAY_REFETCH_MS - Math.max(0, Date.now() - query.dataUpdatedAt));
   })();
 

@@ -1,9 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { bookReplayTradesQueryKey, TODAY_REFETCH_MS, useBookReplayTrades } from "../../api/bookReplay";
 import type { BookReplayTrades } from "../../api/generated/BookReplayTrades";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
+import { gapContaining } from "../brokers/chartSync";
 import { projectTradesReplay, type TradesReplayView } from "./tradesReplay";
 import type { WorkspaceReplayCursor } from "./useWorkspaceReplayCursor";
 
@@ -28,6 +29,8 @@ export function useTradesReplay(
   const [settled, setSettled] = useState<SettledTarget | null>(() =>
     pointed === null ? null : { code, date: pointed.date, untilSec: pointed.secondOfDay },
   );
+  const settledRef = useRef(settled);
+  settledRef.current = settled;
 
   useEffect(() => {
     if (pointed === null) {
@@ -42,11 +45,12 @@ export function useTradesReplay(
       setSettled(nextTarget);
       return;
     }
-    if (settled === null || settled.code !== code || settled.date !== pointed.date) {
+    const current = settledRef.current;
+    if (current === null || current.code !== code || current.date !== pointed.date) {
       setSettled(nextTarget);
       return;
     }
-    if (settled.untilSec === pointed.secondOfDay) return;
+    if (current.untilSec === pointed.secondOfDay) return;
     const timer = window.setTimeout(() => setSettled(nextTarget), TRADES_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [code, pointed?.date, pointed?.secondOfDay, venue, minWon, queryClient]);
@@ -67,7 +71,8 @@ export function useTradesReplay(
     if (query.data === undefined) return null;
     const uncollected =
       query.data.coverage !== "collected" ||
-      (query.data.trades.length === 0 && query.data.cumVolume === 0);
+      (query.data.trades.length === 0 && query.data.cumVolume === 0) ||
+      gapContaining(query.data.gaps, pointed.at) !== null;
     if (!uncollected) return null;
     return Math.max(0, TODAY_REFETCH_MS - Math.max(0, Date.now() - query.dataUpdatedAt));
   })();

@@ -50,32 +50,38 @@ function buildReplayEntries(
 ): readonly TapeEntry[] {
   if (trades.length === 0) return [];
   const { start: dayStart } = kstDayBounds(date);
+  const newestTs = dayStart + trades[0]!.secondOfDay;
+  const oldestTs = dayStart + trades[trades.length - 1]!.secondOfDay;
   const relevantGaps = gaps
-    .filter(([fromSec]) => fromSec <= at)
-    .sort((a, b) => b[1] - a[1]);
+    .filter(([fromSec, toSec]) => fromSec <= at && toSec >= oldestTs)
+    .sort((a, b) => b[0] - a[0]);
   const entries: TapeEntry[] = [];
   let gapIndex = 0;
 
+  const pushGap = (index: number, fromSec: UnixSeconds, toSec: UnixSeconds) => {
+    const gapRow: GapRow = {
+      kind: "gap",
+      key: `rg-${index}-${fromSec}-${toSec}`,
+      fromSecond: secondOfDay(fromSec),
+      toSecond: secondOfDay(toSec),
+    };
+    entries.push(gapRow);
+  };
+
+  while (gapIndex < relevantGaps.length && relevantGaps[gapIndex]![0] >= newestTs) {
+    const [fromSec, toSec] = relevantGaps[gapIndex]!;
+    pushGap(gapIndex, fromSec, toSec);
+    gapIndex += 1;
+  }
+
   for (let i = 0; i < trades.length; i++) {
-    const trade = trades[i]!;
-    entries.push(toTradeRow(trade, i));
+    entries.push(toTradeRow(trades[i]!, i));
     if (i + 1 >= trades.length) continue;
 
-    const newerTs = dayStart + trade.secondOfDay;
     const olderTs = dayStart + trades[i + 1]!.secondOfDay;
-
-    while (gapIndex < relevantGaps.length && relevantGaps[gapIndex]![1] > newerTs) {
-      gapIndex += 1;
-    }
     while (gapIndex < relevantGaps.length && relevantGaps[gapIndex]![0] >= olderTs) {
       const [fromSec, toSec] = relevantGaps[gapIndex]!;
-      const gapRow: GapRow = {
-        kind: "gap",
-        key: `rg-${gapIndex}-${fromSec}-${toSec}`,
-        fromSecond: secondOfDay(fromSec),
-        toSecond: secondOfDay(toSec),
-      };
-      entries.push(gapRow);
+      pushGap(gapIndex, fromSec, toSec);
       gapIndex += 1;
     }
   }
@@ -91,9 +97,7 @@ export function projectTradesReplay(
 
   const { data } = query;
   if (data === undefined) {
-    if (query.isPending) return { kind: "none", reason: REPLAY_REASON.loading };
-    if (query.isError) return { kind: "none", reason: REPLAY_REASON.failed };
-    return { kind: "none", reason: REPLAY_REASON.loading };
+    return { kind: "none", reason: query.isError ? REPLAY_REASON.failed : REPLAY_REASON.loading };
   }
   if (data.coverage === "day_not_collected") return { kind: "none", reason: REPLAY_REASON.dayNotCollected };
   if (data.coverage === "symbol_not_collected") return { kind: "none", reason: REPLAY_REASON.symbolNotCollected };

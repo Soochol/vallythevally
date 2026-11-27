@@ -98,4 +98,44 @@ describe("projectTradesReplay", () => {
       ["trade", secAt(9, 4, 50), 71_200, "buy", "history"],
     ]);
   });
+
+  test("places gap after newest trade at the top, keeps 1s-skewed gap between trades, and skips older gaps", () => {
+    const cursor: WorkspaceReplayCursor = {
+      ...POINTED,
+      bar: barInterval(unixAt(9, 0), "5m"),
+      at: unixAt(9, 4, 59),
+      secondOfDay: secAt(9, 4, 59),
+      minute: 9 * 60 + 4,
+    };
+    const postNewestData: BookReplayTrades = {
+      ...SAMPLE_DATA,
+      gaps: [[unixAt(9, 2, 0), unixAt(9, 4, 0)]],
+      trades: [{ secondOfDay: secAt(9, 1, 0), price: 71_000, quantity: 10, side: "buy", venue: "krx" }],
+    };
+    const postNewestView = projectTradesReplay(cursor, { data: postNewestData, isPending: false, isError: false });
+    if (postNewestView.kind !== "past") throw new Error(`expected past, got ${postNewestView.kind}`);
+    expect(postNewestView.entries.map((entry) => (entry.kind === "gap" ? ["gap", entry.fromSecond, entry.toSecond] : ["trade", entry.secondOfDay]))).toEqual([
+      ["gap", secAt(9, 2, 0), secAt(9, 4, 0)],
+      ["trade", secAt(9, 1, 0)],
+    ]);
+
+    const skewedData: BookReplayTrades = {
+      ...SAMPLE_DATA,
+      gaps: [
+        [unixAt(9, 1, 0), unixAt(9, 3, 0)],
+        [unixAt(8, 50, 0), unixAt(8, 55, 0)],
+      ],
+      trades: [
+        { secondOfDay: secAt(9, 2, 59), price: 71_200, quantity: 15, side: "sell", venue: "krx" },
+        { secondOfDay: secAt(9, 0, 50), price: 71_000, quantity: 10, side: "buy", venue: "krx" },
+      ],
+    };
+    const skewedView = projectTradesReplay(cursor, { data: skewedData, isPending: false, isError: false });
+    if (skewedView.kind !== "past") throw new Error(`expected past, got ${skewedView.kind}`);
+    expect(skewedView.entries.map((entry) => (entry.kind === "gap" ? ["gap", entry.fromSecond, entry.toSecond] : ["trade", entry.secondOfDay]))).toEqual([
+      ["trade", secAt(9, 2, 59)],
+      ["gap", secAt(9, 1, 0), secAt(9, 3, 0)],
+      ["trade", secAt(9, 0, 50)],
+    ]);
+  });
 });

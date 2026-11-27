@@ -286,9 +286,10 @@ describe("createTodayBrokerFeed", () => {
     const feed = createTodayBrokerFeed(CODE, h.deps);
     feed.configure({ date: DATE, enabled: true, active: true, allowLiveFallback: false });
 
-    await h.resolveFetch(replyOf({ source: "none" }));
+    await h.resolveFetch(replyOf({ source: "none", coverage: "symbol_not_collected" }));
     expect(feed.snapshot().mode).toBe("collected");
     expect(feed.snapshot().source).toBe("none");
+    expect(feed.snapshot().coverage).toBe("symbol_not_collected");
     expect(feed.snapshot().failed).toBe(false);
     expect(h.liveSubCount()).toBe(0);
     expect(h.socketListeners.size).toBe(0);

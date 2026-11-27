@@ -444,6 +444,7 @@ test("진행 중 봉, 수집 끊김, 미수집 종목 상태에서 4창이 일�
           symbol: CODE,
           date: DATE,
           source: "none",
+          coverage: uncollectedState.active ? "symbol_not_collected" : undefined,
           snapshots: [],
           gaps: [],
           live: false,
@@ -500,6 +501,7 @@ test("진행 중 봉, 수집 끊김, 미수집 종목 상태에서 4창이 일�
     await expect(win).toHaveAttribute("data-replay", "none");
     await expect(win.getByTestId("replay-strip")).toHaveText("수집이 끊긴 시각입니다");
   }
+  await expect(brokersWin(page).getByTestId("broker-card")).toHaveCount(0);
   await pollSaved(() => activeFeedSubs(scenario, "brokers")).toHaveLength(0);
 
   uncollectedState.active = true;

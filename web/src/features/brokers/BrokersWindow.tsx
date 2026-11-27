@@ -140,6 +140,15 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
 
   const grid = day.state.grid;
   const staleDay = day.mode === "collected" && day.date !== null && day.date !== activeDate;
+  const replayLoading = replayPointed && (day.mode === "loading" || staleDay || day.fetching);
+  const uncollectedReason =
+    day.coverage === "symbol_not_collected"
+      ? REPLAY_REASON.symbolNotCollected
+      : day.coverage === "day_not_collected"
+        ? REPLAY_REASON.dayNotCollected
+        : isToday
+          ? REPLAY_REASON.symbolNotCollected
+          : REPLAY_REASON.dayNotCollected;
   const displayCursor = staleDay ? null : effectiveCursor;
   const gaps = day.gaps;
   const activeGap = useMemo(() => gapContaining(gaps, displayCursor), [gaps, displayCursor]);
@@ -150,8 +159,8 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     [grid.times, nowMs],
   );
   const selectedTrack = selected === null ? null : (tracks.find((track) => track.code === selected) ?? null);
-  const shownTime = replayInProgress ? null : (effectiveCursor ?? grid.times[grid.times.length - 1] ?? null);
-  const shownPrice = replayInProgress
+  const shownTime = replayInProgress || replayLoading ? null : (effectiveCursor ?? grid.times[grid.times.length - 1] ?? null);
+  const shownPrice = replayInProgress || replayLoading
     ? null
     : replayPointed && localCursor === null && replayCursor.close !== null
       ? replayCursor.close
@@ -180,11 +189,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     if (!replayEnabled) return null;
     if (replayCursor.kind === "live") return { kind: "live" };
     if (replayCursor.kind === "in_progress") return { kind: "none", reason: REPLAY_REASON.inProgress };
+    if (replayLoading) return { kind: "none", reason: REPLAY_REASON.loading };
     if (day.failed) return { kind: "none", reason: REPLAY_REASON.failed };
-    if (day.mode === "loading") return { kind: "none", reason: REPLAY_REASON.loading };
-    if (day.source === "none") {
-      return { kind: "none", reason: isToday ? REPLAY_REASON.symbolNotCollected : REPLAY_REASON.dayNotCollected };
-    }
+    if (day.source === "none") return { kind: "none", reason: uncollectedReason };
     if (activeGap !== null) return { kind: "none", reason: REPLAY_REASON.gap };
     return { kind: "past", at: replayCursor.at };
   })();
@@ -213,11 +220,12 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     setSelected((current) => (current === brokerCode ? null : brokerCode));
   }, []);
 
-  const failed = !replayInProgress && day.failed;
+  const failed = !replayInProgress && !replayLoading && day.failed;
   const retry = day.retry;
-  const showReplayUncollected = replayPointed && !failed && day.mode !== "loading" && day.source === "none";
-  const showEmpty = !replayInProgress && !showReplayUncollected && !failed && day.mode !== "loading" && grid.times.length === 0;
-  const showContent = !replayInProgress && !showReplayUncollected && !failed && grid.times.length > 0;
+  const showReplayUncollected = replayPointed && !replayLoading && !failed && day.source === "none";
+  const showReplayGap = replayPointed && !replayLoading && !failed && day.source !== "none" && activeGap !== null;
+  const showEmpty = !replayInProgress && !replayLoading && !showReplayUncollected && !showReplayGap && !failed && day.mode !== "loading" && grid.times.length === 0;
+  const showContent = !replayInProgress && !replayLoading && !showReplayUncollected && !showReplayGap && !failed && day.mode !== "loading" && grid.times.length > 0;
   const syncStrip = replayEnabled ? null : buildSyncStrip(syncTarget);
 
   const cycleCards = () => {
@@ -281,8 +289,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       )}
       {replayInProgress && <EmptyState title={REPLAY_REASON.inProgress} />}
       {failed && <ErrorState message="거래원을 받지 못했습니다" retry={retry} />}
-      {!replayInProgress && !failed && day.mode === "loading" && <Skeleton label="거래원 불러오는 중" />}
-      {showReplayUncollected && <EmptyState title={isToday ? REPLAY_REASON.symbolNotCollected : REPLAY_REASON.dayNotCollected} />}
+      {!replayInProgress && !failed && (day.mode === "loading" || replayLoading) && <Skeleton label="거래원 불러오는 중" />}
+      {showReplayUncollected && <EmptyState title={uncollectedReason} />}
+      {showReplayGap && <EmptyState title={REPLAY_REASON.gap} />}
       {showEmpty && <EmptyState title={isToday ? "거래원 스냅샷을 기다리는 중입니다" : "이 날의 거래원 자료가 없습니다"} />}
       {showContent && view === "board" && (
         <>

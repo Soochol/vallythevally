@@ -55,26 +55,19 @@ export function sliceProgramReplayAt(
   const { start: dayStart } = kstDayBounds(date);
   const firstRowTs = dayStart + rows[0]!.secondOfDay;
   const relevantGaps = gaps
-    .filter(([fromSec, toSec]) => fromSec <= at && toSec >= firstRowTs)
+    .filter(([fromSec]) => fromSec >= firstRowTs && fromSec <= at)
     .sort((a, b) => a[0] - b[0]);
 
   const lines: ProgramLine[] = [];
   let gapIndex = 0;
   for (let i = 0; i < lo; i++) {
-    const rowTs = dayStart + rows[i]!.secondOfDay;
-    while (gapIndex < relevantGaps.length && relevantGaps[gapIndex]![0] <= rowTs) {
+    lines.push({ kind: "row", row: sliced[i]! });
+    const nextTs = i + 1 < lo ? dayStart + rows[i + 1]!.secondOfDay : at + 1;
+    while (gapIndex < relevantGaps.length && relevantGaps[gapIndex]![0] < nextTs) {
       const [fromSec] = relevantGaps[gapIndex]!;
-      if (i > 0) {
-        lines.push({ kind: "gap", key: `replay-gap-${gapIndex}-${fromSec}`, time: formatSecond(secondOfDay(fromSec)) });
-      }
+      lines.push({ kind: "gap", key: `replay-gap-${gapIndex}-${fromSec}`, time: formatSecond(secondOfDay(fromSec)) });
       gapIndex += 1;
     }
-    lines.push({ kind: "row", row: sliced[i]! });
-  }
-  while (gapIndex < relevantGaps.length) {
-    const [fromSec] = relevantGaps[gapIndex]!;
-    lines.push({ kind: "gap", key: `replay-gap-${gapIndex}-${fromSec}`, time: formatSecond(secondOfDay(fromSec)) });
-    gapIndex += 1;
   }
 
   return {

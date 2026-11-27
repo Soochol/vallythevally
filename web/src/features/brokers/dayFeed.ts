@@ -1,4 +1,5 @@
 import type { BrokerDay } from "../../api/brokers";
+import type { BookReplayCoverage } from "../../api/generated/BookReplayCoverage";
 import type { BrokerDaySource } from "../../api/generated/BrokerDaySource";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
@@ -14,6 +15,7 @@ export interface BrokerDaySnapshot {
   readonly mode: BrokerDayMode;
   readonly date: string | null;
   readonly source: BrokerDaySource | null;
+  readonly coverage?: BookReplayCoverage;
   readonly state: BrokerState;
   readonly gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
   readonly failed: boolean;
@@ -85,13 +87,14 @@ function applyCollected(previous: BrokerDaySnapshot, reply: BrokerDay): BrokerDa
     previous.mode === "collected" &&
     previous.date === reply.date &&
     previous.source === reply.source &&
+    previous.coverage === reply.coverage &&
     !previous.failed &&
     nextState === previous.state &&
     nextGaps === previous.gaps
   ) {
     return previous;
   }
-  return { mode: "collected", date: reply.date, source: reply.source, state: nextState, gaps: nextGaps, failed: false };
+  return { mode: "collected", date: reply.date, source: reply.source, coverage: reply.coverage, state: nextState, gaps: nextGaps, failed: false };
 }
 
 function toFallbackSnapshot(reply: BrokerDay): BrokerDaySnapshot {
@@ -296,7 +299,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
         polling = false;
         if (!allowLiveFallback) {
           stopLive();
-          emit({ mode: "collected", date, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS, failed: false });
+          emit({ mode: "collected", date, source: "none", coverage: reply.coverage, state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS, failed: false });
           return;
         }
         startLive(expectedSession, false);

@@ -55,4 +55,27 @@ describe("sliceProgramReplayAt", () => {
       "gap:09:04:00",
     ]);
   });
+
+  test("places gap after a row when gap starts at that row timestamp for both first and later rows", () => {
+    const laterRows: readonly BookReplayProgramRow[] = [
+      { secondOfDay: secAt(9, 1, 0), price: 71_000, buyQty: 100, sellQty: 0, netQty: 100, netQtyChange: 100, netAmountMillionWon: 700 },
+      { secondOfDay: secAt(9, 2, 0), price: 71_100, buyQty: 200, sellQty: 0, netQty: 200, netQtyChange: 100, netAmountMillionWon: 1400 },
+      { secondOfDay: secAt(9, 5, 0), price: 71_200, buyQty: 300, sellQty: 0, netQty: 300, netQtyChange: 100, netAmountMillionWon: 2100 },
+    ];
+    const laterResult = sliceProgramReplayAt(laterRows, [[unixAt(9, 2, 0), unixAt(9, 4, 0)]], DATE, unixAt(9, 6, 0));
+    expect(laterResult.lines.map((line) => (line.kind === "gap" ? `gap:${line.time}` : `row:${line.row.time}`))).toEqual([
+      "row:09:01:00",
+      "row:09:02:00",
+      "gap:09:02:00",
+      "row:09:05:00",
+    ]);
+
+    const firstRows: readonly BookReplayProgramRow[] = [laterRows[0]!, laterRows[2]!];
+    const firstResult = sliceProgramReplayAt(firstRows, [[unixAt(9, 1, 0), unixAt(9, 4, 0)]], DATE, unixAt(9, 6, 0));
+    expect(firstResult.lines.map((line) => (line.kind === "gap" ? `gap:${line.time}` : `row:${line.row.time}`))).toEqual([
+      "row:09:01:00",
+      "gap:09:01:00",
+      "row:09:05:00",
+    ]);
+  });
 });
