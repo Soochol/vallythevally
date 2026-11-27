@@ -184,3 +184,34 @@ test("거래원을 바꾸면 건별 표는 맨 위부터다", async ({ page, sce
   const renderedCount = await detail.getByTestId("broker-detail-row").count();
   expect(renderedCount).toBeLessThan(200);
 });
+
+test("숫자 모드는 7건 제한 없이 모든 행을 담고 카드 안에서 아래로 스크롤된다", async ({ page, scenario }) => {
+  const start = at("09:00:00");
+  const snapshots: FeedBrokers[] = Array.from({ length: 20 }, (_, i) => ({
+    t: start + i * 60,
+    buys: [entry("151", "키움", (i + 1) * 10)],
+    sells: [entry("141", "삼성", (i + 1) * 5)],
+  }));
+  scenario.on((url) => url.pathname === "/api/symbols/005930/brokers", () => ({
+    body: day({ source: "store", live: false, snapshots, cursor: "s:1:20" }),
+  }));
+
+  await openBrokers(page, scenario);
+  await window_(page).getByRole("group", { name: "카드 모양" }).getByRole("button", { name: "숫자", exact: true }).click();
+
+  const nums = card(page, "키움").getByTestId("broker-numbers");
+  await expect(nums.getByTestId("broker-number-row")).toHaveCount(20);
+  await expect(nums.getByTestId("broker-number-row").first()).toContainText("09:19");
+  await expect(nums.getByTestId("broker-number-row").last()).toContainText("09:00");
+
+  const metrics = await nums.evaluate((el) => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+  const box = (await nums.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, 600);
+  await expect.poll(() => nums.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+
+  await nums.getByTestId("broker-number-row").last().click();
+  await expect(window_(page).getByTestId("broker-detail")).toContainText("키움");
+});

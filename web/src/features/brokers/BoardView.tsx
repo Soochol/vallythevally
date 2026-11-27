@@ -71,7 +71,10 @@ function BrokerCard({
     [track, axis, binSeconds],
   );
   const cumulative = cumulativeUntil(track, cursor);
-  const rows = mode === "bars" ? [] : eventsUntil(track, cursor, mode === "numbers" ? 7 : 4);
+  const rows = useMemo(
+    () => (mode === "bars" ? [] : eventsUntil(track, cursor, mode === "numbers" ? track.events.length : 4)),
+    [track, cursor, mode],
+  );
   const foreign = isForeignBroker(track.name);
 
   const handleMove = (event: PointerEvent<HTMLSpanElement>) => {
@@ -105,12 +108,21 @@ function BrokerCard({
         </span>
       )}
       {mode !== "bars" && (
-        <span className="br-nums" data-testid="broker-numbers" data-mode={mode}>
+        <span
+          className="br-nums"
+          data-testid="broker-numbers"
+          data-mode={mode}
+          onClick={(event) => {
+            if (mode === "numbers" && event.target === event.currentTarget && event.nativeEvent.offsetX >= event.currentTarget.clientWidth) {
+              event.stopPropagation();
+            }
+          }}
+        >
           {rows.length === 0 ? (
             <span className="br-num-row"><i>-</i></span>
           ) : (
             rows.map((event) => (
-              <span key={event.t} className="br-num-row">
+              <span key={event.t} className="br-num-row" data-testid="broker-number-row">
                 <i>{formatClock(event.t).slice(0, 5)}</i>
                 <em data-tone={event.net >= 0 ? "up" : "down"}>{signed(event.net)}</em>
                 <em className="br-num-cum" data-tone={event.cumulative >= 0 ? "up" : "down"}>{signed(event.cumulative)}</em>
