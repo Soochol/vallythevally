@@ -14,6 +14,7 @@ export function useOrderCommands(
   writes: OrderWrites,
   onRememberEntry: (quantity: number, usedAt: number) => void,
   onClearBuyRatio: () => void,
+  onDisableBookReplay: () => void,
 ): BoundOrderCommands {
   const [confirm, setConfirm] = useState<HighValueRequest | null>(null);
   const contextRef = useRef(context);
@@ -24,6 +25,8 @@ export function useOrderCommands(
   rememberRef.current = onRememberEntry;
   const clearBuyRatioRef = useRef(onClearBuyRatio);
   clearBuyRatioRef.current = onClearBuyRatio;
+  const disableBookReplayRef = useRef(onDisableBookReplay);
+  disableBookReplayRef.current = onDisableBookReplay;
 
   const commands = useMemo(
     () =>
@@ -36,6 +39,7 @@ export function useOrderCommands(
         setConfirm: (request) => setConfirm(request),
         rememberEntry: (quantity, usedAt) => rememberRef.current(quantity, usedAt),
         clearBuyRatio: () => clearBuyRatioRef.current(),
+        disableBookReplay: () => disableBookReplayRef.current(),
         readPending: () => pendingWrites.snapshot(),
         nowMs: () => Date.now(),
       }),

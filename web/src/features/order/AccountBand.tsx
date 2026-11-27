@@ -42,6 +42,7 @@ interface Props {
   readonly holding: TradingHolding | null;
   readonly executions: readonly TradingExecution[];
   readonly writable: boolean;
+  readonly cancelDisabledTitle?: string;
   readonly mock: boolean;
   readonly onCancel: (orderNo: string) => void;
   readonly panel?: AccountPanelKind | null;
@@ -61,7 +62,7 @@ function RowsHead({ kind }: { kind: RowsKind }) {
   return <div className="od-rows-head" data-kind={kind} aria-hidden="true">{HEADS[kind].map((name, index) => <span key={index}>{name}</span>)}</div>;
 }
 
-function OpenPanel({ orders, writable, onCancel, goTo }: { orders: readonly TradingOpenOrder[]; writable: boolean; onCancel(orderNo: string): void; goTo: GoToSymbol }) {
+function OpenPanel({ orders, writable, cancelDisabledTitle, onCancel, goTo }: { orders: readonly TradingOpenOrder[]; writable: boolean; cancelDisabledTitle?: string; onCancel(orderNo: string): void; goTo: GoToSymbol }) {
   if (orders.length === 0) return <p className="od-list-empty">미체결 주문이 없습니다</p>;
   return (
     <>
@@ -74,7 +75,7 @@ function OpenPanel({ orders, writable, onCancel, goTo }: { orders: readonly Trad
             <SymbolName code={order.code} name={order.name} goTo={goTo} />
             <span className="od-figure">{formatQuantity(order.openQuantity)}</span>
             <b className="od-figure">{formatPrice(order.price, false)}원</b>
-            <button type="button" className="od-row-cancel" disabled={!writable} onClick={() => onCancel(order.orderNo)}>취소</button>
+            <button type="button" className="od-row-cancel" disabled={!writable} title={!writable ? cancelDisabledTitle : undefined} onClick={() => onCancel(order.orderNo)}>취소</button>
           </li>
         ))}
       </ul>
@@ -138,6 +139,7 @@ export const AccountBand = memo(function AccountBand({
   holding,
   executions,
   writable,
+  cancelDisabledTitle,
   mock,
   onCancel,
   panel: controlledPanel,
@@ -227,7 +229,7 @@ export const AccountBand = memo(function AccountBand({
           data-testid="account-panel"
           data-panel={panel}
         >
-          {panel === "open" && <OpenPanel orders={openOrders} writable={writable} onCancel={onCancel} goTo={goTo} />}
+          {panel === "open" && <OpenPanel orders={openOrders} writable={writable} cancelDisabledTitle={cancelDisabledTitle} onCancel={onCancel} goTo={goTo} />}
           {panel === "holdings" && <HoldingsPanel balance={balance} activeHolding={holding} goTo={goTo} />}
           {panel === "fills" && <FillsPanel executions={executions} goTo={goTo} />}
         </Popover>

@@ -28,7 +28,7 @@ import {
 } from "./orderRules";
 import { routeLabel } from "./orderSettings";
 import type { PendingWrite } from "./pendingWrites";
-import { CANCEL_REFUSAL, type OrderStatus, REJECT_TEXT, REPLAY_LOCKED_TEXT } from "./statusText";
+import { CANCEL_REFUSAL, type OrderStatus, REJECT_TEXT, statusOfReplayLocked } from "./statusText";
 import type { PlaceRequest } from "./useOrderWrites";
 
 export interface OrderCommandContext {
@@ -56,6 +56,7 @@ export interface OrderCommandSink {
   readonly setConfirm: (request: HighValueRequest) => void;
   readonly rememberEntry: (quantity: number, usedAt: number) => void;
   readonly clearBuyRatio: () => void;
+  readonly disableBookReplay: () => void;
   readonly readPending: () => readonly PendingWrite[];
   readonly nowMs: () => number;
 }
@@ -65,15 +66,18 @@ export interface OrderCommands {
   readonly modifyOrders: (side: OrderSide, price: number, orders: readonly TradingOpenOrder[], to: number) => void;
   readonly cancelOne: (orderNo: string) => void;
   readonly cancelGroups: (keys: readonly PriceKey[]) => void;
-  readonly cancelLadderOne: (orderNo: string) => void;
-  readonly cancelLadderGroups: (keys: readonly PriceKey[]) => void;
   readonly drop: (source: DragSource, outcome: DragOutcome) => void;
+  readonly notifyReplayLocked: () => void;
 }
 
 export function createOrderCommands(readContext: () => OrderCommandContext, sink: OrderCommandSink): OrderCommands {
+  const notifyReplayLocked = (): void => {
+    sink.say(statusOfReplayLocked(sink.disableBookReplay));
+  };
+
   const guardReplayLock = (action: () => void): void => {
     if (readContext().replayLocked) {
-      sink.say({ tone: "error", text: REPLAY_LOCKED_TEXT });
+      notifyReplayLocked();
       return;
     }
     action();
@@ -184,38 +188,32 @@ export function createOrderCommands(readContext: () => OrderCommandContext, sink
   };
 
   const cancelGroups = (keys: readonly PriceKey[]) => {
-    const ctx = readContext();
-    const plan = planCancel(ctx.groups, sink.readPending(), ctx.code, keys);
-    if (plan.kind === "ready") plan.targets.forEach((group) => sink.cancelAtPrice(group.side, group.price));
-    else sink.say(CANCEL_REFUSAL[plan.kind]);
+    guardReplayLock(() => {
+      const ctx = readContext();
+      const plan = planCancel(ctx.groups, sink.readPending(), ctx.code, keys);
+      if (plan.kind === "ready") plan.targets.forEach((group) => sink.cancelAtPrice(group.side, group.price));
+      else sink.say(CANCEL_REFUSAL[plan.kind]);
+    });
   };
 
   const cancelOne = (orderNo: string) => {
-    sink.cancelOne(orderNo);
-  };
-
-  const cancelLadderOne = (orderNo: string) => {
     guardReplayLock(() => sink.cancelOne(orderNo));
-  };
-
-  const cancelLadderGroups = (keys: readonly PriceKey[]) => {
-    guardReplayLock(() => cancelGroups(keys));
   };
 
   const drop = (source: DragSource, outcome: DragOutcome) => {
     if (outcome.kind === "abort") return;
-    if (source.kind === "chip") {
-      guardReplayLock(() => {
+    guardReplayLock(() => {
+      if (source.kind === "chip") {
         if (outcome.kind === "cancel") cancelGroups([source.group]);
         else modifyOrders(source.group.side, source.group.price, source.group.orders, outcome.price);
-      });
-    } else if (source.kind === "order") {
-      if (outcome.kind === "cancel") sink.cancelOne(source.order.orderNo);
-      else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
-    } else {
-      cancelGroups(source.groups);
-    }
+      } else if (source.kind === "order") {
+        if (outcome.kind === "cancel") sink.cancelOne(source.order.orderNo);
+        else modifyOrders(source.order.side, source.order.price, [source.order], outcome.price);
+      } else {
+        cancelGroups(source.groups);
+      }
+    });
   };
 
-  return { place, modifyOrders, cancelOne, cancelGroups, cancelLadderOne, cancelLadderGroups, drop };
+  return { place, modifyOrders, cancelOne, cancelGroups, drop, notifyReplayLocked };
 }

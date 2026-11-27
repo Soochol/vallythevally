@@ -53,6 +53,7 @@ function ReplayStatus({ view }: { readonly view: ReplayView }) {
     <div className="od-status" role="status" data-testid="replay-strip" data-kind="live" data-tone="info">
       <span className="od-status-icon" aria-hidden="true"><InfoIcon size={ICON_SIZE} /></span>
       <span className="od-status-text">{REPLAY_LIVE_TEXT}</span>
+      <span className="od-replay-lock">주문 잠금</span>
     </div>
   );
 }
