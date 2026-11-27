@@ -104,4 +104,39 @@ describe("symbolDrag", () => {
     applySymbolDrop(id, "tape_matrix", { code: "012450", name: "한화에어로스페이스", sourceWindow: windowId("watchlist") }, "panel");
     expect(loadTapeMatrixConfig(id).symbols).toContain("012450");
   });
+
+  it("updates a chartless link group through sendSymbol and linkedWindowSymbol", () => {
+    useLayoutStore.getState().load({
+      ...DEFAULT_LAYOUT,
+      windows: [
+        { id: windowId("chart-a1"), link: "a", kind: "chart", symbol: "005930", period: "D", chartSettings: DEFAULT_CHART_SETTINGS },
+        { id: windowId("book-c1"), link: "c", kind: "book" },
+        { id: windowId("brokers-c1"), link: "c", kind: "brokers" },
+        { id: windowId("scanner-c"), link: "c", kind: "scanner" },
+      ],
+    });
+    const res = useLayoutStore.getState().sendSymbol(windowId("scanner-c"), windowId("chart-a1"), { code: "000660", name: "SK하이닉스" });
+    expect(res.changed).toEqual([windowId("book-c1"), windowId("brokers-c1")]);
+    const state = useLayoutStore.getState();
+    expect(linkedWindowSymbol(state.layout, windowId("book-c1"), windowId("chart-a1"), state.groupSymbols)).toBe("000660");
+    expect(linkedWindowSymbol(state.layout, windowId("brokers-c1"), windowId("chart-a1"), state.groupSymbols)).toBe("000660");
+  });
+
+  it("protects manually locked charts from group changes and drops, and rejoins on unlock", () => {
+    useLayoutStore.getState().toggleWindowLock(windowId("chart-a2"), windowId("chart-a1"));
+    useLayoutStore.getState().sendSymbolToLink("a", windowId("chart-a1"), { code: "000660", name: "SK하이닉스" });
+    const afterGroup = useLayoutStore.getState().layout.windows;
+    const c1 = afterGroup.find((w) => w.id === windowId("chart-a1"));
+    const c2 = afterGroup.find((w) => w.id === windowId("chart-a2"));
+    expect(c1 && c1.kind === "chart" ? c1.symbol : null).toBe("000660");
+    expect(c2 && c2.kind === "chart" ? c2.symbol : null).toBe("005930");
+
+    const dropRes = useLayoutStore.getState().dropSymbolOnWindow(windowId("chart-a2"), { code: "035420", name: "NAVER" });
+    expect(dropRes.changed).toEqual([]);
+    expect(dropRes.notice).toContain("고정");
+
+    useLayoutStore.getState().toggleWindowLock(windowId("chart-a2"), windowId("chart-a1"));
+    const afterUnlock = useLayoutStore.getState().layout.windows.find((w) => w.id === windowId("chart-a2"));
+    expect(afterUnlock && afterUnlock.kind === "chart" ? afterUnlock.symbol : null).toBe("000660");
+  });
 });

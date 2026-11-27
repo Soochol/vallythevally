@@ -11,7 +11,7 @@ import { openSystemSettings } from "../system-settings/open";
 
 export function useLinkedSymbol(id: WindowId): SymbolCode | null {
   const activeCell = useSelectionStore((s) => s.activeCell);
-  return useLayoutStore((s) => linkedWindowSymbol(s.layout, id, activeCell));
+  return useLayoutStore((s) => linkedWindowSymbol(s.layout, id, activeCell, s.groupSymbols));
 }
 
 export function MarketWindowGate({ id, children }: { id: WindowId; children(code: SymbolCode): ReactNode }) {

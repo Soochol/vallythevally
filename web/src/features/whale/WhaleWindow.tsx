@@ -8,6 +8,7 @@ import { useLayoutStore, watchedSymbol } from "../../stores/layout";
 import { whaleBook } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
 import { dropPendingOpen, openResult } from "../screener/resultActions";
+import { symbolDragProps } from "../../stores/symbolDrag";
 import {
   aggregateWhaleRows,
   DEFAULT_WHALE_MIN_WON,
@@ -206,6 +207,7 @@ export function WhaleWindow({ id }: { id: WindowId }) {
                       key={ev.id}
                       data-symbol={ev.symbol}
                       data-selected={watched === ev.symbol ? "" : undefined}
+                      {...symbolDragProps({ code: ev.symbol, name: nameOf(ev.symbol), sourceWindow: id })}
                       onClick={() => selectSymbol(ev.symbol)}
                     >
                       <td>{formatWhaleTime(ev.at)}</td>
@@ -285,6 +287,7 @@ export function WhaleWindow({ id }: { id: WindowId }) {
                   key={row.symbol}
                   data-symbol={row.symbol}
                   data-selected={watched === row.symbol ? "" : undefined}
+                  {...symbolDragProps({ code: row.symbol, name: row.name, sourceWindow: id })}
                   onClick={() => selectSymbol(row.symbol)}
                 >
                   <td className="wh-center">{idx + 1}</td>

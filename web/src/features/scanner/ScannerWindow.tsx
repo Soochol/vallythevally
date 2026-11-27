@@ -7,6 +7,7 @@ import { useFeedLink } from "../../stores/kiwoomLink";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { useRankingFeed } from "../ranking/useRankingFeed";
 import { dropPendingOpen, openResult } from "../screener/resultActions";
+import { symbolDragProps } from "../../stores/symbolDrag";
 import "./scanner.css";
 
 type SignalKind = "ALL" | "VOL" | "HIGH" | "VI" | "PROG" | "BOOK";
@@ -192,6 +193,7 @@ export function ScannerWindow({ id }: { id: WindowId }) {
                 type="button"
                 className="scn-row"
                 data-testid={`scanner-row-${ev.code}`}
+                {...symbolDragProps({ code: ev.code, name: ev.name, sourceWindow: id })}
                 onClick={() => {
                   if (ev.listed) void openResult(queryClient, ev.code, id);
                 }}

@@ -60,7 +60,8 @@ function useIsActiveRow(sender: WindowId | null, code: SymbolCode, key: string, 
   return useSyncExternalStore(subscribe, () => {
     const pending = preview?.get() ?? null;
     if (pending !== null) return pending === key;
-    return watchedSymbol(useLayoutStore.getState().layout, sender, useSelectionStore.getState().activeCell) === code;
+    const layoutState = useLayoutStore.getState();
+    return watchedSymbol(layoutState.layout, sender, useSelectionStore.getState().activeCell, layoutState.groupSymbols) === code;
   });
 }
 

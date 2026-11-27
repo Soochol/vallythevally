@@ -99,26 +99,44 @@ const PINNABLE: ReadonlySet<WindowKind> = new Set<WindowKind>(["trades", "book",
 export type SymbolTarget = Pick<SymbolInfo, "code"> & { name?: string };
 export type SymbolChange = { changed: WindowId[]; notice: string | null };
 
-function linkedCharts(layout: EditableLayout, cellId: WindowId): ChartWindowState[] {
-  const chart = chartWindows(layout).find((w) => w.id === cellId);
-  if (!chart) return [];
-  return chart.link === null ? [chart] : chartWindows(layout).filter((w) => w.link === chart.link);
-}
-
 const senderLink = (layout: EditableLayout, sender: WindowId | null): LinkColor | null =>
   sender === null ? null : (layout.windows.find((w) => w.id === sender)?.link ?? null);
 
 export const isPinnableWindow = (w: WindowState): w is PinnableWindowState | BrokersWindowState | OrderWindowState => PINNABLE.has(w.kind);
 
-export function watchedSymbol(layout: EditableLayout, sender: WindowId | null, activeCell: WindowId): SymbolCode | null {
-  const link = senderLink(layout, sender);
-  if (link === null) return chartWindow(layout, activeCell).symbol;
-  return chartWindows(layout).find((w) => w.link === link)?.symbol ?? null;
+export const isFollowsWindow = (w: WindowState): boolean => WINDOW_KINDS[w.kind].link === "follows";
+
+export function isWindowLocked(w: WindowState, lockedWindows: readonly WindowId[]): boolean {
+  return lockedWindows.includes(w.id) || (isPinnableWindow(w) && w.link !== null && w.symbol !== undefined);
 }
 
-export function linkedWindowSymbol(layout: EditableLayout, id: WindowId, activeCell: WindowId): SymbolCode | null {
+export function watchedSymbol(
+  layout: EditableLayout,
+  sender: WindowId | null,
+  activeCell: WindowId,
+  groupSymbols: Partial<Record<LinkColor, SymbolCode>> = {},
+): SymbolCode | null {
+  const link = senderLink(layout, sender);
+  if (link === null) return chartWindow(layout, activeCell).symbol;
+  return groupSymbols[link] ?? chartWindows(layout).find((w) => w.link === link)?.symbol ?? null;
+}
+
+export function linkedWindowSymbol(
+  layout: EditableLayout,
+  id: WindowId,
+  activeCell: WindowId,
+  groupSymbols: Partial<Record<LinkColor, SymbolCode>> = {},
+): SymbolCode | null {
   const window = layout.windows.find((w) => w.id === id);
-  return (window && isPinnableWindow(window) ? window.symbol : undefined) ?? watchedSymbol(layout, id, activeCell);
+  return (window && isPinnableWindow(window) ? window.symbol : undefined) ?? watchedSymbol(layout, id, activeCell, groupSymbols);
+}
+
+function seedGroupSymbols(layout: EditableLayout): Partial<Record<LinkColor, SymbolCode>> {
+  const symbols: Partial<Record<LinkColor, SymbolCode>> = {};
+  for (const chart of chartWindows(layout)) {
+    if (chart.link !== null && symbols[chart.link] === undefined) symbols[chart.link] = chart.symbol;
+  }
+  return symbols;
 }
 
 function follow(chart: ChartWindowState, leader: ChartWindowState): ChartWindowState {
@@ -203,6 +221,8 @@ interface LayoutState {
   redos: readonly ArrangementStep[];
   dockOrigins: DockOrigins;
   lastUsedLink: LinkColor | null;
+  groupSymbols: Partial<Record<LinkColor, SymbolCode>>;
+  lockedWindows: readonly WindowId[];
   commitDock(edit: { session: number; expected: DockPlacement | null; next: DockPlacement }): boolean;
   attachFloat(window: WindowId): void;
   workspaceArea: Size | null;
@@ -228,9 +248,11 @@ interface LayoutState {
   addChart(from: WindowId, room: DockRoom | null, targetGroup?: string, options?: NewWindowOptions): WindowId | null;
   closeWindow(id: WindowId, replacement?: WindowId): boolean;
   setSymbol(cellId: WindowId, target: SymbolTarget): SymbolChange;
+  setWindowSymbol(windowId: WindowId, target: SymbolTarget, options?: { unlock?: boolean }): SymbolChange;
   sendSymbol(sender: WindowId | null, cellId: WindowId, target: SymbolTarget): SymbolChange;
   sendSymbolToLink(link: LinkColor | null, activeCell: WindowId, target: SymbolTarget): SymbolChange;
   dropSymbolOnWindow(windowId: WindowId, target: SymbolTarget): SymbolChange;
+  toggleWindowLock(window: WindowId, activeCell: WindowId): void;
   setLink(window: WindowId, link: LinkColor | null): void;
   setWindowList(window: WindowId, list: string | null): void;
   setWindowScreen(window: WindowId, screen: string | null): void;
@@ -335,6 +357,8 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     redos: [],
     dockOrigins: new Map(),
     lastUsedLink: null,
+    groupSymbols: seedGroupSymbols(DEFAULT_LAYOUT),
+    lockedWindows: [],
     commitDock: ({ session, expected, next }) => {
       const state = get();
       if (useUiStore.getState().prefs.layoutMode !== "dock" || session !== state.session || expected !== state.layout.placement.dock) return false;
@@ -391,7 +415,7 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       arrangeCanvas(state.layout.windows, next);
       return true;
     },
-    load: (layout) => set((s) => ({ layout, dockOrigins: readDockOrigins(layout), lastUsedLink: null, steps: [], redos: [], session: s.session + 1 })),
+    load: (layout) => set((s) => ({ layout, dockOrigins: readDockOrigins(layout), lastUsedLink: null, groupSymbols: seedGroupSymbols(layout), lockedWindows: [], steps: [], redos: [], session: s.session + 1 })),
     rename: (name) => set((s) => s.layout.name === name ? s : { layout: { ...s.layout, name }, revision: s.revision + 1 }),
     setCrosshairSync: (enabled) => set((s) => s.layout.sync.crosshair === enabled ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: enabled } }, revision: s.revision + 1 }),
     setCrosshairScope: (scope) => set((s) => s.layout.sync.crosshair && s.layout.sync.crosshairScope === scope ? s : { layout: { ...s.layout, sync: { ...s.layout.sync, crosshair: true, crosshairScope: scope } }, revision: s.revision + 1 }),
@@ -513,30 +537,21 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       }
       return true;
     },
-    setSymbol: (cellId, target) => openIn(linkedCharts(get().layout, cellId), target),
-    sendSymbol: (sender, cellId, target) => {
-      const { layout } = get();
-      const link = senderLink(layout, sender);
-      if (link === null) return openIn(linkedCharts(layout, cellId), target);
-      const charts = chartWindows(layout).filter((w) => w.link === link);
-      return charts.length ? openIn(charts, target) : { changed: [], notice: null };
+    setSymbol: (cellId, target) => {
+      const { layout, lockedWindows } = get();
+      const chart = chartWindows(layout).find((w) => w.id === cellId);
+      if (!chart) return { changed: [], notice: null };
+      if (chart.link !== null) return get().sendSymbolToLink(chart.link, cellId, target);
+      if (isWindowLocked(chart, lockedWindows)) return { changed: [], notice: "종목이 고정된 창입니다. 고정을 해제한 뒤 변경하세요." };
+      return openIn([chart], target);
     },
-    sendSymbolToLink: (link, activeCell, target) => {
-      const { layout } = get();
-      const charts = link === null ? [] : chartWindows(layout).filter((w) => w.link === link);
-      return openIn(charts.length ? charts : linkedCharts(layout, activeCell), target);
-    },
-    dropSymbolOnWindow: (id, target) => {
-      const { layout } = get();
+    setWindowSymbol: (id, target, options) => {
+      const { layout, lockedWindows } = get();
       const win = layout.windows.find((w) => w.id === id);
-      if (!win) return { changed: [], notice: null };
-      if (win.link !== null) {
-        if (isPinnableWindow(win) && win.symbol !== undefined) return { changed: [], notice: null };
-        if (isChartWindow(win) || isPinnableWindow(win)) {
-          const charts = chartWindows(layout).filter((w) => w.link === win.link);
-          return charts.length ? openIn(charts, target) : { changed: [], notice: null };
-        }
-        return { changed: [], notice: null };
+      if (!win || !isFollowsWindow(win)) return { changed: [], notice: null };
+      if (isWindowLocked(win, lockedWindows)) {
+        if (!options?.unlock) return { changed: [], notice: "종목이 고정된 창입니다. 고정을 해제한 뒤 변경하세요." };
+        set((s) => ({ lockedWindows: s.lockedWindows.filter((w) => w !== id) }));
       }
       if (isChartWindow(win)) return openIn([win], target);
       if (isPinnableWindow(win)) {
@@ -546,6 +561,64 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
         return { changed: [id], notice: null };
       }
       return { changed: [], notice: null };
+    },
+    sendSymbol: (sender, cellId, target) => {
+      const { layout } = get();
+      const link = senderLink(layout, sender);
+      if (link === null) return get().setSymbol(cellId, target);
+      if (!layout.windows.some((w) => w.link === link && isFollowsWindow(w))) return { changed: [], notice: null };
+      return get().sendSymbolToLink(link, cellId, target);
+    },
+    sendSymbolToLink: (link, activeCell, target) => {
+      const { layout, lockedWindows, groupSymbols } = get();
+      if (link === null) return get().setSymbol(activeCell, target);
+      const hasAnyInLink = layout.windows.some((w) => w.link === link && isFollowsWindow(w));
+      if (!hasAnyInLink) return get().setSymbol(activeCell, target);
+      const prevSymbol = groupSymbols[link];
+      if (prevSymbol !== target.code || get().lastUsedLink !== link) {
+        set((s) => ({ groupSymbols: { ...s.groupSymbols, [link]: target.code }, lastUsedLink: link }));
+      }
+      const charts = chartWindows(layout).filter((w) => w.link === link && !isWindowLocked(w, lockedWindows));
+      if (charts.length > 0) return openIn(charts, target);
+      const followers = layout.windows.filter((w) => w.link === link && isFollowsWindow(w) && !isWindowLocked(w, lockedWindows));
+      return { changed: prevSymbol === target.code ? [] : followers.map((w) => w.id), notice: null };
+    },
+    dropSymbolOnWindow: (id, target) => {
+      const { layout, lockedWindows } = get();
+      const win = layout.windows.find((w) => w.id === id);
+      if (!win) return { changed: [], notice: null };
+      if (isWindowLocked(win, lockedWindows)) {
+        return { changed: [], notice: "종목이 고정된 창입니다. 고정을 해제한 뒤 변경하세요." };
+      }
+      if (win.link !== null) {
+        if (isChartWindow(win) || isPinnableWindow(win)) {
+          return get().sendSymbolToLink(win.link, id, target);
+        }
+        return { changed: [], notice: null };
+      }
+      return get().setWindowSymbol(id, target);
+    },
+    toggleWindowLock: (id, activeCell) => {
+      const { layout, lockedWindows, groupSymbols } = get();
+      const win = layout.windows.find((w) => w.id === id);
+      if (!win || !isFollowsWindow(win)) return;
+      if (isWindowLocked(win, lockedWindows)) {
+        set((s) => ({ lockedWindows: s.lockedWindows.filter((w) => w !== id) }));
+        if (isPinnableWindow(win) && win.link !== null) {
+          patchWindows((w) => (w.id === id && isPinnableWindow(w) ? withOptional(w, "symbol", null) : w));
+        } else if (isChartWindow(win) && win.link !== null) {
+          const groupCode = groupSymbols[win.link] ?? chartWindows(layout).find((c) => c.id !== id && c.link === win.link)?.symbol;
+          if (groupCode) openIn([win], { code: groupCode });
+        }
+        return;
+      }
+      set((s) => ({ lockedWindows: s.lockedWindows.includes(id) ? s.lockedWindows : [...s.lockedWindows, id] }));
+      if (isPinnableWindow(win) && win.link !== null) {
+        const current = linkedWindowSymbol(layout, id, activeCell, groupSymbols);
+        if (current !== null && !isIndexCode(current)) {
+          patchWindows((w) => (w.id === id && isPinnableWindow(w) ? withOptional(w, "symbol", current) : w));
+        }
+      }
     },
     setLink: (id, link) => {
       set((s) => {

@@ -6,7 +6,7 @@ import type { Rect } from "../../layout/placement";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { chartNumber, chartWindows, useCell, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { applySymbolDrop, hasDraggedSymbol, isSymbolDropKind, readDraggedSymbol, useSymbolDragStore } from "../../stores/symbolDrag";
+import { applySymbolDrop, hasDraggedSymbol, isSymbolDropKind, readDraggedSymbol, symbolDragProps, useSymbolDragStore } from "../../stores/symbolDrag";
 import { ChevronIcon, CloseIcon } from "../icons";
 import { IntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
@@ -34,7 +34,7 @@ function ChartTabLabel({ id }: { id: WindowId }) {
   }
   return (
     <>
-      <span className="dock-tab-name">{name}</span><span className="dock-tab-sub">{PERIOD_LABEL[cell.period]}</span>
+      <span className="dock-tab-name" {...symbolDragProps({ code: cell.symbol, name, sourceWindow: id })}>{name}</span><span className="dock-tab-sub">{PERIOD_LABEL[cell.period]}</span>
       {flash > 0 && <span key={flash} className="dock-tab-flash" aria-hidden="true" onAnimationEnd={() => setFlash(0)} />}
     </>
   );
