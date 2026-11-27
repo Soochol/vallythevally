@@ -1,0 +1,218 @@
+.tm-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.tm-head {
+  box-sizing: border-box;
+  height: var(--size-34);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--size-6);
+  padding: 0 var(--s3);
+  border-bottom: var(--size-1) solid var(--line);
+  background: var(--surface);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.tm-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-1);
+  padding: var(--size-2);
+  border-radius: var(--r-m);
+  background: var(--raised);
+  flex: none;
+}
+.tm-seg-btn {
+  height: var(--size-20);
+  padding: 0 var(--size-6);
+  border-radius: var(--r-s);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.tm-seg-btn[aria-pressed="true"] {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 700;
+}
+.tm-add-form {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4);
+  flex: none;
+}
+.tm-input {
+  width: 96px;
+  height: var(--ctl-xs);
+  padding: 0 var(--size-6);
+  border: var(--size-1) solid var(--line-strong);
+  border-radius: var(--r-s);
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+}
+.tm-add-btn {
+  height: var(--ctl-xs);
+  padding: 0 var(--size-6);
+  border: var(--size-1) solid var(--line-strong);
+  border-radius: var(--r-s);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+}
+.tm-add-btn:hover {
+  background: var(--hover);
+}
+.tm-spacer {
+  flex: 1;
+}
+.tm-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.tm-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s3);
+}
+.tm-grid {
+  display: grid;
+  gap: var(--s3);
+}
+.tm-grid[data-cols="auto"] {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.tm-grid[data-cols="2"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tm-grid[data-cols="3"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.tm-grid[data-cols="4"] {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.tm-card {
+  border: var(--size-1) solid var(--line);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tm-card:hover {
+  border-color: var(--line-strong);
+}
+.tm-card-head {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-bottom: var(--size-1) solid var(--line);
+  font-size: var(--fs-xs);
+}
+.tm-card-title {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-card-price {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.tm-card-act {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-s);
+  color: var(--text-3);
+  font-size: 10px;
+}
+.tm-card-act:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+.tm-card-act:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.tm-book {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.tm-lvl {
+  display: grid;
+  grid-template-columns: 1fr 66px 1fr;
+  align-items: center;
+  height: 18px;
+}
+.tm-bar-wrap {
+  position: relative;
+  height: 14px;
+  display: flex;
+  align-items: center;
+}
+.tm-bar-ask {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--down-vol);
+}
+.tm-bar-bid {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--up-vol);
+}
+.tm-qty {
+  position: relative;
+  z-index: 1;
+  padding: 0 3px;
+  font-size: 10px;
+  color: var(--text-2);
+}
+.tm-px {
+  text-align: center;
+  font-weight: 700;
+}
+.tm-up {
+  color: var(--up);
+}
+.tm-down {
+  color: var(--down);
+}
+.tm-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-top: var(--size-1) solid var(--line);
+  background: var(--bg);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+}
+.tm-limit {
+  padding: 4px 6px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 10px;
+}

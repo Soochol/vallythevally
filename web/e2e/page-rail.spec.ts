@@ -101,7 +101,7 @@ test("다른 페이지에서 누른 키는 숨은 작업 영역에 닿지 않는
   await expect(groups).toHaveCount(1);
 });
 
-test("vally 로고를 누르면 랜딩으로 가고, 로그인 상태 랜딩에 작업 영역 열기와 바로가기 4개가 있다", async ({ page, scenario }) => {
+test("vally 로고를 누르면 랜딩으로 가고, 로그인 상태 랜딩에 작업 영역 열기와 바로가기 5개가 있다", async ({ page, scenario }) => {
   scenario.live.account = SIGNED_IN;
   await page.goto("/");
   await expect(cell(page)).toBeVisible();
@@ -110,11 +110,12 @@ test("vally 로고를 누르면 랜딩으로 가고, 로그인 상태 랜딩에 
   await expect(landing(page)).toBeVisible();
   await expect(page.getByRole("button", { name: "로그인", exact: true })).toHaveCount(0);
   const shortcuts = page.getByRole("region", { name: "페이지 바로가기" });
-  await expect(shortcuts.getByRole("link")).toHaveCount(4);
+  await expect(shortcuts.getByRole("link")).toHaveCount(5);
   await expect(shortcuts.getByRole("link", { name: /^시장 종합/ })).toHaveAttribute("href", "/market");
   await expect(shortcuts.getByRole("link", { name: /^히트맵/ })).toHaveAttribute("href", "/heatmap");
   await expect(shortcuts.getByRole("link", { name: /^ETF/ })).toHaveAttribute("href", "/etf");
   await expect(shortcuts.getByRole("link", { name: /^호가 복기/ })).toHaveAttribute("href", "/replay");
+  await expect(shortcuts.getByRole("link", { name: /^매매 복기/ })).toHaveAttribute("href", "/journal");
 
   await page.getByRole("link", { name: "작업 영역 열기", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);

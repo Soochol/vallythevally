@@ -1799,6 +1799,10 @@ pub enum WindowContent {
         #[ts(optional)]
         symbol: Option<SymbolCode>,
     },
+    Scanner,
+    Themes,
+    #[serde(rename = "tape_matrix")]
+    TapeMatrix,
     Whale,
 }
 
