@@ -26,9 +26,9 @@
 .app-brand svg { color:var(--accent); }
 .mock-badge { flex:none; padding:0 var(--s2); border:0; border-radius:0; background:transparent; color:var(--warning); font-size:var(--fs-xs); font-weight:700; white-space:nowrap; }
 .desktop-topbar .topbar-search-slot { display:flex; flex:1 1 0; align-items:center; justify-content:center; gap:var(--size-8); min-width:var(--size-320); }
-.topbar-clock { display:inline-flex; flex:none; align-items:baseline; gap:var(--size-6); height:var(--ctl-m); padding-inline:var(--size-6); color:var(--text); white-space:nowrap; user-select:none; }
-.topbar-clock-time { font-family:var(--font-mono); font-size:var(--fs-s); font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-0.01em; }
-.topbar-clock-session { font-size:var(--fs-xs); font-weight:600; color:var(--text-3); }
+.topbar-clock { display:inline-flex; flex:none; align-items:center; gap:var(--size-6); height:var(--ctl-m); padding-inline:var(--size-6); color:var(--text); white-space:nowrap; user-select:none; }
+.topbar-clock-time { font-family:var(--font-mono); font-size:var(--fs-s); font-weight:600; font-variant-numeric:tabular-nums; letter-spacing:-0.01em; line-height:1; }
+.topbar-clock-session { font-size:var(--fs-xs); font-weight:600; color:var(--text-3); line-height:1; }
 .desktop-topbar .shell-search { display:flex; align-items:center; gap:var(--size-8); width:100%; max-width:var(--size-480); min-width:0; height:var(--ctl-m); padding-inline:var(--size-4); border:0; border-bottom:var(--size-1) solid var(--line-strong); border-radius:0; background:transparent; color:var(--text-2); font-size:var(--fs-s); text-align:left; transition:background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .desktop-topbar .shell-search:hover { background:var(--hover); border-bottom-color:var(--line-strong); color:var(--text); }
 .shell-search svg { flex:none; }

@@ -14,6 +14,12 @@ test("차트 Topbar에 KST 시계와 장 상태가 표시되고 1초마다 갱�
 
   await page.clock.fastForward(1000);
   await expect(clock.locator(".topbar-clock-time")).toHaveText("10:00:01");
+
+  const searchBox = await bar.locator(".shell-search").boundingBox();
+  const timeBox = await clock.locator(".topbar-clock-time").boundingBox();
+  const searchCenterY = searchBox!.y + searchBox!.height / 2;
+  const timeCenterY = timeBox!.y + timeBox!.height / 2;
+  expect(Math.abs(timeCenterY - searchCenterY)).toBeLessThanOrEqual(2);
 });
 
 test("PageTopbar에 KST 시계가 표시되고 좁은 폭에서는 장 상태 라벨만 숨긴다", async ({ page, scenario }) => {
