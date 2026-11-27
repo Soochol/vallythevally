@@ -23,7 +23,6 @@ export interface DepthStyle {
   maxOpacity: number;
   topLevels: number | null;
   dynamicContrast?: boolean;
-  outlierBorder?: HexColor;
 }
 
 const halfStepCache = new WeakMap<QuoteDepthPoint, number>();
@@ -230,7 +229,6 @@ export function drawDepth(
     }
     if (dynamicContrast && (outlierBuckets[0].length > 0 || outlierBuckets[1].length > 0)) {
       const coreAlpha = Math.min(0.85, style.maxOpacity * 0.75);
-      const borderRgb = style.outlierBorder ? parseRgb(style.outlierBorder) : ([245, 158, 11] as const);
       for (let s = 0; s < 2; s++) {
         const bucket = outlierBuckets[s]!;
         if (bucket.length === 0) continue;
@@ -242,18 +240,6 @@ export function drawDepth(
           const height = bucket[j + 2]!;
           const coreH = height * 0.5 > 1 ? height * 0.5 : 1;
           ctx.fillRect(left, top + (height - coreH) / 2, frame.width, coreH);
-        }
-      }
-      ctx.fillStyle = `rgba(${borderRgb[0]}, ${borderRgb[1]}, ${borderRgb[2]}, 0.9)`;
-      for (let s = 0; s < 2; s++) {
-        const bucket = outlierBuckets[s]!;
-        for (let j = 0; j < bucket.length; j += 3) {
-          const left = bucket[j]!;
-          const top = bucket[j + 1]!;
-          const height = bucket[j + 2]!;
-          const edgeH = height > 3 ? 1.25 : 0.75;
-          ctx.fillRect(left, top, frame.width, edgeH);
-          ctx.fillRect(left, top + height - edgeH, frame.width, edgeH);
         }
       }
     }

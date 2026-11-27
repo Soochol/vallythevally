@@ -43,17 +43,18 @@ export function liveRow(row: FeedProgramRow, sequence: number): ProgramRow {
   };
 }
 
-export function historyRows(points: readonly ProgramTradePoint[]): ProgramRow[] {
+export function historyRows(points: readonly ProgramTradePoint[], truncated = false): ProgramRow[] {
   const chronological = [...points].sort((a, b) => a.time.localeCompare(b.time));
   let previousNet = 0;
   return chronological.map((point, index) => {
+    const netQtyChange = truncated && index === 0 ? 0 : point.netQuantity - previousNet;
     const row: ProgramRow = {
       key: `history-${index}`,
       source: "history",
       time: point.time,
       price: point.price,
       netQty: point.netQuantity,
-      netQtyChange: point.netQuantity - previousNet,
+      netQtyChange,
       netAmountMillionWon: millionWonFromWon(point.netAmount),
       buyQty: point.buyQuantity,
       sellQty: point.sellQuantity,
@@ -109,6 +110,7 @@ export const MAX_PROGRAM_TREND_POINTS = 400;
 
 export interface ProgramLiveState {
   readonly firstLiveTime: string | null;
+  readonly lastTickSeconds: number | null;
   readonly latest: ProgramRow | null;
   readonly lines: readonly ProgramLine[];
   readonly trend: readonly number[];
@@ -117,11 +119,21 @@ export interface ProgramLiveState {
 
 export const EMPTY_PROGRAM_LIVE: ProgramLiveState = {
   firstLiveTime: null,
+  lastTickSeconds: null,
   latest: null,
   lines: [],
   trend: [],
   sequence: 0,
 };
+
+export function isHistoryFresherThanLive(
+  history: readonly ProgramRow[],
+  live: ProgramLiveState,
+  isFallbackHistory: boolean,
+): boolean {
+  if (isFallbackHistory || live.latest === null || history.length === 0) return false;
+  return history.at(-1)!.time > live.latest.time;
+}
 
 export type ProgramLiveAction = { readonly type: "row"; readonly row: FeedProgramRow } | { readonly type: "gap"; readonly at: number };
 
@@ -161,6 +173,19 @@ export function reduceProgramLive(state: ProgramLiveState, action: ProgramLiveAc
       : [...state.lines, gap];
     return { ...state, lines: nextLines, sequence: state.sequence + 1 };
   }
+  if (state.lastTickSeconds !== null) {
+    if (action.row.t < state.lastTickSeconds) return state;
+    if (
+      action.row.t === state.lastTickSeconds
+      && state.latest !== null
+      && state.latest.netQty === action.row.netQty
+      && state.latest.netQtyChange === action.row.netQtyChange
+      && state.latest.buyQty === action.row.buyQty
+      && state.latest.sellQty === action.row.sellQty
+    ) {
+      return state;
+    }
+  }
   const row = liveRow(action.row, state.sequence);
   const firstLiveTime = state.firstLiveTime ?? row.time;
   let nextLines = state.lines;
@@ -174,7 +199,7 @@ export function reduceProgramLive(state: ProgramLiveState, action: ProgramLiveAc
   const trend = appendedTrend.length > MAX_PROGRAM_TREND_POINTS
     ? downsampleMinMax(appendedTrend, Math.floor(MAX_PROGRAM_TREND_POINTS / 2))
     : appendedTrend;
-  return { firstLiveTime, latest: row, lines: nextLines, trend, sequence: state.sequence + 1 };
+  return { firstLiveTime, lastTickSeconds: action.row.t, latest: row, lines: nextLines, trend, sequence: state.sequence + 1 };
 }
 
 export function sparklinePoints(netQtys: readonly number[], width: number, height: number): string {
