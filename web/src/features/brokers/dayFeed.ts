@@ -35,6 +35,7 @@ export interface TodayBrokerFeedConfig {
   readonly enabled: boolean;
   readonly active: boolean;
   readonly allowFallback?: boolean;
+  readonly allowLiveFallback?: boolean;
 }
 
 export interface TodayBrokerFeed {
@@ -114,6 +115,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
   let active = false;
   let enabled = false;
   let allowFallback = false;
+  let allowLiveFallback = true;
   let date = "";
   let disposed = false;
 
@@ -292,6 +294,11 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       inFlight = false;
       if (reply.source === "none") {
         polling = false;
+        if (!allowLiveFallback) {
+          stopLive();
+          emit({ mode: "collected", date, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS, failed: false });
+          return;
+        }
         startLive(expectedSession, false);
         return;
       }
@@ -317,6 +324,11 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       inFlight = false;
       if (initial) {
         polling = false;
+        if (!allowLiveFallback) {
+          stopLive();
+          emit({ mode: "collected", date, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS, failed: true });
+          return;
+        }
         startLive(expectedSession, false);
         return;
       }
@@ -360,10 +372,12 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
     configure(next) {
       if (disposed) return;
       const nextAllowFallback = next.allowFallback ?? false;
+      const nextAllowLiveFallback = next.allowLiveFallback ?? true;
       const dateChanged = next.date !== date;
       const enabledChanged = next.enabled !== enabled;
       const activeChanged = next.active !== active;
       const allowFallbackChanged = nextAllowFallback !== allowFallback;
+      const allowLiveFallbackChanged = nextAllowLiveFallback !== allowLiveFallback;
       active = next.active;
       if (next.enabled && next.date !== liveDate) {
         if (liveDate !== null) {
@@ -375,6 +389,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       date = next.date;
       enabled = next.enabled;
       allowFallback = nextAllowFallback;
+      allowLiveFallback = nextAllowLiveFallback;
       if (!enabled) {
         if (enabledChanged || current !== LOADING_BROKER_SNAPSHOT) {
           stopSession();
@@ -382,7 +397,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
         }
         return;
       }
-      if (enabledChanged || dateChanged || allowFallbackChanged) {
+      if (enabledChanged || dateChanged || allowFallbackChanged || allowLiveFallbackChanged) {
         startSession();
         return;
       }

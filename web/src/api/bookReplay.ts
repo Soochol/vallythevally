@@ -5,7 +5,10 @@ import type { BookReplayAccess } from "./generated/BookReplayAccess";
 import type { BookReplayDay } from "./generated/BookReplayDay";
 import type { BookReplayDays } from "./generated/BookReplayDays";
 import type { BookReplayMeta } from "./generated/BookReplayMeta";
+import type { BookReplayProgramDay } from "./generated/BookReplayProgramDay";
+import type { BookReplayTrades } from "./generated/BookReplayTrades";
 import type { SymbolCode } from "./generated/SymbolCode";
+import type { Venue } from "./generated/Venue";
 import { getJson } from "./http";
 
 const GC_TIME_MS = 5 * 60 * 1000;
@@ -79,6 +82,56 @@ export function useBookReplayDays(code: SymbolCode, enabled: boolean) {
     enabled: active,
     staleTime: DAYS_STALE_MS,
     refetchInterval: active ? DAYS_REFETCH_MS : false,
+    gcTime: GC_TIME_MS,
+    retry: false,
+  });
+}
+
+export const bookReplayTradesQueryKey = (
+  code: SymbolCode,
+  date: string | null,
+  untilSec: number | null,
+  venue: Venue,
+  minWon: number,
+) => ["book-replay", "trades", code, date, untilSec, venue, minWon] as const;
+
+export function useBookReplayTrades(
+  code: SymbolCode,
+  date: string | null,
+  untilSec: number | null,
+  venue: Venue,
+  minWon: number,
+  options: { readonly enabled: boolean; readonly isToday?: boolean },
+) {
+  const publicMode = usePublicMode();
+  return useQuery({
+    queryKey: bookReplayTradesQueryKey(code, date, untilSec, venue, minWon),
+    queryFn: ({ signal }) =>
+      getJson<BookReplayTrades>(
+        `/api/symbols/${encodeURIComponent(code)}/book-replay/trades?date=${date}&untilSec=${untilSec}&venue=${venue}&minWon=${minWon}&limit=200`,
+        signal,
+      ),
+    enabled: !publicMode && options.enabled && date !== null && untilSec !== null,
+    placeholderData: (prev) => (prev && prev.symbol === code && prev.date === date ? prev : undefined),
+    staleTime: options.isToday ? TODAY_REFETCH_MS : Infinity,
+    gcTime: GC_TIME_MS,
+    retry: false,
+  });
+}
+
+export function useBookReplayProgramDay(
+  code: SymbolCode,
+  date: string | null,
+  options: { readonly enabled: boolean; readonly isToday?: boolean },
+) {
+  const publicMode = usePublicMode();
+  return useQuery({
+    queryKey: ["book-replay", "program", code, date] as const,
+    queryFn: ({ signal }) =>
+      getJson<BookReplayProgramDay>(`/api/symbols/${encodeURIComponent(code)}/book-replay/program?date=${date}`, signal),
+    enabled: !publicMode && options.enabled && date !== null,
+    placeholderData: (prev) => (prev && prev.symbol === code && prev.date === date ? prev : undefined),
+    staleTime: options.isToday ? TODAY_REFETCH_MS : Infinity,
     gcTime: GC_TIME_MS,
     retry: false,
   });

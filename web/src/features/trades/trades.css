@@ -1,5 +1,6 @@
 .tr-window { container:tr / inline-size; display:flex; flex:1; flex-direction:column; min-height:0; font-variant-numeric:tabular-nums; }
 .tr-body { position:relative; display:flex; flex:1; min-height:0; }
+.tr-body > .ui-state { flex:1; }
 .tr-tape { flex:1; min-height:0; overflow:hidden auto; }
 .tr-head, .tr-row { display:grid; grid-template-columns:var(--size-72) 1fr 1fr; align-items:center; padding:0 var(--s4); }
 .tr-head { position:sticky; top:0; z-index:2; box-sizing:border-box; height:var(--size-24); border-bottom:var(--size-1) solid var(--line); background:var(--surface); color:var(--text-3); font-size:var(--fs-xs); }

@@ -167,7 +167,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     const symbol = cell.symbol;
     return ctl.current.subscribePointedBar((bar, close) => {
       if (bar === null) return;
-      if (replayEnabled) replayPointScheduler.push(symbol, bar);
+      if (replayEnabled) replayPointScheduler.push(symbol, bar, close);
       if (brokerSyncActive) chartPointerScheduler.push(symbol, bar, close);
     });
   }, [replayEnabled, brokerSyncActive, cell.symbol]);

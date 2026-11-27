@@ -76,13 +76,14 @@ function useTodayBrokerDay(
   enabled: boolean,
   active: boolean,
   allowFallback: boolean,
+  allowLiveFallback: boolean,
 ): BrokerDayResult {
   const feed = useMemo(() => createTodayBrokerFeed(code, BROWSER_FEED_DEPS), [code]);
   const snapshot = useSyncExternalStore(feed.subscribe, feed.snapshot);
 
   useEffect(() => {
-    feed.configure({ date, enabled, active, allowFallback });
-  }, [feed, date, enabled, active, allowFallback]);
+    feed.configure({ date, enabled, active, allowFallback, allowLiveFallback });
+  }, [feed, date, enabled, active, allowFallback, allowLiveFallback]);
 
   useEffect(() => () => feed.dispose(), [feed]);
 
@@ -154,9 +155,11 @@ export function useBrokerDay(
   isToday: boolean,
   active: boolean,
   allowFallback = false,
+  allowLiveFallback = true,
+  enabled = true,
 ): BrokerDayResult {
-  const todayResult = useTodayBrokerDay(code, date, isToday, active, allowFallback);
-  const pastResult = usePastBrokerDay(code, isToday ? null : date);
+  const todayResult = useTodayBrokerDay(code, date, enabled && isToday, active, allowFallback, allowLiveFallback);
+  const pastResult = usePastBrokerDay(code, enabled && !isToday ? date : null);
   return isToday ? todayResult : pastResult;
 }
 

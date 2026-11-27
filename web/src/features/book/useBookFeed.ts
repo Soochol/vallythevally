@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { getJson } from "../../api/http";
 import type { OrderBook } from "../../api/generated/OrderBook";
 import type { SubErrorCode } from "../../api/generated/SubErrorCode";
@@ -38,11 +38,20 @@ const fresh = (code: SymbolCode, venue: Venue, socketOpen: boolean): Live => ({ 
 
 const isCurrent = (state: Live, code: SymbolCode, venue: Venue) => state.code === code && state.venue === venue;
 
-export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade | null): BookFeed {
+export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade | null, enabled = true): BookFeed {
   const [live, fold] = useFrameFold<Live>(() => fresh(code, venue, true));
   const current = isCurrent(live, code, venue) ? live : fresh(code, venue, live.socketOpen);
+  const wasEnabled = useRef(enabled);
 
   useEffect(() => {
+    if (!enabled) {
+      wasEnabled.current = false;
+      return;
+    }
+    if (!wasEnabled.current) {
+      wasEnabled.current = true;
+      fold(() => fresh(code, venue, true));
+    }
     const update = (change: (state: Live) => Live) => fold((state) => change(isCurrent(state, code, venue) ? state : fresh(code, venue, state.socketOpen)));
     const stopWatch = marketSocket.watch((connection) => update((state) => ({ ...state, socketOpen: connection.socket === "open" })));
     const stopBook = marketSocket.subscribeFeed({ symbol: code, kind: "book", venue }, (m) => {
@@ -57,11 +66,12 @@ export function useBookFeed(code: SymbolCode, venue: Venue, lastTrade: LastTrade
       stopWatch();
       stopBook();
     };
-  }, [code, venue, fold]);
+  }, [code, venue, enabled, fold]);
 
   const snapshot = useQuery({
     queryKey: ["order-book", code, venue],
     queryFn: ({ signal }) => getJson<OrderBook>(`/api/symbols/${encodeURIComponent(code)}/order-book?venue=${venue}`, signal),
+    enabled,
     staleTime: 0,
     gcTime: 0,
     retry: false,

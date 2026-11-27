@@ -53,8 +53,8 @@ describe("createReplayPointScheduler", () => {
     let pointed: PointedReplay | null = null;
     const calls: PointedReplay[] = [];
     const scheduler = createReplayPointScheduler(
-      (symbol, bar) => {
-        pointed = { symbol, bar };
+      (symbol, bar, close) => {
+        pointed = { symbol, bar, close };
         calls.push(pointed);
       },
       () => pointed,
@@ -62,43 +62,43 @@ describe("createReplayPointScheduler", () => {
       clock.timers,
     );
 
-    scheduler.push("005930", barAt(0));
+    scheduler.push("005930", barAt(0), 71_200);
     expect(calls).toEqual([]);
 
     clock.stepFrame(16);
-    expect(calls).toEqual([{ symbol: "005930", bar: barAt(0) }]);
+    expect(calls).toEqual([{ symbol: "005930", bar: barAt(0), close: 71_200 }]);
   });
 
   test("coalesces rapid sweeps across bars and cells so only the latest target commits at the trailing edge", () => {
     const clock = fakeTimers();
     let pointed: PointedReplay | null = null;
-    const calls: { symbol: string; start: number }[] = [];
+    const calls: { symbol: string; start: number; close: number | null }[] = [];
     const scheduler = createReplayPointScheduler(
-      (symbol, bar) => {
-        pointed = { symbol, bar };
-        calls.push({ symbol, start: bar.start });
+      (symbol, bar, close) => {
+        pointed = { symbol, bar, close };
+        calls.push({ symbol, start: bar.start, close });
       },
       () => pointed,
       80,
       clock.timers,
     );
 
-    scheduler.push("005930", barAt(0));
+    scheduler.push("005930", barAt(0), 70_000);
     clock.stepFrame(16);
-    expect(calls).toEqual([{ symbol: "005930", start: barAt(0).start }]);
+    expect(calls).toEqual([{ symbol: "005930", start: barAt(0).start, close: 70_000 }]);
 
-    scheduler.push("005930", barAt(1));
+    scheduler.push("005930", barAt(1), 70_100);
     clock.stepFrame(16);
-    scheduler.push("005930", barAt(2));
+    scheduler.push("005930", barAt(2), 70_200);
     clock.stepFrame(16);
-    scheduler.push("000660", barAt(3));
+    scheduler.push("000660", barAt(3), 190_000);
     clock.stepFrame(16);
-    expect(calls).toEqual([{ symbol: "005930", start: barAt(0).start }]);
+    expect(calls).toEqual([{ symbol: "005930", start: barAt(0).start, close: 70_000 }]);
 
     clock.stepFrame(40);
     expect(calls).toEqual([
-      { symbol: "005930", start: barAt(0).start },
-      { symbol: "000660", start: barAt(3).start },
+      { symbol: "005930", start: barAt(0).start, close: 70_000 },
+      { symbol: "000660", start: barAt(3).start, close: 190_000 },
     ]);
   });
 
@@ -107,8 +107,8 @@ describe("createReplayPointScheduler", () => {
     let pointed: PointedReplay | null = null;
     const calls: number[] = [];
     const scheduler = createReplayPointScheduler(
-      (symbol, bar) => {
-        pointed = { symbol, bar };
+      (symbol, bar, close) => {
+        pointed = { symbol, bar, close };
         calls.push(bar.start);
       },
       () => pointed,

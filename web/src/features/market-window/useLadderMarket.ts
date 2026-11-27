@@ -61,7 +61,10 @@ export interface LadderMarket extends ResolvedLadderMarket {
 
 export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGap: boolean): LadderMarket {
   const venue = useShownVenue(code);
-  const { state: tapeState, dispatch: tapeDispatch } = useTradeTape(marketSocket, code, venue, HISTORY_PAGES);
+  const replayEnabled = useBookReplayEnabled();
+  const replay = useBookReplay(code);
+  const liveEnabled = replay.kind === "live";
+  const { state: tapeState, dispatch: tapeDispatch } = useTradeTape(marketSocket, code, venue, HISTORY_PAGES, liveEnabled);
   const shownVenue = tapeState.historyVenue ?? venue;
   const tradeList = useMemo(() => tradeRows(tapeState, shownVenue), [tapeState, shownVenue]);
   const hold = useCallback(() => tapeDispatch({ type: "hold" }), [tapeDispatch]);
@@ -71,9 +74,7 @@ export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGa
     [tapeState.strength, tapeState.sameTimeRatio, tapeState.lastTrade, tradeList, hold, release],
   );
 
-  const feed = useBookFeed(code, venue, trades.lastTrade);
-  const replayEnabled = useBookReplayEnabled();
-  const replay = useBookReplay(code);
+  const feed = useBookFeed(code, venue, trades.lastTrade, liveEnabled);
   const fundamentals = useFundamentals(code).data;
   const symbolInfo = useSymbolInfo(code).data;
   const summary = useQuery(daySummaryQuery(code, venue)).data ?? null;
