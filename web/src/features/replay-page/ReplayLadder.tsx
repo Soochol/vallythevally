@@ -653,7 +653,7 @@ export function ReplayLadder({
     : [];
 
   return (
-    <section className="rp-col" aria-label="10호가 사다리" data-testid="replay-ladder">
+    <section className="rp-col rp-ladder-col" aria-label="10호가 사다리" data-testid="replay-ladder">
       <div className="rp-pane-head">
         <div className="rp-pane-title">
           <span>호가주문 시뮬레이터</span>

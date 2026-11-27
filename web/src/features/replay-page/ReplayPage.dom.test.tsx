@@ -82,9 +82,9 @@ test("minute_only 해상도 폴백, 종목 전환 대화상자, 블라인드·�
   expect(screen.getByTestId("replay-blind-btn").getAttribute("aria-pressed")).toBe("true");
 
   fireEvent.click(screen.getByTestId("replay-symbol-picker"));
-  const dialog = await screen.findByTestId("replay-symbol-dialog");
-  fireEvent.click(within(dialog).getByRole("button", { name: "닫기" }));
-  expect(screen.queryByTestId("replay-symbol-dialog")).toBeNull();
+  expect(useSelectionStore.getState().dialog).toEqual({ kind: "search", purpose: "replay" });
+  useSelectionStore.getState().closeDialog();
+  expect(useSelectionStore.getState().dialog).toBeNull();
 
   fireEvent.click(screen.getByTestId("replay-date-trigger"));
   const popover = await screen.findByTestId("replay-date-popover");

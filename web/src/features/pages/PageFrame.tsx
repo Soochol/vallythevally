@@ -18,6 +18,8 @@ interface PageFrameProps {
   freshness?: ReactNode;
   fresh?: FreshnessClock;
   actions?: ReactNode;
+  fullWidth?: boolean;
+  hideLinkColorPicker?: boolean;
   children: ReactNode;
 }
 
@@ -40,7 +42,7 @@ function PageTitleMenu({ title }: { title: string }) {
   );
 }
 
-export function PageFrame({ title, freshness, fresh, actions, children }: PageFrameProps) {
+export function PageFrame({ title, freshness, fresh, actions, fullWidth = false, hideLinkColorPicker = false, children }: PageFrameProps) {
   const desktop = useMediaQuery(DESKTOP_QUERY);
   const slot = usePageSlot();
   const status = <Freshness clock={fresh}>{freshness}</Freshness>;
@@ -50,11 +52,11 @@ export function PageFrame({ title, freshness, fresh, actions, children }: PageFr
       {status}
       <div className="page-frame-spacer" />
       {actions}
-      <LinkColorPicker />
+      {!hideLinkColorPicker && <LinkColorPicker />}
     </>
   );
   return (
-    <div className="page-frame">
+    <div className="page-frame" data-full-width={fullWidth ? "" : undefined}>
       {desktop ? (
         slot && createPortal(topbarContent, slot)
       ) : (
@@ -63,7 +65,7 @@ export function PageFrame({ title, freshness, fresh, actions, children }: PageFr
             <Link to={pathOfPage("workspace")} className="page-frame-back" aria-label="작업 영역으로">‹</Link>
             <PageTitleMenu title={title} />
             <div className="page-frame-spacer" />
-            <LinkColorPicker />
+            {!hideLinkColorPicker && <LinkColorPicker />}
           </header>
           {actions && <div className="page-frame-actions">{actions}</div>}
           {status}

@@ -387,111 +387,115 @@ export function ReplayDeck({
   return (
     <footer className="rp-deck" data-testid="replay-deck">
       <div className="rp-deck-controls">
-        <div className="rp-clock-box">
-          <span ref={clockRef} className="rp-clock-val rp-mono" data-testid="replay-clock">09:00:00.000</span>
-          <span ref={sessionPillRef} className="rp-session-pill" data-kind="open">정규장</span>
-          <span ref={deltaPillRef} className="rp-dt-pill rp-mono" data-testid="replay-tick-dt" hidden>
-            <span className="rp-dt-lbl">Δt</span>
-            <span ref={deltaValRef} className="rp-dt-val">0ms</span>
-          </span>
-          <span ref={skipPillRef} className="rp-skip-pill rp-mono" data-testid="replay-skip-notice" hidden />
-          {buffering && <span className="rp-buf-pill" data-testid="replay-buffering">구간 불러오는 중</span>}
-        </div>
-
-        <div className="rp-seg" role="group" aria-label="재생 방식" data-testid="replay-mode-switch">
-          <button type="button" aria-pressed={mode.kind === "time"} title="실제 장중 타임스탬프 간격대로 배속 재생 (M)" onClick={switchToTime}>
-            시간 단위
-          </button>
-          <button type="button" aria-pressed={mode.kind === "tick"} title="틱 1건당 일정 속도로 정밀 재생 (M)" onClick={switchToTick}>
-            틱 단위
-          </button>
-        </div>
-
-        <div className="rp-transport" role="group" aria-label="재생 제어">
-          <button type="button" className="rp-tbtn" title="-1분 (PageDown)" onClick={() => onStepSec(-60)}>-1m</button>
-          <button type="button" className="rp-tbtn" title="-1초 (←)" onClick={() => onStepSec(-1)}>-1s</button>
-          <button type="button" className="rp-tbtn" title="이전 틱 (,)" onClick={() => onStepTick(-1)}>-1틱</button>
-          <button
-            type="button"
-            className="rp-tbtn rp-play-btn"
-            data-testid="replay-play"
-            data-playing={playing ? "true" : "false"}
-            title="재생/일시정지 (Space)"
-            onClick={onTogglePlay}
-          >
-            {playing ? (
-              <svg className="rp-play-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-                <rect x="2" y="1.5" width="3" height="9" rx="0.8" fill="currentColor" />
-                <rect x="7" y="1.5" width="3" height="9" rx="0.8" fill="currentColor" />
-              </svg>
-            ) : (
-              <svg className="rp-play-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-                <path d="M2.5 1.5L10.5 6L2.5 10.5V1.5Z" fill="currentColor" />
-              </svg>
-            )}
-            <span>{playing ? "멈춤" : "재생"}</span>
-          </button>
-          <button type="button" className="rp-tbtn" title="다음 틱 (.)" onClick={() => onStepTick(1)}>+1틱</button>
-          <button type="button" className="rp-tbtn" title="+1초 (→)" onClick={() => onStepSec(1)}>+1s</button>
-          <button type="button" className="rp-tbtn" title="+1분 (PageUp)" onClick={() => onStepSec(60)}>+1m</button>
-        </div>
-
-        {mode.kind === "time" ? (
-          <div className="rp-mode-controls" data-testid="replay-time-controls">
-            <div className="rp-seg rp-mono" role="group" aria-label="배속 선택">
-              {TIME_REPLAY_SPEEDS.map((sp) => (
-                <button
-                  key={sp}
-                  type="button"
-                  aria-pressed={mode.speed === sp}
-                  onClick={() => setTimeSpeed(sp)}
-                >
-                  {`${sp}x`}
-                </button>
-              ))}
-            </div>
-            <div className="rp-seg" role="group" aria-label="공백 구간 자동 스킵" data-testid="replay-idle-skip">
-              <span className="rp-seg-label">공백 스킵</span>
-              {IDLE_SKIP_CHOICES.map((opt) => (
-                <button
-                  key={opt.label}
-                  type="button"
-                  aria-pressed={mode.skipIdleMs === opt.value}
-                  onClick={() => setIdleSkip(opt.value)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+        <div className="rp-deck-left">
+          <div className="rp-clock-box">
+            <span ref={clockRef} className="rp-clock-val rp-mono" data-testid="replay-clock">09:00:00.000</span>
+            <span ref={sessionPillRef} className="rp-session-pill" data-kind="open">정규장</span>
+            <span ref={deltaPillRef} className="rp-dt-pill rp-mono" data-testid="replay-tick-dt" hidden>
+              <span className="rp-dt-lbl">Δt</span>
+              <span ref={deltaValRef} className="rp-dt-val">0ms</span>
+            </span>
+            <span ref={skipPillRef} className="rp-skip-pill rp-mono" data-testid="replay-skip-notice" hidden />
+            {buffering && <span className="rp-buf-pill" data-testid="replay-buffering">구간 불러오는 중</span>}
           </div>
-        ) : (
-          <div className="rp-mode-controls" data-testid="replay-tick-controls">
-            <div className="rp-seg rp-mono" role="group" aria-label="틱 속도 선택">
-              {TICK_REPLAY_RATES.map((rate) => (
-                <button
-                  key={rate}
-                  type="button"
-                  aria-pressed={mode.rateHz === rate}
-                  onClick={() => setTickRate(rate)}
-                >
-                  {`${rate}틱/s`}
-                </button>
-              ))}
-            </div>
-            <div className="rp-seg" role="group" aria-label="틱 대상 선택">
-              {TICK_FILTER_CHOICES.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  aria-pressed={mode.filter === opt.value}
-                  onClick={() => setTickFilter(opt.value)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+        </div>
+
+        <div className="rp-deck-center" data-testid="replay-deck-center">
+          <div className="rp-seg" role="group" aria-label="재생 방식" data-testid="replay-mode-switch">
+            <button type="button" aria-pressed={mode.kind === "time"} title="실제 장중 타임스탬프 간격대로 배속 재생 (M)" onClick={switchToTime}>
+              시간 단위
+            </button>
+            <button type="button" aria-pressed={mode.kind === "tick"} title="틱 1건당 일정 속도로 정밀 재생 (M)" onClick={switchToTick}>
+              틱 단위
+            </button>
           </div>
-        )}
+
+          <div className="rp-transport" role="group" aria-label="재생 제어">
+            <button type="button" className="rp-tbtn" title="-1분 (PageDown)" onClick={() => onStepSec(-60)}>-1m</button>
+            <button type="button" className="rp-tbtn" title="-1초 (←)" onClick={() => onStepSec(-1)}>-1s</button>
+            <button type="button" className="rp-tbtn" title="이전 틱 (,)" onClick={() => onStepTick(-1)}>-1틱</button>
+            <button
+              type="button"
+              className="rp-tbtn rp-play-btn"
+              data-testid="replay-play"
+              data-playing={playing ? "true" : "false"}
+              title="재생/일시정지 (Space)"
+              onClick={onTogglePlay}
+            >
+              {playing ? (
+                <svg className="rp-play-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                  <rect x="2" y="1.5" width="3" height="9" rx="0.8" fill="currentColor" />
+                  <rect x="7" y="1.5" width="3" height="9" rx="0.8" fill="currentColor" />
+                </svg>
+              ) : (
+                <svg className="rp-play-icon" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M2.5 1.5L10.5 6L2.5 10.5V1.5Z" fill="currentColor" />
+                </svg>
+              )}
+              <span>{playing ? "멈춤" : "재생"}</span>
+            </button>
+            <button type="button" className="rp-tbtn" title="다음 틱 (.)" onClick={() => onStepTick(1)}>+1틱</button>
+            <button type="button" className="rp-tbtn" title="+1초 (→)" onClick={() => onStepSec(1)}>+1s</button>
+            <button type="button" className="rp-tbtn" title="+1분 (PageUp)" onClick={() => onStepSec(60)}>+1m</button>
+          </div>
+
+          {mode.kind === "time" ? (
+            <div className="rp-mode-controls" data-testid="replay-time-controls">
+              <div className="rp-seg rp-mono" role="group" aria-label="배속 선택">
+                {TIME_REPLAY_SPEEDS.map((sp) => (
+                  <button
+                    key={sp}
+                    type="button"
+                    aria-pressed={mode.speed === sp}
+                    onClick={() => setTimeSpeed(sp)}
+                  >
+                    {`${sp}x`}
+                  </button>
+                ))}
+              </div>
+              <div className="rp-seg" role="group" aria-label="공백 구간 자동 스킵" data-testid="replay-idle-skip">
+                <span className="rp-seg-label">공백 스킵</span>
+                {IDLE_SKIP_CHOICES.map((opt) => (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    aria-pressed={mode.skipIdleMs === opt.value}
+                    onClick={() => setIdleSkip(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="rp-mode-controls" data-testid="replay-tick-controls">
+              <div className="rp-seg rp-mono" role="group" aria-label="틱 속도 선택">
+                {TICK_REPLAY_RATES.map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    aria-pressed={mode.rateHz === rate}
+                    onClick={() => setTickRate(rate)}
+                  >
+                    {`${rate}틱/s`}
+                  </button>
+                ))}
+              </div>
+              <div className="rp-seg" role="group" aria-label="틱 대상 선택">
+                {TICK_FILTER_CHOICES.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={mode.filter === opt.value}
+                    onClick={() => setTickFilter(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="rp-deck-tools">
           <button type="button" className="rp-flat-btn" data-testid="replay-bookmark-btn" title="현재 시각 북마크 추가 (B)" onClick={onAddBookmark}>
