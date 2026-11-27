@@ -6,7 +6,7 @@ import type { LadderRow } from "../market-window/ladder";
 import { type DayPrices, ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
 import { type BuyingPower, buyPreview, type BuyRatioPercent, groupKey, orderQuantityForPrice, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
-import { PENDING_CHIP_TEXT, PENDING_TEXT } from "./statusText";
+import { PENDING_CHIP_TEXT, PENDING_TEXT, REPLAY_LOCKED_TEXT } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
 import { resolveOrderCellAt } from "./nearestCell";
@@ -29,6 +29,8 @@ interface Props {
   readonly previousClose: number | null;
   readonly groups: ReadonlyMap<string, PriceGroup>;
   readonly writable: boolean;
+  readonly replayLocked?: boolean;
+  readonly onReplayBlocked?: () => void;
   readonly previewQuantity: number;
   readonly buyRatio?: BuyRatioPercent | null;
   readonly buying: BuyingPower | null;
@@ -74,6 +76,7 @@ interface CellApi {
   readonly drag: OrderDrag;
   readonly actions: LadderActions;
   readonly openMenu: (menu: MenuState) => void;
+  readonly onReplayBlocked?: () => void;
 }
 
 interface CellProps {
@@ -82,6 +85,7 @@ interface CellProps {
   readonly price: number;
   readonly group: PriceGroup | undefined;
   readonly writable: boolean;
+  readonly replayLocked: boolean;
   readonly previewQuantity: number;
   readonly buyRatio: BuyRatioPercent | null;
   readonly buying: BuyingPower | null;
@@ -117,7 +121,8 @@ const centerRowOffset = (element: HTMLElement, fallbackToBid: boolean): number |
   return Math.max(0, rowCenter - head - (element.clientHeight - head) / 2);
 };
 
-const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, previewQuantity, buyRatio, buying, api }: CellProps) {
+const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable, replayLocked, previewQuantity, buyRatio, buying, api }: CellProps) {
+  const canEdit = writable && !replayLocked;
   const hovered = useStoreValue(api.hover, (cell) => cell !== null && cell.side === side && cell.rowKey === rowKey);
   const targeted = useStoreValue(api.drag.views, (view) =>
     view?.target.kind === "cell"
@@ -128,7 +133,7 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
   const chipDragging = useStoreValue(api.drag.views, (view) => group !== undefined && view?.source.kind === "chip" && view.source.group === group);
   const cellQuantity = orderQuantityForPrice(side, price, previewQuantity, buying, buyRatio);
   const buyRatioZero = side === "buy" && buyRatio !== null && buying !== null && cellQuantity === 0;
-  const showsPreview = hovered && writable && group === undefined && (cellQuantity > 0 || buyRatioZero);
+  const showsPreview = hovered && canEdit && group === undefined && (cellQuantity > 0 || buyRatioZero);
   const previewTone = showsPreview && side === "buy"
     ? (buyRatioZero ? "over" : buyPreview(price, cellQuantity, buying))
     : null;
@@ -139,8 +144,9 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
       data-side={side}
       data-price={price}
       data-row-key={rowKey}
-      data-disabled={writable ? undefined : ""}
+      data-disabled={canEdit ? undefined : ""}
       data-target={targeted ? "" : undefined}
+      title={replayLocked ? REPLAY_LOCKED_TEXT : undefined}
       onPointerEnter={() => api.hover.set({ side, price, rowKey })}
       onPointerLeave={() => {
         const current = api.hover.get();
@@ -148,9 +154,16 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
       }}
     >
       {group
-        ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-dragging={chipDragging ? "" : undefined} data-pending={group.pending}
+        ? <button type="button" className="od-chip" data-testid="order-chip" data-side={side} data-price={price} data-disabled={canEdit ? undefined : ""} data-dragging={chipDragging ? "" : undefined} data-pending={group.pending}
             aria-label={`${SIDE_LABEL[side]} ${formatPrice(price, false)}원 ${formatShares(group.quantity)} 주문${group.pending ? ` ${PENDING_TEXT[group.pending]}` : ""}`}
-            onPointerDown={(e) => { if (writable && !group.pending) api.drag.begin({ source: { kind: "chip", group }, origin: null }, e); }}
+            onPointerDown={(e) => {
+              if (group.pending || !writable) return;
+              if (replayLocked) {
+                if (e.button === 0) api.onReplayBlocked?.();
+                return;
+              }
+              api.drag.begin({ source: { kind: "chip", group }, origin: null }, e);
+            }}
             onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (!group.pending) api.openMenu({ x: e.clientX, y: e.clientY, group }); }}>
             {group.quantity.toLocaleString("ko-KR")}{group.pending && <span className="od-chip-state"> {PENDING_CHIP_TEXT[group.pending]}</span>}
           </button>
@@ -159,10 +172,11 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, previewQuantity, buyRatio = null, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice, headerOverlay }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, replayLocked = false, onReplayBlocked, previewQuantity, buyRatio = null, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice, headerOverlay }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
-  const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu }), [hover, drag, actions]);
+  const canEdit = writable && !replayLocked;
+  const api = useMemo<CellApi>(() => ({ hover, drag, actions, openMenu: setMenu, onReplayBlocked }), [hover, drag, actions, onReplayBlocked]);
 
   const exploring = explorerOn;
   const [range, setRange] = useState<RowRange>({ start: 0, end: 0 });
@@ -231,11 +245,13 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
     const side = SIDE_OF_SLOT[slot];
     if (row.price === null) return <div className="od-cell" data-empty="" data-side={side} />;
     const group = chipVisible(side, row, repeated) ? groups.get(groupKey(side, row.price)) : undefined;
-    return <OrderCell rowKey={row.key} side={side} price={row.price} group={group} writable={writable} previewQuantity={previewQuantity} buyRatio={buyRatio} buying={buying} api={api} />;
+    return <OrderCell rowKey={row.key} side={side} price={row.price} group={group} writable={writable} replayLocked={replayLocked} previewQuantity={previewQuantity} buyRatio={buyRatio} buying={buying} api={api} />;
   };
   const slots = { left: cell("left"), right: cell("right") };
 
   const all = [...groups.values()].filter((group) => !group.pending);
+  const disabledTitle = replayLocked ? REPLAY_LOCKED_TEXT : undefined;
+  const blockedDrag = writable && replayLocked ? onReplayBlocked : undefined;
   const items = (state: MenuState): OrderListItem[] => {
     const { group } = state;
     if (group) {
@@ -243,13 +259,13 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
       const orders = groups.get(groupKey(group.side, group.price))?.orders ?? [];
       return [
         { kind: "heading", label: `${formatPrice(group.price, false)}원 ${SIDE_LABEL[group.side]} 주문` },
-        ...orders.map((order): OrderListItem => ({ kind: "order", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, order, disabled: !writable, onSelect: () => actions.cancelOne(order.orderNo) })),
+        ...orders.map((order): OrderListItem => ({ kind: "order", label: `${order.openQuantity.toLocaleString("ko-KR")} 취소`, order, disabled: !canEdit, title: disabledTitle, onBlockedDrag: blockedDrag, onSelect: () => actions.cancelOne(order.orderNo) })),
         { kind: "separator" },
-        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !writable || orders.length === 0, onSelect: () => actions.cancelGroups(keys) },
+        { kind: "action", label: "이 가격 모두 취소", danger: true, disabled: !canEdit || orders.length === 0, title: disabledTitle, onSelect: () => actions.cancelGroups(keys) },
       ];
     }
     const side = (s: OrderSide) => all.filter((g) => g.side === s);
-    const entry = (prefix: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label: `${prefix} 모두 취소`, danger: true, disabled: !writable || targets.length === 0, onSelect: () => actions.cancelGroups(targets) });
+    const entry = (prefix: string, targets: readonly PriceGroup[]): OrderListItem => ({ kind: "action", label: `${prefix} 모두 취소`, danger: true, disabled: !canEdit || targets.length === 0, title: disabledTitle, onSelect: () => actions.cancelGroups(targets) });
     return [entry("매수", side("buy")), entry("매도", side("sell")), entry("전체", all)];
   };
 
@@ -262,7 +278,12 @@ export function OrderLadder({ rows, previousClose, groups, writable, previewQuan
       onDoubleClick={(e) => {
         if (!writable || !ladder.current) return;
         const resolved = resolveOrderCellAt(ladder.current, e.clientX, e.clientY, e.target);
-        if (resolved !== null) actions.place(resolved.side, resolved.price);
+        if (resolved === null) return;
+        if (replayLocked) {
+          onReplayBlocked?.();
+          return;
+        }
+        actions.place(resolved.side, resolved.price);
       }}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
       {headerOverlay ?? <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />}

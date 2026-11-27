@@ -81,7 +81,7 @@ export function ReplayStatusLine({ view, trailing }: { readonly view: ReplayView
   if (view.kind === "none") {
     return <MarketStatusLine testId="replay-strip" kind="none" tone="warn" text={view.reason} />;
   }
-  return <MarketStatusLine testId="replay-strip" kind="live" tone="info" text={REPLAY_LIVE_TEXT} />;
+  return <MarketStatusLine testId="replay-strip" kind="live" tone="info" text={REPLAY_LIVE_TEXT}>{trailing}</MarketStatusLine>;
 }
 
 interface BookStatusBarProps {

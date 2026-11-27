@@ -1,6 +1,12 @@
 .od { container:od / inline-size; display:flex; flex:1; flex-direction:column; min-height:0; overflow:hidden; }
 .od-gate { display:flex; align-items:center; gap:var(--s3); padding:var(--s3) var(--s4); border-bottom:var(--size-1) solid var(--line); background:var(--warning-soft); color:var(--text); font-size:var(--fs-xs); }
 .od-gate span { flex:1; }
+.od-replay-banner { box-sizing:border-box; display:flex; flex:none; align-items:center; gap:var(--s2); min-height:var(--size-28); padding:var(--size-4) var(--s3); border-bottom:var(--size-1) solid color-mix(in srgb, var(--warning) 35%, transparent); background:var(--warning-soft); color:var(--text); font-size:var(--fs-xs); }
+.od-replay-banner-icon { display:inline-flex; flex:none; color:var(--warning); }
+.od-replay-banner-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.od-replay-unlock { flex:none; height:var(--size-20); padding:0 var(--s3); border:var(--size-1) solid color-mix(in srgb, var(--warning) 50%, transparent); border-radius:var(--r-s); background:var(--bg); color:var(--text); font-size:var(--fs-xs); font-weight:600; white-space:nowrap; transition:background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }
+.od-replay-unlock:hover { background:var(--hover); border-color:var(--warning); }
+.od[data-replay-locked] .od-ladder-wrap { box-shadow:inset 0 0 0 var(--size-2) color-mix(in srgb, var(--warning) 55%, transparent); }
 .od-link { color:var(--accent); font-size:var(--fs-xs); font-weight:600; }
 .od-link:hover { text-decoration:underline; }
 .od-link:disabled { color:var(--text-3); text-decoration:none; }
@@ -41,6 +47,7 @@
 .od-chip[data-side=sell] { border:var(--size-1) solid var(--down); color:var(--down); box-shadow:none; }
 .od-chip[data-side=buy] { border:var(--size-1) solid var(--up); color:var(--up); box-shadow:none; }
 .od-chip[data-dragging] { opacity:.4; }
+.od-chip[data-disabled] { cursor:not-allowed; }
 .od-chip-state { font-weight:500; }
 .od-chip[data-pending] { cursor:default; border:var(--size-1) dashed var(--on-data); }
 .od-chip[data-pending][data-side=sell] { background:color-mix(in srgb, var(--down) 60%, var(--surface)); }
@@ -56,10 +63,11 @@
 .od-total:hover { border-color:var(--line-strong); }
 .od-total[data-side=sell]:hover { background:color-mix(in srgb, var(--down) 13%, transparent); }
 .od-total[data-side=buy]:hover { background:color-mix(in srgb, var(--up) 13%, transparent); }
-.od-total:not([data-empty]) { cursor:grab; touch-action:none; }
+.od-total:not([data-empty]):not([data-drag-disabled]) { cursor:grab; touch-action:none; }
+.od-total:not([data-empty])[data-drag-disabled] { cursor:pointer; }
 .od-total[data-dragging] { opacity:.4; }
 .od-list-order { cursor:grab; touch-action:none; }
-.od-list-order:disabled { cursor:not-allowed; }
+.od-list-order:disabled, .od-list-order[data-disabled] { cursor:not-allowed; }
 .od-list-row { display:flex; align-items:center; gap:var(--s4); min-height:var(--size-32); padding:0 var(--s3); border-radius:var(--r-m); font-variant-numeric:tabular-nums; transition:background-color var(--dur-fast) var(--ease); }
 .od-list-row:hover { background:var(--hover); }
 .od-list-value { flex:1; color:var(--text-2); }

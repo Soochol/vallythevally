@@ -1,10 +1,10 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
-import { TODAY_REFETCH_MS, useBookReplayAvailable, useBookReplayDay } from "../../api/bookReplay";
+import { TODAY_REFETCH_MS, useBookReplayAvailable, useBookReplayDay, useBookReplayLockAvailable } from "../../api/bookReplay";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { BarInterval } from "../../chart/crosshairSync";
 import { useBookReplayStore } from "../../stores/bookReplay";
 import { serverNow, useServerClock } from "../../stores/serverClock";
-import { useBookReplayPref } from "../../stores/ui";
+import { useBookReplayPref, useUiStore } from "../../stores/ui";
 import { REPLAY_REASON, replayDate, replayView, todayRefreshDelayMs, type ReplayView } from "./replay";
 
 const LIVE_VIEW: ReplayView = { kind: "live" };
@@ -15,9 +15,19 @@ function readPointedBar(code: SymbolCode, enabled: boolean): BarInterval | null 
   return pointed?.symbol === code ? pointed.bar : null;
 }
 
+export function disableBookReplay(): void {
+  useUiStore.getState().setBookReplay(false);
+  useBookReplayStore.getState().clear();
+}
+
 export function useBookReplayEnabled(): boolean {
   const pref = useBookReplayPref();
   return useBookReplayAvailable(pref);
+}
+
+export function useBookReplayOrderLock(): boolean {
+  const pref = useBookReplayPref();
+  return useBookReplayLockAvailable(pref);
 }
 
 export function useBookReplay(code: SymbolCode): ReplayView {

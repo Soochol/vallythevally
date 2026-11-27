@@ -22,6 +22,7 @@ export interface LadderMarketInput {
   readonly fundamentals: Fundamentals | undefined;
   readonly symbolKind: SymbolKind | null;
   readonly replay: ReplayView;
+  readonly replayEnabled?: boolean;
   readonly vi: ViState | null;
   readonly nxtVi?: ViState | null;
   readonly venue?: Venue;
@@ -63,7 +64,7 @@ export function resolveLadderMarket(input: LadderMarketInput): ResolvedLadderMar
   const nxtVi = input.nxtVi ?? null;
   const liveView = book.phase === "empty" ? null : book.view;
   const bounds: LadderBounds = { lower: fundamentals?.lowerLimit ?? null, upper: fundamentals?.upperLimit ?? null };
-  const replayLocked = replay.kind !== "live";
+  const replayLocked = input.replayEnabled === true || replay.kind !== "live";
   const replayRef = replay.kind === "past" ? replayReference(replay.at, serverNowSeconds, { previousClose, bounds }) : null;
   const view = replay.kind === "live" ? liveView : replay.kind === "past" ? replay.book : null;
   const tickRule = tickRuleOf(symbolKind, view ? [...view.asks, ...view.bids].map((level) => level.price) : []);
