@@ -109,6 +109,10 @@
   color: var(--text-2);
 }
 
+:is([data-style="bento"], [data-style="carbon"]) .ui-seg[data-size="sm"] .ui-seg-item {
+  padding-inline: var(--s2);
+}
+
 :is([data-style="bento"], [data-style="carbon"]) .ui-seg-item[aria-checked="true"],
 :is([data-style="bento"], [data-style="carbon"]) .ui-seg-item[aria-pressed="true"],
 :is([data-style="bento"], [data-style="carbon"]) .ui-seg-item[aria-selected="true"] {
@@ -247,6 +251,8 @@
 :is([data-style="bento"], [data-style="carbon"]) .ui-badge[data-tone="success"] { background: var(--success-soft); }
 :is([data-style="bento"], [data-style="carbon"]) .ui-badge[data-tone="warning"] { background: var(--warning-soft); }
 :is([data-style="bento"], [data-style="carbon"]) .ui-badge[data-tone="danger"] { background: var(--danger-soft); }
+:is([data-style="bento"], [data-style="carbon"]) .ui-badge[data-tone="up"] { background: var(--up-soft); }
+:is([data-style="bento"], [data-style="carbon"]) .ui-badge[data-tone="down"] { background: var(--down-soft); }
 
 :is([data-style="bento"], [data-style="carbon"]) .rate-badge {
   padding-inline: 7px;
@@ -343,6 +349,10 @@
   border: 0;
   border-radius: var(--r-l);
   background: var(--surface);
+}
+
+:is([data-style="bento"], [data-style="carbon"]) .rp-col,
+:is([data-style="bento"], [data-style="carbon"]) .rp-deck {
   overflow: hidden;
 }
 
@@ -441,6 +451,7 @@
   border: 0;
   border-radius: var(--r-s);
   background: var(--overlay);
+  color: var(--text-2);
 }
 
 :is([data-style="bento"], [data-style="carbon"])[data-theme="light"] .desktop-topbar,
@@ -664,6 +675,10 @@
   color: var(--text-2);
 }
 
+[data-style="glass"] .ui-seg[data-size="sm"] .ui-seg-item {
+  padding-inline: var(--s2);
+}
+
 [data-style="glass"] .ui-seg-item[aria-checked="true"],
 [data-style="glass"] .ui-seg-item[aria-pressed="true"],
 [data-style="glass"] .ui-seg-item[aria-selected="true"] {
@@ -714,6 +729,18 @@
   border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+[data-style="glass"] .od-preset[data-side-tone="buy"][data-picked],
+[data-style="glass"] .od-preset-mode button[data-mode="buy"][aria-pressed="true"] {
+  background: var(--up-soft);
+  color: var(--up);
+}
+
+[data-style="glass"] .od-preset[data-side-tone="sell"][data-picked],
+[data-style="glass"] .od-preset-mode button[data-mode="sell"][aria-pressed="true"] {
+  background: var(--down-soft);
+  color: var(--down);
 }
 
 [data-style="glass"] .od-tab[aria-expanded="true"] b {
@@ -1045,6 +1072,10 @@
   color: var(--text-2);
 }
 
+[data-style="forest"] .ui-seg[data-size="sm"] .ui-seg-item {
+  padding-inline: var(--s2);
+}
+
 [data-style="forest"] .ui-seg-item[aria-checked="true"],
 [data-style="forest"] .ui-seg-item[aria-pressed="true"],
 [data-style="forest"] .ui-seg-item[aria-selected="true"] {
@@ -1099,6 +1130,18 @@
   background: var(--accent-soft);
   color: var(--accent);
   box-shadow: none;
+}
+
+[data-style="forest"] .od-preset[data-side-tone="buy"][data-picked],
+[data-style="forest"] .od-preset-mode button[data-mode="buy"][aria-pressed="true"] {
+  background: var(--up-soft);
+  color: var(--up);
+}
+
+[data-style="forest"] .od-preset[data-side-tone="sell"][data-picked],
+[data-style="forest"] .od-preset-mode button[data-mode="sell"][aria-pressed="true"] {
+  background: var(--down-soft);
+  color: var(--down);
 }
 
 [data-style="forest"] .od-tab[aria-expanded="true"] b {

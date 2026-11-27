@@ -4,6 +4,7 @@ import { usePublicMode } from "../../public-mode/serverMode";
 import { isActiveAutoOrder, useAutoOrdersStore } from "../../stores/autoOrders";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { Popover } from "../overlay/Popover";
 
 export function AutoGuardBadge() {
   const publicMode = usePublicMode();
@@ -14,28 +15,20 @@ export function AutoGuardBadge() {
   const toggleMaster = useAutoOrdersStore((s) => s.toggleMaster);
   const activeCell = useSelectionStore((s) => s.activeCell);
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!publicMode && !loaded) void load();
   }, [publicMode, loaded, load]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   if (publicMode) return null;
   const activeRules = rules.filter(isActiveAutoOrder);
   if (activeRules.length === 0) return null;
 
   return (
-    <div ref={rootRef} className="relative">
+    <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         data-testid="auto-guard-badge"
         className="tb-btn"
@@ -49,16 +42,21 @@ export function AutoGuardBadge() {
         <span>자동감시 {activeRules.length}</span>
       </button>
       {open && (
-        <div
+        <Popover
+          anchor={triggerRef}
+          solid
+          placement="bottom"
           role="dialog"
           aria-label="자동감시 종목 목록"
-          className="absolute right-0 top-[calc(100%+6px)] z-50 w-72 rounded-m border border-border bg-surface p-3 shadow-dialog"
+          onClose={() => setOpen(false)}
+          className="w-72 border border-line p-3"
         >
-          <div className="mb-2 flex items-center justify-between border-b border-border pb-2 text-s font-semibold">
+          <div className="mb-2 flex items-center justify-between border-b border-line pb-2 text-s font-semibold">
             <span>자동 손절·익절 감시</span>
             <button
               type="button"
-              className="rounded-s border border-border px-2 py-0.5 text-xs"
+              aria-pressed={masterEnabled}
+              className="btn btn-sm"
               onClick={() => void toggleMaster(!masterEnabled)}
             >
               {masterEnabled ? "마스터 ON" : "마스터 OFF"}
@@ -69,7 +67,7 @@ export function AutoGuardBadge() {
               <button
                 key={rule.id}
                 type="button"
-                className="flex flex-col rounded-s border border-border bg-surface-2 px-2.5 py-2 text-left hover:border-accent"
+                className="flex flex-col rounded-s border border-line bg-raised px-2.5 py-2 text-left hover:border-accent"
                 onClick={() => {
                   useLayoutStore.getState().setSymbol(activeCell, { code: rule.symbol as SymbolCode });
                   setOpen(false);
@@ -80,13 +78,13 @@ export function AutoGuardBadge() {
                   <span className="tabular-nums text-xs text-text-2">{rule.remainingQuantity}주</span>
                 </div>
                 <div className="mt-1 flex w-full justify-between tabular-nums text-xs">
-                  <span className="text-warning">SL {rule.stopLossPrice.toLocaleString("ko-KR")}</span>
-                  <span className="text-accent">TP {rule.takeProfit2Price.toLocaleString("ko-KR")}</span>
+                  <span className="text-down">SL {rule.stopLossPrice.toLocaleString("ko-KR")}</span>
+                  <span className="text-up">TP {rule.takeProfit2Price.toLocaleString("ko-KR")}</span>
                 </div>
               </button>
             ))}
           </div>
-        </div>
+        </Popover>
       )}
     </div>
   );

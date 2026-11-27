@@ -144,6 +144,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
 
   const startDrag = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || (e.target instanceof Element && e.target.closest("button, input"))) return;
+    if (typeof window !== "undefined" && window.matchMedia("(width < 48rem)").matches) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { sx: e.clientX, sy: e.clientY, ox: dragOffset.x, oy: dragOffset.y };
@@ -178,8 +179,8 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
   const activeDockMode: ChartPanelMode = panelSection === "settings" ? "settings" : mode;
   const footerMode: IndicatorCommandMode = mode === "compare" ? "compare" : selected?.kind === "candidate" ? "add" : "current";
 
-  return <CommandFrame solid scrim={false} width="ic-frame" labelledBy={`${ids}-title`} onClose={handleClose}>
-    <div data-chart-control="" data-dragging={dragging ? "true" : undefined} style={isMoved ? { transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` } : undefined} className="ic-shell flex min-h-0 flex-1 flex-col" onKeyDown={(event) => {
+  return <CommandFrame solid scrim={false} width="ic-frame" panelStyle={isMoved ? { transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` } : undefined} labelledBy={`${ids}-title`} onClose={handleClose}>
+    <div data-chart-control="" data-dragging={dragging ? "true" : undefined} className="ic-shell flex min-h-0 flex-1 flex-col" onKeyDown={(event) => {
       if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
       const action = commandKey(event.nativeEvent);
       if (action.kind === "submit" && event.target === inputRef.current) { event.preventDefault(); submit(action.close); }

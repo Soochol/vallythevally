@@ -424,9 +424,9 @@ export function FlowTab({ onOpenShares, onOpenAccumulation }: FlowTabProps) {
                           <td className="etf-num">{formatAumWon(row.aumWon)}</td>
                           <td className="etf-num">
                             {row.streakDays >= 2 ? (
-                              <Badge tone="success">▲ {row.streakDays}일</Badge>
+                              <Badge tone="up">▲ {row.streakDays}일</Badge>
                             ) : row.streakDays <= -2 ? (
-                              <Badge tone="danger">▼ {Math.abs(row.streakDays)}일</Badge>
+                              <Badge tone="down">▼ {Math.abs(row.streakDays)}일</Badge>
                             ) : (
                               <span className="etf-muted">-</span>
                             )}

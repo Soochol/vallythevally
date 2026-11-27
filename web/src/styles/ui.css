@@ -1,3 +1,4 @@
+@layer components {
 .ui-dialog-backdrop { padding:var(--size-24); align-items:center; }
 .ui-dialog { max-height:calc(100dvh - var(--size-48)); border:var(--size-1) solid var(--line-strong); background:var(--glass); -webkit-backdrop-filter:var(--glass-blur); backdrop-filter:var(--glass-blur); box-shadow:var(--shadow); }
 .ui-popover.ui-dialog-backdrop:not([data-command-frame]) .ui-dialog,.ui-dialog[data-solid] { background:var(--glass-solid); -webkit-backdrop-filter:none; backdrop-filter:none; }
@@ -40,3 +41,4 @@
 .ui-switch-track>span { position:absolute; top:var(--size-3); left:var(--size-3); width:var(--size-14); height:var(--size-14); border-radius:var(--r-pill); background:var(--text-3); transition:left .12s, background .12s; }
 .ui-switch[aria-checked=true] .ui-switch-track { background:var(--accent); box-shadow:none; }
 .ui-switch[aria-checked=true] .ui-switch-track>span { left:calc(var(--size-18) + var(--size-1)); background:var(--accent-ink); }
+}

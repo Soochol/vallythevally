@@ -30,8 +30,8 @@ const KIND_LABEL: Record<EtfChangeKind, string> = {
 const KIND_TONE: Record<EtfChangeKind, BadgeTone> = {
   added: "accent",
   removed: "warning",
-  increased: "success",
-  decreased: "danger",
+  increased: "up",
+  decreased: "down",
   unchanged: "neutral",
 };
 const COUNT_KINDS = [

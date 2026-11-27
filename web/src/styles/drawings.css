@@ -62,6 +62,7 @@
 .draw-tree-row { display:flex; align-items:center; gap:var(--size-6); padding:var(--size-5) var(--size-6); border:var(--size-1) solid transparent; border-radius:var(--r-s); cursor:pointer; transition:background var(--dur-fast), border-color var(--dur-fast); }
 .draw-tree-row:hover { background:var(--hover); }
 .draw-tree-row[data-selected] { background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 45%, transparent); }
+.draw-tree-row[data-selected] .draw-tree-meta { color:var(--text-2); }
 .draw-tree-row[data-hidden] { opacity:.48; }
 .draw-tree-swatch { width:var(--size-3); height:var(--size-20); border-radius:var(--r-pill); flex:none; }
 .draw-tree-icon { color:var(--text-2); flex:none; }

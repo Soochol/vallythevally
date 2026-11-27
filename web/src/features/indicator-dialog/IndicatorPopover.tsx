@@ -32,7 +32,7 @@ export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }:
     <div className="ip-body">
     <div className="mb-3 flex items-center gap-2">
       <h3 className="flex-1 text-m font-semibold">{KINDS[initial.spec.kind].label}</h3>
-      <button type="button" className="icon-btn" aria-label={shown ? "지표 숨기기" : "지표 보이기"} aria-pressed={!shown} title={shown ? "숨기기" : "보이기"} onClick={() => useLayoutStore.getState().updateIndicator(cellId, initial.id, { visible: !shown })}><EyeIcon size={16} /></button>
+      <button type="button" className="icon-btn" aria-label={shown ? "지표 숨기기" : "지표 보이기"} aria-pressed={!shown} title={shown ? "숨기기" : "보이기"} onClick={() => useLayoutStore.getState().updateIndicator(cellId, initial.id, { visible: !shown })}><EyeIcon size={16} off={!shown} /></button>
       <button type="button" className="icon-btn text-danger" aria-label="지표 지우기" title="지우기" onClick={() => { useLayoutStore.getState().removeIndicator(cellId, initial.id); onClose(); }}><Icon path={DRAWING_ICONS.trash} size={16} /></button>
       <button type="button" className="icon-btn" aria-label="설정 닫기" onClick={() => close()}><CloseIcon size={16} /></button>
     </div>

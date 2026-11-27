@@ -231,16 +231,16 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       aria-busy={status.kind === "loading"}
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
-      <div ref={chartEl} className={dockedHere ? "absolute inset-y-0 left-0 right-[var(--size-320)]" : "absolute inset-0"} />
+      <div ref={chartEl} className={dockedHere ? "isolate absolute inset-y-0 left-0 right-[var(--size-320)]" : "isolate absolute inset-0"} />
       {status.kind === "ready" && <AxisMode cellId={cellId} corner={corner} />}
       {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />
       {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} cellId={cellId} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
-      {status.kind === "loading" && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[5] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}
+      {status.kind === "loading" && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[15] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}
       {olderError && (
         <div
           role="alert"
-          className="absolute left-2 top-1/2 z-[5] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-warning bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] px-3 py-2 text-s text-text shadow-dialog"
+          className="absolute left-2 top-1/2 z-[15] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-warning bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] px-3 py-2 text-s text-text shadow-dialog"
         >
           <p>{olderError.text}</p>
           {olderError.retry && (
@@ -251,14 +251,14 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
         </div>
       )}
       {status.kind === "ready" && status.olderLoading && (
-        <div className="pointer-events-none absolute left-2 top-1/2 z-[5] rounded-m bg-surface px-3 py-2 text-s text-text-2 shadow-dialog" role="status">
+        <div className="pointer-events-none absolute left-2 top-1/2 z-[15] rounded-m bg-surface px-3 py-2 text-s text-text-2 shadow-dialog" role="status">
           과거 봉을 불러오는 중입니다
         </div>
       )}
       {status.kind === "ready" && status.intradayEnd && (
         <div
           role="status"
-          className="absolute left-2 top-1/2 z-[5] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-line bg-surface px-3 py-2 text-s text-text-2 shadow-dialog"
+          className="absolute left-2 top-1/2 z-[15] flex max-w-[min(44ch,calc(100%-96px))] -translate-y-1/2 flex-col items-start gap-2 rounded-m border border-line bg-surface px-3 py-2 text-s text-text-2 shadow-dialog"
         >
           <p>분봉은 최근 1년까지 볼 수 있습니다. 더 과거는 일봉으로 보세요</p>
           <button type="button" className="tb-btn border border-line" onClick={() => useLayoutStore.getState().setPeriod(cellId, "D")}>
@@ -268,7 +268,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       )}
       {notice && <BeforeConnectCard notice={notice} />}
       {error && (
-        <div className="absolute inset-0 z-[5] grid place-items-center bg-chart-bg p-6">
+        <div className="absolute inset-0 z-[15] grid place-items-center bg-chart-bg p-6">
           <CellState view={error} onAction={runCellAction} />
         </div>
       )}

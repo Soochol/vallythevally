@@ -142,16 +142,9 @@
 }
 
 .rp-cal-popover {
-  position: absolute;
-  top: calc(100% + var(--size-6));
-  left: 0;
-  z-index: 60;
-  width: 264px;
+  width: var(--size-268);
   padding: var(--size-12);
   border: var(--size-1) solid var(--line-strong);
-  border-radius: var(--r-l);
-  background: var(--overlay);
-  box-shadow: var(--shadow);
 }
 
 .rp-cal-pop-head {
