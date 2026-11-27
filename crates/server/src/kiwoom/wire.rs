@@ -2370,7 +2370,8 @@ fn parse_real_item(entry: &Value) -> Result<RealItem, WireError> {
             };
             let day = (|| {
                 let change_centi = signed(field("11").ok()?).ok()?.checked_mul(100)?;
-                Some(DayTotals { change_centi, cumulative: Volume(unsigned(field("13").ok()?).ok()?) })
+                let traded_million_won = field("14").ok().and_then(|s| unsigned(s).ok());
+                Some(DayTotals { change_centi, cumulative: Volume(unsigned(field("13").ok()?).ok()?), traded_million_won })
             })();
             let strength_centi = field("228").ok().and_then(|s| level_centi(s.trim().trim_start_matches(['+', '-'])));
             let same_time_ratio_centi = values.get("851").and_then(Value::as_str).and_then(|s| {
@@ -3508,7 +3509,7 @@ mod tests {
     #[test]
     fn real_0b_is_a_combined_trade_with_abs_price_and_qty() {
         let code = StockCode::parse("005930").unwrap();
-        let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100) });
+        let day = Some(DayTotals { change_centi: 0, cumulative: Volume(100), traded_million_won: None });
         let tick = |exchange| RealTick { symbol: Symbol::Stock(code), hhmmss: TimeOfDay::hms(9, 30, 1).unwrap(), price: Price::from_centi(7_120_000).unwrap(), qty: Volume(15), exchange, day, strength_centi: None, same_time_ratio_centi: None, side: None };
         let sell = |exchange| RealTick { side: Some(TradeSide::Sell), ..tick(exchange) };
         assert_eq!(one("0B", "005930_AL", trade_values("093001", -71_200, -15, 100, "NXT")), Ok(RealItem::Trade(sell(Some(Exchange::Nxt)))));
@@ -3528,7 +3529,10 @@ mod tests {
         };
         let mut v = trade_values("093001", -193_400, 15, 56_147_847, "KRX");
         v["11"] = "-8100".into();
-        assert_eq!(day(v.clone()), Some(DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847) }));
+        assert_eq!(day(v.clone()), Some(DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847), traded_million_won: None }));
+        let mut with_value = v.clone();
+        with_value["14"] = "123456".into();
+        assert_eq!(day(with_value), Some(DayTotals { change_centi: -810_000, cumulative: Volume(56_147_847), traded_million_won: Some(123_456) }));
         for (fid, bad) in [("11", "x"), ("13", "")] {
             let mut broken = v.clone();
             broken[fid] = bad.into();

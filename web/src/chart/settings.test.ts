@@ -371,20 +371,43 @@ test("히트맵 설정을 저장했다가 그대로 읽고 틀린 값은 거절�
   expect(readSpecShape({ ...spec, microLabelMode: "full" })).toBeNull();
 });
 
-test("계층별 CVD와 프로그램 수급 설정을 저장했다가 읽고 잘못된 값은 거절한다", () => {
+test("계층별 CVD와 수급 지표 설정을 저장했다가 읽고 옛 프로그램 수급 모양도 호환하며 잘못된 값은 거절한다", () => {
   const cvd = { kind: "tickCvd", showWhale: true, showLarge: true, showMid: false, showRetail: true } as const;
-  const prog = { kind: "programFlow", showShare: true } as const;
+  const prog = { kind: "programFlow", displayMode: "both", aggregation: "cumulative", unit: "eok", showShare: true } as const;
+  const foreign = { kind: "foreignFlow", displayMode: "histogram", aggregation: "bar", unit: "eok" } as const;
+  const inst = { kind: "institutionFlow", displayMode: "line", aggregation: "cumulative", unit: "shares" } as const;
   const settings: ChartSettings = {
     ...DEFAULT_CHART_SETTINGS,
     indicators: [
       { id: "cvd", spec: cvd, panel: "p-cvd", visible: true, style: { colors: ["ind-1", "ind-2", "ind-3"], width: 1 } },
-      { id: "prog", spec: prog, panel: "p-prog", visible: true, style: { colors: ["ind-4", "ind-5"], width: 2 } },
+      { id: "prog", spec: prog, panel: "p-prog", visible: true, style: { colors: ["ind-4", "ind-5"], width: 2, barOpacity: 0.72 } },
+      { id: "foreign", spec: foreign, panel: "p-flow", visible: true, style: { colors: ["ind-1"], width: 1 } },
+      { id: "inst", spec: inst, panel: "p-flow", visible: true, style: { colors: ["ind-2"], width: 2 } },
     ],
-    panels: [{ id: "p-cvd", stretch: 0.25 }, { id: "p-prog", stretch: 0.25 }],
+    panels: [{ id: "p-cvd", stretch: 0.25 }, { id: "p-prog", stretch: 0.25 }, { id: "p-flow", stretch: 0.34 }],
   };
   expect(parseChartSettings(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+  expect(readSpecShape({ kind: "programFlow", showShare: false })).toEqual({
+    kind: "programFlow",
+    displayMode: "line",
+    aggregation: "cumulative",
+    unit: "eok",
+    showShare: false,
+  });
+  expect(readSpecShape({ kind: "programFlow", showShare: true })).toEqual({
+    kind: "programFlow",
+    displayMode: "line",
+    aggregation: "cumulative",
+    unit: "eok",
+    showShare: true,
+  });
+  expect(barOpacityOf({ colors: ["ind-1"], width: 1 }, "foreignFlow")).toBe(0.72);
+  expect(barOpacityOf({ colors: ["ind-1"], width: 1 }, "programFlow")).toBe(0.72);
   expect(readSpecShape({ ...cvd, showWhale: "yes" })).toBeNull();
   expect(readSpecShape({ ...prog, showShare: 1 })).toBeNull();
+  expect(readSpecShape({ ...prog, displayMode: "area" })).toBeNull();
+  expect(readSpecShape({ ...foreign, aggregation: "weekly" })).toBeNull();
+  expect(readSpecShape({ ...inst, unit: "krw" })).toBeNull();
 });
 
 test("여러 지표를 한 패널에 합치고 분리·순서 변경·축 전환하며 v2로 저장·복원한다", () => {

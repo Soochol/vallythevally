@@ -7,6 +7,7 @@ use domain::{KstTime, Symbol};
 
 use super::{ConnId, SubId};
 use crate::market_source::stream::{DesiredFeeds, SeatRules, StreamKind};
+use crate::market_source::vi::ViMarket;
 
 /// 보유자가 모두 빠진 종목을 이만큼 더 받는다. 칸의 종목을 바꿨다가 바로 돌아와도 다시 받기를 기다리지 않는다.
 pub const RELEASE_GRACE_SECS: i64 = 30;
@@ -17,18 +18,19 @@ pub enum Holder {
     Cell { conn: ConnId, sub: SubId },
     Watch { conn: ConnId, symbol: Symbol },
     Feed { conn: ConnId, sub: SubId, kind: StreamKind },
+    Vi { market: ViMarket },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Rank {
     Cell { held: u64 },
     Watch { row: usize, held: u64 },
+    Vi { held: u64 },
 }
 
 impl Rank {
-    /// 보유자 가운데 가장 앞선 순위라서, 관심종목 순위면 칸이 잡지 않은 종목이다.
-    fn is_watch_only(self) -> bool {
-        matches!(self, Rank::Watch { .. })
+    fn is_evictable(self) -> bool {
+        matches!(self, Rank::Watch { .. } | Rank::Vi { .. })
     }
 }
 
@@ -156,7 +158,9 @@ impl SubscriptionManager {
             self.kind_released_at.remove(&(symbol, kind));
         }
         if self.remove_holder_left_empty(symbol, h) {
+            self.released_at.remove(&symbol);
             self.admitted.remove(&symbol);
+            self.admitted_venue.retain(|(x, _)| *x != symbol);
         }
     }
 
@@ -178,7 +182,7 @@ impl SubscriptionManager {
         let held: Vec<(Symbol, Holder)> = self
             .holders
             .iter()
-            .flat_map(|(s, hs)| hs.iter().filter(|h| h.conn() == conn).map(|h| (*s, h.clone())))
+            .flat_map(|(s, hs)| hs.iter().filter(|h| h.conn() == Some(conn)).map(|h| (*s, h.clone())))
             .collect();
         for (s, h) in held {
             self.release(s, &h, now);
@@ -197,7 +201,7 @@ impl SubscriptionManager {
     pub fn watchers(&self, symbol: Symbol) -> impl Iterator<Item = ConnId> + '_ {
         self.holders.get(&symbol).into_iter().flatten().filter_map(|h| match h {
             Holder::Watch { conn, .. } => Some(*conn),
-            Holder::Cell { .. } | Holder::Feed { .. } => None,
+            Holder::Cell { .. } | Holder::Feed { .. } | Holder::Vi { .. } => None,
         })
     }
 
@@ -283,7 +287,7 @@ impl SubscriptionManager {
     }
 
     fn make_room(&mut self, rank: Rank, needed: usize, keep: Option<Symbol>) -> bool {
-        let order = self.evictions(|candidate| candidate.is_watch_only() && candidate > rank);
+        let order = self.evictions(|candidate| candidate.is_evictable() && candidate > rank);
         self.evict_for(order, needed, keep)
     }
 
@@ -371,6 +375,7 @@ impl SubscriptionManager {
             .map(|h| match h {
                 Holder::Cell { .. } | Holder::Feed { .. } => Rank::Cell { held },
                 Holder::Watch { conn, .. } => Rank::Watch { row: self.watch_rows[conn][&symbol], held },
+                Holder::Vi { .. } => Rank::Vi { held },
             })
             .min()
             .expect("보유자가 있는 종목")
@@ -392,9 +397,10 @@ impl Eviction {
 }
 
 impl Holder {
-    fn conn(&self) -> ConnId {
+    fn conn(&self) -> Option<ConnId> {
         match self {
-            Holder::Cell { conn, .. } | Holder::Watch { conn, .. } | Holder::Feed { conn, .. } => *conn,
+            Holder::Cell { conn, .. } | Holder::Watch { conn, .. } | Holder::Feed { conn, .. } => Some(*conn),
+            Holder::Vi { .. } => None,
         }
     }
 
@@ -1164,5 +1170,36 @@ mod tests {
         m.release(stock(2), &combined, t(0));
         let plan = m.plan(t(0));
         assert!(rules.seats(&plan.feeds) <= 3, "{plan:?}");
+    }
+
+    #[test]
+    fn vi_holder_uses_free_seat_yields_to_user_holders_and_forgets_without_grace() {
+        let mut m = manager();
+        let vi = Holder::Vi { market: ViMarket::Krx };
+        m.hold(stock(500), vi.clone());
+        assert_eq!(m.plan(t(0)).realtime, BTreeSet::from([stock(500)]));
+
+        m.forget(stock(500), &vi);
+        assert_eq!(m.plan(t(1)).realtime, BTreeSet::new());
+
+        fill(&mut m, REALTIME_LIMIT - 1);
+        m.hold(stock(500), vi.clone());
+        let plan = m.plan(t(2));
+        assert!(plan.realtime.contains(&stock(500)));
+
+        m.set_watch(ConnId(2), vec![stock(501)], t(3));
+        let plan = m.plan(t(3));
+        assert!(plan.realtime.contains(&stock(501)));
+        assert!(!plan.realtime.contains(&stock(500)));
+        assert!(plan.rejected.contains(&vi));
+
+        m.set_watch(ConnId(2), Vec::new(), t(4));
+        let plan = m.plan(t(4 + RELEASE_GRACE_SECS));
+        assert!(plan.realtime.contains(&stock(500)));
+
+        m.hold(stock(502), cell(3, "c"));
+        let plan = m.plan(t(5 + RELEASE_GRACE_SECS));
+        assert!(plan.realtime.contains(&stock(502)));
+        assert!(!plan.realtime.contains(&stock(500)));
     }
 }

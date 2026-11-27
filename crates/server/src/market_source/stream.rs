@@ -35,6 +35,7 @@ pub struct RealTick {
 pub struct DayTotals {
     pub change_centi: i64,
     pub cumulative: Volume,
+    pub traded_million_won: Option<u64>,
 }
 
 pub const BOOK_DEPTH: usize = 10;

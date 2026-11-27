@@ -18,6 +18,9 @@ test("한글 이름·초성·재무 지표를 찾고 숫자 종목 코드는 지
   expect(first("영업이익")?.kind).toBe("operating_income");
   expect(first("roe")?.kind).toBe("owner_roe");
   expect(first("부채비율")?.kind).toBe("debt_ratio");
+  expect(first("외국인")?.kind).toBe("foreignFlow");
+  expect(first("기관")?.kind).toBe("institutionFlow");
+  expect(first("프로그램 순매수")?.kind).toBe("programFlow");
   expect(parseIndicatorInput("005930")).toEqual([]);
   expect(parseIndicatorInput("없는 지표")).toEqual([]);
 });

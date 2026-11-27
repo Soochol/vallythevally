@@ -294,6 +294,7 @@ pub struct MarketHub {
     first_expected: FirstOfDay,
     tallies: DayTallies,
     vi: ViBoard,
+    vi_holders: BTreeSet<(StockCode, ViMarket)>,
     vi_epoch: u64,
     whales: WhaleBoard,
     last_fill: HashMap<(StockCode, Exchange), KstTime>,
@@ -334,6 +335,7 @@ impl MarketHub {
             first_expected: FirstOfDay::default(),
             tallies: DayTallies::default(),
             vi: ViBoard::default(),
+            vi_holders: BTreeSet::new(),
             vi_epoch: 0,
             whales: WhaleBoard::default(),
             last_fill: HashMap::new(),
@@ -427,7 +429,7 @@ impl MarketHub {
                 self.last_books.clear();
                 self.last_expected.clear();
                 self.micro_detectors.clear();
-                self.reset_vi();
+                self.reset_vi(now);
                 self.reset_whales();
                 tracing::info!(keys = self.keys.len(), "07:45 실시간 키를 모두 다시 시드합니다");
                 self.reseed_all(SeedPurpose::Reload { reason: ReloadReason::DailyReset, from: None });
@@ -548,6 +550,19 @@ impl MarketHub {
         {
             let msg = ServerMessage::FeedBrokers { sub: sub.0.clone(), brokers: feed_brokers(snapshot, *received_at) };
             push(&self.conns, &mut self.closing, conn, msg);
+        }
+        if feed.kind == FeedKind::Book
+            && let Symbol::Stock(code) = feed.symbol
+        {
+            for (market, triggered_at, points) in self.vi.expected_snapshots(code, feed.venue) {
+                let msg = ServerMessage::ViExpectedSnapshot {
+                    symbol: api::SymbolCode(feed.symbol.as_wire()),
+                    market: api::ViMarket::from(market),
+                    triggered_at,
+                    points,
+                };
+                push(&self.conns, &mut self.closing, conn, msg);
+            }
         }
     }
 
@@ -778,8 +793,13 @@ impl MarketHub {
                 Venue::Nxt if tick.exchange != Some(Exchange::Nxt) => None,
                 Venue::Nxt => venue_volumes.map(|v| v.nxt),
             };
+            let traded_million_won = match venue {
+                Venue::Combined => day.traded_million_won,
+                Venue::Krx if !nxt_enabled => day.traded_million_won,
+                _ => None,
+            };
             if let Some(volume) = volume {
-                c.outbox.set_quote(quotes::realtime(symbol, venue, tick.price, base_centi, volume, at));
+                c.outbox.set_quote(quotes::realtime(symbol, venue, tick.price, base_centi, volume, traded_million_won, at));
                 sent_volume[venue_slot(venue)] = Some(volume);
             }
         }
@@ -800,14 +820,18 @@ impl MarketHub {
             return;
         };
         let symbol = expected.symbol;
+        let nxt_enabled = self.nxt_enabled(symbol);
+        let today_fill = |exchange| self.last_fill.get(&(code, exchange)).copied().filter(|filled| filled.kst_date() == at.kst_date());
+        let from = quotes::expected_exchange(nxt_enabled, expected.hhmmss, today_fill(Exchange::Krx), today_fill(Exchange::Nxt));
+        let vi_market = self.resolve_expected_vi_market(code, from);
+        if let Some(market) = vi_market {
+            self.vi.record_expected(code, market, expected.price, expected.expected_qty, at);
+        }
         let watchers: Vec<ConnId> = self.manager.watchers(symbol).collect();
         let book_targets = self.feed_targets(symbol, FeedKind::Book);
         if watchers.is_empty() && book_targets.is_empty() {
             return;
         }
-        let nxt_enabled = self.nxt_enabled(symbol);
-        let today_fill = |exchange| self.last_fill.get(&(code, exchange)).copied().filter(|filled| filled.kst_date() == at.kst_date());
-        let from = quotes::expected_exchange(nxt_enabled, expected.hhmmss, today_fill(Exchange::Krx), today_fill(Exchange::Nxt));
         if !watchers.is_empty()
             && let Some(base_centi) = quotes::base_centi(expected.price, expected.change_centi)
         {
@@ -829,7 +853,8 @@ impl MarketHub {
                 let Some(venue) = self.conns.get(&conn).and_then(|c| c.feeds.get(&sub)).map(|f| f.venue) else {
                     continue;
                 };
-                if !quotes::expected_moves_row(venue, from, nxt_enabled, expected.hhmmss) {
+                let vi_matches = vi_market.is_some_and(|market| vi_market_matches_venue(market, venue));
+                if !quotes::expected_moves_row(venue, from, nxt_enabled, expected.hhmmss) && !vi_matches {
                     continue;
                 }
                 self.last_expected.insert((symbol, venue), (trade, at));
@@ -1027,7 +1052,8 @@ impl MarketHub {
                 self.session_down(RealtimeState::Halted, now);
             }
             StreamEvent::SourceSwitched => {
-                self.reset_vi();
+                let now = self.clock.now();
+                self.reset_vi(now);
                 self.stream.forget_vi_history();
             }
             StreamEvent::SeatsChanged => {
@@ -1102,13 +1128,29 @@ impl MarketHub {
         }
         let book_at = resolve_trade_time(received_at, book.hhmmss).unwrap_or(received_at);
         let nxt_enabled = self.nxt_enabled(book.symbol);
-        let resolved = if book.expected.is_some() {
-            self.last_expected.remove(&(book.symbol, book.venue));
+        let stock_code = match book.symbol {
+            Symbol::Stock(code) => Some(code),
+            Symbol::Index(_) => None,
+        };
+        let resolved = if let Some(expected) = book.expected {
+            if let Some(code) = stock_code {
+                if let Some(market) = self.resolve_book_vi_market(code, book.venue) {
+                    self.vi.record_expected(code, market, expected.price, expected.qty, book_at);
+                }
+                if self.vi.active_accepts_expected(code, book.venue, book_at) {
+                    self.last_expected.insert((book.symbol, book.venue), (expected, book_at));
+                } else {
+                    self.last_expected.remove(&(book.symbol, book.venue));
+                }
+            } else {
+                self.last_expected.remove(&(book.symbol, book.venue));
+            }
             *book
         } else if let Some((cached, cached_at)) = self.last_expected.get(&(book.symbol, book.venue)).copied()
             && cached_at.kst_date() == book_at.kst_date()
-            && let Some(window) = quotes::call_auction_window(book_at.kst_time_of_day(), book.venue, nxt_enabled)
-            && quotes::call_auction_window(cached_at.kst_time_of_day(), book.venue, nxt_enabled) == Some(window)
+            && (quotes::call_auction_window(book_at.kst_time_of_day(), book.venue, nxt_enabled)
+                .is_some_and(|window| quotes::call_auction_window(cached_at.kst_time_of_day(), book.venue, nxt_enabled) == Some(window))
+                || stock_code.is_some_and(|code| self.vi.active_accepts_expected(code, book.venue, cached_at)))
         {
             BookSnapshot { expected: Some(cached), ..*book }
         } else {
@@ -1219,6 +1261,7 @@ impl MarketHub {
         };
         if changed {
             self.publish_vi(code, market);
+            self.sync_vi_holders(received_at);
         }
     }
 
@@ -1236,20 +1279,28 @@ impl MarketHub {
 
     fn on_vi_history(&mut self, alerts: &[ViAlert], now: KstTime) {
         let changed: BTreeSet<(StockCode, ViMarket)> = alerts.iter().filter(|alert| self.vi.apply_alert(alert, now, BaseAfterRelease::Unknown)).map(|alert| (alert.code, alert.market)).collect();
-        for (code, market) in changed {
-            self.publish_vi(code, market);
+        for (code, market) in &changed {
+            self.publish_vi(*code, *market);
+        }
+        if !changed.is_empty() {
+            self.sync_vi_holders(now);
         }
     }
 
     fn settle_vi(&mut self, now: KstTime) {
-        for (code, market) in self.vi.expire(now) {
-            self.publish_vi(code, market);
+        let expired = self.vi.expire(now);
+        for (code, market) in &expired {
+            self.publish_vi(*code, *market);
+        }
+        if !expired.is_empty() {
+            self.sync_vi_holders(now);
         }
     }
 
-    fn reset_vi(&mut self) {
+    fn reset_vi(&mut self, now: KstTime) {
         self.vi.clear();
         self.vi_epoch += 1;
+        self.sync_vi_holders(now);
         for (conn, c) in &self.conns {
             if c.outbox.push(ServerMessage::ViSnapshot { states: Vec::new() }).is_err() {
                 self.closing.push(*conn);
@@ -1265,6 +1316,54 @@ impl MarketHub {
             if c.whales && c.outbox.push(snap.clone()).is_err() {
                 self.closing.push(*conn);
             }
+        }
+    }
+
+    fn is_listed(&self, symbol: Symbol) -> bool {
+        self.directory.borrow().as_ref().is_none_or(|dir| dir.get(symbol).is_some())
+    }
+
+    fn sync_vi_holders(&mut self, now: KstTime) {
+        let desired: BTreeSet<(StockCode, ViMarket)> = self
+            .vi
+            .active_keys()
+            .into_iter()
+            .filter(|(code, _)| self.is_listed(Symbol::Stock(*code)))
+            .collect();
+        if desired == self.vi_holders {
+            return;
+        }
+        for &(code, market) in self.vi_holders.difference(&desired) {
+            let holder = Holder::Vi { market };
+            self.manager.forget(Symbol::Stock(code), &holder);
+            self.rejected.remove(&holder);
+        }
+        for &(code, market) in desired.difference(&self.vi_holders) {
+            self.manager.hold(Symbol::Stock(code), Holder::Vi { market });
+        }
+        self.vi_holders = desired;
+        self.replan(now);
+    }
+
+    fn resolve_expected_vi_market(&self, code: StockCode, fallback: Exchange) -> Option<ViMarket> {
+        let krx = self.vi.is_active(code, ViMarket::Krx);
+        let nxt = self.vi.is_active(code, ViMarket::Nxt);
+        match (krx, nxt) {
+            (true, false) => Some(ViMarket::Krx),
+            (false, true) => Some(ViMarket::Nxt),
+            (true, true) => Some(match fallback {
+                Exchange::Krx => ViMarket::Krx,
+                Exchange::Nxt => ViMarket::Nxt,
+            }),
+            (false, false) => None,
+        }
+    }
+
+    fn resolve_book_vi_market(&self, code: StockCode, venue: Venue) -> Option<ViMarket> {
+        match venue {
+            Venue::Krx => self.vi.is_active(code, ViMarket::Krx).then_some(ViMarket::Krx),
+            Venue::Nxt => self.vi.is_active(code, ViMarket::Nxt).then_some(ViMarket::Nxt),
+            Venue::Combined => self.resolve_expected_vi_market(code, Exchange::Krx),
         }
     }
 
@@ -1387,6 +1486,7 @@ impl MarketHub {
             for conn in conns {
                 self.hold_listed_watch_rows(conn, now);
             }
+            self.sync_vi_holders(now);
         }
         self.replan(now);
         self.sync_day_volumes(now);
@@ -1552,6 +1652,14 @@ fn venue_takes(requested: Venue, exchange: Option<Exchange>) -> bool {
     }
 }
 
+fn vi_market_matches_venue(market: ViMarket, venue: Venue) -> bool {
+    match venue {
+        Venue::Combined => true,
+        Venue::Krx => market == ViMarket::Krx,
+        Venue::Nxt => market == ViMarket::Nxt,
+    }
+}
+
 fn feed_book(book: &BookSnapshot, received_at: KstTime) -> api::FeedBook {
     let side = |levels: &[Option<BookLevel>]| levels.iter().map(|l| l.map(|l| api::FeedBookLevel { price: won(l.price), qty: l.qty.0 })).collect();
     api::FeedBook {
@@ -1587,14 +1695,14 @@ fn feed_brokers(snapshot: &BrokerSnapshot, at: KstTime) -> api::FeedBrokers {
 fn cell_of(h: Holder) -> Option<(ConnId, SubId)> {
     match h {
         Holder::Cell { conn, sub } => Some((conn, sub)),
-        Holder::Watch { .. } | Holder::Feed { .. } => None,
+        Holder::Watch { .. } | Holder::Feed { .. } | Holder::Vi { .. } => None,
     }
 }
 
 fn feed_of(h: &Holder) -> Option<(ConnId, SubId)> {
     match h {
         Holder::Feed { conn, sub, .. } => Some((*conn, sub.clone())),
-        Holder::Cell { .. } | Holder::Watch { .. } => None,
+        Holder::Cell { .. } | Holder::Watch { .. } | Holder::Vi { .. } => None,
     }
 }
 
@@ -1814,7 +1922,7 @@ mod tests {
         let StreamEvent::Tick { mut tick, received_at } = trade(h, hhmmss, price, 1, Some(exchange)) else {
             unreachable!("trade는 Tick이다")
         };
-        tick.day = Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative) });
+        tick.day = Some(DayTotals { change_centi: change_won * 100, cumulative: Volume(cumulative), traded_million_won: None });
         StreamEvent::Tick { tick, received_at }
     }
 
@@ -3252,7 +3360,7 @@ mod tests {
             unreachable!("trade는 Tick이다")
         };
         tick.symbol = Symbol::parse(code).unwrap();
-        tick.day = Some(DayTotals { change_centi: day.0 * 100, cumulative: Volume(day.1) });
+        tick.day = Some(DayTotals { change_centi: day.0 * 100, cumulative: Volume(day.1), traded_million_won: None });
         StreamEvent::Tick { tick, received_at }
     }
 
@@ -3276,6 +3384,29 @@ mod tests {
 
     fn quote_messages(msgs: Vec<ServerMessage>) -> Vec<ServerMessage> {
         msgs.into_iter().filter(|m| matches!(m, ServerMessage::Quotes { .. })).collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn realtime_quote_forwards_traded_million_won_for_combined_only() {
+        let h = std_harness();
+        let (conn, out) = connect(&h).await;
+        live(&h).await;
+        h.hub.watch(conn, vec![samsung().feed.symbol()], Venue::Combined);
+        settle().await;
+        let _ = take(&out).await;
+
+        let StreamEvent::Tick { mut tick, received_at } = trade(&h, (9, 0, 51), 71_000, 10, Some(Exchange::Krx)) else {
+            unreachable!("trade는 Tick이다")
+        };
+        tick.day = Some(DayTotals { change_centi: 100_000, cumulative: Volume(1_000), traded_million_won: Some(71) });
+        h.events.send(StreamEvent::Tick { tick, received_at }).await.unwrap();
+
+        let quotes = quote_messages(take(&out).await);
+        assert_eq!(quotes.len(), 1);
+        let ServerMessage::Quotes { quotes, .. } = &quotes[0] else {
+            unreachable!()
+        };
+        assert_eq!(quotes[0].traded_million_won, Some(71));
     }
 
     fn samsung_code(venue: Venue) -> String {
@@ -4247,5 +4378,79 @@ mod tests {
                     && event.ratio_bps == 10_000
         )));
         assert!(second.iter().any(|m| matches!(m, ServerMessage::FeedOfi { sub, ofi } if sub == "m" && ofi.buy_pressure_pct == 100 && ofi.ofi_qty == 4_900)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn vi_expected_history_accumulates_via_temp_holder_replays_on_book_subscribe_and_keeps_last_expected() {
+        let h = harness(at(9, 30, 0), morning_chart(), Duration::ZERO);
+        live(&h).await;
+        vi_event(&h, vi_alert(SAMSUNG, None)).await;
+        until_desired(&h, "VI 임시 홀더 등록", |desired| desired.contains_key(&samsung_symbol())).await;
+
+        let send_expected = |sec: u32, price_won: u64, qty: u64| {
+            let quote = ExpectedQuote {
+                symbol: samsung_symbol(),
+                hhmmss: TimeOfDay::hms(9, 30, sec).unwrap(),
+                price: won(price_won),
+                change_centi: 10_000,
+                expected_qty: Volume(qty),
+            };
+            h.events.send(StreamEvent::Expected { quote, received_at: at(9, 30, sec) })
+        };
+        send_expected(5, 881_000, 200).await.unwrap();
+        send_expected(12, 883_000, 350).await.unwrap();
+        settle().await;
+
+        let (conn1, out1) = connect(&h).await;
+        subscribe_feed(&h, conn1, "b1", FeedKind::Book, Venue::Combined);
+        let msgs1 = take(&out1).await;
+        let expected_points = vec![
+            api::ViExpectedPoint { t: UnixSeconds(at(9, 30, 5).unix()), price: 881_000.0, qty: 200 },
+            api::ViExpectedPoint { t: UnixSeconds(at(9, 30, 12).unix()), price: 883_000.0, qty: 350 },
+        ];
+        assert!(msgs1.contains(&ServerMessage::ViExpectedSnapshot {
+            symbol: api::SymbolCode(SAMSUNG.into()),
+            market: api::ViMarket::Krx,
+            triggered_at: Some(UnixSeconds(at(9, 30, 0).unix())),
+            points: expected_points.clone(),
+        }));
+
+        let StreamEvent::Book { mut book, .. } = book_event_on(&h, Venue::Combined, 881_000, 10) else { unreachable!() };
+        book.hhmmss = TimeOfDay::hms(9, 30, 15).unwrap();
+        h.events.send(StreamEvent::Book { book, received_at: at(9, 30, 15) }).await.unwrap();
+        take(&out1).await;
+
+        send_expected(20, 885_000, 420).await.unwrap();
+        let after_0h = take(&out1).await;
+        let want_expected = Some(api::FeedExpected { price: 885_000.0, qty: 420 });
+        assert!(after_0h.iter().any(|m| matches!(m, ServerMessage::FeedBook { sub, book } if sub == "b1" && book.expected == want_expected)));
+
+        let StreamEvent::Book { mut book, .. } = book_event_on(&h, Venue::Combined, 885_000, 20) else { unreachable!() };
+        book.hhmmss = TimeOfDay::hms(9, 30, 25).unwrap();
+        book.expected = None;
+        h.events.send(StreamEvent::Book { book, received_at: at(9, 30, 25) }).await.unwrap();
+        let after_0d = take(&out1).await;
+        assert!(after_0d.iter().any(|m| matches!(m, ServerMessage::FeedBook { sub, book } if sub == "b1" && book.expected == want_expected)));
+
+        let (conn2, out2) = connect(&h).await;
+        subscribe_feed(&h, conn2, "b2", FeedKind::Book, Venue::Combined);
+        let msgs2 = take(&out2).await;
+        let mut all_points = expected_points;
+        all_points.push(api::ViExpectedPoint { t: UnixSeconds(at(9, 30, 20).unix()), price: 885_000.0, qty: 420 });
+        assert!(msgs2.contains(&ServerMessage::ViExpectedSnapshot {
+            symbol: api::SymbolCode(SAMSUNG.into()),
+            market: api::ViMarket::Krx,
+            triggered_at: Some(UnixSeconds(at(9, 30, 0).unix())),
+            points: all_points,
+        }));
+
+        h.hub.unsubscribe(conn1, sub("b1"));
+        h.hub.unsubscribe(conn2, sub("b2"));
+        h.clock.jump(crate::market::subscriptions::RELEASE_GRACE_SECS + 5);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert!(h.desired.borrow().contains_key(&samsung_symbol()));
+
+        vi_event(&h, vi_alert(SAMSUNG, TimeOfDay::hms(9, 32, 14))).await;
+        until_desired(&h, "VI 해제 즉시 임시 홀더 반납", |desired| !desired.contains_key(&samsung_symbol())).await;
     }
 }

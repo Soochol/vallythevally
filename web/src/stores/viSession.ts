@@ -1,24 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { FeedExpected } from "../api/generated/FeedExpected";
 import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import type { ViDirection } from "../api/generated/ViDirection";
+import type { ViExpectedPoint } from "../api/generated/ViExpectedPoint";
 import type { ViPlaybook } from "../api/generated/ViPlaybook";
 import type { ViState } from "../api/generated/ViState";
 import { useViPlaybook } from "../api/viPlaybook";
+import { viExpectedStore } from "./realtime";
+import { appendExpectedPoint, EMPTY_EXPECTED_POINTS, MAX_EXPECTED_POINTS } from "./viExpectedStore";
+
+export { appendExpectedPoint, MAX_EXPECTED_POINTS };
+export type { ViExpectedPoint };
 
 export const VI_DURATION_SEC = 120;
 export const VI_LATE_WINDOW_ELAPSED_SEC = 105;
 export const VI_TRAP_PRICE_PCT = 0.5;
 export const VI_TRAP_VOLUME_SHRINK_PCT = 30;
-const MAX_EXPECTED_POINTS = 240;
 const TICK_INTERVAL_MS = 1000;
-
-export interface ViExpectedPoint {
-  readonly t: UnixSeconds;
-  readonly price: number;
-  readonly qty: number;
-}
 
 export type ViTrapReason = "price_drop" | "volume_shrink";
 
@@ -57,19 +56,6 @@ export function computeViTiming(trigger: ViState, nowSec: UnixSeconds): ViTiming
   const elapsedSec = trigger.triggeredAt === null ? 0 : Math.max(0, Math.floor(nowSec - trigger.triggeredAt));
   const remainingSec = Math.max(0, VI_DURATION_SEC - elapsedSec);
   return { elapsedSec, remainingSec };
-}
-
-export function appendExpectedPoint(
-  series: readonly ViExpectedPoint[],
-  expected: FeedExpected | null,
-  t: UnixSeconds,
-): readonly ViExpectedPoint[] {
-  if (expected === null || !(expected.price > 0) || !Number.isFinite(expected.price)) return series;
-  const qty = Number.isFinite(expected.qty) && expected.qty >= 0 ? expected.qty : 0;
-  const last = series[series.length - 1];
-  if (last !== undefined && last.price === expected.price && last.qty === qty) return series;
-  const next = [...series, { t, price: expected.price, qty }];
-  return next.length > MAX_EXPECTED_POINTS ? next.slice(next.length - MAX_EXPECTED_POINTS) : next;
 }
 
 export function detectTrapAlert(
@@ -147,23 +133,22 @@ export function formatCountdown(remainingSec: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-interface TrackedSeries {
-  readonly key: string | null;
-  readonly points: readonly ViExpectedPoint[];
-}
-
 export function useViSession(
   code: SymbolCode,
   vi: ViState | null,
   expected: FeedExpected | null,
   trackingEnabled: boolean,
   overlayVisible: boolean = trackingEnabled,
+  expectedAt: UnixSeconds | null = null,
+  includePlaybook: boolean = true,
 ): ViViewState {
   const trackingActive = trackingEnabled && vi !== null && vi.active;
   const visible = trackingActive && overlayVisible;
   const sessionKey = trackingActive ? viSessionKey(code, vi) : null;
+  const market = vi?.market ?? "krx";
+  const triggeredAt = vi?.triggeredAt ?? null;
   const direction: ViDirection = vi?.direction ?? "up";
-  const playbookQuery = useViPlaybook(code, direction, "all", trackingActive);
+  const playbookQuery = useViPlaybook(code, direction, "all", trackingActive && includePlaybook);
   const playbookStatus: ViPlaybookStatus =
     playbookQuery.data !== undefined
       ? "ready"
@@ -172,7 +157,11 @@ export function useViSession(
         : "loading";
 
   const [nowSec, setNowSec] = useState<UnixSeconds>(() => Math.floor(Date.now() / 1000));
-  const [tracked, setTracked] = useState<TrackedSeries>({ key: null, points: [] });
+  const subscribeExpected = useCallback((listener: () => void) => viExpectedStore.subscribe(code, listener), [code]);
+  const expectedSeries = useSyncExternalStore(
+    subscribeExpected,
+    () => (trackingActive && vi !== null ? viExpectedStore.get(code, vi.market, vi.triggeredAt) : EMPTY_EXPECTED_POINTS),
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -182,30 +171,22 @@ export function useViSession(
   }, [visible, sessionKey]);
 
   useEffect(() => {
-    if (sessionKey === null) {
-      setTracked((prev) => (prev.key === null && prev.points.length === 0 ? prev : { key: null, points: [] }));
-      return;
-    }
-    const stamp = Math.floor(Date.now() / 1000);
-    setNowSec(stamp);
-    setTracked((prev) => {
-      const base = prev.key === sessionKey ? prev.points : [];
-      const next = appendExpectedPoint(base, expected, stamp);
-      if (prev.key === sessionKey && next === prev.points) return prev;
-      return { key: sessionKey, points: next };
-    });
-  }, [sessionKey, expected?.price, expected?.qty]);
+    if (!trackingActive || vi === null || expected === null) return;
+    const now = Math.floor(Date.now() / 1000);
+    setNowSec(now);
+    const stamp = expectedAt ?? now;
+    viExpectedStore.record(code, market, triggeredAt, expected, stamp);
+  }, [trackingActive, code, market, triggeredAt, expected?.price, expected?.qty, expectedAt]);
 
   return useMemo(() => {
     if (!visible || vi === null || sessionKey === null) return { kind: "inactive" };
-    const points = tracked.key === sessionKey ? tracked.points : [];
     return resolveViViewState({
       sessionKey,
       vi,
       nowSec,
-      expectedSeries: points,
+      expectedSeries,
       playbook: playbookQuery.data ?? null,
       playbookStatus,
     });
-  }, [visible, vi, sessionKey, nowSec, tracked, playbookQuery.data, playbookStatus]);
+  }, [visible, vi, sessionKey, nowSec, expectedSeries, playbookQuery.data, playbookStatus]);
 }

@@ -30,8 +30,9 @@ import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
 import { FinancialIndicatorStore } from "./financialFamily";
-import { isFinancial, isFinancialBar, isMicro, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName } from "./kinds";
-import { type MicroFamilyDeps, MicroIndicatorController, type MicroTarget, programLineValue, tickCvdLineValue } from "./microFamily";
+import { isFinancial, isFinancialBar, isFlow, isInvestorFlow, isMicro, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName } from "./kinds";
+import { InvestorFlowController, type InvestorFamilyDeps, type InvestorTarget } from "./investorFamily";
+import { type MicroFamilyDeps, MicroIndicatorController, type MicroTarget, tickCvdLineValue } from "./microFamily";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
 import type { BarTuple, Columns, EngineErrorKind, EngineResult, FromWorker, LineInfo, Point } from "./protocol";
 import { type QuoteFamilyDeps, QuoteIndicatorController, type QuoteTarget } from "./quoteFamily";
@@ -109,7 +110,21 @@ export interface LayerHost {
   guard(draw: () => void): void;
 }
 
-const GUIDES: Partial<Record<Kind, number[]>> = { rsi: [70, 30], stochSlow: [80, 20] };
+const GUIDES: Partial<Record<Kind, number[]>> = {
+  rsi: [70, 30],
+  stochSlow: [80, 20],
+  foreignFlow: [0],
+  institutionFlow: [0],
+  programFlow: [0],
+};
+
+function effectiveBarOpacity(config: IndicatorConfig): number {
+  const base = barOpacityOf(config.style, config.spec.kind);
+  if (isFlow(config.spec) && config.spec.displayMode === "both") {
+    return Math.max(0.1, Math.round(base * 0.65 * 100) / 100);
+  }
+  return base;
+}
 
 const tuple = (b: Bar): BarTuple => [b.t, b.o, b.h, b.l, b.c, b.v];
 const volumePoint = (b: Bar): Point => ({ t: b.t, v: b.v, up: b.c >= b.o });
@@ -173,6 +188,7 @@ export class IndicatorLayer {
   private readonly financialStore = new FinancialIndicatorStore();
   private readonly quotes: QuoteIndicatorController;
   private readonly micro: MicroIndicatorController;
+  private readonly investors: InvestorFlowController;
 
   attachMainSeries(series: ISeriesApi<SeriesType, Time>): void {
     this.quotes.attachMainSeries(series);
@@ -188,6 +204,10 @@ export class IndicatorLayer {
 
   setMicroTarget(target: MicroTarget | null, sync = true): void {
     this.micro.setTarget(target, sync);
+  }
+
+  setInvestorTarget(target: InvestorTarget | null, sync = true): void {
+    this.investors.setTarget(target, sync);
   }
 
   setMicroLive(enabled: boolean): void {
@@ -229,6 +249,7 @@ export class IndicatorLayer {
     open: OpenPort,
     quoteDeps?: QuoteFamilyDeps,
     microDeps?: MicroFamilyDeps,
+    investorDeps?: InvestorFamilyDeps,
   ) {
     this.port = open({ message: (m) => this.onMessage(m), broken: () => this.onBroken() });
     this.quotes = new QuoteIndicatorController(
@@ -247,9 +268,18 @@ export class IndicatorLayer {
         tokens: () => this.host.tokens(),
         configs: () => this.configs,
         onTickCvdChanged: (from) => this.applyTickCvdUpdate(from),
-        onProgramChanged: (from) => this.applyProgramUpdate(from),
+        onProgramChanged: () => this.applyProgramUpdate(),
       },
       microDeps,
+    );
+    this.investors = new InvestorFlowController(
+      {
+        bars: () => this.display,
+        tokens: () => this.host.tokens(),
+        configs: () => this.configs,
+        onInvestorChanged: () => this.applyInvestorUpdate(),
+      },
+      investorDeps,
     );
   }
 
@@ -261,10 +291,18 @@ export class IndicatorLayer {
     this.host.requestFrame();
   }
 
-  private applyProgramUpdate(from: UnixSeconds | null): void {
+  private applyProgramUpdate(): void {
     for (const s of this.shown.values()) if (isProgramFlow(s.config.spec)) {
       this.updateProgramStatus(s);
-      if (s.config.visible) this.syncProgramFlow(s, from);
+      if (s.config.visible) this.syncProgramFlow(s);
+    }
+    this.host.requestFrame();
+  }
+
+  private applyInvestorUpdate(): void {
+    for (const s of this.shown.values()) if (isInvestorFlow(s.config.spec)) {
+      this.updateInvestorStatus(s);
+      if (s.config.visible) this.syncInvestorFlow(s);
     }
     this.host.requestFrame();
   }
@@ -378,7 +416,7 @@ export class IndicatorLayer {
       }
       if (prev.style !== config.style || prev.visible !== config.visible) this.styleLines(s);
       else if (prevLeaderById.get(config.id) !== this.isAxisLeader(config)) leaderChanged.push(s);
-      if (barOpacityOf(prev.style) !== barOpacityOf(config.style)) this.redrawBars(s);
+      if (barOpacityOf(prev.style, prev.spec.kind) !== barOpacityOf(config.style, config.spec.kind)) this.redrawBars(s);
     }
     if (this.canPatchSeries(prevConfigs, prevPanels, prevPaneById, prevSlotById, prevVolMergedById, survivingIds)) {
       for (const s of leaderChanged) this.styleLines(s);
@@ -399,6 +437,7 @@ export class IndicatorLayer {
     this.create(fresh);
     this.quotes.syncFeeds();
     this.micro.syncFeeds();
+    this.investors.syncFeeds();
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
       else if (isQuoteTotals(s.config.spec)) {
@@ -411,7 +450,10 @@ export class IndicatorLayer {
         if (s.config.visible) this.syncTickCvd(s, null);
       } else if (isProgramFlow(s.config.spec)) {
         this.updateProgramStatus(s);
-        if (s.config.visible) this.syncProgramFlow(s, null);
+        if (s.config.visible) this.syncProgramFlow(s);
+      } else if (isInvestorFlow(s.config.spec)) {
+        this.updateInvestorStatus(s);
+        if (s.config.visible) this.syncInvestorFlow(s);
       }
     }
   }
@@ -475,13 +517,14 @@ export class IndicatorLayer {
 
   private resetNow(h: History, keepQuotes = false): void {
     for (const s of this.shown.values()) {
-      if (keepQuotes && (isQuoteTotals(s.config.spec) || isQuoteDepth(s.config.spec) || isMicro(s.config.spec))) continue;
+      if (keepQuotes && (isQuoteTotals(s.config.spec) || isQuoteDepth(s.config.spec) || isMicro(s.config.spec) || isInvestorFlow(s.config.spec))) continue;
       this.clearLines(s);
       if (s.config.visible) s.status = { kind: "pending" };
     }
     if (!keepQuotes) {
       this.quotes.markDepthLegendsDirty();
       this.micro.invalidateCoverage();
+      this.investors.invalidateCoverage();
     }
     this.load(h, keepQuotes);
   }
@@ -494,6 +537,7 @@ export class IndicatorLayer {
     this.committedT = h.bars[h.bars.length - 1]?.t ?? null;
     this.quotes.cover(this.display);
     this.micro.cover(this.display);
+    this.investors.cover(this.display);
     this.create(this.configs.filter((c) => c.visible));
     for (const s of this.shown.values()) {
       if (isFinancial(s.config.spec)) this.drawFinancial(s);
@@ -507,7 +551,10 @@ export class IndicatorLayer {
         if (s.config.visible) this.syncTickCvd(s, null);
       } else if (isProgramFlow(s.config.spec) && !keepQuotes) {
         this.updateProgramStatus(s);
-        if (s.config.visible) this.syncProgramFlow(s, null);
+        if (s.config.visible) this.syncProgramFlow(s);
+      } else if (isInvestorFlow(s.config.spec) && !keepQuotes) {
+        this.updateInvestorStatus(s);
+        if (s.config.visible) this.syncInvestorFlow(s);
       }
     }
   }
@@ -551,10 +598,16 @@ export class IndicatorLayer {
     if (next.length > prev.length) {
       this.quotes.cover(next);
       this.micro.cover(next);
+      this.investors.cover(next);
     }
     if (!this.timesDirty) this.allTimes.add(bar.t);
     if (op === "confirm") this.committedT = bar.t;
-    if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) this.rebaseLeadingSpans(bar);
+    if (next.length > prev.length || next.at(-1)?.c !== prev.at(-1)?.c) {
+      this.rebaseLeadingSpans(bar);
+      for (const s of this.shown.values()) {
+        if (s.config.visible && isInvestorFlow(s.config.spec)) this.syncInvestorFlow(s);
+      }
+    }
     const point = volumePoint(bar);
     for (const s of this.shown.values()) if (s.config.visible && isPlainVolume(s.config.spec)) {
       for (const line of s.lines) {
@@ -678,6 +731,9 @@ export class IndicatorLayer {
       if (isProgramFlow(config.spec)) {
         return { ...this.micro.programFlowRow(config, time, tokens, panelInfo), draggable };
       }
+      if (isInvestorFlow(config.spec)) {
+        return { ...this.investors.row(config, time, tokens, panelInfo), draggable };
+      }
       const values: LegendValue[] =
         state !== "ok" || time === null || !s
           ? []
@@ -706,7 +762,7 @@ export class IndicatorLayer {
     for (const config of this.configs) {
       const shown = this.shown.get(config.id);
       const panelIndex = config.panel === "price" ? -1 : this.panels.findIndex((panel) => panel.id === config.panel);
-      if (isFinancial(config.spec) || isQuoteTotals(config.spec) || isMicro(config.spec) || panelIndex >= 0) continue;
+      if (isFinancial(config.spec) || isQuoteTotals(config.spec) || isMicro(config.spec) || isInvestorFlow(config.spec) || panelIndex >= 0) continue;
       if (isQuoteDepth(config.spec)) {
         rows.push(this.quotes.depthPriceLegend(config, this.display));
         continue;
@@ -770,6 +826,7 @@ export class IndicatorLayer {
   dispose(): void {
     this.quotes.dispose();
     this.micro.dispose();
+    this.investors.dispose();
     this.port.close();
     this.clearPanelAnchors();
     for (const id of [...this.shown.keys()]) this.removeShown(id);
@@ -943,8 +1000,18 @@ export class IndicatorLayer {
       } else if (isProgramFlow(s.config.spec)) {
         this.updateProgramStatus(s);
         if (s.config.visible) {
+          const data = this.micro.programSeriesFor(s.config);
           for (const line of s.lines) {
-            line.points = this.buildProgramPoints(line);
+            line.points = this.programLinePoints(line.id, data);
+            if (line.points.length) this.draw(line, line.points);
+          }
+        }
+      } else if (isInvestorFlow(s.config.spec)) {
+        this.updateInvestorStatus(s);
+        if (s.config.visible) {
+          const data = this.investors.seriesFor(s.config);
+          for (const line of s.lines) {
+            line.points = this.investorLinePoints(line.id, data);
             if (line.points.length) this.draw(line, line.points);
           }
         }
@@ -969,7 +1036,7 @@ export class IndicatorLayer {
       if ((isVolumeOverPrice(config) || mergedVolume) && id === "volume") series.setSeriesOrder(0);
       const guides = i === 0 ? (GUIDES[config.spec.kind] ?? []).map((price) => series.createPriceLine(this.guide(price))) : [];
       const same = kept[i]?.id === id ? kept[i] : undefined;
-      return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: barOpacityOf(config.style), points: same?.points ?? [], drawnLastT: null, guides, legendValues: new TrackedValues(), legendDirty: true, legendHasGap: false };
+      return { ...plot, priceOverlay: isOverlay(config, id), id, shift: same?.shift ?? 0, barOpacity: effectiveBarOpacity(config), points: same?.points ?? [], drawnLastT: null, guides, legendValues: new TrackedValues(), legendDirty: true, legendHasGap: false };
     });
   }
 
@@ -980,9 +1047,11 @@ export class IndicatorLayer {
       ? { priceScaleId: `volume:${config.id}` }
       : id === "programShare"
         ? { priceScaleId: `programShare:${config.id}` }
-        : pane > 0 && resolvedSlot !== "right"
-          ? { priceScaleId: priceScaleIdFor(config, resolvedSlot) }
-          : {};
+        : id === "flowCum"
+          ? { priceScaleId: `flowCum:${config.id}` }
+          : pane > 0 && resolvedSlot !== "right"
+            ? { priceScaleId: priceScaleIdFor(config, resolvedSlot) }
+            : {};
     const options = { ...this.lineOptions(config, id, i), priceFormat, ...scaleOverride };
     const bar = isFinancial(config.spec) ? isFinancialBar(config.spec.kind) : isBarLine(id);
     if (!bar) return { overlay: true, series: addOverlayLine(this.host.chart, options, pane, isOverlay(config, id)) };
@@ -1024,6 +1093,9 @@ export class IndicatorLayer {
   private priceFormat(config: IndicatorConfig): PriceFormat {
     const financialFormat = this.financialStore.priceFormat(config, this.axisGeometry(config));
     if (financialFormat !== null) return financialFormat;
+    if (isFlow(config.spec)) {
+      return axisPriceFormat(config.spec.unit, config.spec.unit === "shares" ? 1 : 0.01, this.axisGeometry(config));
+    }
     const unit = config.spec.kind === "volume" || isQuoteTotals(config.spec) ? "volume" : config.spec.kind === "macd" || config.spec.kind === "rsi" || config.spec.kind === "stochSlow" || isMicro(config.spec) || this.host.isIndex() ? "index" : "price";
     return axisPriceFormat(unit, 0.01, this.axisGeometry(config));
   }
@@ -1095,13 +1167,7 @@ export class IndicatorLayer {
     const programPt = this.micro.programPointAt(bar.t);
     if (programPt) {
       for (const s of this.shown.values()) if (s.config.visible && isProgramFlow(s.config.spec)) {
-        for (const line of s.lines) {
-          const v = programLineValue(line.id, programPt);
-          if (v === null) continue;
-          const point: Point = { t: bar.t, v };
-          line.points = applyToPoints(line.points, { op: "update", point });
-          this.queue.push(line, { op: "update", point });
-        }
+        this.syncProgramFlow(s);
       }
     }
   }
@@ -1120,6 +1186,14 @@ export class IndicatorLayer {
       return;
     }
     s.status = this.micro.programState() === "loading" ? { kind: "pending" } : { kind: "ready" };
+  }
+
+  private updateInvestorStatus(s: Shown): void {
+    if (!s.config.visible) {
+      s.status = { kind: "hidden" };
+      return;
+    }
+    s.status = this.investors.feedState() === "loading" ? { kind: "pending" } : { kind: "ready" };
   }
 
   private buildTickCvdPoints(line: Line): Point[] {
@@ -1145,28 +1219,32 @@ export class IndicatorLayer {
     return out;
   }
 
-  private buildProgramPoints(line: Line): Point[] {
-    const out: Point[] = [];
-    let prevHad = true;
-    for (let i = 0; i < this.display.length; i++) {
-      const t = this.display[i]!.t;
-      const pt = this.micro.programPointAt(t);
-      const v = pt ? programLineValue(line.id, pt) : null;
-      if (v === null) {
-        prevHad = false;
-        continue;
-      }
-      out.push(prevHad ? { t, v } : { t, v, break: true });
-      prevHad = true;
+  private programLinePoints(lineId: LineId, data: ReturnType<MicroIndicatorController["programSeriesFor"]>): Point[] {
+    switch (lineId) {
+      case "flowBar":
+        return data.bar;
+      case "flowLine":
+        return data.line;
+      case "flowCum":
+        return data.cum;
+      case "programShare":
+        return data.share;
+      default:
+        return [];
     }
-    const liveT = this.micro.programLiveLatestT();
-    const lastBarT = this.display.at(-1)?.t ?? null;
-    if (liveT !== null && (lastBarT === null || liveT > lastBarT)) {
-      const livePt = this.micro.programPointAt(liveT);
-      const v = livePt ? programLineValue(line.id, livePt) : null;
-      if (v !== null) out.push({ t: liveT, v });
+  }
+
+  private investorLinePoints(lineId: LineId, data: ReturnType<InvestorFlowController["seriesFor"]>): Point[] {
+    switch (lineId) {
+      case "flowBar":
+        return data.bar;
+      case "flowLine":
+        return data.line;
+      case "flowCum":
+        return data.cum;
+      default:
+        return [];
     }
-    return out;
   }
 
   private syncTickCvd(s: Shown, from: UnixSeconds | null): void {
@@ -1192,28 +1270,19 @@ export class IndicatorLayer {
     }
   }
 
-  private syncProgramFlow(s: Shown, from: UnixSeconds | null): void {
-    if (from === null) {
-      for (const line of s.lines) {
-        line.points = this.buildProgramPoints(line);
-        this.queue.push(line, { op: "set", points: line.points });
-      }
-      return;
-    }
-    const pt = this.micro.programPointAt(from);
-    if (!pt) return;
+  private syncProgramFlow(s: Shown): void {
+    const data = this.micro.programSeriesFor(s.config);
     for (const line of s.lines) {
-      const v = programLineValue(line.id, pt);
-      if (v === null) continue;
-      const lastT = line.points.at(-1)?.t ?? -Infinity;
-      if (from < lastT) {
-        line.points = this.buildProgramPoints(line);
-        this.queue.push(line, { op: "set", points: line.points });
-      } else {
-        const point: Point = { t: from, v };
-        line.points = applyToPoints(line.points, { op: "update", point });
-        this.queue.push(line, { op: "update", point });
-      }
+      line.points = this.programLinePoints(line.id, data);
+      this.queue.push(line, { op: "set", points: line.points });
+    }
+  }
+
+  private syncInvestorFlow(s: Shown): void {
+    const data = this.investors.seriesFor(s.config);
+    for (const line of s.lines) {
+      line.points = this.investorLinePoints(line.id, data);
+      this.queue.push(line, { op: "set", points: line.points });
     }
   }
 
@@ -1349,7 +1418,7 @@ export class IndicatorLayer {
 
   private redrawBars(s: Shown): void {
     for (const line of s.lines) {
-      line.barOpacity = barOpacityOf(s.config.style);
+      line.barOpacity = effectiveBarOpacity(s.config);
       if (isBarLine(line.id) && line.points.length) {
         this.queue.forget(line);
         this.draw(line, line.points);
@@ -1390,6 +1459,7 @@ export class IndicatorLayer {
     if (!isBarLine(line.id)) return { time, value: pt.v };
     const t = this.host.tokens();
     if (line.id === "volume") return { time, value: pt.v, color: withAlpha(pt.up !== false ? t.up : t.down, line.barOpacity) };
+    if (line.id === "flowBar") return { time, value: pt.v, color: withAlpha(pt.v >= 0 ? t.up : t.down, line.barOpacity) };
     return { time, value: pt.v, color: pt.v >= 0 ? t.upVol : t.downVol };
   }
 

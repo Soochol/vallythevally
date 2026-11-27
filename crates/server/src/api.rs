@@ -277,6 +277,12 @@ pub enum ServerMessage {
     },
     ViSnapshot { states: Vec<ViState> },
     ViUpdate { state: ViState },
+    ViExpectedSnapshot {
+        symbol: SymbolCode,
+        market: ViMarket,
+        triggered_at: Option<UnixSeconds>,
+        points: Vec<ViExpectedPoint>,
+    },
     WhaleSnapshot {
         events: Vec<WhaleEvent>,
         summaries: Vec<WhaleStockSummary>,
@@ -287,6 +293,16 @@ pub enum ServerMessage {
         summary: WhaleStockSummary,
         watched_count: u32,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ViExpectedPoint {
+    pub t: UnixSeconds,
+    pub price: f64,
+    #[ts(type = "number")]
+    pub qty: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]

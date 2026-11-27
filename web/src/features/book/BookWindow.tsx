@@ -2,6 +2,7 @@ import { useMemo, useRef } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WindowId } from "../../layout/kinds";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
+import { useViSession } from "../../stores/viSession";
 import { ReplayStrip } from "../book-replay/ReplayStrip";
 import { FeedStrip } from "../market-window/FeedStrip";
 import { buildDefaultLadder, ROWS_ABOVE_BASE, withVisibleRepeats } from "../market-window/ladder";
@@ -14,6 +15,7 @@ import { expectedItemsOnPage, placeInfoItems } from "../market-window/quoteInfo"
 import { SymbolHead } from "../market-window/SymbolHead";
 import { type InfoPager, useInfoPager, useLadderMarket } from "../market-window/useLadderMarket";
 import { ladderRowHeightPx } from "../order/orderSettings";
+import { ViOrderOverlay } from "../order/ViOrderOverlay";
 import { EmptyState, ErrorState } from "../overlay/State";
 import { Notice } from "../ui/Notice";
 import { BookSettingsPopover } from "./BookSettingsPopover";
@@ -36,6 +38,8 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
   const { feed, replay, totals, view, liveView, trades } = market;
   const afterHours = totals.source === "afterHours";
   const notice = replay.kind === "live" && feed.rejected ? REJECTION[feed.rejected] : null;
+  const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null && market.liveQuotes !== null);
+  const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", shownLadder, market.liveView?.t ?? null, false);
   const settingsPopover = useMemo(
     () => <BookSettingsPopover settings={settings} onChange={setSettings} />,
     [settings, setSettings],
@@ -65,6 +69,7 @@ function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
       {market.replayEnabled && <ReplayStrip view={replay} />}
       {notice && <Notice tone="warning" className="mw-notice">{notice}</Notice>}
       {replay.kind === "live" && !feed.connected && notice === null && <FeedStrip since={market.downSince} />}
+      <ViOrderOverlay band="top" state={viState} previousClose={market.headPreviousClose} />
       {view !== null && <BookColumnHead />}
       <div ref={ladderBox} className="bk-ladder" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-state={view === null ? "" : undefined}>{ladder}</div>
       <Strip divided>

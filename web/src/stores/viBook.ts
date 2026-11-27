@@ -112,6 +112,8 @@ export class ViBook {
         this.setKnown(true);
         return;
       }
+      case "vi_expected_snapshot":
+        return;
     }
   }
 
