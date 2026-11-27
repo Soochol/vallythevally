@@ -12,7 +12,7 @@ import {
 import { formatPercent, formatPrice } from "../../lib/format";
 import { replayGlow } from "../market-window/flash";
 import { PRESET_MODES, type PresetMode } from "../order/orderSettings";
-import { quantityForAmount, quantityForRatio, RATIO_PRESETS } from "../order/orderRules";
+import { type BuyRatioPercent, quantityForAmount, quantityForRatio, RATIO_PRESETS } from "../order/orderRules";
 import type { ReplayEngine, ReplayEngineFrame } from "./replayEngine";
 import { type DeltaMode, formatReplayClock, formatSignedQty } from "./replayModel";
 import {
@@ -147,7 +147,7 @@ export function ReplayLadder({
   const [qtyInput, setQtyInput] = useState(String(DEFAULT_SIM_QTY));
   const [presetMode, setPresetMode] = useState<PresetMode>("amount");
   const [pickedPreset, setPickedPreset] = useState<string | null>(null);
-  const [buyRatioPercent, setBuyRatioPercent] = useState<number | null>(null);
+  const [buyRatioPercent, setBuyRatioPercent] = useState<BuyRatioPercent | null>(null);
   const [paperTick, setPaperTick] = useState(0);
   const [refPrice, setRefPrice] = useState<number | null>(() => referencePriceOf(engine.getFrame()));
   const [dragView, setDragView] = useState<DragView | null>(null);
@@ -183,7 +183,7 @@ export function ReplayLadder({
   const rowPricesRef = useRef<(number | null)[]>(ROW_INDICES.map(() => null));
   const prevRowQtyRef = useRef<Map<string, number>>(new Map());
   const qtyNumRef = useRef<number>(DEFAULT_SIM_QTY);
-  const buyRatioPercentRef = useRef<number | null>(null);
+  const buyRatioPercentRef = useRef<BuyRatioPercent | null>(null);
   const dragOriginRef = useRef<{
     readonly side: PaperOrderSide;
     readonly fromPrice: number;
@@ -224,15 +224,12 @@ export function ReplayLadder({
     return Number.isFinite(n) && n > 0 ? n : 0;
   }, [qtyInput]);
 
-  useEffect(() => {
-    qtyNumRef.current = parsedQty;
-  }, [parsedQty]);
+  qtyNumRef.current = parsedQty;
+  buyRatioPercentRef.current = buyRatioPercent;
 
   useEffect(() => {
-    buyRatioPercentRef.current = buyRatioPercent;
-  }, [buyRatioPercent]);
-
-  useEffect(() => {
+    setBuyRatioPercent(null);
+    setPickedPreset(null);
     userScrolledRef.current = false;
     const el = ladderScrollRef.current;
     if (!el) return;
@@ -596,7 +593,11 @@ export function ReplayLadder({
     const orderQty = side === "buy"
       ? resolvePaperBuyQuantity(price, paper.getAvailableCash(), paper.isFeeEnabled(), buyRatioPercent, parsedQty)
       : parsedQty;
-    paper.placeOrder(side, price, orderQty, marketContextOf(frame));
+    const placed = paper.placeOrder(side, price, orderQty, marketContextOf(frame));
+    if (placed && side === "buy" && buyRatioPercent !== null) {
+      setBuyRatioPercent(null);
+      setPickedPreset(null);
+    }
   };
 
   const startChipDrag = (side: PaperOrderSide, price: number, quantity: number, e: ReactPointerEvent<HTMLButtonElement>) => {
@@ -625,6 +626,8 @@ export function ReplayLadder({
 
   const handleCashPreset = (man: number) => {
     setCashInputMan(String(man));
+    setBuyRatioPercent(null);
+    setPickedPreset(null);
     paper.reset(man * MAN_WON, engine.getFrame().cursorMs);
   };
 
@@ -632,6 +635,8 @@ export function ReplayLadder({
     const parsed = Math.floor(Number(cashInputMan.replace(/[^0-9]/g, "")));
     const clamped = Number.isFinite(parsed) && parsed >= 100 ? Math.min(1_000_000, parsed) : DEFAULT_PAPER_INITIAL_CASH / MAN_WON;
     setCashInputMan(String(clamped));
+    setBuyRatioPercent(null);
+    setPickedPreset(null);
     paper.reset(clamped * MAN_WON, engine.getFrame().cursorMs);
   };
 
@@ -642,6 +647,11 @@ export function ReplayLadder({
   };
 
   const handleQtyKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (buyRatioPercent !== null && /^[0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      setPickedPreset(null);
+      setBuyRatioPercent(null);
+      return;
+    }
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     e.preventDefault();
     const step = (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1);
@@ -650,7 +660,13 @@ export function ReplayLadder({
     setQtyInput(String(Math.max(1, (Number(qtyInput) || 0) + step)));
   };
 
-  const presetButtons = useMemo(() => {
+  const presetButtons = useMemo<readonly {
+    readonly key: string;
+    readonly label: string;
+    readonly qty: number;
+    readonly buyRatio: BuyRatioPercent | null;
+    readonly disabled: boolean;
+  }[]>(() => {
     if (presetMode === "amount") {
       return PAPER_AMOUNT_PRESETS_MAN.map((man) => {
         const qty = quantityForAmount(man * MAN_WON, refPrice) ?? 0;
@@ -658,24 +674,21 @@ export function ReplayLadder({
           key: `amount:${man}`,
           label: man >= 1_000 ? `${man / 1_000}천만` : `${man}만`,
           qty,
-          buyRatio: null as number | null,
+          buyRatio: null,
           disabled: qty <= 0,
         };
       });
     }
     if (presetMode === "buy") {
-      const maxQ = refPrice !== null && refPrice > 0
-        ? affordableMaxBuyQuantity(refPrice, summary.availableCash, summary.feeEnabled)
-        : 0;
       return RATIO_PRESETS.map(({ percent, label }) => {
-        const qty = quantityForRatio(maxQ, percent);
-        return { key: `buy:${percent}`, label, qty, buyRatio: percent as number | null, disabled: qty <= 0 };
+        const qty = resolvePaperBuyQuantity(refPrice ?? 0, summary.availableCash, summary.feeEnabled, percent, 0);
+        return { key: `buy:${percent}`, label, qty, buyRatio: percent, disabled: qty <= 0 };
       });
     }
     const sellable = summary.sellableQuantity;
     return RATIO_PRESETS.map(({ percent, label }) => {
       const qty = quantityForRatio(sellable, percent);
-      return { key: `sell:${percent}`, label, qty, buyRatio: null as number | null, disabled: qty <= 0 };
+      return { key: `sell:${percent}`, label, qty, buyRatio: null, disabled: qty <= 0 };
     });
   }, [presetMode, refPrice, summary.availableCash, summary.feeEnabled, summary.sellableQuantity]);
 
@@ -749,7 +762,11 @@ export function ReplayLadder({
             className="rp-sim-mini-btn"
             data-danger=""
             data-testid="replay-sim-reset"
-            onClick={() => paper.reset(undefined, engine.getFrame().cursorMs)}
+            onClick={() => {
+              setBuyRatioPercent(null);
+              setPickedPreset(null);
+              paper.reset(undefined, engine.getFrame().cursorMs);
+            }}
           >
             초기화
           </button>
@@ -803,6 +820,7 @@ export function ReplayLadder({
         <input
           className="od-qty-input rp-mono"
           data-testid="replay-sim-qty-input"
+          data-ratio-active={buyRatioPercent !== null ? "" : undefined}
           aria-label="가상 주문 수량"
           inputMode="numeric"
           autoComplete="off"
@@ -829,24 +847,38 @@ export function ReplayLadder({
           ))}
         </div>
         <div className="od-presets rp-mono" role="group" aria-label="주문 수량 프리셋">
-          {presetButtons.map((btn) => (
-            <button
-              key={btn.key}
-              type="button"
-              className="od-preset"
-              data-side-tone={presetMode === "amount" ? undefined : presetMode}
-              data-picked={pickedPreset === btn.key ? "" : undefined}
-              disabled={btn.disabled}
-              title={`${formatPrice(btn.qty, false)}주`}
-              onClick={() => {
-                setPickedPreset(btn.key);
-                setBuyRatioPercent(btn.buyRatio);
-                setQtyInput(String(btn.qty));
-              }}
-            >
-              {btn.label}
-            </button>
-          ))}
+          {presetButtons.map((btn) => {
+            const isBuyRatio = btn.buyRatio !== null;
+            const active = isBuyRatio ? buyRatioPercent === btn.buyRatio : pickedPreset === btn.key;
+            return (
+              <button
+                key={btn.key}
+                type="button"
+                className="od-preset"
+                data-side-tone={presetMode === "amount" ? undefined : presetMode}
+                aria-pressed={isBuyRatio ? active : undefined}
+                data-picked={active ? "" : undefined}
+                disabled={btn.disabled}
+                title={
+                  isBuyRatio
+                    ? `클릭 호가 기준 ${btn.label} (현재가 약 ${formatPrice(btn.qty, false)}주)`
+                    : `${formatPrice(btn.qty, false)}주`
+                }
+                onClick={() => {
+                  if (btn.buyRatio !== null) {
+                    setPickedPreset(null);
+                    setBuyRatioPercent((prev) => (prev === btn.buyRatio ? null : btn.buyRatio));
+                  } else {
+                    setPickedPreset(btn.key);
+                    setBuyRatioPercent(null);
+                    setQtyInput(String(btn.qty));
+                  }
+                }}
+              >
+                {btn.label}
+              </button>
+            );
+          })}
         </div>
         <button
           type="button"

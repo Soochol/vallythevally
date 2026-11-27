@@ -75,6 +75,8 @@
 .od-qty { box-sizing:border-box; display:flex; flex:none; align-items:center; gap:var(--size-6); flex-wrap:nowrap; height:var(--size-34); padding:0 var(--s3); border-bottom:var(--size-1) solid var(--line); }
 .od-qty-input { box-sizing:border-box; flex:1 1 var(--size-60); min-width:var(--size-60); max-width:var(--size-84); height:var(--size-24); padding:0 var(--size-4); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-m); background:var(--surface); color:var(--text); font-size:var(--fs-s); font-weight:700; text-align:right; font-variant-numeric:tabular-nums; }
 .od-qty-input:focus { border-color:var(--accent); outline:0; }
+.od-qty-input[data-ratio-active] { color:var(--text-3); opacity:.65; border-style:dashed; }
+.od-qty-input[data-ratio-active]:focus { color:var(--text); opacity:1; border-style:solid; }
 .od-preset-mode { flex:none; }
 .od-preset-mode button { white-space:nowrap; }
 .od-qty .ui-seg { gap:var(--size-1); padding:var(--size-2); border:0; border-radius:var(--r-m); background:var(--raised); }

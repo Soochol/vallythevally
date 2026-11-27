@@ -117,9 +117,9 @@ export function resolvePaperBuyQuantity(
   fallbackQty: number,
 ): number {
   if (ratioPercent === null) return fallbackQty;
-  const maxQty = affordableMaxBuyQuantity(price, availableCash, feeEnabled);
-  if (maxQty <= 0) return 0;
-  return ratioPercent >= 100 ? maxQty : Math.floor((maxQty * ratioPercent) / 100);
+  if (!(price > 0) || !(availableCash > 0) || !(ratioPercent > 0)) return 0;
+  const budget = ratioPercent >= 100 ? availableCash : Math.floor((availableCash * ratioPercent) / 100);
+  return affordableMaxBuyQuantity(price, budget, feeEnabled);
 }
 
 const MAX_SNAPSHOTS = 500;

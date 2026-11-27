@@ -380,14 +380,49 @@ test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 �
   await expect(page.getByTestId("replay-ladder-clock")).toHaveText("09:00:10");
 
   await page.getByRole("group", { name: "프리셋 기준" }).getByRole("button", { name: "매수", exact: true }).click();
-  await page.getByRole("group", { name: "주문 수량 프리셋" }).getByRole("button", { name: "전량", exact: true }).click();
-
+  const qtyInput = page.getByTestId("replay-sim-qty-input");
+  const presetGroup = page.getByRole("group", { name: "주문 수량 프리셋" });
+  const btn50 = presetGroup.getByRole("button", { name: "50%", exact: true });
+  const btnFull = presetGroup.getByRole("button", { name: "전량", exact: true });
   const higherAskBuyCell = page.locator('[data-testid="replay-sim-buy-cell"][data-price="71300"]');
+  const bidBuyCell = page.locator('[data-testid="replay-sim-buy-cell"][data-price="71000"]');
+
+  await expect(qtyInput).toHaveValue("50");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveValue("50");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
+  await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 210");
+  await expect(bidBuyCell.locator(".od-preview")).toHaveText("매수 211");
+
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 50");
+
+  await btnFull.click();
+  await expect(btnFull).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveValue("50");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
   await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 420");
   await expect(higherAskBuyCell.locator(".od-preview")).not.toHaveAttribute("data-over", "");
   await higherAskBuyCell.click();
   await expect(page.getByTestId("replay-sim-qty")).toHaveText("420주");
   await expect(page.getByTestId("replay-sim-status")).toHaveAttribute("data-tone", "ok");
+  await expect(btnFull).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await expect(qtyInput).toHaveValue("50");
+
+  await page.getByTestId("replay-sim-reset").click();
+  await btn50.click();
+  await expect(btn50).toHaveAttribute("aria-pressed", "true");
+  await expect(qtyInput).toHaveAttribute("data-ratio-active", "");
+  await qtyInput.fill("25");
+  await expect(btn50).toHaveAttribute("aria-pressed", "false");
+  await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
+  await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 25");
 
   const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");

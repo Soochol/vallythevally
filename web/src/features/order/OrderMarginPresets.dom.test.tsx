@@ -74,7 +74,7 @@ test("매수 가능 칸과 자금 팝오버에서 미수 허용 확인·취소·
   failedBuyable.client.clear();
 });
 
-test("매수·매도 비율 프리셋 계산, 소량 보유 비활성, 미수 허용 한도 반영, 전량 클릭 가격별 수량 미리보기를 검증한다", async () => {
+test("매수 비율 토글 모드(입력 수량 유지·호버 가격별 미리보기·1회 주문 후 자동 해제·입력 시 즉시 해제)와 매도 고정 프리셋을 검증한다", async () => {
   const env = setupOrderEnv({
     orderable: { cashAmount: 7_000_000, cashQuantity: 100, marginAmount: 14_000_000, marginQuantity: 200 },
     holdings: [{ code: CODE, name: "삼성전자", quantity: 120, sellableQuantity: 120, averagePrice: BASE, currentPrice: BASE, evaluationProfit: 0, profitRateCenti: 0 }],
@@ -86,28 +86,81 @@ test("매수·매도 비율 프리셋 계산, 소량 보유 비활성, 미수 �
   const modeGroup = within(row).getByRole("group", { name: "프리셋 기준" });
   const qtyInput = screen.getByRole("textbox", { name: "수량" }) as HTMLInputElement;
 
+  fireEvent.change(qtyInput, { target: { value: "15", selectionStart: 2 } });
+  expect(qtyInput.value).toBe("15");
+
   fireEvent.click(within(modeGroup).getByRole("button", { name: "매수" }));
   const buyPresets = within(row).getByRole("group", { name: "매수 비율 프리셋" });
-  const btn25 = within(buyPresets).getByRole("button", { name: "25%" }) as HTMLButtonElement;
-  await waitFor(() => expect(btn25.disabled).toBe(false));
+  const btn50 = within(buyPresets).getByRole("button", { name: "50%" }) as HTMLButtonElement;
+  const btnFull = within(buyPresets).getByRole("button", { name: "전량" }) as HTMLButtonElement;
+  await waitFor(() => expect(btn50.disabled).toBe(false));
   expect(within(buyPresets).getAllByRole("button").map((b) => b.textContent)).toEqual(["25%", "50%", "75%", "전량"]);
   expect(useUiStore.getState().prefs.orderSettings.presetMode).toBe("buy");
+  expect(btn50.getAttribute("aria-pressed")).toBe("false");
+  expect(qtyInput.hasAttribute("data-ratio-active")).toBe(false);
 
-  fireEvent.click(btn25);
-  expect(qtyInput.value).toBe("25");
-  fireEvent.click(within(buyPresets).getByRole("button", { name: "전량" }));
-  expect(qtyInput.value).toBe("100");
+  fireEvent.click(btn50);
+  expect(qtyInput.value).toBe("15");
+  expect(qtyInput.hasAttribute("data-ratio-active")).toBe(true);
+  expect(btn50.getAttribute("aria-pressed")).toBe("true");
+  expect(btn50.hasAttribute("data-picked")).toBe(true);
 
   await waitFor(() => expect(screen.getByTestId("order-window").hasAttribute("data-writable")).toBe(true));
 
-  const cell = document.querySelector(`[data-order-cell][data-side="buy"][data-price="${BASE}"]`)!;
-  fireEvent.dblClick(cell);
+  const cellAtBase = document.querySelector(`[data-order-cell][data-side="buy"][data-price="${BASE}"]`)!;
+  const cellAtHigher = document.querySelector(`[data-order-cell][data-side="buy"][data-price="${BASE + 100}"]`)!;
+
+  fireEvent.pointerEnter(cellAtBase);
+  expect(within(cellAtBase as HTMLElement).getByTestId("order-preview").textContent).toBe("매수 50");
+  fireEvent.pointerLeave(cellAtBase);
+
+  fireEvent.pointerEnter(cellAtHigher);
+  expect(within(cellAtHigher as HTMLElement).getByTestId("order-preview").textContent).toBe("매수 49");
+  fireEvent.pointerLeave(cellAtHigher);
+
+  fireEvent.click(btn50);
+  expect(btn50.getAttribute("aria-pressed")).toBe("false");
+  expect(qtyInput.hasAttribute("data-ratio-active")).toBe(false);
+  expect(qtyInput.value).toBe("15");
+
+  fireEvent.click(btnFull);
+  expect(btnFull.getAttribute("aria-pressed")).toBe("true");
+  expect(qtyInput.hasAttribute("data-ratio-active")).toBe(true);
+  expect(qtyInput.value).toBe("15");
+
+  fireEvent.pointerEnter(cellAtHigher);
+  expect(within(cellAtHigher as HTMLElement).getByTestId("order-preview").textContent).toBe("매수 99");
+  fireEvent.pointerLeave(cellAtHigher);
+
+  fireEvent.dblClick(cellAtHigher);
   await waitFor(() => expect(env.placedBodies()).toHaveLength(1));
-  expect(env.placedBodies()[0]).toMatchObject({ side: "buy", price: BASE, quantity: 100 });
+  expect(env.placedBodies()[0]).toMatchObject({ side: "buy", price: BASE + 100, quantity: 99 });
+  expect(btnFull.getAttribute("aria-pressed")).toBe("false");
+  expect(qtyInput.hasAttribute("data-ratio-active")).toBe(false);
+  expect(qtyInput.value).toBe("15");
+
+  fireEvent.dblClick(cellAtBase);
+  await waitFor(() => expect(env.placedBodies()).toHaveLength(2));
+  expect(env.placedBodies()[1]).toMatchObject({ side: "buy", price: BASE, quantity: 15 });
+
+  fireEvent.click(btn50);
+  expect(btn50.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.change(qtyInput, { target: { value: "5", selectionStart: 1 } });
+  expect(btn50.getAttribute("aria-pressed")).toBe("false");
+  expect(qtyInput.hasAttribute("data-ratio-active")).toBe(false);
+  expect(qtyInput.value).toBe("5");
+
+  fireEvent.click(btn50);
+  expect(btn50.getAttribute("aria-pressed")).toBe("true");
+  fireEvent.keyDown(qtyInput, { key: "5" });
+  expect(btn50.getAttribute("aria-pressed")).toBe("false");
+  expect(qtyInput.hasAttribute("data-ratio-active")).toBe(false);
 
   fireEvent.click(within(modeGroup).getByRole("button", { name: "매도" }));
   const sellPresets = within(row).getByRole("group", { name: "매도 비율 프리셋" });
-  fireEvent.click(within(sellPresets).getByRole("button", { name: "25%" }));
+  const sell25 = within(sellPresets).getByRole("button", { name: "25%" });
+  expect(sell25.getAttribute("aria-pressed")).toBeNull();
+  fireEvent.click(sell25);
   expect(qtyInput.value).toBe("17");
   fireEvent.click(within(sellPresets).getByRole("button", { name: "전량" }));
   expect(qtyInput.value).toBe("70");

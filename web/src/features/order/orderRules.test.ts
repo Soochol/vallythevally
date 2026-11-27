@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { TradingOpenOrder } from "../../api/generated/TradingOpenOrder";
 import type { TradingOrderable } from "../../api/generated/TradingOrderable";
 import type { PendingWrite } from "./pendingWrites";
-import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, capacityProblem, dragCancels, type DragSource, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, orderCountOf, orderQuantityForPrice, planCancel, type PriceGroup, quantityForAmount, quantityForRatio, RATIO_PRESETS, sideTotal, typedQuantity } from "./orderRules";
+import { type BuyingPower, buyBlock, buyingPowerOf, buyPreview, buyQuantityForRatio, buyRatioLabel, capacityProblem, dragCancels, type DragSource, marginOf, maxBuyQuantity, modifyBuyProblem, type DragTarget, dragGhostText, dragQuantity, dragSide, groupOpenOrders, groupWithPending, HIGH_VALUE_WON, judgeDrag, needsHighValueConfirm, orderCountOf, orderQuantityForPrice, planCancel, type PriceGroup, quantityForAmount, quantityForRatio, RATIO_PRESETS, sideTotal, typedQuantity } from "./orderRules";
 
 const order = (orderNo: string, side: "buy" | "sell", price: number, openQuantity: number, code = "005930"): TradingOpenOrder => ({
   orderNo, code, name: "삼성전자", side, quantity: openQuantity, price, openQuantity, status: "접수", orderedAt: "090000", originalOrderNo: null, venue: "krx",
@@ -123,13 +123,29 @@ test("수량이 없거나 매도 가능 수량을 넘는 주문은 보내기 전
 const cashOnly: BuyingPower = { policy: "cash_only", amount: 1_000_000, cashAmount: 1_000_000 };
 const allowMargin: BuyingPower = { policy: "allow_margin", amount: 3_000_000, cashAmount: 1_000_000 };
 
-test("매수 전량 상태에서는 클릭한 가격 기준으로 최대 매수 수량을 계산하고 매도나 일반 상태는 입력 수량을 그대로 쓴다", () => {
-  const power: BuyingPower = { policy: "cash_only", amount: 7_000_000, cashAmount: 7_000_000 };
-  expect(orderQuantityForPrice("buy", 70_100, 100, power, true)).toBe(99);
-  expect(orderQuantityForPrice("buy", 69_000, 100, power, true)).toBe(101);
-  expect(orderQuantityForPrice("buy", 70_100, 100, power, false)).toBe(100);
-  expect(orderQuantityForPrice("sell", 70_100, 100, power, true)).toBe(100);
-  expect(orderQuantityForPrice("buy", 70_100, 100, null, true)).toBe(100);
+test("매수 비율 수량은 비율 예산을 가격으로 나눠 이중 내림 없이 계산하고 라벨을 제공한다", () => {
+  expect(RATIO_PRESETS.map((preset) => buyRatioLabel(preset.percent))).toEqual(["25%", "50%", "75%", "전량"]);
+  expect(buyQuantityForRatio(70_000, 10_000_000, 75)).toBe(107);
+  expect(buyQuantityForRatio(70_000, 10_000_000, 50)).toBe(71);
+  expect(buyQuantityForRatio(70_000, 10_000_000, 25)).toBe(35);
+  expect(buyQuantityForRatio(70_000, 10_000_000, 100)).toBe(142);
+  expect(buyQuantityForRatio(0, 10_000_000, 50)).toBe(0);
+  expect(buyQuantityForRatio(70_000, 0, 50)).toBe(0);
+  expect(buyQuantityForRatio(70_000, 10_000_000, 0)).toBe(0);
+});
+
+test("매수 비율 활성 상태에서는 클릭한 가격 기준으로 비율 수량을 계산하고 매도나 일반 상태는 입력 수량을 그대로 쓴다", () => {
+  const power: BuyingPower = { policy: "cash_only", amount: 10_000_000, cashAmount: 10_000_000 };
+  expect(orderQuantityForPrice("buy", 70_000, 15, power, 25)).toBe(35);
+  expect(orderQuantityForPrice("buy", 70_000, 15, power, 50)).toBe(71);
+  expect(orderQuantityForPrice("buy", 70_000, 15, power, 75)).toBe(107);
+  expect(orderQuantityForPrice("buy", 70_000, 15, power, 100)).toBe(142);
+  expect(orderQuantityForPrice("buy", 70_100, 15, power, 100)).toBe(142);
+  expect(orderQuantityForPrice("buy", 69_000, 15, power, 100)).toBe(144);
+  expect(orderQuantityForPrice("buy", 70_100, 15, power, null)).toBe(15);
+  expect(orderQuantityForPrice("sell", 70_100, 15, power, 100)).toBe(15);
+  expect(orderQuantityForPrice("sell", 70_100, 15, power, 50)).toBe(15);
+  expect(orderQuantityForPrice("buy", 70_100, 15, null, 100)).toBe(15);
 });
 
 test("막기 정책은 현금을 넘는 매수에 최대 수량을 알려 주고 한도 안이면 통과시킨다", () => {
