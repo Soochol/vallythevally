@@ -4,6 +4,7 @@ import { useActionKeys } from "../../stores/ui";
 import { SearchIcon } from "../icons";
 import { setPageSlot } from "../pages/pageSlot";
 import { MockBadge } from "../topbar/MockBadge";
+import { TopbarClock } from "../topbar/TopbarClock";
 import { BrandLink } from "./BrandLink";
 
 export function PageTopbar() {
@@ -17,6 +18,7 @@ export function PageTopbar() {
       </div>
       <span className="tb-sep" />
       <div ref={setPageSlot} className="page-topbar-slot" />
+      <TopbarClock />
       <button type="button" className="tb-btn page-find" aria-haspopup="dialog" aria-label="종목 찾기" title={searchTitle(keys)} onClick={() => openSearch("page")}>
         <SearchIcon size={14} />
         <span className="topbar-label-lg">종목 찾기</span>

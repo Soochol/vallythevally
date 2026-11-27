@@ -15,6 +15,7 @@ import { VenuePicker } from "../venue/VenuePicker";
 import { AddWindowMenu } from "../workspace/AddWindowMenu";
 import { BookReplayToggle } from "../book-replay/BookReplayToggle";
 import { AutoGuardBadge } from "./AutoGuardBadge";
+import { TopbarClock } from "./TopbarClock";
 
 type PillSection = "indicators" | "compare" | "settings";
 
@@ -110,6 +111,7 @@ export function Topbar() {
           <span className="shell-search-hint">종목·지표·명령 찾기</span>
           {keys.search?.slice(0, 2).map((key) => <kbd key={key}>{keyCapsLabel(key)}</kbd>)}
         </button>
+        <TopbarClock />
       </div>
       <div className="topbar-zone" data-zone="workspace">
         <AutoGuardBadge />
