@@ -56,17 +56,20 @@
 
 :is([data-style="bento"], [data-style="carbon"]) .dock-tab-group {
   height: var(--size-26);
+  margin-top: 0;
   padding-inline: var(--size-8);
   border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--raised) 45%, transparent);
 }
 
 :is([data-style="bento"], [data-style="carbon"]) .dock-tab-group:not([data-selected]):hover {
-  background: var(--hover);
+  background: var(--raised);
+  color: var(--text);
 }
 
 :is([data-style="bento"], [data-style="carbon"]) .dock-tab-group[data-selected] {
   border-radius: var(--r-pill);
-  background: var(--raised);
+  background: var(--overlay);
   color: var(--text);
   box-shadow: none;
 }
@@ -603,12 +606,15 @@
 
 [data-style="glass"] .dock-tab-group {
   height: var(--size-24);
+  margin-top: 0;
   padding-inline: var(--size-8);
   border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--raised) 45%, transparent);
 }
 
 [data-style="glass"] .dock-tab-group:not([data-selected]):hover {
-  background: var(--hover);
+  background: color-mix(in srgb, var(--raised) 82%, transparent);
+  color: var(--text);
 }
 
 [data-style="glass"] .dock-tab-group[data-selected] {
@@ -963,7 +969,7 @@
 }
 
 [data-style="forest"] .dock-tab-scroll {
-  gap: var(--size-1);
+  gap: var(--size-4);
 }
 
 [data-style="forest"] .dock-tab-list {
@@ -973,18 +979,20 @@
 
 [data-style="forest"] .dock-tab-group {
   margin-top: var(--size-4);
+  padding-inline: 0;
   border-radius: var(--r-m) var(--r-m) 0 0;
+  background: color-mix(in srgb, var(--raised) 45%, transparent);
   color: var(--text-2);
 }
 
 [data-style="forest"] .dock-tab-group:not([data-selected]):hover {
-  background: var(--hover);
+  background: var(--raised);
   color: var(--text);
 }
 
 [data-style="forest"] .dock-tab-group[data-selected] {
   border-radius: var(--r-m) var(--r-m) 0 0;
-  background: var(--raised);
+  background: var(--overlay);
   color: var(--text);
   box-shadow: none;
 }
