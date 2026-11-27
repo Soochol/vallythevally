@@ -76,8 +76,24 @@ export function TotalRatioToggle({ ask, bid }: { ask: number | null; bid: number
   );
 }
 
-export function Strip({ children, divided, compact }: { children: ReactNode; divided?: boolean; compact?: boolean }) {
-  return <div className="mw-strip" data-divided={divided ? "" : undefined} data-compact={compact ? "" : undefined}>{children}</div>;
+interface LadderFooterProps {
+  readonly ask: number | null;
+  readonly bid: number | null;
+  readonly left: ReactNode;
+  readonly right: ReactNode;
+  readonly className?: string;
+  readonly testId?: string;
+}
+
+export function LadderFooter({ ask, bid, left, right, className, testId }: LadderFooterProps) {
+  return (
+    <div className={className ? `mw-footer ${className}` : "mw-footer"} data-testid={testId}>
+      <FooterRatioBar ask={ask} bid={bid} />
+      <div className="mw-footer-side">{left}</div>
+      <TotalRatioToggle ask={ask} bid={bid} />
+      <div className="mw-footer-side">{right}</div>
+    </div>
+  );
 }
 
 export function RatioBar({ buy, sell, sellFirst, label }: { buy: number; sell: number; sellFirst?: boolean; label: string }) {

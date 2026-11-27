@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { windowId } from "../../layout/kinds";
 import { useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
+import { useUiStore } from "../../stores/ui";
 import { renderWithProviders } from "../../test/domHarness";
 import { resetDomAfterEach } from "../../test/domSetup";
 import { BookWindow } from "../book/BookWindow";
@@ -223,4 +224,78 @@ test("10호가창과 호가주문창은 종목을 바꿨다 돌아와도 VI 예�
 
   view.client.clear();
   view.unmount();
+});
+
+test("10호가창과 호가주문창은 하단 상태바에서 실시간 끊김·구독 거절을 같은 구조로 보이고 구분선 설정을 공유한다", async () => {
+  const env = setupOrderEnv();
+  const { client, unmount } = renderWithProviders(
+    <>
+      <BookWindow id={windowId("book")} />
+      <OrderWindow id={windowId("order")} />
+    </>,
+  );
+
+  await waitFor(() => expect(screen.getAllByTestId("price-ladder")).toHaveLength(2));
+  const book = screen.getByTestId("book-window");
+  const order = screen.getByTestId("order-window");
+
+  expect(within(book).getByTestId("book-totals").classList.contains("mw-footer")).toBe(true);
+  expect(within(order).getByTestId("order-totals").classList.contains("mw-footer")).toBe(true);
+  expect(within(book).getByTestId("book-status-slot").classList.contains("mw-status-slot")).toBe(true);
+  expect(within(order).getByTestId("order-status-slot").classList.contains("mw-status-slot")).toBe(true);
+  expect(within(order).getByTestId("order-colhead").getAttribute("role")).toBe("row");
+
+  await waitFor(() => expect(env.socket.subsOf("book", CODE).length).toBeGreaterThan(0));
+
+  await act(async () => {
+    for (const sub of env.socket.subsOf("book", CODE)) {
+      env.socket.emit({ type: "feed_link", sub, live: false, at: 1 });
+    }
+  });
+
+  const bookDown = await within(book).findByTestId("feed-down");
+  const orderDown = await within(order).findByTestId("feed-down");
+  expect(within(book).getByTestId("book-status-slot").contains(bookDown)).toBe(true);
+  expect(within(order).getByTestId("order-status-slot").contains(orderDown)).toBe(true);
+  expect(bookDown.getAttribute("data-tone")).toBe("warn");
+  expect(orderDown.getAttribute("data-tone")).toBe("warn");
+  expect(bookDown.textContent).toContain("실시간 끊김");
+  expect(orderDown.textContent).toContain("실시간 끊김");
+
+  await act(async () => {
+    for (const sub of env.socket.subsOf("book", CODE)) {
+      env.socket.emit({ type: "sub_error", sub, code: "realtime_limit" });
+    }
+  });
+
+  const bookRejected = await within(book).findByTestId("feed-rejected");
+  const orderRejected = await within(order).findByTestId("feed-rejected");
+  expect(within(book).getByTestId("book-status-slot").contains(bookRejected)).toBe(true);
+  expect(within(order).getByTestId("order-status-slot").contains(orderRejected)).toBe(true);
+  expect(bookRejected.getAttribute("data-tone")).toBe("warn");
+  expect(orderRejected.getAttribute("data-tone")).toBe("warn");
+  expect(bookRejected.textContent).toBe(orderRejected.textContent);
+
+  await act(async () => {
+    for (const sub of env.socket.subsOf("book", CODE)) {
+      env.socket.emit({ type: "feed_subscribed", sub, kind: "book" });
+    }
+  });
+  await waitFor(() => expect(within(book).queryByTestId("feed-rejected")).toBeNull());
+  expect(within(order).queryByTestId("feed-rejected")).toBeNull();
+
+  const bookLadder = book.querySelector(".bk-ladder")!;
+  const orderLadder = within(order).getByTestId("order-ladder");
+  expect(bookLadder.hasAttribute("data-divider")).toBe(true);
+  expect(orderLadder.hasAttribute("data-divider")).toBe(true);
+
+  fireEvent.click(within(book).getByTestId("book-settings-button"));
+  const bookPop = await screen.findByTestId("book-settings");
+  fireEvent.click(within(bookPop).getByRole("checkbox", { name: "구분선" }));
+  expect(bookLadder.hasAttribute("data-divider")).toBe(false);
+  expect(orderLadder.hasAttribute("data-divider")).toBe(false);
+  expect(useUiStore.getState().prefs.orderSettings.divider).toBe(false);
+
+  client.clear();
+  unmount();
 });

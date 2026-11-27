@@ -103,12 +103,12 @@ interface HeadProps {
 
 const LadderHead = memo(function LadderHead({ explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer }: HeadProps) {
   return (
-    <div className="od-colhead" data-testid="order-colhead" style={{ gridTemplateColumns: HEAD_COLUMNS }}>
-      <span>매도주문</span>
-      <span>매도잔량</span>
+    <div className="od-colhead" role="row" data-testid="order-colhead" style={{ gridTemplateColumns: HEAD_COLUMNS }}>
+      <span role="columnheader">매도주문</span>
+      <span role="columnheader">매도잔량</span>
       <button type="button" className="od-colhead-explorer" data-testid="order-explorer" aria-pressed={explorerOn} disabled={explorerUnavailable} title={explorerTitle} onClick={onToggleExplorer}>전체호가</button>
-      <span>매수잔량</span>
-      <span>매수주문</span>
+      <span role="columnheader">매수잔량</span>
+      <span role="columnheader">매수주문</span>
     </div>
   );
 });
