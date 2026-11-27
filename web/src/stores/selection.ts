@@ -22,13 +22,15 @@ const isUndo = (value: ToastUndo | ToastOptions): value is ToastUndo => "run" in
 export type SearchPurpose = "open" | "watch" | "page";
 export interface PutTarget { listId: string; groupId: string | null }
 export type IndicatorCommandMode = "current" | "add" | "compare";
+export type ChartPanelMode = IndicatorCommandMode | "settings";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
-  | { kind: "indicatorCommand"; cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null }
+  | { kind: "indicatorCommand"; cellId: WindowId; mode: ChartPanelMode; indicatorId: string | null }
   | { kind: "screen"; window: WindowId | null }
   | { kind: "hotkey-sheet" }
   | { kind: "system-settings"; menu: SystemMenuId | null };
 export type InspectorRequest = { cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null };
+export type ChartDockState = { cellId: WindowId; mode: ChartPanelMode; indicatorId: string | null };
 export type PhoneTab = "chart" | "watch" | "screener";
 
 /** 저장하지 않는 화면 상태(frontend.md §5.3). */
@@ -36,6 +38,7 @@ interface SelectionState {
   activeCell: WindowId;
   dialog: null | Dialog;
   inspector: InspectorRequest | null;
+  chartDock: ChartDockState | null;
   phoneTab: PhoneTab;
   toast: ToastEntry | null;
   toasts: readonly ToastEntry[];
@@ -43,8 +46,10 @@ interface SelectionState {
   setActiveCell(cellId: WindowId): void;
   openSearch(purpose?: SearchPurpose, putTarget?: PutTarget): void;
   setPutTarget(putTarget: PutTarget | null): void;
-  openIndicatorDialog(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
+  openIndicatorDialog(cellId: WindowId, mode: ChartPanelMode, indicatorId: string | null): void;
   openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
+  openChartDock(cellId: WindowId, mode: ChartPanelMode, indicatorId: string | null): void;
+  closeChartDock(): void;
   takeInspectorRequest(): InspectorRequest | null;
   openScreenEditor(window: WindowId | null): void;
   openHotkeySheet(): void;
@@ -67,6 +72,7 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   activeCell: chartWindows(DEFAULT_LAYOUT)[0]!.id,
   dialog: null,
   inspector: null,
+  chartDock: null,
   phoneTab: "chart",
   toast: null,
   toasts: [],
@@ -74,12 +80,14 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
   setActiveCell: (activeCell) => set((s) => (s.activeCell === activeCell ? s : { activeCell })),
   openSearch: (purpose = "open", putTarget) => set({ dialog: { kind: "search", purpose }, ...(putTarget ? { putTarget } : {}) }),
   setPutTarget: (putTarget) => set({ putTarget }),
-  openIndicatorDialog: (cellId, mode, indicatorId) => set({ dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } }),
+  openIndicatorDialog: (cellId, mode, indicatorId) => set({ dialog: { kind: "indicatorCommand", cellId, mode, indicatorId }, chartDock: null }),
   openIndicatorInspector: (cellId, mode, indicatorId) => {
-    set({ dialog: null, activeCell: cellId, inspector: { cellId, mode, indicatorId } });
+    set({ dialog: null, chartDock: null, activeCell: cellId, inspector: { cellId, mode, indicatorId } });
     useLayoutStore.getState().showWindow("indicators");
     if (!useLayoutStore.getState().layout.windows.some((w) => w.kind === "indicators")) set({ inspector: null, dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } });
   },
+  openChartDock: (cellId, mode, indicatorId) => set({ dialog: null, activeCell: cellId, chartDock: { cellId, mode, indicatorId } }),
+  closeChartDock: () => set({ chartDock: null }),
   takeInspectorRequest: () => {
     const request = get().inspector;
     if (request) set({ inspector: null });

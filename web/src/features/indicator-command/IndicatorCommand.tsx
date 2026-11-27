@@ -1,10 +1,12 @@
-import { Fragment, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
+import { Fragment, type PointerEvent, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import { isFinancial, isInvestorFlow, isQuote, isTickCvd, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { symbolSub } from "../../lib/symbol";
 import { chartWindow, useLayoutStore } from "../../stores/layout";
-import { useSelectionStore } from "../../stores/selection";
+import { defaultIndicatorMode, useSelectionStore, type ChartPanelMode } from "../../stores/selection";
+import { useUiStore } from "../../stores/ui";
+import { ChartSettingsSections } from "../chart-settings/ChartSettingsDialog";
 import { CommandFrame } from "../commands/CommandFrame";
 import { CloseIcon, SearchIcon } from "../icons";
 import { stepIndex } from "../indicator-dialog/compareForm";
@@ -60,11 +62,18 @@ function maGroupSummary(lines: readonly IndicatorConfig[]): string {
     .join(" · ");
 }
 
-export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = null }: { cellId: WindowId; initialMode: IndicatorCommandMode; initialIndicator?: string | null }) {
+export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = null }: { cellId: WindowId; initialMode: ChartPanelMode; initialIndicator?: string | null }) {
   const close = useSelectionStore((s) => s.closeDialog);
   const [initialSettings] = useState(() => chartWindow(useLayoutStore.getState().layout, cellId).chartSettings);
+  const [initialIndicatorWindow] = useState(() => useUiStore.getState().prefs.indicatorWindow);
+  const [panelSection, setPanelSection] = useState<"indicators" | "compare" | "settings">(
+    initialMode === "settings" ? "settings" : initialMode === "compare" ? "compare" : "indicators"
+  );
   const [category, setCategory] = useState<AddCategory>("all");
-  const command = useIndicatorCommand(cellId, initialMode, initialIndicator);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const command = useIndicatorCommand(cellId, initialMode === "settings" ? defaultIndicatorMode(cellId) : initialMode, initialIndicator);
   const { cell, mode, input, chosen, rows: rawRows, symbols, search, compareButton, editor } = command;
   const inputRef = useRef<HTMLInputElement>(null);
   const ids = useId();
@@ -84,6 +93,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
     if (reason === "escape") {
       useIndicatorPreview.getState().set(cellId, null);
       useLayoutStore.getState().setChartSettings(cellId, initialSettings);
+      useUiStore.getState().setIndicatorWindow(initialIndicatorWindow);
     }
     close();
   };
@@ -93,6 +103,33 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
     command.show(value);
     setCategory("all");
     inputRef.current?.focus();
+  };
+  const switchSection = (next: "indicators" | "compare" | "settings") => {
+    setPanelSection(next);
+    if (next === "compare") command.show("compare");
+    else if (next === "indicators") command.show(mode === "compare" ? defaultIndicatorMode(cellId) : mode);
+  };
+  const startDrag = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || (e.target instanceof Element && e.target.closest("button, input"))) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { sx: e.clientX, sy: e.clientY, ox: dragOffset.x, oy: dragOffset.y };
+    setDragging(true);
+  };
+  const moveDrag = (e: PointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const maxX = Math.max(0, (window.innerWidth - 360) / 2);
+    const maxY = Math.max(0, (window.innerHeight - 240) / 2);
+    setDragOffset({
+      x: Math.round(Math.max(-maxX, Math.min(maxX, d.ox + (e.clientX - d.sx)))),
+      y: Math.round(Math.max(-maxY, Math.min(maxY, d.oy + (e.clientY - d.sy)))),
+    });
+  };
+  const endDrag = () => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    setDragging(false);
   };
   const selectRow = (row: DialogRow) => {
     if (row.kind === "symbol" && !row.selectable) return;
@@ -104,15 +141,36 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
       command.addCompareSymbol(row.info);
     }
   };
+  const isMoved = dragOffset.x !== 0 || dragOffset.y !== 0;
+  const activeDockMode: ChartPanelMode = panelSection === "settings" ? "settings" : mode;
 
   return <CommandFrame solid scrim={false} width="ic-frame" labelledBy={`${ids}-title`} onClose={handleClose}>
-    <div data-chart-control="" className="flex min-h-0 flex-1 flex-col" onKeyDown={(event) => {
+    <div data-chart-control="" data-dragging={dragging ? "true" : undefined} style={isMoved ? { transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` } : undefined} className="ic-shell flex min-h-0 flex-1 flex-col" onKeyDown={(event) => {
       if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
       const action = commandKey(event.nativeEvent);
       if (action.kind === "submit" && event.target === inputRef.current) { event.preventDefault(); submit(action.close); }
     }}>
+      <div className="ic-top-bar" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
+        <h2 id={`${ids}-title`} className="sr-only">{panelSection === "settings" ? "차트 설정" : "지표·비교 입력창"}</h2>
+        <div role="group" aria-label="차트 설정 영역" className="ic-section-seg">
+          <button type="button" aria-pressed={panelSection === "indicators"} onClick={() => switchSection("indicators")}>지표</button>
+          <button type="button" aria-pressed={panelSection === "compare"} onClick={() => switchSection("compare")}>비교</button>
+          <button type="button" aria-pressed={panelSection === "settings"} onClick={() => switchSection("settings")}>차트 설정</button>
+        </div>
+        <div className="ic-top-actions">
+          {isMoved && <button type="button" className="icon-btn" aria-label="가운데로" title="가운데로 복귀" onClick={() => setDragOffset({ x: 0, y: 0 })}>⌖</button>}
+          <button type="button" className="cd-mode-btn" aria-label="차트 오른쪽에 도킹" title="차트 오른쪽에 도킹" onClick={() => useSelectionStore.getState().openChartDock(cellId, activeDockMode, selected?.kind === "current" ? selected.config.id : null)}>우측 도킹</button>
+          <button type="button" className="icon-btn" aria-label={panelSection === "settings" ? "닫기" : "입력창 닫기"} title="닫기" onClick={() => handleClose()}><CloseIcon size={16} /></button>
+        </div>
+      </div>
+
+      {panelSection === "settings" ? (
+        <div className="ic-settings-body">
+          <ChartSettingsSections cellId={cellId} />
+          <p className="cs-foot mt-auto pt-2">자동 저장 · Esc로 되돌리고 닫기</p>
+        </div>
+      ) : <>
       <div className="ic-head">
-        <h2 id={`${ids}-title`} className="sr-only">지표·비교 입력창</h2>
         <label className="ic-search">
           <SearchIcon size={16} />
           <input ref={inputRef} autoFocus role="combobox" aria-label="지표·비교 찾기" aria-expanded={rows.length > 0} aria-controls={`${ids}-list`} aria-activedescendant={index >= 0 ? optionId(index) : undefined} aria-autocomplete="list"
@@ -130,7 +188,6 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
             </button>
           )}
         </label>
-        <button type="button" className="icon-btn" aria-label="입력창 닫기" title="입력창 닫기" onClick={() => handleClose()}><CloseIcon size={16} /></button>
       </div>
 
       {mode === "compare" ? (
@@ -220,6 +277,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
             <CommandFooter mode={mode} />
           </>}
       </div>
+      </>}
     </div>
   </CommandFrame>;
 }

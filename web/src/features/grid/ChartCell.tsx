@@ -32,6 +32,7 @@ import { BeforeConnectCard } from "../status/BeforeConnectCard";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
 import { useAutoGuardLayer } from "../../chart/autoGuard/useAutoGuardLayer";
 import { useShownSettings } from "../indicator-command/preview";
+import { ChartRightDock } from "../indicator-command/ChartRightDock";
 import { AxisMode } from "./AxisMode";
 import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
 import type { IndicatorConfig } from "../../chart/settings";
@@ -109,7 +110,9 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     return merged.size > 0 ? merged : null;
   }, [replayDaysList, brokerDaysList]);
   const openSearch = useSelectionStore((s) => s.openSearch);
+  const dockedHere = useSelectionStore((s) => s.chartDock?.cellId === cellId);
   const windowVisible = useWindowVisible();
+  const sectionEl = useRef<HTMLElement>(null);
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
   const [editing, setEditing] = useState<{ initial: IndicatorConfig; anchor: HTMLElement } | null>(null);
@@ -222,12 +225,13 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
 
   return (
     <section
+      ref={sectionEl}
       tabIndex={0}
       aria-label={`칸 ${cellNumber}: ${[name, venueLabel(cell.symbol, venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
       aria-busy={status.kind === "loading"}
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
-      <div ref={chartEl} className="absolute inset-0" />
+      <div ref={chartEl} className={dockedHere ? "absolute inset-y-0 left-0 right-[var(--size-320)]" : "absolute inset-0"} />
       {status.kind === "ready" && <AxisMode cellId={cellId} corner={corner} />}
       {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />
@@ -268,6 +272,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
           <CellState view={error} onAction={runCellAction} />
         </div>
       )}
+      <ChartRightDock cellId={cellId} hostRef={sectionEl} />
     </section>
   );
 }

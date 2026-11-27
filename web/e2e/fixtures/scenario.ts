@@ -441,6 +441,7 @@ export class Scenario {
       if (venue !== "combined" && venue !== "krx" && venue !== "nxt") return error(400, "bad_request", "Invalid venue");
       return { body: { available: true, venue, days: [], points: [] } satisfies QuoteTotalsPage };
     }
+    if (path === "/api/trading/auto-orders" && method === "GET") return { body: { masterEnabled: false, rules: [], events: [] } };
     const description = `Unconfigured API fixture: ${method} ${url.pathname}${url.search}`;
     this.failures.push(description);
     return error(599, "internal", description);
