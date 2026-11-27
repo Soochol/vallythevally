@@ -10,6 +10,7 @@ export interface ThemeTokens {
   line: string;
   grid: string;
   gridH: string;
+  daySeparator: string;
   raised: string;
   onData: string;
   accent: string;
@@ -37,6 +38,7 @@ export function readThemeTokens(root: HTMLElement = document.documentElement): T
     line: v("--line"),
     grid: v("--grid"),
     gridH: v("--grid-h"),
+    daySeparator: v("--day-separator"),
     raised: v("--raised"),
     onData: v("--on-data"),
     accent: v("--accent"),

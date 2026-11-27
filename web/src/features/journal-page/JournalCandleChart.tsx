@@ -343,7 +343,7 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
     const daySeps = new DaySeparators(chart, {
       shown: () => isIntraday(TF_TO_PERIOD[propsRef.current.tf]),
       bars: () => barsRef.current,
-      color: () => tokensRef.current.text3,
+      color: () => tokensRef.current.daySeparator,
     });
     daySepsRef.current = daySeps;
 

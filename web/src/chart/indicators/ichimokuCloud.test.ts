@@ -10,6 +10,7 @@ const DARK_TOKENS: ThemeTokens = {
   line: "rgba(255,255,255,0.11)",
   grid: "rgba(255,255,255,0.04)",
   gridH: "rgba(255,255,255,0.06)",
+  daySeparator: "rgba(255,255,255,0.15)",
   raised: "#242424",
   onData: "#0B0B0B",
   accent: "#F3F1EC",

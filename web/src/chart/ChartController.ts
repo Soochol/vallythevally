@@ -289,7 +289,7 @@ export class ChartController {
     this.daySeparators = new DaySeparators(this.chart, {
       shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
       bars: () => this.bars,
-      color: () => this.tokens.text3,
+      color: () => this.tokens.daySeparator,
     });
     this.replayDays = new ReplayDays(this.chart, {
       shown: () => this.view !== null && (isIntraday(this.view.period) || this.view.period === "D") && this.replayDaysSet !== null && this.replayDaysSet.size > 0,
@@ -634,6 +634,7 @@ export class ChartController {
     applyMainColors(this.main, tokens);
     this.indicators.setTheme();
     this.compare.setTheme();
+    this.daySeparators.sync();
     this.replayDays.sync();
     this.requestLegendSources("indicators", "compare");
     this.renderLegend();

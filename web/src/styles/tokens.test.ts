@@ -131,6 +131,29 @@ for (const theme of THEME_KEYS) {
       expect(deltaE2000(color("--danger"), color("--up")), theme).toBeGreaterThanOrEqual(MIN_SERIES_DISTANCE);
     });
   });
+
+  describe(`[${theme}] 날짜 구분선 --day-separator`, () => {
+    const chartBg = color("--chart-bg");
+    const daySeparator = over(color("--day-separator"), chartBg);
+    const grid = over(color("--grid"), chartBg);
+    const daySeparatorContrast = contrastRatio(daySeparator, chartBg);
+
+    it("세로 격자 --grid보다 또렷해 날짜 경계를 구분할 수 있다", () => {
+      expect(daySeparatorContrast, theme).toBeGreaterThan(contrastRatio(grid, chartBg));
+    });
+
+    if (theme.endsWith("-dark")) {
+      it("다크모드에서 캔들을 방해하지 않는 은은한 대비(1.3:1~1.8:1)를 유지한다", () => {
+        expect(daySeparatorContrast, theme).toBeGreaterThanOrEqual(1.3);
+        expect(daySeparatorContrast, theme).toBeLessThanOrEqual(1.8);
+        expect(daySeparatorContrast, theme).toBeLessThan(contrastRatio(color("--text-3"), chartBg));
+      });
+    } else {
+      it("라이트모드에서 4.5:1 이상 가독성을 유지한다", () => {
+        expect(daySeparatorContrast, theme).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+      });
+    }
+  });
 }
 
 describe("공통 치수 토큰", () => {
