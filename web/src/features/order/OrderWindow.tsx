@@ -9,6 +9,7 @@ import { createValueStore, useStoreValue } from "../../lib/valueStore";
 import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
+import { useCallAuctionSession } from "../../stores/callAuctionSession";
 import { useViSession } from "../../stores/viSession";
 import { FeedStrip } from "../market-window/FeedStrip";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
@@ -40,6 +41,7 @@ import { useOrderCommands } from "./useOrderCommands";
 import { type OrderAccess, useOrderAccess, useOrderData } from "./useOrderData";
 import { useOrderDrag } from "./useOrderDrag";
 import { useOrderWrites } from "./useOrderWrites";
+import { ExpectedHeaderBar } from "./ExpectedHeaderBar";
 import { ViOrderOverlay } from "./ViOrderOverlay";
 
 const EXPLORER_UNAVAILABLE = "상·하한가를 아직 받지 못했습니다";
@@ -187,6 +189,10 @@ function OrderBody({
   const sellableRemaining = holding === null ? null : Math.max(0, remainingToSell(holding, sellOrdered));
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null);
   const viState = useViSession(code, market.activeVi, market.expected, replay.kind === "live", !explorerOn && shownLadder, market.liveView?.t ?? null, true);
+  const auctionState = useCallAuctionSession(code, market.venue, symbolInfo?.nxtEnabled === true, market.expected, replay.kind === "live" && !explorerOn && shownLadder && viState.kind === "inactive", market.liveView?.t ?? null);
+  const headerOverlay = viState.kind === "active" || auctionState.kind === "active"
+    ? <ExpectedHeaderBar viState={viState} auctionState={auctionState} previousClose={market.headPreviousClose} variant="order" />
+    : undefined;
 
   const rowHeightPx = ladderRowHeightPx(settings.ladderDensity);
 
@@ -232,11 +238,10 @@ function OrderBody({
       />
       {replay.kind === "live" && !feed.connected && <FeedStrip since={market.downSince} />}
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
-        <ViOrderOverlay band="top" state={viState} previousClose={market.headPreviousClose} />
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable && !replayLocked} previewQuantity={quantity} buyFull={buyFullActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayLocked || referencePrice === null || fullPrices === null} explorerTitle={replayLocked ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} headerOverlay={headerOverlay} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (
