@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ProgramTradeTimeline } from "../../api/generated/ProgramTradeTimeline";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { getJson } from "../../api/http";
@@ -15,6 +15,7 @@ import { priceTone } from "../market-window/PriceLadder";
 import { formatQuantity, withSign } from "../market-window/format";
 import { useWindowedRows } from "../market-window/useWindowedRows";
 import { ErrorState, EmptyState, Skeleton } from "../overlay/State";
+import { useWindowVisible } from "../workspace/windowVisibility";
 import { boldKeys, type ColumnWidths, EMPTY_PROGRAM_LIVE, eokFromMillionWon, formatEokAmount, historyRows, keepProgramHistory, nonZeroChangeLines, type ProgramLine, type ProgramLiveState, type ProgramRow, reduceProgramLive, rowsOf, sparklinePoints, widestSoFar } from "./program";
 
 const VISIBLE_ROWS = 300;
@@ -23,10 +24,16 @@ const SPARK_HEIGHT = 16;
 const CLOCK_TICK_MS = 60_000;
 const quantityFormat = new Intl.NumberFormat("ko-KR");
 
-function useLiveProgram(code: SymbolCode, today: string): ProgramLiveState {
+function useLiveProgram(code: SymbolCode, today: string, active: boolean): ProgramLiveState {
   const [live, fold] = useFrameFold<ProgramLiveState>(() => EMPTY_PROGRAM_LIVE);
+  const resetKey = useRef(`${code}:${today}`);
   useEffect(() => {
-    fold(() => EMPTY_PROGRAM_LIVE);
+    const key = `${code}:${today}`;
+    if (resetKey.current !== key) {
+      resetKey.current = key;
+      fold(() => EMPTY_PROGRAM_LIVE);
+    }
+    if (!active) return;
     let sawRow = false;
     return marketSocket.subscribeFeed({ symbol: code, kind: "program" }, (m) => {
       if (m.type === "feed_program") {
@@ -35,7 +42,7 @@ function useLiveProgram(code: SymbolCode, today: string): ProgramLiveState {
       } else if (m.type === "feed_link" && !m.live && sawRow) fold((state) => reduceProgramLive(state, { type: "gap", at: m.at }));
       else if (m.type === "resync" && sawRow) fold((state) => reduceProgramLive(state, { type: "gap", at: Math.floor(Date.now() / 1000) }));
     });
-  }, [code, today, fold]);
+  }, [code, today, active, fold]);
   return live;
 }
 
@@ -52,7 +59,7 @@ function useWidestColumns(rows: readonly ProgramRow[]): ColumnWidths {
   }, [rows]);
 }
 
-function Summary({ code, latest, trend, fallbackDate }: { code: SymbolCode; latest: ProgramRow | undefined; trend: readonly number[]; fallbackDate: string | null }) {
+const Summary = memo(function Summary({ code, latest, trend, fallbackDate }: { code: SymbolCode; latest: ProgramRow | undefined; trend: readonly number[]; fallbackDate: string | null }) {
   const net = latest?.netQty ?? 0;
   const amount = eokFromMillionWon(latest?.netAmountMillionWon ?? 0);
   const direction = net > 0 ? "up" : net < 0 ? "down" : "flat";
@@ -80,11 +87,11 @@ function Summary({ code, latest, trend, fallbackDate }: { code: SymbolCode; late
       </svg>
     </div>
   );
-}
+});
 
 const TONE_CLASS = { up: "mw-up", down: "mw-down", flat: undefined } as const;
 
-function Table({ lines, previousClose }: { lines: readonly ProgramLine[]; previousClose: number | null }) {
+const Table = memo(function Table({ lines, previousClose }: { lines: readonly ProgramLine[]; previousClose: number | null }) {
   const visible = useMemo(() => nonZeroChangeLines(lines).slice(-VISIBLE_ROWS).reverse(), [lines]);
   const rows = useMemo(() => rowsOf(visible), [visible]);
   const bold = useMemo(() => boldKeys(rows), [rows]);
@@ -113,25 +120,28 @@ function Table({ lines, previousClose }: { lines: readonly ProgramLine[]; previo
       </div>
     </div>
   );
-}
+});
 
 function ProgramBody({ code }: { code: SymbolCode }) {
-  const [, setClockTick] = useState(0);
+  const windowVisible = useWindowVisible();
+  const [clockTick, setClockTick] = useState(0);
   useEffect(() => {
+    if (!windowVisible) return;
     const timer = setInterval(() => setClockTick((tick) => tick + 1), CLOCK_TICK_MS);
     return () => clearInterval(timer);
-  }, []);
+  }, [windowVisible]);
   const serverTimeOrigin = useServerClock((s) => s.serverTimeOrigin);
-  const today = kstDateOf(serverNow(serverTimeOrigin));
+  const today = useMemo(() => kstDateOf(serverNow(serverTimeOrigin)), [serverTimeOrigin, clockTick, windowVisible]);
 
   const history = useQuery({
     queryKey: ["program-trades", code, today],
     queryFn: ({ signal }) => getJson<ProgramTradeTimeline>(`/api/symbols/${encodeURIComponent(code)}/program-trades`, signal),
+    enabled: windowVisible,
     staleTime: 0,
     gcTime: 0,
     refetchOnWindowFocus: false,
   });
-  const live = useLiveProgram(code, today);
+  const live = useLiveProgram(code, today, windowVisible);
   const hasLive = live.latest !== null;
   const historyDate = history.data?.date ?? null;
   const isFallbackHistory = historyDate !== null && historyDate !== today;
@@ -150,13 +160,21 @@ function ProgramBody({ code }: { code: SymbolCode }) {
     () => keepProgramHistory(past, live.firstLiveTime, isFallbackHistory),
     [past, live.firstLiveTime, isFallbackHistory],
   );
+  const keptHistoryLines = useMemo(
+    () => nonZeroChangeLines(keptHistory.map((row): ProgramLine => ({ kind: "row", row }))).slice(-VISIBLE_ROWS),
+    [keptHistory],
+  );
+  const keptHistoryTrend = useMemo(
+    () => keptHistory.map((row) => row.netQty),
+    [keptHistory],
+  );
   const lines = useMemo(
-    () => [...keptHistory.map((row): ProgramLine => ({ kind: "row", row })), ...live.lines],
-    [keptHistory, live.lines],
+    () => (live.lines.length === 0 ? keptHistoryLines : [...keptHistoryLines, ...live.lines]),
+    [keptHistoryLines, live.lines],
   );
   const trend = useMemo(
-    () => [...keptHistory.map((row) => row.netQty), ...live.trend],
-    [keptHistory, live.trend],
+    () => (live.trend.length === 0 ? keptHistoryTrend : [...keptHistoryTrend, ...live.trend]),
+    [keptHistoryTrend, live.trend],
   );
   const latest = live.latest ?? keptHistory.at(-1);
   const { previousClose } = useDayQuote(code, "combined");

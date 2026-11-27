@@ -877,7 +877,35 @@ export class ChartController {
     this.scheduleFrame();
   }
 
+  private active = true;
+  private dirtyWhileInactive = false;
   private reportedCorner = { width: 0, height: 0 };
+
+  setActive(active: boolean): void {
+    if (this.active === active) return;
+    this.active = active;
+    this.legend.setActive(active);
+    this.indicators.setActive(active);
+    if (!active) {
+      if (this.frame !== null) {
+        cancelAnimationFrame(this.frame);
+        this.frame = null;
+        this.dirtyWhileInactive = true;
+      }
+      if (this.legendFrame !== null) {
+        cancelAnimationFrame(this.legendFrame);
+        this.legendFrame = null;
+        this.dirtyWhileInactive = true;
+      }
+      this.stopMicroFeeds();
+      return;
+    }
+    this.syncMicroFeeds();
+    if (this.dirtyWhileInactive) {
+      this.dirtyWhileInactive = false;
+      this.scheduleFrame();
+    }
+  }
   private reportCorner(): void {
     const width = this.chart.priceScale("right").width();
     const height = this.chart.timeScale().height();
@@ -888,7 +916,12 @@ export class ChartController {
 
   private scheduleFrame(): void {
     this.cancelLegendFrame();
-    if (this.frame !== null || this.disposed) return;
+    if (this.disposed) return;
+    if (!this.active) {
+      this.dirtyWhileInactive = true;
+      return;
+    }
+    if (this.frame !== null) return;
     this.frame = requestAnimationFrame((time) => {
       this.frame = null;
       this.drawFrame(time);
@@ -896,7 +929,12 @@ export class ChartController {
   }
 
   private scheduleLegendPaint(): void {
-    if (this.frame !== null || this.legendFrame !== null || this.disposed) return;
+    if (this.disposed) return;
+    if (!this.active) {
+      this.dirtyWhileInactive = true;
+      return;
+    }
+    if (this.frame !== null || this.legendFrame !== null) return;
     this.legendFrame = requestAnimationFrame(() => {
       this.legendFrame = null;
       this.paintLegend();
@@ -1138,7 +1176,7 @@ export class ChartController {
     const socket = this.socket;
     const liveAllowed = this.feed.activeDate === null;
     this.indicators.setMicroLive(liveAllowed);
-    const eligible = liveAllowed && view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
+    const eligible = this.active && liveAllowed && view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
     const wantTrades = eligible && view.settings.indicators.some(
       (c) => c.visible && (isTickCvd(c.spec) || (isProgramFlow(c.spec) && c.spec.showShare)),
     );
@@ -1153,7 +1191,7 @@ export class ChartController {
       const venue = view.venue;
       const stop = socket.subscribeFeed({ symbol, kind: "trades", venue: venue ?? "combined" }, (m) => {
         if (this.disposed || m.type !== "feed_trades") return;
-        for (const trade of m.trades) this.indicators.applyLiveTrade(symbol, trade);
+        this.indicators.applyLiveTrades(symbol, m.trades);
       });
       this.tradeFeedSub = { symbol, venue, stop };
     }

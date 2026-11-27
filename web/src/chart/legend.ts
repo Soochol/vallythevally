@@ -4,7 +4,7 @@ import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
 import type { PaneBounds } from "./indicators/legendRows";
 import { denserTier, legendTier, reserveLegendFields, type LegendField, type LegendProjection, type LegendTier } from "./legendProjection";
-import { OptionalTrackedValues, TrackedValues } from "./legendShapes";
+import { OptionalTrackedValues, TrackedValues, valueShape } from "./legendShapes";
 import type { ChartSettings } from "./settings";
 import { formatBarTime, formatKstClock } from "./time";
 
@@ -264,6 +264,9 @@ export class Legend {
   private lastVenueAndOhlcClass = OHLC_ALONE.group;
   private lastOhlcClass = OHLC_ALONE.values;
   private layout = emptyAlternatives();
+  private readonly seenTailShapes = new Map<string, Set<string>>();
+  private active = true;
+  private deferredFit: LayoutChange | null = null;
 
   private readonly host: HTMLElement;
   private readonly presentationResize: ResizeObserver;
@@ -483,9 +486,10 @@ export class Legend {
 
   setLayoutBars(bars: readonly LegendBar[]): void {
     const layout = emptyAlternatives();
+    this.seenTailShapes.clear();
     layout.present = bars.length > 0;
     layout.count = bars.length;
-    for (let i = 0; i < bars.length; i++) this.putLayoutBar(layout, i, bars[i]!);
+    for (let i = 0; i < bars.length; i++) this.putLayoutBar(layout, i, bars[i]!, false);
     this.layout = layout;
     this.fit("content");
   }
@@ -497,7 +501,7 @@ export class Legend {
     }
     let changed = false;
     for (let offset = 0; offset < bars.length; offset++) {
-      if (this.putLayoutBar(this.layout, from + offset, bars[offset]!)) changed = true;
+      if (this.putLayoutBar(this.layout, from + offset, bars[offset]!, true)) changed = true;
     }
     const nextCount = from + bars.length;
     if (nextCount < this.layout.count && this.truncateLayout(this.layout, nextCount)) changed = true;
@@ -510,15 +514,38 @@ export class Legend {
     return changed;
   }
 
-  private putLayoutBar(layout: LayoutAlternatives, index: number, bar: LegendBar): boolean {
+  private recordTailShape(slot: string, text: string): boolean {
+    if (text === "") return false;
+    const shape = valueShape(text);
+    let set = this.seenTailShapes.get(slot);
+    if (!set) {
+      set = new Set();
+      this.seenTailShapes.set(slot, set);
+    }
+    if (set.has(shape)) return false;
+    set.add(shape);
+    return true;
+  }
+
+  private putLayoutBar(layout: LayoutAlternatives, index: number, bar: LegendBar, tailOnly: boolean): boolean {
     const parts = legendParts(bar);
     const status = statusParts(bar);
     let changed = false;
-    if (layout.price.close.setAt(index, parts.close)) changed = true;
-    if (layout.price.change.setAt(index, parts.change)) changed = true;
-    if (layout.price.time.setAt(index, parts.time)) changed = true;
-    if (layout.price.fetched.setAt(index, status.fetched)) changed = true;
-    if (layout.price.stalled.setAt(index, status.stalled)) changed = true;
+    const closeChanged = layout.price.close.setAt(index, parts.close);
+    const changeChanged = layout.price.change.setAt(index, parts.change);
+    const timeChanged = layout.price.time.setAt(index, parts.time);
+    const fetchedChanged = layout.price.fetched.setAt(index, status.fetched);
+    const stalledChanged = layout.price.stalled.setAt(index, status.stalled);
+    const closeNew = this.recordTailShape("close", parts.close);
+    const changeNew = this.recordTailShape("change", parts.change);
+    const timeNew = this.recordTailShape("time", parts.time);
+    const fetchedNew = this.recordTailShape("fetched", status.fetched);
+    const stalledNew = this.recordTailShape("stalled", status.stalled);
+    if (tailOnly) {
+      if (closeNew || changeNew || timeNew || fetchedNew || stalledNew) changed = true;
+    } else if (closeChanged || changeChanged || timeChanged || fetchedChanged || stalledChanged) {
+      changed = true;
+    }
     for (let i = 0; i < parts.cells.length; i++) {
       const [label, value, change] = parts.cells[i]!;
       let field = layout.cells[i];
@@ -528,7 +555,9 @@ export class Legend {
         changed = true;
       }
       const text = `${value}${this.display.showOhlcChange && change ? ` (${change.text})` : ""}`;
-      if (field.values.setAt(index, text)) changed = true;
+      const cellChanged = field.values.setAt(index, text);
+      const cellNew = this.recordTailShape(`cell:${i}`, text);
+      if (tailOnly ? cellNew : cellChanged) changed = true;
     }
     return changed;
   }
@@ -544,9 +573,32 @@ export class Legend {
     return changed;
   }
 
+  setActive(active: boolean): void {
+    if (this.disposed || this.active === active) return;
+    this.active = active;
+    if (!active) {
+      if (this.presentationFrame !== null) {
+        cancelAnimationFrame(this.presentationFrame);
+        this.presentationFrame = null;
+        this.deferredFit = this.deferredFit === "content" ? "content" : "geometry";
+      }
+      return;
+    }
+    if (this.deferredFit !== null) {
+      const change = this.deferredFit;
+      this.deferredFit = null;
+      this.fit(change);
+    }
+  }
+
   fit(change: LayoutChange): void {
     if (change === "content") this.presentation = { kind: "invalidated" };
-    if (this.disposed || this.presentationFrame !== null) return;
+    if (this.disposed) return;
+    if (!this.active) {
+      this.deferredFit = this.deferredFit === "content" || change === "content" ? "content" : "geometry";
+      return;
+    }
+    if (this.presentationFrame !== null) return;
     this.presentationFrame = requestAnimationFrame(() => {
       this.presentationFrame = null;
       this.refreshPresentation();

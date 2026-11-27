@@ -35,6 +35,7 @@ import { AxisMode } from "./AxisMode";
 import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
 import type { IndicatorConfig } from "../../chart/settings";
 import { DrawingOverlay } from "../drawings/DrawingOverlay";
+import { useWindowVisible } from "../workspace/windowVisibility";
 import { attachController } from "./controllers";
 import type { WindowId } from "../../layout/kinds";
 
@@ -107,6 +108,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     return merged.size > 0 ? merged : null;
   }, [replayDaysList, brokerDaysList]);
   const openSearch = useSelectionStore((s) => s.openSearch);
+  const windowVisible = useWindowVisible();
   const chartEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
   const [editing, setEditing] = useState<{ initial: IndicatorConfig; anchor: HTMLElement } | null>(null);
@@ -143,6 +145,10 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, []);
 
   useEffect(() => attachController(cellId, ctl.current!), [cellId]);
+
+  useEffect(() => {
+    ctl.current?.setActive(windowVisible);
+  }, [windowVisible]);
 
   useEffect(() => {
     if (crosshairScope === null || !ctl.current || !chartEl.current) return;

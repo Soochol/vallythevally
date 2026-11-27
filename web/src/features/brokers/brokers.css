@@ -45,7 +45,9 @@
 .br-future { position:absolute; top:0; right:0; bottom:0; background:color-mix(in srgb, var(--chart-bg) 62%, transparent); pointer-events:none; }
 .br-cursor { position:absolute; top:0; bottom:0; width:0; border-left:var(--size-1) dashed var(--text-3); pointer-events:none; }
 .br-nums { display:grid; align-content:start; gap:var(--size-1); min-height:var(--size-60); font-size:var(--fs-xs); }
-.br-nums[data-mode=numbers] { height:calc(var(--size-96) + var(--size-8)); min-height:0; overflow-y:auto; padding-right:var(--size-2); scrollbar-width:thin; }
+.br-nums[data-mode=numbers] { display:block; height:calc(var(--size-96) + var(--size-8)); min-height:0; overflow-y:auto; padding-right:var(--size-2); scrollbar-width:thin; }
+.br-nums-list { display:grid; align-content:start; gap:0; }
+.br-nums[data-mode=numbers] .br-num-row { box-sizing:border-box; height:var(--size-16); align-items:center; }
 .br-nums[data-mode=numbers]::-webkit-scrollbar { width:var(--size-4); }
 .br-nums[data-mode=numbers]::-webkit-scrollbar-thumb { border-radius:var(--r-pill); background:color-mix(in srgb, var(--text) 24%, transparent); }
 .br-num-row { display:grid; grid-template-columns:var(--size-38) minmax(0, 1fr) minmax(0, 1fr); gap:var(--size-4); text-align:right; }

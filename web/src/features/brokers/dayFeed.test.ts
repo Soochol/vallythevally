@@ -268,4 +268,16 @@ describe("createTodayBrokerFeed", () => {
 
     feed.dispose();
   });
+
+  it("수집 모드에서 720개를 넘는 스냅샷은 분 단위로 압축해 격자 크기를 제한한다", async () => {
+    const h = createHarness();
+    const feed = createTodayBrokerFeed(CODE, h.deps);
+    feed.configure({ date: DATE, enabled: true, active: true });
+    const start = 1_760_000_040;
+    const snapshots = Array.from({ length: 900 }, (_, i) => snapshot(start + i * 2, (i + 1) * 10));
+    await h.resolveFetch(replyOf({ source: "flow", cursor: "c900", snapshots }));
+    expect(feed.snapshot().state.grid.times.length).toBeLessThanOrEqual(40);
+    expect(feed.snapshot().state.grid.times.at(-1)).toBe(start + 899 * 2);
+    feed.dispose();
+  });
 });

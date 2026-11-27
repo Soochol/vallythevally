@@ -117,6 +117,10 @@ function barDates(bars: readonly Bar[]): string[] {
   return dates;
 }
 
+const MAX_MICRO_EVENTS_PER_DAY = 2_000;
+const MAX_MICRO_EVENTS_TOTAL = 4_000;
+const MICRO_TRIM_SLACK = 200;
+
 function microEventKey(event: MicroEvent): string {
   return `${event.recvMs}:${event.kind}:${event.side}:${event.priceWon}:${event.cancelledOrAbsorbedQty}`;
 }
@@ -125,7 +129,27 @@ function mergeMicroLists(existing: readonly MicroEvent[], incoming: readonly Mic
   const seen = new Map<string, MicroEvent>();
   for (const event of existing) seen.set(microEventKey(event), event);
   for (const event of incoming) seen.set(microEventKey(event), event);
-  return [...seen.values()].sort((a, b) => a.recvMs - b.recvMs);
+  const sorted = [...seen.values()].sort((a, b) => a.recvMs - b.recvMs);
+  return sorted.length > MAX_MICRO_EVENTS_PER_DAY ? sorted.slice(sorted.length - MAX_MICRO_EVENTS_PER_DAY) : sorted;
+}
+
+function lowerBoundRecvMs(events: readonly MicroEvent[], targetMs: number): number {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (events[mid]!.recvMs < targetMs) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function insertSortedMicroEvent(list: MicroEvent[], event: MicroEvent): void {
+  if (list.length === 0 || event.recvMs >= list[list.length - 1]!.recvMs) {
+    list.push(event);
+    return;
+  }
+  list.splice(lowerBoundRecvMs(list, event.recvMs), 0, event);
 }
 
 const defaultNowSeconds = (): UnixSeconds => Math.floor(Date.now() / 1000);
@@ -147,11 +171,26 @@ export class QuoteIndicatorController {
   private microSymbol: SymbolCode | null = null;
   private microVenue: ShownVenue | null = null;
   private readonly microByDate = new Map<string, MicroEvent[]>();
+  private readonly microKeysByDate = new Map<string, Set<string>>();
   private readonly microFetched = new Set<string>();
   private readonly microInFlight = new Map<string, AbortController>();
   private microLiveStop: (() => void) | null = null;
-  private microEvents: readonly MicroEvent[] = [];
+  private microEvents: MicroEvent[] = [];
+  private active = true;
   private disposed = false;
+
+  setActive(active: boolean): void {
+    if (this.disposed || this.active === active) return;
+    this.active = active;
+    this.totalsFeed.setPaused(!active);
+    for (const feed of this.depthFeeds.values()) feed.setPaused(!active);
+    if (!active) {
+      this.microLiveStop?.();
+      this.microLiveStop = null;
+      return;
+    }
+    this.coverMicroEvents(this.host.bars());
+  }
 
   constructor(private readonly host: QuoteFamilyHost, deps: QuoteFamilyDeps = {}) {
     this.now = deps.now ?? defaultNowSeconds;
@@ -230,6 +269,7 @@ export class QuoteIndicatorController {
           },
           now: this.now,
         });
+        feed.setPaused(!this.active);
         this.depthFeeds.set(config.id, feed);
       }
       this.depthOverrides = null;
@@ -315,12 +355,17 @@ export class QuoteIndicatorController {
     const showIceberg = config.spec.showIceberg === true;
     if (time !== null && (showSpoof || showIceberg)) {
       const span = this.target ? periodSeconds(this.target.period) : 60;
-      const hit = this.microEvents.find((event) => {
-        if (event.kind === "spoof_cancel" && !showSpoof) return false;
-        if (event.kind === "iceberg_absorb" && !showIceberg) return false;
-        const sec = Math.floor(event.recvMs / 1000);
-        return sec >= time && sec < time + span;
-      });
+      const startMs = time * 1000;
+      const endMs = (time + span) * 1000;
+      let hit: MicroEvent | undefined;
+      for (let i = lowerBoundRecvMs(this.microEvents, startMs); i < this.microEvents.length; i++) {
+        const event = this.microEvents[i]!;
+        if (event.recvMs >= endMs) break;
+        if (event.kind === "spoof_cancel" && !showSpoof) continue;
+        if (event.kind === "iceberg_absorb" && !showIceberg) continue;
+        hit = event;
+        break;
+      }
       if (hit) {
         values.push({
           text: formatMicroHoverDetail(hit),
@@ -404,6 +449,7 @@ export class QuoteIndicatorController {
     this.microSymbol = null;
     this.microVenue = null;
     this.microByDate.clear();
+    this.microKeysByDate.clear();
     this.microFetched.clear();
     this.microEvents = [];
   }
@@ -436,7 +482,7 @@ export class QuoteIndicatorController {
         this.fetchMicroDate(symbol, date);
       }
     }
-    if (dates.includes(today)) {
+    if (this.active && dates.includes(today)) {
       if (this.microLiveStop === null) {
         const venue = this.microVenue ?? undefined;
         this.microLiveStop = this.subscribeMicroFeed({ symbol, kind: "micro", venue }, (message) => {
@@ -464,6 +510,7 @@ export class QuoteIndicatorController {
         this.microFetched.add(date);
         const merged = mergeMicroLists(this.microByDate.get(date) ?? [], page.events);
         this.microByDate.set(date, merged);
+        this.microKeysByDate.set(date, new Set(merged.map(microEventKey)));
         this.rebuildMicroEvents();
         this.heatmap.redraw();
         this.host.onDepthChanged();
@@ -486,10 +533,30 @@ export class QuoteIndicatorController {
 
   private appendLiveMicroEvent(event: MicroEvent): void {
     const date = kstYyyymmdd(event.recvMs);
-    const current = this.microByDate.get(date) ?? [];
-    const merged = mergeMicroLists(current, [event]);
-    this.microByDate.set(date, merged);
-    this.rebuildMicroEvents();
+    let current = this.microByDate.get(date);
+    if (!current) {
+      current = [];
+      this.microByDate.set(date, current);
+    }
+    let keys = this.microKeysByDate.get(date);
+    if (!keys) {
+      keys = new Set(current.map(microEventKey));
+      this.microKeysByDate.set(date, keys);
+    }
+    const key = microEventKey(event);
+    if (keys.has(key)) return;
+    keys.add(key);
+    insertSortedMicroEvent(current, event);
+    if (current.length > MAX_MICRO_EVENTS_PER_DAY + MICRO_TRIM_SLACK) {
+      const removed = current.splice(0, current.length - MAX_MICRO_EVENTS_PER_DAY);
+      for (const old of removed) keys.delete(microEventKey(old));
+      this.rebuildMicroEvents();
+    } else {
+      insertSortedMicroEvent(this.microEvents, event);
+      if (this.microEvents.length > MAX_MICRO_EVENTS_TOTAL + MICRO_TRIM_SLACK) {
+        this.microEvents.splice(0, this.microEvents.length - MAX_MICRO_EVENTS_TOTAL);
+      }
+    }
     this.heatmap.redraw();
     this.host.onDepthChanged();
   }
@@ -500,7 +567,9 @@ export class QuoteIndicatorController {
       for (const event of events) combined.push(event);
     }
     combined.sort((a, b) => a.recvMs - b.recvMs);
-    this.microEvents = combined;
+    this.microEvents = combined.length > MAX_MICRO_EVENTS_TOTAL
+      ? combined.slice(combined.length - MAX_MICRO_EVENTS_TOTAL)
+      : combined;
   }
 
   private depthLayers(): QuoteDepthLayer[] {

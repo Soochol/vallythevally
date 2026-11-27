@@ -119,29 +119,66 @@ function addTierDelta(point: TickCvdPoint, tier: TickTier, deltaMillionWon: numb
   }
 }
 
+const MAX_PENDING_LIVE = 4_000;
+
+function kstDayIndex(unixSec: UnixSeconds): number {
+  return Math.floor((unixSec + KST_OFFSET_SEC) / DAY_SEC);
+}
+
 export function applyLiveTradeToPoints(
   points: Map<UnixSeconds, TickCvdPoint>,
   tick: FeedTrade,
   period: Period,
+  maxTByDay?: Map<number, UnixSeconds>,
 ): TickCvdPoint | null {
   const bucketT = bucketStartSec(tick.t, period);
   if (bucketT === null || tick.qty === 0 || tick.price <= 0) return null;
   const valueWon = Math.abs(tick.price * tick.qty);
   const deltaMillionWon = (tick.price * tick.qty) / 1_000_000;
   const tier = classifyTickTier(valueWon);
-  const day = kstDateOf(bucketT);
+  const dayIdx = kstDayIndex(bucketT);
+  const dayStart = dayIdx * DAY_SEC - KST_OFFSET_SEC;
+  const dayEnd = dayStart + DAY_SEC;
+  const maxT = maxTByDay?.get(dayIdx);
   const existing = points.get(bucketT);
   if (existing !== undefined) {
     const updated = addTierDelta(existing, tier, deltaMillionWon);
     points.set(bucketT, updated);
-    for (const [t, pt] of points) {
-      if (t > bucketT && kstDateOf(t) === day) points.set(t, addTierDelta(pt, tier, deltaMillionWon));
+    if (maxTByDay !== undefined && maxT !== undefined && bucketT >= maxT) {
+      if (bucketT > maxT) maxTByDay.set(dayIdx, bucketT);
+      return updated;
     }
+    for (const [t, pt] of points) {
+      if (t > bucketT && t < dayEnd) points.set(t, addTierDelta(pt, tier, deltaMillionWon));
+    }
+    if (maxTByDay !== undefined && maxT === undefined) maxTByDay.set(dayIdx, bucketT);
     return updated;
+  }
+  if (maxTByDay !== undefined && (maxT === undefined || bucketT > maxT)) {
+    const prevSameDay = maxT !== undefined ? (points.get(maxT) ?? null) : null;
+    const base: TickCvdPoint = prevSameDay
+      ? {
+          t: bucketT,
+          whaleNetMillionWon: prevSameDay.whaleNetMillionWon,
+          largeNetMillionWon: prevSameDay.largeNetMillionWon,
+          midNetMillionWon: prevSameDay.midNetMillionWon,
+          retailNetMillionWon: prevSameDay.retailNetMillionWon,
+        }
+      : {
+          t: bucketT,
+          whaleNetMillionWon: 0,
+          largeNetMillionWon: 0,
+          midNetMillionWon: 0,
+          retailNetMillionWon: 0,
+        };
+    const created = addTierDelta(base, tier, deltaMillionWon);
+    points.set(bucketT, created);
+    maxTByDay.set(dayIdx, bucketT);
+    return created;
   }
   let prevSameDay: TickCvdPoint | null = null;
   for (const [t, pt] of points) {
-    if (t < bucketT && kstDateOf(t) === day && (prevSameDay === null || t > prevSameDay.t)) {
+    if (t >= dayStart && t < bucketT && (prevSameDay === null || t > prevSameDay.t)) {
       prevSameDay = pt;
     }
   }
@@ -163,8 +200,9 @@ export function applyLiveTradeToPoints(
   const created = addTierDelta(base, tier, deltaMillionWon);
   points.set(bucketT, created);
   for (const [t, pt] of points) {
-    if (t > bucketT && kstDateOf(t) === day) points.set(t, addTierDelta(pt, tier, deltaMillionWon));
+    if (t > bucketT && t < dayEnd) points.set(t, addTierDelta(pt, tier, deltaMillionWon));
   }
+  if (maxTByDay !== undefined && (maxT === undefined || bucketT > maxT)) maxTByDay.set(dayIdx, bucketT);
   return created;
 }
 
@@ -272,11 +310,13 @@ interface SeriesStore<P extends { t: UnixSeconds }, L> {
   gen: number;
   state: MicroFeedState;
   points: Map<UnixSeconds, P>;
+  maxTByDay: Map<number, UnixSeconds>;
   have: DateRange[];
   need: DateRange | null;
   liveLatestT: UnixSeconds | null;
   pendingLive: L[];
   fetching: boolean;
+  fetchFailed: boolean;
   abort: AbortController | null;
 }
 
@@ -286,11 +326,13 @@ function emptyStore<P extends { t: UnixSeconds }, L>(): SeriesStore<P, L> {
     gen: 0,
     state: "loading",
     points: new Map(),
+    maxTByDay: new Map(),
     have: [],
     need: null,
     liveLatestT: null,
     pendingLive: [],
     fetching: false,
+    fetchFailed: false,
     abort: null,
   };
 }
@@ -300,13 +342,24 @@ function resetStore<P extends { t: UnixSeconds }, L>(store: SeriesStore<P, L>, k
   store.abort?.abort();
   store.abort = null;
   store.fetching = false;
+  store.fetchFailed = false;
   store.key = key;
   store.state = state;
   store.points.clear();
+  store.maxTByDay.clear();
   store.have = [];
   store.need = null;
   store.liveLatestT = null;
   store.pendingLive = [];
+}
+
+function rebuildMaxTByDay<P extends { t: UnixSeconds }, L>(store: SeriesStore<P, L>): void {
+  store.maxTByDay.clear();
+  for (const t of store.points.keys()) {
+    const dayIdx = kstDayIndex(t);
+    const prev = store.maxTByDay.get(dayIdx);
+    if (prev === undefined || t > prev) store.maxTByDay.set(dayIdx, t);
+  }
 }
 
 function targetKey(target: MicroTarget): string {
@@ -452,22 +505,33 @@ export class MicroIndicatorController {
   }
 
   applyLiveTrade(symbol: SymbolCode, tick: FeedTrade): boolean {
-    if (this.disposed || !this.liveEnabled || !this.target || this.target.symbol !== symbol) return false;
+    return this.applyLiveTrades(symbol, [tick]);
+  }
+
+  applyLiveTrades(symbol: SymbolCode, ticks: readonly FeedTrade[]): boolean {
+    if (this.disposed || !this.liveEnabled || !this.target || this.target.symbol !== symbol || ticks.length === 0) return false;
     if (!isIntraday(this.target.period) || isIndexCode(symbol)) return false;
-    const bucketT = bucketStartSec(tick.t, this.target.period);
-    if (bucketT !== null && tick.qty !== 0 && tick.price > 0) {
-      const day = kstDateOf(bucketT);
-      this.liveDayTradedWon.set(day, (this.liveDayTradedWon.get(day) ?? 0) + Math.abs(tick.price * tick.qty));
+    const period = this.target.period;
+    let earliestT: UnixSeconds | null = null;
+    for (let i = 0; i < ticks.length; i++) {
+      const tick = ticks[i]!;
+      const bucketT = bucketStartSec(tick.t, period);
+      if (bucketT !== null && tick.qty !== 0 && tick.price > 0) {
+        const day = kstDateOf(bucketT);
+        this.liveDayTradedWon.set(day, (this.liveDayTradedWon.get(day) ?? 0) + Math.abs(tick.price * tick.qty));
+        if (this.cvdActive && !this.cvd.fetchFailed && !rangesContain(this.cvd.have, day)) {
+          if (this.cvd.pendingLive.length < MAX_PENDING_LIVE) this.cvd.pendingLive.push(tick);
+        }
+      }
+      if (!this.cvdActive) continue;
+      const updated = applyLiveTradeToPoints(this.cvd.points, tick, period, this.cvd.maxTByDay);
+      if (!updated) continue;
+      if (this.cvd.state !== "ready") this.cvd.state = "ready";
+      if (this.cvd.liveLatestT === null || updated.t > this.cvd.liveLatestT) this.cvd.liveLatestT = updated.t;
+      if (earliestT === null || updated.t < earliestT) earliestT = updated.t;
     }
-    if (!this.cvdActive) return false;
-    if (bucketT !== null && tick.qty !== 0 && tick.price > 0 && !rangesContain(this.cvd.have, kstDateOf(bucketT))) {
-      this.cvd.pendingLive.push(tick);
-    }
-    const updated = applyLiveTradeToPoints(this.cvd.points, tick, this.target.period);
-    if (!updated) return false;
-    if (this.cvd.state !== "ready") this.cvd.state = "ready";
-    if (this.cvd.liveLatestT === null || updated.t > this.cvd.liveLatestT) this.cvd.liveLatestT = updated.t;
-    this.host.onTickCvdChanged(updated.t);
+    if (earliestT === null) return false;
+    this.host.onTickCvdChanged(earliestT);
     return true;
   }
 
@@ -477,7 +541,9 @@ export class MicroIndicatorController {
     const bucketT = bucketStartSec(row.t, this.target.period);
     if (bucketT === null) return false;
     const day = kstDateOf(bucketT);
-    if (!rangesContain(this.program.have, day)) this.program.pendingLive.push(row);
+    if (!this.program.fetchFailed && !rangesContain(this.program.have, day) && this.program.pendingLive.length < MAX_PENDING_LIVE) {
+      this.program.pendingLive.push(row);
+    }
     const dayTraded = this.dayTradedWonFor(day);
     const updated = applyLiveProgramToPoints(this.program.points, row, this.target.period, dayTraded);
     if (!updated) return false;
@@ -669,8 +735,9 @@ export class MicroIndicatorController {
           if (dateInRange(kstDateOf(t), chunk)) store.points.delete(t);
         }
         for (const pt of page.points) store.points.set(pt.t, pt);
+        rebuildMaxTByDay(store);
         for (const tick of toReplay) {
-          const updated = applyLiveTradeToPoints(store.points, tick, target.period);
+          const updated = applyLiveTradeToPoints(store.points, tick, target.period, store.maxTByDay);
           if (updated && (store.liveLatestT === null || updated.t > store.liveLatestT)) store.liveLatestT = updated.t;
         }
         if (store.points.size > 0) store.state = "ready";
@@ -683,6 +750,8 @@ export class MicroIndicatorController {
       () => {
         if (this.disposed || gen !== store.gen) return;
         store.fetching = false;
+        store.fetchFailed = true;
+        store.pendingLive = [];
         store.abort = null;
         if (store.points.size === 0 && store.state === "loading") {
           store.state = "failed";
@@ -752,6 +821,8 @@ export class MicroIndicatorController {
       () => {
         if (this.disposed || gen !== store.gen) return;
         store.fetching = false;
+        store.fetchFailed = true;
+        store.pendingLive = [];
         store.abort = null;
         if (store.points.size === 0 && store.state === "loading") {
           store.state = "failed";

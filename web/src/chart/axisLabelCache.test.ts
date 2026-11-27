@@ -138,3 +138,17 @@ test("같은 프레임에 축 눈금을 이미 포맷했다면 가격 범위와 
   expect(cache.refresh(2)).toBe(false);
   expect(apply).not.toHaveBeenCalled();
 });
+
+test("연속 입력 실패가 한도를 넘으면 다음 프레임 재시도를 멈추고 무한 rAF를 방지한다", () => {
+  const error = vi.spyOn(console, "error").mockImplementation(() => {});
+  const { cache, panes, timeline } = fixture();
+  panes[0]!.getSeries.mockImplementation(() => { throw new Error("broken axis"); });
+  expect(cache.refresh(1)).toBe(true);
+  timeline.currentTime = 2;
+  expect(cache.refresh(2)).toBe(true);
+  timeline.currentTime = 3;
+  expect(cache.refresh(3)).toBe(true);
+  timeline.currentTime = 4;
+  expect(cache.refresh(4)).toBe(false);
+  expect(error).toHaveBeenCalledTimes(1);
+});
