@@ -11,7 +11,7 @@ import { renderWithProviders } from "../../test/domHarness";
 import { resetDomAfterEach } from "../../test/domSetup";
 import { OrderWindow } from "./OrderWindow";
 import { ORDER_SOUND_LABEL } from "./orderSettings";
-import { ACCOUNT, BASE, CODE, defaultOrdersStatus, setupOrderEnv } from "./orderTestHarness";
+import { ACCOUNT, BASE, CODE, setupOrderEnv } from "./orderTestHarness";
 
 const PLAYBOOK: ViPlaybook = {
   symbol: CODE,
@@ -149,9 +149,8 @@ test("매수·매도 접수·실시간 체결 소리 및 음소거 토글 동작
   client.clear();
 });
 
-test("체결 해부: 내 체결 탭 열 때만 조회, 미수집 카드, 키보드 Enter 선택, 주문 꺼짐 시 미조회", async () => {
+test("내 체결 탭은 포렌식 조회와 진단 뱃지 없이 체결 내역만 표시한다", async () => {
   const fill1: TradingExecution = { orderNo: "0001001", code: CODE, name: "삼성전자", side: "buy", quantity: 10, price: BASE, time: "091500", venue: "krx" };
-  const fill2: TradingExecution = { orderNo: "0001002", code: CODE, name: "삼성전자", side: "buy", quantity: 5, price: BASE + 100, time: "092500", venue: "krx" };
   const env = setupOrderEnv({
     executions: [fill1],
     forensics: {
@@ -159,39 +158,19 @@ test("체결 해부: 내 체결 탭 열 때만 조회, 미수집 카드, 키보�
       account: ACCOUNT,
       items: [
         { orderNo: "0001001", code: CODE, name: "삼성전자", side: "buy", time: "091500", fillAt: 1_794_186_000, price: BASE, quantity: 10, collected: true, diagnosis: "iceberg_support", mfePct: 1.15, maePct: -0.1, slippageTicks: 0, preEntryCancelRatePct: 0, programDeltaMillionWon: 85, whaleNetDeltaMillionWon: 40, summary: "아이스버그 지지 포착" },
-        { orderNo: "0001002", code: CODE, name: "삼성전자", side: "buy", time: "092500", fillAt: 1_794_186_060, price: BASE + 100, quantity: 5, collected: false, diagnosis: "neutral", mfePct: null, maePct: null, slippageTicks: null, preEntryCancelRatePct: null, programDeltaMillionWon: null, whaleNetDeltaMillionWon: null, summary: "미수집 체결" },
       ],
     },
   });
 
-  const { client, unmount } = renderWithProviders(<OrderWindow id={windowId("order")} />);
+  const { client } = renderWithProviders(<OrderWindow id={windowId("order")} />);
   await screen.findByTestId("price-ladder");
   await waitFor(() => expect(screen.getByTestId("order-window").hasAttribute("data-writable")).toBe(true));
-  expect(env.forensicsCalls()).toBe(0);
 
   fireEvent.click(screen.getByTestId("account-tab-fills"));
-  const initialFills = await screen.findAllByTestId("account-fill");
-  fireEvent.click(initialFills[0]!);
-  const card = await screen.findByTestId("execution-forensic-card");
-  expect(card.textContent).toContain("아이스버그 지지");
-  expect(env.forensicsCalls()).toBe(1);
-
-  env.executions = [fill1, fill2];
-  await act(async () => {
-    env.socket.emit({ type: "trading_account_changed", accountRef: ACCOUNT });
-  });
-  await waitFor(() => expect(screen.getAllByTestId("account-fill")).toHaveLength(2));
-  const items = screen.getAllByTestId("account-fill");
-  fireEvent.keyDown(items[0]!, { key: "Enter" });
-  expect((await screen.findByTestId("execution-forensic-card")).getAttribute("data-collected")).toBe("false");
+  const fills = await screen.findAllByTestId("account-fill");
+  expect(fills).toHaveLength(1);
+  expect(screen.queryByTestId("fill-diagnosis-badge")).toBeNull();
+  expect(screen.queryByTestId("execution-forensic-card")).toBeNull();
+  expect(env.forensicsCalls()).toBe(0);
   client.clear();
-  unmount();
-
-  const disabledEnv = setupOrderEnv({
-    ordersStatus: { ...defaultOrdersStatus(), state: "off", accounts: [{ keyId: "k1", broker: "kiwoom", alias: "주계좌", market: true, state: "off", accountRef: null, accountTail: "12" }] },
-  });
-  const offView = renderWithProviders(<OrderWindow id={windowId("order")} />);
-  fireEvent.click(await offView.findByTestId("account-tab-fills"));
-  expect(disabledEnv.forensicsCalls()).toBe(0);
-  offView.client.clear();
 });
