@@ -1001,7 +1001,27 @@ export class ChartController {
     const found = info && findExtremes(this.bars, first, lastIndex);
     const last = this.bars[lastIndex];
     const paneHeight = this.chart.panes()[0]?.getHeight() ?? 0;
-    const surface = { paneWidth, paneHeight, avoid: this.legend.avoid };
+    const obstacles: { left: number; top: number; right: number; bottom: number }[] = [];
+    if (found && last) {
+      const firstX = xOf(first);
+      const lastX = xOf(lastIndex);
+      const barStep = lastIndex > first && firstX !== null && lastX !== null ? (lastX - firstX) / (lastIndex - first) : 12;
+      const halfWidth = Math.max(2, Math.min(12, barStep * 0.36)) + 2;
+      for (let i = first; i <= lastIndex; i++) {
+        const bar = this.bars[i]!;
+        const cx = xOf(i);
+        const top = this.main.api.priceToCoordinate(bar.h);
+        const bottom = this.main.api.priceToCoordinate(bar.l);
+        if (cx === null || top === null || bottom === null) continue;
+        obstacles.push({
+          left: cx - halfWidth,
+          right: cx + halfWidth,
+          top: Math.min(top, bottom) - 2,
+          bottom: Math.max(top, bottom) + 2,
+        });
+      }
+    }
+    const surface = { paneWidth, paneHeight, avoid: this.legend.avoid, obstacles };
     if (!view || !last || !found) return this.extremeTags.show(null, surface);
     const isIndex = isIndexCode(view.symbol);
     const tag = ({ index, price }: Extreme): ExtremeTag | null => {

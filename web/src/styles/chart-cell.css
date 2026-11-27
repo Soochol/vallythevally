@@ -144,9 +144,10 @@
 .pane-dnd-ghost[data-visible="true"] { display: inline-flex; }
 .chart-extreme { position:absolute; left:0; top:0; z-index:3; pointer-events:none; }
 .chart-extreme[hidden] { display:none; }
+.chart-extreme-line { position:absolute; left:0; top:0; width:1px; height:1px; overflow:visible; pointer-events:none; }
+.chart-extreme-line line { stroke-width:1; stroke-opacity:0.62; }
 .chart-extreme>i { position:absolute; left:calc(-1 * var(--size-2)); top:calc(-1 * var(--size-2)); width:var(--size-4); height:var(--size-4); border-radius:var(--r-pill); box-shadow:0 0 0 var(--size-1) var(--chart-bg); }
-.chart-extreme>span { position:absolute; left:0; transform:translateX(calc(-1 * var(--size-10))); padding:var(--size-2) var(--size-8); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); background:var(--raised); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
-.chart-extreme[data-flip]>span { transform:translateX(calc(-100% + var(--size-10))); }
+.chart-extreme>span { position:absolute; left:0; top:0; padding:var(--size-2) var(--size-6); border:var(--size-1) solid var(--line); border-radius:var(--r-s); background:color-mix(in srgb, var(--chart-bg) 88%, transparent); color:var(--text); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; transition:transform 90ms ease-out; }
 .chart-extreme b { font-weight:600; }
 .chart-jump { pointer-events:auto; display:flex; align-items:center; max-width:100%; min-height:var(--size-24); padding:0 var(--size-2) 0 var(--size-8); border:var(--size-1) solid var(--warning); border-radius:var(--r-pill); color:var(--warning); font-size:var(--fs-xs); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .chart-jump[hidden] { display:none; }
@@ -165,8 +166,12 @@
 }
 .chart-extreme[data-extreme=high]>i { background:var(--up); }
 .chart-extreme[data-extreme=high] b { color:var(--up); }
+.chart-extreme[data-extreme=high] .chart-extreme-line line { stroke:var(--up); }
+.chart-extreme[data-extreme=high]>span { border-color:color-mix(in srgb, var(--up) 35%, transparent); }
 .chart-extreme[data-extreme=low]>i { background:var(--down); }
 .chart-extreme[data-extreme=low] b { color:var(--down); }
+.chart-extreme[data-extreme=low] .chart-extreme-line line { stroke:var(--down); }
+.chart-extreme[data-extreme=low]>span { border-color:color-mix(in srgb, var(--down) 35%, transparent); }
 @media (width >= 48rem) {
   :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend { top:var(--size-4); gap:var(--size-2); }
   :is([data-legend-tier=compact],[data-legend-tier=minimal]) .chart-legend>div { gap:var(--size-2); }

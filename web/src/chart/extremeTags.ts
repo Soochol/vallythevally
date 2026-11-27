@@ -16,27 +16,35 @@ export function extremeChange(price: number, last: number, basis: ExtremeBasis):
 }
 
 const SIDE_LABEL: Record<ExtremeSide, string> = { high: "최고", low: "최저" };
-const FLIP_WITHIN_PX = 190;
-const LABEL_ABOVE_PX = -30;
-const LABEL_BELOW_PX = 10;
 const LABEL_HEIGHT_PX = 20;
-const LABEL_INSET_PX = 10;
-const LABEL_CHROME_PX = 18;
+const LABEL_CHROME_PX = 14;
 const PANE_EDGE_PX = 8;
 const WIDE_GLYPH_PX = 11;
 const NARROW_GLYPH_PX = 6.8;
+const SVG_NS = "http://www.w3.org/2000/svg";
 
-export interface ExtremeBox { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number }
+export interface ExtremeBox {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+}
 
 export interface ExtremeSurface {
   readonly paneWidth: number;
   readonly paneHeight: number;
   readonly avoid: ExtremeBox | null;
+  readonly obstacles?: readonly ExtremeBox[];
 }
 
 export interface LabelPlacement {
-  readonly flip: boolean;
+  readonly left: number;
   readonly top: number;
+  readonly width: number;
+  readonly height: number;
+  readonly anchorX: number;
+  readonly anchorY: number;
+  readonly overlap: number;
 }
 
 export function estimateLabelWidth(text: string): number {
@@ -45,53 +53,127 @@ export function estimateLabelWidth(text: string): number {
   return width;
 }
 
-function intersects(first: ExtremeBox, second: ExtremeBox): boolean {
-  return first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom;
+function overlapArea(first: ExtremeBox, second: ExtremeBox): number {
+  const xOverlap = Math.max(0, Math.min(first.right, second.right) - Math.max(first.left, second.left));
+  const yOverlap = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
+  return xOverlap * yOverlap;
 }
 
-export function placeExtremeLabel(side: ExtremeSide, tag: Pick<ExtremeTag, "x" | "y">, text: string, surface: ExtremeSurface): LabelPlacement {
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function candidateOffsets(side: ExtremeSide, width: number, height: number): readonly (readonly [number, number])[] {
+  if (side === "high") {
+    return [
+      [12, -height - 10],
+      [-width - 12, -height - 10],
+      [-width / 2, -height - 12],
+      [16, -height / 2],
+      [-width - 16, -height / 2],
+      [22, -height - 16],
+      [-width - 22, -height - 16],
+      [12, 10],
+      [-width - 12, 10],
+      [-width / 2, 12],
+    ];
+  }
+  return [
+    [12, 10],
+    [-width - 12, 10],
+    [-width / 2, 12],
+    [16, -height / 2],
+    [-width - 16, -height / 2],
+    [22, 16],
+    [-width - 22, 16],
+    [12, -height - 10],
+    [-width - 12, -height - 10],
+    [-width / 2, -height - 12],
+  ];
+}
+
+export function placeExtremeLabel(
+  side: ExtremeSide,
+  tag: Pick<ExtremeTag, "x" | "y">,
+  text: string,
+  surface: ExtremeSurface,
+  otherBox: ExtremeBox | null = null,
+): LabelPlacement {
   const width = estimateLabelWidth(text);
-  const edgeFlip = tag.x > surface.paneWidth - FLIP_WITHIN_PX;
-  const preferred = side === "high" ? LABEL_ABOVE_PX : LABEL_BELOW_PX;
-  const opposite = side === "high" ? LABEL_BELOW_PX : LABEL_ABOVE_PX;
-  const lowest = surface.paneHeight - PANE_EDGE_PX - LABEL_HEIGHT_PX;
-  const candidates = [[edgeFlip, preferred], [edgeFlip, opposite], [!edgeFlip, preferred], [!edgeFlip, opposite]] as const;
-  const placed = candidates.map(([flip, offset]) => {
-    const top = Math.max(PANE_EDGE_PX, Math.min(lowest, tag.y + offset)) - tag.y;
-    const left = flip ? tag.x + LABEL_INSET_PX - width : tag.x - LABEL_INSET_PX;
-    const box = { left, right: left + width, top: tag.y + top, bottom: tag.y + top + LABEL_HEIGHT_PX };
-    return { flip, top, clear: surface.avoid === null || !intersects(box, surface.avoid) };
-  });
-  const chosen = placed.find((candidate) => candidate.clear) ?? placed[0]!;
-  return { flip: chosen.flip, top: chosen.top };
+  const height = LABEL_HEIGHT_PX;
+  const maxLeft = Math.max(PANE_EDGE_PX, surface.paneWidth - PANE_EDGE_PX - width);
+  const maxTop = Math.max(PANE_EDGE_PX, surface.paneHeight - PANE_EDGE_PX - height);
+  const obstacles = surface.obstacles ?? [];
+  const offsets = candidateOffsets(side, width, height);
+
+  let best: { left: number; top: number; overlap: number; score: number } | null = null;
+  for (let index = 0; index < offsets.length; index++) {
+    const [dx, dy] = offsets[index]!;
+    const absLeft = clamp(tag.x + dx, PANE_EDGE_PX, maxLeft);
+    const absTop = clamp(tag.y + dy, PANE_EDGE_PX, maxTop);
+    const box: ExtremeBox = { left: absLeft, top: absTop, right: absLeft + width, bottom: absTop + height };
+
+    let obstacleOverlap = 0;
+    for (let i = 0; i < obstacles.length; i++) obstacleOverlap += overlapArea(box, obstacles[i]!);
+    const legendOverlap = surface.avoid === null ? 0 : overlapArea(box, surface.avoid);
+    const otherOverlap = otherBox === null ? 0 : overlapArea(box, otherBox);
+    const totalOverlap = obstacleOverlap + legendOverlap + otherOverlap;
+    const score = obstacleOverlap * 10 + legendOverlap * 20 + otherOverlap * 30 + index * 1.5;
+
+    if (best === null || score < best.score) {
+      best = { left: absLeft - tag.x, top: absTop - tag.y, overlap: totalOverlap, score };
+    }
+    if (totalOverlap === 0) break;
+  }
+
+  const chosen = best!;
+  const anchorX = clamp(0, chosen.left, chosen.left + width);
+  const anchorY = clamp(0, chosen.top, chosen.top + height);
+  return {
+    left: chosen.left,
+    top: chosen.top,
+    width,
+    height,
+    anchorX,
+    anchorY,
+    overlap: chosen.overlap,
+  };
 }
 
 class Tag {
   readonly root = document.createElement("div");
+  private readonly line = document.createElementNS(SVG_NS, "line");
   private readonly price = document.createElement("span");
   private readonly label = document.createElement("span");
-  private placed: LabelPlacement | null = null;
   private lastHidden = true;
   private lastTransform = "";
+  private lastLabelTransform = "";
+  private lastAnchor = "";
 
   constructor(private readonly side: ExtremeSide) {
     this.root.className = "chart-extreme";
     this.root.dataset.extreme = side;
     this.root.hidden = true;
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "chart-extreme-line");
+    svg.setAttribute("aria-hidden", "true");
+    this.line.setAttribute("x1", "0");
+    this.line.setAttribute("y1", "0");
+    svg.append(this.line);
     const dot = document.createElement("i");
     const name = document.createElement("b");
     name.textContent = SIDE_LABEL[side];
     this.label.append(name, " ", this.price);
-    this.root.append(dot, this.label);
+    this.root.append(svg, dot, this.label);
   }
 
-  show(tag: ExtremeTag | null, surface: ExtremeSurface): void {
+  show(tag: ExtremeTag | null, surface: ExtremeSurface, otherBox: ExtremeBox | null): ExtremeBox | null {
     const hidden = tag === null;
     if (this.lastHidden !== hidden) {
       this.lastHidden = hidden;
       this.root.hidden = hidden;
     }
-    if (!tag) return;
+    if (!tag) return null;
     const transform = `translate(${tag.x}px, ${tag.y}px)`;
     if (this.lastTransform !== transform) {
       this.lastTransform = transform;
@@ -99,10 +181,24 @@ class Tag {
     }
     const text = tag.change === null ? tag.price : `${tag.price} (${tag.change})`;
     if (this.price.textContent !== text) this.price.textContent = text;
-    const placement = placeExtremeLabel(this.side, tag, `${SIDE_LABEL[this.side]} ${text}`, surface);
-    if (this.placed?.flip !== placement.flip) this.root.toggleAttribute("data-flip", placement.flip);
-    if (this.placed?.top !== placement.top) this.label.style.top = `${placement.top}px`;
-    this.placed = placement;
+    const placement = placeExtremeLabel(this.side, tag, `${SIDE_LABEL[this.side]} ${text}`, surface, otherBox);
+    const labelTransform = `translate(${Math.round(placement.left)}px, ${Math.round(placement.top)}px)`;
+    if (this.lastLabelTransform !== labelTransform) {
+      this.lastLabelTransform = labelTransform;
+      this.label.style.transform = labelTransform;
+    }
+    const anchor = `${Math.round(placement.anchorX)},${Math.round(placement.anchorY)}`;
+    if (this.lastAnchor !== anchor) {
+      this.lastAnchor = anchor;
+      this.line.setAttribute("x2", String(Math.round(placement.anchorX)));
+      this.line.setAttribute("y2", String(Math.round(placement.anchorY)));
+    }
+    return {
+      left: tag.x + placement.left,
+      top: tag.y + placement.top,
+      right: tag.x + placement.left + placement.width,
+      bottom: tag.y + placement.top + placement.height,
+    };
   }
 }
 
@@ -115,8 +211,8 @@ export class ExtremeTags {
   }
 
   show(tags: Record<ExtremeSide, ExtremeTag | null> | null, surface: ExtremeSurface): void {
-    this.high.show(tags?.high ?? null, surface);
-    this.low.show(tags?.low ?? null, surface);
+    const highBox = this.high.show(tags?.high ?? null, surface, null);
+    this.low.show(tags?.low ?? null, surface, highBox);
   }
 
   dispose(): void {
