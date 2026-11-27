@@ -1,4 +1,5 @@
 import type { BrokerDay } from "../../api/brokers";
+import type { BookReplayCoverage } from "../../api/generated/BookReplayCoverage";
 import type { BrokerDaySource } from "../../api/generated/BrokerDaySource";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
@@ -14,6 +15,7 @@ export interface BrokerDaySnapshot {
   readonly mode: BrokerDayMode;
   readonly date: string | null;
   readonly source: BrokerDaySource | null;
+  readonly coverage?: BookReplayCoverage;
   readonly state: BrokerState;
   readonly gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
   readonly failed: boolean;
@@ -35,6 +37,7 @@ export interface TodayBrokerFeedConfig {
   readonly enabled: boolean;
   readonly active: boolean;
   readonly allowFallback?: boolean;
+  readonly allowLiveFallback?: boolean;
 }
 
 export interface TodayBrokerFeed {
@@ -84,13 +87,14 @@ function applyCollected(previous: BrokerDaySnapshot, reply: BrokerDay): BrokerDa
     previous.mode === "collected" &&
     previous.date === reply.date &&
     previous.source === reply.source &&
+    previous.coverage === reply.coverage &&
     !previous.failed &&
     nextState === previous.state &&
     nextGaps === previous.gaps
   ) {
     return previous;
   }
-  return { mode: "collected", date: reply.date, source: reply.source, state: nextState, gaps: nextGaps, failed: false };
+  return { mode: "collected", date: reply.date, source: reply.source, coverage: reply.coverage, state: nextState, gaps: nextGaps, failed: false };
 }
 
 function toFallbackSnapshot(reply: BrokerDay): BrokerDaySnapshot {
@@ -114,6 +118,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
   let active = false;
   let enabled = false;
   let allowFallback = false;
+  let allowLiveFallback = true;
   let date = "";
   let disposed = false;
 
@@ -292,6 +297,11 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       inFlight = false;
       if (reply.source === "none") {
         polling = false;
+        if (!allowLiveFallback) {
+          stopLive();
+          emit({ mode: "collected", date, source: "none", coverage: reply.coverage, state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS, failed: false });
+          return;
+        }
         startLive(expectedSession, false);
         return;
       }
@@ -317,6 +327,11 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       inFlight = false;
       if (initial) {
         polling = false;
+        if (!allowLiveFallback) {
+          stopLive();
+          emit({ mode: "collected", date, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS, failed: true });
+          return;
+        }
         startLive(expectedSession, false);
         return;
       }
@@ -360,10 +375,12 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
     configure(next) {
       if (disposed) return;
       const nextAllowFallback = next.allowFallback ?? false;
+      const nextAllowLiveFallback = next.allowLiveFallback ?? true;
       const dateChanged = next.date !== date;
       const enabledChanged = next.enabled !== enabled;
       const activeChanged = next.active !== active;
       const allowFallbackChanged = nextAllowFallback !== allowFallback;
+      const allowLiveFallbackChanged = nextAllowLiveFallback !== allowLiveFallback;
       active = next.active;
       if (next.enabled && next.date !== liveDate) {
         if (liveDate !== null) {
@@ -375,6 +392,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
       date = next.date;
       enabled = next.enabled;
       allowFallback = nextAllowFallback;
+      allowLiveFallback = nextAllowLiveFallback;
       if (!enabled) {
         if (enabledChanged || current !== LOADING_BROKER_SNAPSHOT) {
           stopSession();
@@ -382,7 +400,7 @@ export function createTodayBrokerFeed(code: SymbolCode, deps: TodayBrokerFeedDep
         }
         return;
       }
-      if (enabledChanged || dateChanged || allowFallbackChanged) {
+      if (enabledChanged || dateChanged || allowFallbackChanged || allowLiveFallbackChanged) {
         startSession();
         return;
       }

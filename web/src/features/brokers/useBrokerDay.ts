@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 import { fetchBarsPage, fetchJumpPage, jumpAsBarsPage } from "../../api/bars";
 import { fetchBrokerDay, type BrokerDay } from "../../api/brokers";
 import type { Bar } from "../../api/generated/Bar";
+import type { BookReplayCoverage } from "../../api/generated/BookReplayCoverage";
 import type { BrokerDaySource } from "../../api/generated/BrokerDaySource";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
@@ -31,6 +32,7 @@ export type { BrokerDayMode };
 interface CachedPastDay {
   readonly date: string;
   readonly source: BrokerDaySource;
+  readonly coverage?: BookReplayCoverage;
   readonly state: BrokerState;
   readonly gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
 }
@@ -60,11 +62,12 @@ const BROWSER_FEED_DEPS: TodayBrokerFeedDeps = {
 
 function toCachedPastDay(reply: BrokerDay): CachedPastDay {
   if (reply.source === "none") {
-    return { date: reply.date, source: "none", state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS };
+    return { date: reply.date, source: "none", coverage: reply.coverage, state: EMPTY_BROKER_STATE, gaps: EMPTY_BROKER_GAPS };
   }
   return {
     date: reply.date,
     source: reply.source,
+    coverage: reply.coverage,
     state: compactBrokerState(appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps)),
     gaps: reply.gaps,
   };
@@ -76,13 +79,14 @@ function useTodayBrokerDay(
   enabled: boolean,
   active: boolean,
   allowFallback: boolean,
+  allowLiveFallback: boolean,
 ): BrokerDayResult {
   const feed = useMemo(() => createTodayBrokerFeed(code, BROWSER_FEED_DEPS), [code]);
   const snapshot = useSyncExternalStore(feed.subscribe, feed.snapshot);
 
   useEffect(() => {
-    feed.configure({ date, enabled, active, allowFallback });
-  }, [feed, date, enabled, active, allowFallback]);
+    feed.configure({ date, enabled, active, allowFallback, allowLiveFallback });
+  }, [feed, date, enabled, active, allowFallback, allowLiveFallback]);
 
   useEffect(() => () => feed.dispose(), [feed]);
 
@@ -135,6 +139,7 @@ function usePastBrokerDay(code: SymbolCode, date: string | null): BrokerDayResul
       mode: "collected",
       date: query.data.date,
       source: query.data.source,
+      coverage: query.data.coverage,
       state: query.data.state,
       gaps: query.data.gaps,
       failed: false,
@@ -154,9 +159,11 @@ export function useBrokerDay(
   isToday: boolean,
   active: boolean,
   allowFallback = false,
+  allowLiveFallback = true,
+  enabled = true,
 ): BrokerDayResult {
-  const todayResult = useTodayBrokerDay(code, date, isToday, active, allowFallback);
-  const pastResult = usePastBrokerDay(code, isToday ? null : date);
+  const todayResult = useTodayBrokerDay(code, date, enabled && isToday, active, allowFallback, allowLiveFallback);
+  const pastResult = usePastBrokerDay(code, enabled && !isToday ? date : null);
   return isToday ? todayResult : pastResult;
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { TradeTape } from "../../api/generated/TradeTape";
 import type { Venue } from "../../api/generated/Venue";
@@ -18,13 +18,20 @@ interface Held {
   readonly tape: TapeState;
 }
 
-export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, code: SymbolCode, venue: Venue, historyPages?: number) {
+export function useTradeTape(
+  socket: Pick<MarketSocketLike, "subscribeFeed">,
+  code: SymbolCode,
+  venue: Venue,
+  historyPages?: number,
+  enabled = true,
+) {
   const [held, fold] = useFrameFold<Held>(() => ({ code, venue, tape: emptyTape }));
   const state = held.code === code && held.venue === venue ? held.tape : emptyTape;
   const dispatch = useCallback((action: TapeAction) => fold((previous) => ({ code, venue, tape: tapeReducer(previous.code === code && previous.venue === venue ? previous.tape : emptyTape, action) })), [fold, code, venue]);
   const [history, setHistory] = useState<HistoryStatus>("loading");
   const [feedError, setFeedError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const wasEnabled = useRef(enabled);
   const retry = useCallback(() => {
     setHistory("loading");
     setAttempt((count) => count + 1);
@@ -37,6 +44,16 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
   }
 
   useEffect(() => {
+    if (!enabled) {
+      wasEnabled.current = false;
+      return;
+    }
+    if (!wasEnabled.current) {
+      wasEnabled.current = true;
+      dispatch({ type: "reset" });
+      setHistory("loading");
+      setFeedError(null);
+    }
     const nowSeconds = () => Date.now() / 1000;
     return socket.subscribeFeed({ symbol: code, kind: "trades", venue }, (event) => {
       if (event.type === "feed_trades") dispatch({ type: "live", trades: event.trades, receivedAt: Date.now() });
@@ -45,9 +62,10 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
       else if (event.type === "feed_subscribed") setFeedError(null);
       else if (event.type === "sub_error") setFeedError(event.code);
     });
-  }, [socket, code, venue, dispatch]);
+  }, [socket, code, venue, dispatch, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     const settle = (tape: TradeTape) => {
       dispatch({ type: "history", tape });
@@ -78,7 +96,7 @@ export function useTradeTape(socket: Pick<MarketSocketLike, "subscribeFeed">, co
       );
     }
     return () => controller.abort();
-  }, [code, venue, historyPages, dispatch, attempt]);
+  }, [code, venue, historyPages, dispatch, attempt, enabled]);
 
   return { state, dispatch, history, feedError, retry };
 }

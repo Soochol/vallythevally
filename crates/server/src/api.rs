@@ -780,6 +780,9 @@ pub struct BrokerDay {
     pub symbol: SymbolCode,
     pub date: String,
     pub source: BrokerDaySource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub coverage: Option<BookReplayCoverage>,
     pub snapshots: Vec<FeedBrokers>,
     #[ts(type = "[number, number][]")]
     pub gaps: Vec<[i64; 2]>,
@@ -1607,6 +1610,79 @@ pub struct BookReplayDay {
     pub books: Vec<BookReplayBook>,
     #[ts(type = "[number, number, number, number][]")]
     pub trades: Vec<(u32, u32, u64, i64)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BookReplayTradeSide {
+    Buy,
+    Sell,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayTradeRow {
+    pub second_of_day: u32,
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub quantity: u64,
+    pub side: BookReplayTradeSide,
+    pub venue: Option<Venue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayTrades {
+    pub symbol: SymbolCode,
+    pub date: String,
+    pub coverage: BookReplayCoverage,
+    pub venue: Venue,
+    #[ts(type = "[number, number][]")]
+    pub gaps: Vec<[i64; 2]>,
+    #[ts(type = "number")]
+    pub cum_volume: u64,
+    #[ts(type = "number")]
+    pub cum_buy_qty: u64,
+    #[ts(type = "number")]
+    pub cum_sell_qty: u64,
+    pub strength: Option<f64>,
+    pub trades: Vec<BookReplayTradeRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayProgramRow {
+    pub second_of_day: u32,
+    #[ts(type = "number | null")]
+    pub price: Option<u64>,
+    #[ts(type = "number")]
+    pub buy_qty: u64,
+    #[ts(type = "number")]
+    pub sell_qty: u64,
+    #[ts(type = "number")]
+    pub net_qty: i64,
+    #[ts(type = "number")]
+    pub net_qty_change: i64,
+    #[ts(type = "number")]
+    pub net_amount_million_won: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayProgramDay {
+    pub symbol: SymbolCode,
+    pub date: String,
+    pub coverage: BookReplayCoverage,
+    #[ts(type = "[number, number][]")]
+    pub gaps: Vec<[i64; 2]>,
+    pub rows: Vec<BookReplayProgramRow>,
 }
 
 /// 체결 한 건. 수량의 부호가 방향이다(+ 매수 체결, - 매도 체결).

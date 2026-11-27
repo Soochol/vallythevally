@@ -12,7 +12,7 @@ test("일봉은 가리켜도 기억하지 않고 같은 봉을 다시 가리키�
   const stop = useBookReplayStore.subscribe((state) => changes.push(state.pointed));
   store().point("005930", barInterval(NINE, "5m"));
   const first = store().pointed;
-  expect(first).toEqual({ symbol: "005930", bar: barInterval(NINE, "5m") });
+  expect(first).toEqual({ symbol: "005930", bar: barInterval(NINE, "5m"), close: null });
 
   store().point("005930", barInterval(NINE, "5m"));
   store().point("005930", null);
@@ -20,13 +20,18 @@ test("일봉은 가리켜도 기억하지 않고 같은 봉을 다시 가리키�
   expect(store().pointed).toBe(first);
   expect(changes).toHaveLength(1);
 
+  store().point("005930", barInterval(NINE, "5m"), 71_200);
+  expect(store().pointed).toEqual({ symbol: "005930", bar: barInterval(NINE, "5m"), close: 71_200 });
+  store().point("005930", barInterval(NINE, "5m"), 71_200);
+  expect(changes).toHaveLength(2);
+
   store().point("005930", barInterval(NINE, "1m"));
   expect(store().pointed?.bar.period).toBe("1m");
   store().point("000660", barInterval(NINE, "5m"));
   expect(store().pointed?.symbol).toBe("000660");
   store().point("000660", barInterval(NINE, "D"));
   expect(store().pointed).toBeNull();
-  expect(changes).toHaveLength(4);
+  expect(changes).toHaveLength(5);
 
   store().point("005930", barInterval(NINE, "60m"));
   store().clear();

@@ -14,7 +14,10 @@ use server::http::router;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::stream::KiwoomStream;
-use server::shared_data::{CollectorPaths, CurrentQuotes, DataKind, FeedWriter, Header, Ladder, LevelQty, LiveQuoteWriter, QuoteMinute, TradeMinuteLine, VenueQuote, flow_links_path, trade_minute_path};
+use server::shared_data::{
+    CollectorPaths, CurrentQuotes, DataKind, FeedWriter, FlowDescription, FlowRow, FlowWriter, Header, Ladder, LevelQty, LiveQuoteWriter, QuoteMinute, TradeMinuteLine, VenueQuote, flow_links_path,
+    flow_path, trade_minute_path,
+};
 use server::symbols::SymbolDirectory;
 use support::ScriptedTransport;
 use tower::ServiceExt;
@@ -188,4 +191,263 @@ async fn live_replay_reads_from_separate_shared_data_dir() {
     assert_eq!(body["books"].as_array().unwrap().len(), 1);
     assert_eq!(body["trades"], json!([[540, 32_401, 71_000, 3]]));
     assert_eq!(get(&app, "/api/symbols/005930/book-replay/days").await.1["days"], json!([DATE]));
+}
+
+fn write_trade_flow(shared: &Path, key: &str, code: &str, rows: Vec<FlowRow>) {
+    let fids = [20, 10, 15, 1313, 9081];
+    let path = flow_path(shared, DATE, "0B", code, key);
+    FlowWriter::open(&path, FlowDescription::new("0B", code, DATE, key, &fids))
+        .unwrap()
+        .append(&rows)
+        .unwrap();
+}
+
+fn write_program_flow(shared: &Path, key: &str, code: &str, rows: Vec<FlowRow>) {
+    let fids = [20, 10, 202, 204, 206, 208, 210, 211, 212, 213];
+    let path = flow_path(shared, DATE, "0w", code, key);
+    FlowWriter::open(&path, FlowDescription::new("0w", code, DATE, key, &fids))
+        .unwrap()
+        .append(&rows)
+        .unwrap();
+}
+
+fn trade_flow_row(recv_ms: i64, hhmmss: &str, price: &str, qty: &str, exchange: Option<&str>) -> FlowRow {
+    FlowRow {
+        recv_ms,
+        values: vec![
+            Some(hhmmss.to_owned()),
+            Some(price.to_owned()),
+            Some(qty.to_owned()),
+            None,
+            exchange.map(str::to_owned),
+        ],
+    }
+}
+
+struct ProgramFlowSpec<'a> {
+    recv_ms: i64,
+    hhmmss: &'a str,
+    price: Option<&'a str>,
+    sell_qty: &'a str,
+    buy_qty: &'a str,
+    net_qty: &'a str,
+    net_change: &'a str,
+    net_amt_million: &'a str,
+}
+
+fn program_flow_row(spec: ProgramFlowSpec<'_>) -> FlowRow {
+    FlowRow {
+        recv_ms: spec.recv_ms,
+        values: vec![
+            Some(spec.hhmmss.to_owned()),
+            spec.price.map(str::to_owned),
+            Some(spec.sell_qty.to_owned()),
+            Some("0".to_owned()),
+            Some(spec.buy_qty.to_owned()),
+            Some("0".to_owned()),
+            Some(spec.net_qty.to_owned()),
+            Some(spec.net_change.to_owned()),
+            Some(spec.net_amt_million.to_owned()),
+            Some("0".to_owned()),
+        ],
+    }
+}
+
+#[tokio::test]
+async fn live_today_trades_and_program_read_symbol_flow_and_report_coverage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, data) = start(tmp.path()).await;
+    let shared = data.join("shared");
+
+    let (status, empty_trades) = get(&app, &format!("/api/symbols/005930/book-replay/trades?date={DATE}&untilSec=32500")).await;
+    assert_eq!((status, &empty_trades["coverage"]), (200, &json!("day_not_collected")), "{empty_trades}");
+    let (status, empty_program) = get(&app, &format!("/api/symbols/005930/book-replay/program?date={DATE}")).await;
+    assert_eq!((status, &empty_program["coverage"]), (200, &json!("day_not_collected")), "{empty_program}");
+
+    write_links(&shared, "collect-01", &[(at(8, 0, 0), "live"), (at(9, 10, 0), "down"), (at(9, 12, 0), "live"), (at(9, 59, 50), "alive")]);
+    write_trade_flow(
+        &shared,
+        "collect-01",
+        "005930",
+        vec![
+            trade_flow_row(at(9, 0, 10), "090010", "100000", "+500", Some("KRX")),
+            trade_flow_row(at(9, 1, 0), "090100", "100000", "-200", Some("NXT")),
+            trade_flow_row(at(9, 1, 5) + 999, "090105", "100000", "+100", Some("KRX")),
+            trade_flow_row(at(9, 1, 6), "090106", "100000", "+900", Some("KRX")),
+        ],
+    );
+    write_program_flow(
+        &shared,
+        "collect-01",
+        "005930",
+        vec![
+            program_flow_row(ProgramFlowSpec {
+                recv_ms: at(9, 0, 30),
+                hhmmss: "090030",
+                price: Some("71000"),
+                sell_qty: "100",
+                buy_qty: "400",
+                net_qty: "300",
+                net_change: "300",
+                net_amt_million: "21",
+            }),
+            program_flow_row(ProgramFlowSpec {
+                recv_ms: at(9, 1, 30),
+                hhmmss: "090130",
+                price: None,
+                sell_qty: "250",
+                buy_qty: "450",
+                net_qty: "200",
+                net_change: "-100",
+                net_amt_million: "14",
+            }),
+        ],
+    );
+
+    let expected_gap = json!([[kst(today(), 9, 10, 0).unix(), kst(today(), 9, 12, 0).unix()]]);
+
+    let (status, trades) = get(&app, &format!("/api/symbols/005930/book-replay/trades?date={DATE}&untilSec=32465")).await;
+    assert_eq!(status, 200, "{trades}");
+    assert_eq!(trades["coverage"], json!("collected"));
+    assert_eq!(trades["venue"], json!("combined"));
+    assert_eq!(trades["gaps"], expected_gap);
+    assert_eq!(trades["cumVolume"], json!(800));
+    assert_eq!(trades["cumBuyQty"], json!(600));
+    assert_eq!(trades["cumSellQty"], json!(200));
+    assert_eq!(trades["strength"], json!(300.0));
+    assert_eq!(
+        trades["trades"],
+        json!([
+            {"secondOfDay": 32_465, "price": 100_000, "quantity": 100, "side": "buy", "venue": "krx"},
+            {"secondOfDay": 32_460, "price": 100_000, "quantity": 200, "side": "sell", "venue": "nxt"},
+            {"secondOfDay": 32_410, "price": 100_000, "quantity": 500, "side": "buy", "venue": "krx"},
+        ])
+    );
+
+    let (status, big_trades) = get(&app, &format!("/api/symbols/005930/book-replay/trades?date={DATE}&untilSec=32465&minWon=30000000")).await;
+    assert_eq!(status, 200, "{big_trades}");
+    assert_eq!(big_trades["cumVolume"], json!(800));
+    assert_eq!(
+        big_trades["trades"],
+        json!([{"secondOfDay": 32_410, "price": 100_000, "quantity": 500, "side": "buy", "venue": "krx"}])
+    );
+
+    let (status, nxt_trades) = get(&app, &format!("/api/symbols/005930/book-replay/trades?date={DATE}&untilSec=32465&venue=nxt")).await;
+    assert_eq!(status, 200, "{nxt_trades}");
+    assert_eq!(nxt_trades["venue"], json!("nxt"));
+    assert_eq!(nxt_trades["cumVolume"], json!(200));
+    assert_eq!(nxt_trades["cumBuyQty"], json!(0));
+    assert_eq!(nxt_trades["cumSellQty"], json!(200));
+    assert_eq!(nxt_trades["strength"], json!(0.0));
+
+    let (status, prog) = get(&app, &format!("/api/symbols/005930/book-replay/program?date={DATE}")).await;
+    assert_eq!(status, 200, "{prog}");
+    assert_eq!(prog["coverage"], json!("collected"));
+    assert_eq!(prog["gaps"], expected_gap);
+    assert_eq!(
+        prog["rows"],
+        json!([
+            {"secondOfDay": 32_430, "price": 71_000, "buyQty": 400, "sellQty": 100, "netQty": 300, "netQtyChange": 300, "netAmountMillionWon": 21},
+            {"secondOfDay": 32_490, "price": null, "buyQty": 450, "sellQty": 250, "netQty": 200, "netQtyChange": -100, "netAmountMillionWon": 14},
+        ])
+    );
+
+    let (status, missing_trade_sym) = get(&app, &format!("/api/symbols/035420/book-replay/trades?date={DATE}&untilSec=32465")).await;
+    assert_eq!((status, &missing_trade_sym["coverage"]), (200, &json!("symbol_not_collected")), "{missing_trade_sym}");
+    let (status, missing_prog_sym) = get(&app, &format!("/api/symbols/035420/book-replay/program?date={DATE}")).await;
+    assert_eq!((status, &missing_prog_sym["coverage"]), (200, &json!("symbol_not_collected")), "{missing_prog_sym}");
+}
+
+#[tokio::test]
+async fn live_today_marks_symbol_not_collected_when_only_quote_minutes_live_exists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, data) = start(tmp.path()).await;
+    let shared = data.join("shared");
+    let mut writer = LiveQuoteWriter::open(&shared, DATE, "collect-01", 1).unwrap();
+    writer.append_minute("005930", &quote(540, 71_000)).unwrap();
+
+    let (status, trades) = get(&app, &format!("/api/symbols/035420/book-replay/trades?date={DATE}&untilSec=32460")).await;
+    assert_eq!((status, &trades["coverage"]), (200, &json!("symbol_not_collected")), "{trades}");
+    let (status, prog) = get(&app, &format!("/api/symbols/035420/book-replay/program?date={DATE}")).await;
+    assert_eq!((status, &prog["coverage"]), (200, &json!("symbol_not_collected")), "{prog}");
+}
+
+#[tokio::test]
+async fn live_today_collected_quote_stock_without_flow_reports_collected_empty() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, data) = start(tmp.path()).await;
+    let shared = data.join("shared");
+    let mut writer = LiveQuoteWriter::open(&shared, DATE, "collect-01", 1).unwrap();
+    writer.append_minute("005930", &quote(540, 71_000)).unwrap();
+
+    let (status, prog) = get(&app, &format!("/api/symbols/005930/book-replay/program?date={DATE}")).await;
+    assert_eq!(status, 200, "{prog}");
+    assert_eq!((&prog["coverage"], &prog["rows"]), (&json!("collected"), &json!([])));
+
+    let (status, trades) = get(&app, &format!("/api/symbols/005930/book-replay/trades?date={DATE}&untilSec=32460")).await;
+    assert_eq!(status, 200, "{trades}");
+    assert_eq!((&trades["coverage"], &trades["cumVolume"], &trades["trades"]), (&json!("collected"), &json!(0), &json!([])));
+}
+
+#[tokio::test]
+async fn live_program_replay_orders_rows_monotonically_by_second_of_day() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, data) = start(tmp.path()).await;
+    let shared = data.join("shared");
+    write_links(&shared, "collect-01", &[(at(8, 0, 0), "live"), (at(9, 59, 50), "alive")]);
+    write_links(&shared, "spare-01", &[(at(8, 0, 0), "live"), (at(9, 59, 50), "alive")]);
+    write_program_flow(
+        &shared,
+        "collect-01",
+        "005930",
+        vec![
+            program_flow_row(ProgramFlowSpec {
+                recv_ms: at(9, 0, 31) + 100,
+                hhmmss: "090031",
+                price: Some("71100"),
+                sell_qty: "100",
+                buy_qty: "200",
+                net_qty: "100",
+                net_change: "100",
+                net_amt_million: "7",
+            }),
+            program_flow_row(ProgramFlowSpec {
+                recv_ms: at(9, 0, 31) + 300,
+                hhmmss: "090031",
+                price: Some("71200"),
+                sell_qty: "100",
+                buy_qty: "250",
+                net_qty: "150",
+                net_change: "50",
+                net_amt_million: "10",
+            }),
+        ],
+    );
+    write_program_flow(
+        &shared,
+        "spare-01",
+        "005930",
+        vec![program_flow_row(ProgramFlowSpec {
+            recv_ms: at(9, 0, 31) + 200,
+            hhmmss: "090030",
+            price: Some("71000"),
+            sell_qty: "100",
+            buy_qty: "150",
+            net_qty: "50",
+            net_change: "50",
+            net_amt_million: "3",
+        })],
+    );
+
+    let (status, prog) = get(&app, &format!("/api/symbols/005930/book-replay/program?date={DATE}")).await;
+    assert_eq!(status, 200, "{prog}");
+    assert_eq!(prog["coverage"], json!("collected"));
+    assert_eq!(
+        prog["rows"],
+        json!([
+            {"secondOfDay": 32_430, "price": 71_000, "buyQty": 150, "sellQty": 100, "netQty": 50, "netQtyChange": 50, "netAmountMillionWon": 3},
+            {"secondOfDay": 32_431, "price": 71_100, "buyQty": 200, "sellQty": 100, "netQty": 100, "netQtyChange": 100, "netAmountMillionWon": 7},
+            {"secondOfDay": 32_431, "price": 71_200, "buyQty": 250, "sellQty": 100, "netQty": 150, "netQtyChange": 50, "netAmountMillionWon": 10},
+        ])
+    );
 }

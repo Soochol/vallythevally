@@ -7,6 +7,9 @@ import { formatPrice } from "../../lib/format";
 import { type BrokerCards, type BrokerView, useLayoutStore } from "../../stores/layout";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useUiStore } from "../../stores/ui";
+import { ReplayStrip, type ReplayStripView } from "../book-replay/ReplayStrip";
+import { REPLAY_REASON } from "../book-replay/replay";
+import { useBookReplayEnabled, useWorkspaceReplayCursor } from "../book-replay/useWorkspaceReplayCursor";
 import { SyncIcon } from "../icons";
 import { MarketSymbolName } from "../market-window/MarketHead";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
@@ -21,7 +24,7 @@ import { ListView } from "./ListView";
 import { TableView } from "./TableView";
 import { TransferView } from "./TransferView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "./board";
-import { type BrokerSyncTarget, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
+import { type BrokerSyncTarget, gapContaining, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
 import { formatMonthDay, kstDateOf, priceAt } from "./history";
 import { useBrokerDay, useBrokerMinuteBars } from "./useBrokerDay";
 import "./brokers.css";
@@ -61,9 +64,19 @@ export function BrokersWindow({ id }: { id: WindowId }) {
 function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const chartSync = useUiStore((s) => s.prefs.brokers.chartSync);
   const setBrokerPrefs = useUiStore((s) => s.setBrokerPrefs);
+  const replayEnabled = useBookReplayEnabled();
+  const replayCursor = useWorkspaceReplayCursor(code);
+  const replayPointed = replayCursor.kind === "pointed";
+  const replayInProgress = replayCursor.kind === "in_progress";
+  const replayAt = replayPointed ? replayCursor.at : null;
+
   const [localCursor, setLocalCursor] = useState<UnixSeconds | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [clockTick, setClockTick] = useState(0);
+
+  useEffect(() => {
+    setLocalCursor(null);
+  }, [replayEnabled, replayCursor.kind, replayAt]);
 
   const onWorkspace = (pageOfPath(useLocation().pathname) ?? "workspace") === "workspace";
   const windowVisible = useWindowVisible();
@@ -79,16 +92,32 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const nowMs = useMemo(() => serverNow(serverTimeOrigin), [serverTimeOrigin, clockTick, feedActive]);
   const today = kstDateOf(nowMs);
 
-  const pointed = useBrokerChartPointer(code, chartSync);
+  const chartSyncEnabled = chartSync && !replayEnabled;
+  const pointed = useBrokerChartPointer(code, chartSyncEnabled);
   const syncTarget = useMemo(
-    () => resolveBrokerSyncTarget(chartSync, code, pointed, nowMs),
-    [chartSync, code, pointed, nowMs],
+    () => resolveBrokerSyncTarget(chartSyncEnabled, code, pointed, nowMs),
+    [chartSyncEnabled, code, pointed, nowMs],
   );
 
-  const activeDate = syncTarget.kind === "synced" ? syncTarget.date : today;
-  const isToday = syncTarget.kind === "synced" ? syncTarget.isToday : true;
-  const allowFallback = syncTarget.kind !== "synced";
-  const syncedCursor = syncTarget.kind === "synced" ? syncTarget.cursor : null;
+  const activeDate = replayPointed
+    ? replayCursor.date
+    : replayInProgress
+      ? replayCursor.date
+      : syncTarget.kind === "synced"
+        ? syncTarget.date
+        : today;
+  const isToday = replayPointed
+    ? replayCursor.isToday
+    : replayInProgress
+      ? replayCursor.date === today
+      : syncTarget.kind === "synced"
+        ? syncTarget.isToday
+        : true;
+  const allowFallback = replayPointed || replayInProgress ? false : syncTarget.kind !== "synced";
+  const allowLiveFallback = !replayPointed && !replayInProgress;
+  const brokerDayActive = feedActive && !replayInProgress;
+  const brokerDayEnabled = !replayInProgress;
+  const syncedCursor = replayPointed ? replayCursor.at : syncTarget.kind === "synced" ? syncTarget.cursor : null;
   const effectiveCursor = localCursor ?? syncedCursor;
 
   const view = useLayoutStore((s) => {
@@ -102,17 +131,27 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const setBrokersView = useLayoutStore((s) => s.setBrokersView);
   const setBrokersCards = useLayoutStore((s) => s.setBrokersCards);
 
-  const day = useBrokerDay(code, activeDate, isToday, feedActive, allowFallback);
-  const isFallback = day.mode === "fallback" && day.date !== null;
+  const day = useBrokerDay(code, activeDate, isToday, brokerDayActive, allowFallback, allowLiveFallback, brokerDayEnabled);
+  const isFallback = !replayPointed && !replayInProgress && day.mode === "fallback" && day.date !== null;
   const displayDate = isFallback ? day.date : activeDate;
   const displayIsToday = isToday && !isFallback;
-  const minuteBarsEnabled = !chartSync || selected !== null || localCursor !== null || view === "transfer";
-  const bars = useBrokerMinuteBars(code, displayDate, displayIsToday, feedActive && day.source !== "store", minuteBarsEnabled);
+  const minuteBarsEnabled = !replayInProgress && ((!chartSync && !replayPointed) || selected !== null || localCursor !== null || view === "transfer");
+  const bars = useBrokerMinuteBars(code, displayDate, displayIsToday, brokerDayActive && day.source !== "store", minuteBarsEnabled);
 
   const grid = day.state.grid;
   const staleDay = day.mode === "collected" && day.date !== null && day.date !== activeDate;
+  const replayLoading = replayPointed && (day.mode === "loading" || staleDay || day.fetching);
+  const uncollectedReason =
+    day.coverage === "symbol_not_collected"
+      ? REPLAY_REASON.symbolNotCollected
+      : day.coverage === "day_not_collected"
+        ? REPLAY_REASON.dayNotCollected
+        : isToday
+          ? REPLAY_REASON.symbolNotCollected
+          : REPLAY_REASON.dayNotCollected;
   const displayCursor = staleDay ? null : effectiveCursor;
   const gaps = day.gaps;
+  const activeGap = useMemo(() => gapContaining(gaps, displayCursor), [gaps, displayCursor]);
   const tracks = useMemo(() => brokerTracks(grid), [grid]);
   const runsByCode = useMemo(() => (view === "list" ? trackRuns(grid) : EMPTY_RUNS), [grid, view]);
   const axis = useMemo(
@@ -120,13 +159,47 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     [grid.times, nowMs],
   );
   const selectedTrack = selected === null ? null : (tracks.find((track) => track.code === selected) ?? null);
-  const shownTime = effectiveCursor ?? grid.times[grid.times.length - 1] ?? null;
-  const shownPrice =
-    syncTarget.kind === "synced" && localCursor === null && syncTarget.close !== null
-      ? syncTarget.close
-      : shownTime === null
-        ? null
-        : priceAt(bars, shownTime);
+  const shownTime = replayInProgress || replayLoading ? null : (effectiveCursor ?? grid.times[grid.times.length - 1] ?? null);
+  const shownPrice = replayInProgress || replayLoading
+    ? null
+    : replayPointed && localCursor === null && replayCursor.close !== null
+      ? replayCursor.close
+      : syncTarget.kind === "synced" && localCursor === null && syncTarget.close !== null
+        ? syncTarget.close
+        : shownTime === null
+          ? null
+          : priceAt(bars, shownTime);
+
+  const transferData = useMemo(() => {
+    if (displayCursor === null) {
+      return { snapshots: grid.snapshots, gapBefore: grid.gapBefore };
+    }
+    let count = 0;
+    for (let i = 0; i < grid.snapshots.length; i++) {
+      if (grid.snapshots[i]!.t <= displayCursor) count = i + 1;
+      else break;
+    }
+    return {
+      snapshots: grid.snapshots.slice(0, count),
+      gapBefore: grid.gapBefore.slice(0, count),
+    };
+  }, [grid.snapshots, grid.gapBefore, displayCursor]);
+
+  const brokerReplayStrip: ReplayStripView | null = (() => {
+    if (!replayEnabled) return null;
+    if (replayCursor.kind === "live") return { kind: "live" };
+    if (replayCursor.kind === "in_progress") return { kind: "none", reason: REPLAY_REASON.inProgress };
+    if (replayLoading) return { kind: "none", reason: REPLAY_REASON.loading };
+    if (day.failed) return { kind: "none", reason: REPLAY_REASON.failed };
+    if (day.source === "none") return { kind: "none", reason: uncollectedReason };
+    if (activeGap !== null) return { kind: "none", reason: REPLAY_REASON.gap };
+    return { kind: "past", at: replayCursor.at };
+  })();
+
+  const dataReplay =
+    brokerReplayStrip === null || brokerReplayStrip.kind === "live"
+      ? undefined
+      : brokerReplayStrip.kind;
 
   const changeView = (next: BrokerView) => {
     setLocalCursor(null);
@@ -147,11 +220,13 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     setSelected((current) => (current === brokerCode ? null : brokerCode));
   }, []);
 
-  const failed = day.failed;
+  const failed = !replayInProgress && !replayLoading && day.failed;
   const retry = day.retry;
-  const showEmpty = !failed && day.mode !== "loading" && grid.times.length === 0;
-  const showContent = !failed && grid.times.length > 0;
-  const syncStrip = buildSyncStrip(syncTarget);
+  const showReplayUncollected = replayPointed && !replayLoading && !failed && day.source === "none";
+  const showReplayGap = replayPointed && !replayLoading && !failed && day.source !== "none" && activeGap !== null;
+  const showEmpty = !replayInProgress && !replayLoading && !showReplayUncollected && !showReplayGap && !failed && day.mode !== "loading" && grid.times.length === 0;
+  const showContent = !replayInProgress && !replayLoading && !showReplayUncollected && !showReplayGap && !failed && day.mode !== "loading" && grid.times.length > 0;
+  const syncStrip = replayEnabled ? null : buildSyncStrip(syncTarget);
 
   const cycleCards = () => {
     const index = CARD_OPTIONS.findIndex((option) => option.value === cards);
@@ -160,7 +235,13 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const activeCardLabel = CARD_OPTIONS.find((option) => option.value === cards)?.label ?? "복합";
 
   return (
-    <div className="br" data-testid="brokers-window" data-symbol={code} data-chart-sync={chartSync ? syncTarget.kind : undefined}>
+    <div
+      className="br"
+      data-testid="brokers-window"
+      data-symbol={code}
+      data-chart-sync={chartSyncEnabled ? syncTarget.kind : undefined}
+      data-replay={dataReplay}
+    >
       <div className="mw-head br-bar">
         <MarketSymbolName code={code} />
         <Segmented label="보기" options={VIEW_OPTIONS} value={view} onChange={changeView} />
@@ -191,7 +272,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
           <span className="br-sync-label">동기화</span>
         </button>
         <span className="br-now">
-          {syncTarget.kind === "synced" ? (
+          {replayPointed || syncTarget.kind === "synced" ? (
             <span className="br-sync-date" data-testid="brokers-sync-date">{formatMonthDay(activeDate)}</span>
           ) : isFallback ? (
             <span className="br-sync-date" data-testid="brokers-fallback-date">{formatMonthDay(day.date)} 마감</span>
@@ -200,13 +281,17 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
           <span className="br-price" data-testid="brokers-price">{shownPrice === null ? "-" : formatPrice(shownPrice, false)}</span>
         </span>
       </div>
+      {brokerReplayStrip !== null && <ReplayStrip view={brokerReplayStrip} subject="거래원" showVenueBadge={false} />}
       {syncStrip !== null && (
         <div className="mw-replay-strip" role="status" data-testid="brokers-sync-strip" data-kind={syncStrip.kind}>
           <span>{syncStrip.text}</span>
         </div>
       )}
+      {replayInProgress && <EmptyState title={REPLAY_REASON.inProgress} />}
       {failed && <ErrorState message="거래원을 받지 못했습니다" retry={retry} />}
-      {!failed && day.mode === "loading" && <Skeleton label="거래원 불러오는 중" />}
+      {!replayInProgress && !failed && (day.mode === "loading" || replayLoading) && <Skeleton label="거래원 불러오는 중" />}
+      {showReplayUncollected && <EmptyState title={uncollectedReason} />}
+      {showReplayGap && <EmptyState title={REPLAY_REASON.gap} />}
       {showEmpty && <EmptyState title={isToday ? "거래원 스냅샷을 기다리는 중입니다" : "이 날의 거래원 자료가 없습니다"} />}
       {showContent && view === "board" && (
         <>
@@ -216,7 +301,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
             gaps={gaps}
             mode={cards}
             cursor={displayCursor}
-            dimFuture={chartSync}
+            dimFuture={chartSync || replayPointed}
             selected={selected}
             onSelect={toggleSelected}
             onCursor={setLocalCursor}
@@ -235,7 +320,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
         <TableView snapshots={grid.snapshots} cursor={displayCursor} />
       )}
       {showContent && view === "transfer" && (
-        <TransferView snapshots={grid.snapshots} gapBefore={grid.gapBefore} gaps={gaps} bars={bars} axis={axis} />
+        <TransferView snapshots={transferData.snapshots} gapBefore={transferData.gapBefore} gaps={gaps} bars={bars} axis={axis} />
       )}
     </div>
   );

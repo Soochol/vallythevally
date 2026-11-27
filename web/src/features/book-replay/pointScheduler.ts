@@ -6,29 +6,30 @@ import { type PointedReplay, sameBar, useBookReplayStore } from "../../stores/bo
 export const REPLAY_POINT_INTERVAL_MS = POINTED_SCHEDULER_INTERVAL_MS;
 export type { PointSchedulerTimers };
 
-const sameReplay = (a: PointedReplay, b: PointedReplay): boolean => a.symbol === b.symbol && sameBar(a.bar, b.bar);
+const sameReplay = (a: PointedReplay, b: PointedReplay): boolean =>
+  a.symbol === b.symbol && a.close === b.close && sameBar(a.bar, b.bar);
 
 export function createReplayPointScheduler(
-  commit: (symbol: SymbolCode, bar: BarInterval) => void,
+  commit: (symbol: SymbolCode, bar: BarInterval, close: number | null) => void,
   current: () => PointedReplay | null,
   intervalMs = REPLAY_POINT_INTERVAL_MS,
   timers?: PointSchedulerTimers,
 ) {
   const inner = createPointedScheduler<PointedReplay>(
-    (next) => commit(next.symbol, next.bar),
+    (next) => commit(next.symbol, next.bar, next.close),
     current,
     sameReplay,
     intervalMs,
     timers,
   );
   return {
-    push: (symbol: SymbolCode, bar: BarInterval) => inner.push({ symbol, bar }),
+    push: (symbol: SymbolCode, bar: BarInterval, close: number | null = null) => inner.push({ symbol, bar, close }),
     cancel: inner.cancel,
   };
 }
 
 export const replayPointScheduler = createReplayPointScheduler(
-  (symbol, bar) => useBookReplayStore.getState().point(symbol, bar),
+  (symbol, bar, close) => useBookReplayStore.getState().point(symbol, bar, close),
   () => useBookReplayStore.getState().pointed,
 );
 

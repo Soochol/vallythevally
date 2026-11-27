@@ -9,6 +9,9 @@ import { useFrameFold } from "../../lib/useFrameFold";
 import { useMarketSourceRevision } from "../../stores/kiwoomLink";
 import { marketSocket } from "../../stores/realtime";
 import { serverNow, useServerClock } from "../../stores/serverClock";
+import { ReplayStrip } from "../book-replay/ReplayStrip";
+import { useProgramReplay } from "../book-replay/useProgramReplay";
+import { useBookReplayEnabled, useWorkspaceReplayCursor } from "../book-replay/useWorkspaceReplayCursor";
 import { formatMonthDay, kstDateOf } from "../brokers/history";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { MarketSymbolName, useDayQuote } from "../market-window/MarketHead";
@@ -30,13 +33,21 @@ const quantityFormat = new Intl.NumberFormat("ko-KR");
 function useLiveProgram(code: SymbolCode, today: string, sourceRevision: number, active: boolean): ProgramLiveState {
   const [live, fold] = useFrameFold<ProgramLiveState>(() => EMPTY_PROGRAM_LIVE);
   const resetKey = useRef(`${code}:${today}:${sourceRevision}`);
+  const wasActive = useRef(active);
   useEffect(() => {
     const key = `${code}:${today}:${sourceRevision}`;
     if (resetKey.current !== key) {
       resetKey.current = key;
       fold(() => EMPTY_PROGRAM_LIVE);
     }
-    if (!active) return;
+    if (!active) {
+      wasActive.current = false;
+      return;
+    }
+    if (!wasActive.current) {
+      wasActive.current = true;
+      fold(() => EMPTY_PROGRAM_LIVE);
+    }
     let sawRow = false;
     return marketSocket.subscribeFeed({ symbol: code, kind: "program" }, (m) => {
       if (m.type === "feed_program") {
@@ -128,20 +139,25 @@ const Table = memo(function Table({ lines, previousClose }: { lines: readonly Pr
 
 function ProgramBody({ code }: { code: SymbolCode }) {
   const windowVisible = useWindowVisible();
+  const replayEnabled = useBookReplayEnabled();
+  const cursor = useWorkspaceReplayCursor(code);
+  const isLive = cursor.kind === "live";
+  const liveActive = windowVisible && isLive;
+  const replay = useProgramReplay(code, cursor);
   const [clockTick, setClockTick] = useState(0);
   useEffect(() => {
-    if (!windowVisible) return;
+    if (!liveActive) return;
     const timer = setInterval(() => setClockTick((tick) => tick + 1), CLOCK_TICK_MS);
     return () => clearInterval(timer);
-  }, [windowVisible]);
+  }, [liveActive]);
   const serverTimeOrigin = useServerClock((s) => s.serverTimeOrigin);
-  const today = useMemo(() => kstDateOf(serverNow(serverTimeOrigin)), [serverTimeOrigin, clockTick, windowVisible]);
+  const today = useMemo(() => kstDateOf(serverNow(serverTimeOrigin)), [serverTimeOrigin, clockTick, liveActive]);
   const sourceRevision = useMarketSourceRevision();
 
   const history = useQuery({
     queryKey: ["program-trades", code, today, sourceRevision],
     queryFn: ({ signal }) => getJson<ProgramTradeTimeline>(`/api/symbols/${encodeURIComponent(code)}/program-trades`, signal),
-    enabled: windowVisible,
+    enabled: liveActive,
     staleTime: (query) => {
       const data = query.state.data;
       if (!data || data.points.length === 0) return 0;
@@ -151,7 +167,16 @@ function ProgramBody({ code }: { code: SymbolCode }) {
     gcTime: PROGRAM_HISTORY_GC_MS,
     refetchOnWindowFocus: false,
   });
-  const live = useLiveProgram(code, today, sourceRevision, windowVisible);
+
+  const prevLiveActive = useRef(liveActive);
+  useEffect(() => {
+    if (!prevLiveActive.current && liveActive) {
+      void history.refetch();
+    }
+    prevLiveActive.current = liveActive;
+  }, [liveActive, history.refetch]);
+
+  const live = useLiveProgram(code, today, sourceRevision, liveActive);
   const hasLive = live.latest !== null;
   const historyDate = history.data?.date ?? null;
   const isFallbackHistory = historyDate !== null && historyDate !== today;
@@ -159,11 +184,11 @@ function ProgramBody({ code }: { code: SymbolCode }) {
 
   const refetchedLiveDay = useRef<string | null>(null);
   useEffect(() => {
-    if (!hasLive || !isFallbackHistory) return;
+    if (!liveActive || !hasLive || !isFallbackHistory) return;
     if (refetchedLiveDay.current === today) return;
     refetchedLiveDay.current = today;
     void history.refetch();
-  }, [hasLive, isFallbackHistory, today, history.refetch]);
+  }, [liveActive, hasLive, isFallbackHistory, today, history.refetch]);
 
   const past = useMemo(() => historyRows(history.data?.points ?? [], history.data?.truncated === true), [history.data]);
   const historyAheadOfLive = useMemo(() => isHistoryFresherThanLive(past, live, isFallbackHistory), [past, live, isFallbackHistory]);
@@ -188,15 +213,47 @@ function ProgramBody({ code }: { code: SymbolCode }) {
     [historyAheadOfLive, keptHistoryTrend, live.trend],
   );
   const latest = historyAheadOfLive ? keptHistory.at(-1) : (live.latest ?? keptHistory.at(-1));
-  const { previousClose } = useDayQuote(code, "combined");
+  const { previousClose: livePreviousClose } = useDayQuote(code, "combined");
+  const effectivePreviousClose = cursor.kind === "pointed" && !cursor.isToday ? null : livePreviousClose;
+
+  if (replay.kind === "none") {
+    return (
+      <div className="mw-frame pg" data-testid="program-window" data-symbol={code} data-replay="none">
+        <div className="mw-head"><MarketSymbolName code={code} /></div>
+        {replayEnabled && <ReplayStrip view={replay} subject="프로그램" showVenueBadge={false} />}
+        <EmptyState title={replay.reason} />
+      </div>
+    );
+  }
+
+  if (replay.kind === "past") {
+    if (replay.rowCount === 0) {
+      return (
+        <div className="mw-frame pg" data-testid="program-window" data-symbol={code} data-replay="past">
+          <div className="mw-head"><MarketSymbolName code={code} /></div>
+          {replayEnabled && <ReplayStrip view={replay} subject="프로그램" showVenueBadge={false} />}
+          <EmptyState title="이 시각까지 프로그램 매매 자료가 없습니다" />
+        </div>
+      );
+    }
+    return (
+      <div className="mw-frame pg" data-testid="program-window" data-symbol={code} data-replay="past">
+        <Summary code={code} latest={replay.latest} trend={replay.trend} fallbackDate={null} />
+        {replayEnabled && <ReplayStrip view={replay} subject="프로그램" showVenueBadge={false} />}
+        <Table lines={replay.lines} previousClose={effectivePreviousClose} />
+      </div>
+    );
+  }
+
   const showData = !(history.isPending && !hasLive) && !(history.isError && !hasLive) && !(history.isSuccess && past.length === 0 && !hasLive);
   const content = history.isPending && !hasLive ? <Skeleton label="프로그램 매매 불러오는 중" />
     : history.isError && !hasLive ? <ErrorState message="프로그램 매매를 불러오지 못했습니다" retry={() => void history.refetch()} />
     : history.isSuccess && past.length === 0 && !hasLive ? <EmptyState title="이 종목은 프로그램 매매 자료가 없습니다" />
-    : <Table lines={lines} previousClose={previousClose} />;
+    : <Table lines={lines} previousClose={effectivePreviousClose} />;
   return (
     <div className="mw-frame pg" data-testid="program-window" data-symbol={code}>
       {showData ? <Summary code={code} latest={latest} trend={trend} fallbackDate={fallbackDate} /> : <div className="mw-head"><MarketSymbolName code={code} /></div>}
+      {replayEnabled && <ReplayStrip view={replay} subject="프로그램" showVenueBadge={false} />}
       {content}
     </div>
   );

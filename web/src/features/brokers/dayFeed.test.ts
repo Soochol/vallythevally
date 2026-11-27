@@ -280,4 +280,39 @@ describe("createTodayBrokerFeed", () => {
     expect(feed.snapshot().state.grid.times.at(-1)).toBe(start + 899 * 2);
     feed.dispose();
   });
+
+  it("allowLiveFallback이 false이면 source가 none이거나 실패해도 라이브 WS를 구독하지 않고 true로 돌아오면 복원한다", async () => {
+    const h = createHarness();
+    const feed = createTodayBrokerFeed(CODE, h.deps);
+    feed.configure({ date: DATE, enabled: true, active: true, allowLiveFallback: false });
+
+    await h.resolveFetch(replyOf({ source: "none", coverage: "symbol_not_collected" }));
+    expect(feed.snapshot().mode).toBe("collected");
+    expect(feed.snapshot().source).toBe("none");
+    expect(feed.snapshot().coverage).toBe("symbol_not_collected");
+    expect(feed.snapshot().failed).toBe(false);
+    expect(h.liveSubCount()).toBe(0);
+    expect(h.socketListeners.size).toBe(0);
+
+    feed.retry();
+    await h.rejectFetch(new Error("offline"));
+    expect(feed.snapshot().mode).toBe("collected");
+    expect(feed.snapshot().source).toBe("none");
+    expect(feed.snapshot().failed).toBe(true);
+    expect(h.liveSubCount()).toBe(0);
+
+    feed.configure({ date: DATE, enabled: true, active: true, allowLiveFallback: true });
+    await h.resolveFetch(replyOf({ source: "none" }));
+    expect(feed.snapshot().mode).toBe("live");
+    expect(feed.snapshot().failed).toBe(false);
+    expect(h.liveSubCount()).toBe(1);
+    expect(h.socketListeners.size).toBe(1);
+
+    feed.configure({ date: DATE, enabled: true, active: true, allowLiveFallback: false });
+    expect(h.socketListeners.size).toBe(0);
+    await h.resolveFetch(replyOf({ source: "none" }));
+    expect(h.socketListeners.size).toBe(0);
+
+    feed.dispose();
+  });
 });

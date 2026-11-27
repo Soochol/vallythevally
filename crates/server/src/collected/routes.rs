@@ -72,6 +72,7 @@ async fn broker_day(
         symbol: symbol_code(stock),
         date: resolved_date,
         source: slice.source,
+        coverage: slice.coverage,
         snapshots: slice.snapshots,
         gaps: slice.gaps,
         live: slice.live,
