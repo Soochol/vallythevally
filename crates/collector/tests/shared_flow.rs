@@ -56,7 +56,7 @@ async fn broker_rows_are_written_per_symbol_and_other_types_are_not() {
     let rows: Vec<_> = samsung.iter().flat_map(|block| &block.rows).collect();
     assert_eq!(rows.iter().map(|row| row.recv_ms).collect::<Vec<_>>(), [NINE_MS, NINE_MS + 1]);
     let fids = &samsung[0].description.fids;
-    assert_eq!(*fids, (141..=180).collect::<Vec<u32>>());
+    assert_eq!(*fids, (141..=180).chain([261, 262, 263, 264, 267, 268]).collect::<Vec<u32>>());
     let value = |row: usize, fid: u32| rows[row].values[fids.iter().position(|f| *f == fid).unwrap()].clone();
     assert_eq!([141, 146, 161, 166, 151, 156, 171, 176].map(|fid| value(0, fid).unwrap()), ["삼  성", "030", "120", "-5", "키움증권", "050", "300", "+7"]);
     assert_eq!(value(0, 142), None);
