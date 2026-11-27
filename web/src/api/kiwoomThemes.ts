@@ -14,12 +14,13 @@ export function fetchKiwoomThemeMembers(code: string, periodDays = 1, signal?: A
   return getJson<KiwoomThemeMembers>(`/api/kiwoom-themes/${encodeURIComponent(code)}?periodDays=${periodDays}`, signal);
 }
 
-export function kiwoomThemesQuery(periodDays = 1) {
+export function kiwoomThemesQuery(periodDays = 1, enabled = true) {
   return queryOptions({
     queryKey: ["kiwoom-themes", periodDays] as const,
     queryFn: ({ signal }) => fetchKiwoomThemes(periodDays, signal),
+    enabled,
     staleTime: LIST_STALE_MS,
-    refetchInterval: 45_000,
+    refetchInterval: enabled ? 45_000 : false,
     retry: false,
   });
 }
@@ -35,8 +36,8 @@ export function kiwoomThemeMembersQuery(code: string, enabled: boolean, periodDa
   });
 }
 
-export function useKiwoomThemes(periodDays = 1) {
-  return useQuery(kiwoomThemesQuery(periodDays));
+export function useKiwoomThemes(periodDays = 1, enabled = true) {
+  return useQuery(kiwoomThemesQuery(periodDays, enabled));
 }
 
 export function useKiwoomThemeMembers(code: string, enabled: boolean, periodDays = 1) {

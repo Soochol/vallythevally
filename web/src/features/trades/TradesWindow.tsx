@@ -64,7 +64,7 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
         <div className="tr-strip-metrics">
           <span className="tr-figure" data-figure="strength" title="체결강도">
             <span className="tr-name">강도</span>
-            <b data-testid="trade-strength">{strength === null ? "—" : `${formatDecimal(strength)}%`}</b>
+            <b data-testid="trade-strength" data-dir={strength === null ? undefined : strength >= 100 ? "up" : "down"}>{strength === null ? "—" : `${formatDecimal(strength)}%`}</b>
           </span>
           <RatioBar buy={split.buy} sell={split.sell} label="최근 체결의 매수·매도 비율" />
           <span className="tr-figure" data-figure="cumulative" title="누적">

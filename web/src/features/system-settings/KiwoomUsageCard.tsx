@@ -1,13 +1,17 @@
 import { memo, useState } from "react";
 import { useKiwoomUsage } from "../../api/system";
 import { ChevronIcon } from "../icons";
+import { ErrorState, Skeleton } from "../overlay/State";
 import { HIT_LIMIT_LABEL, RATE_LIMITED_LABEL, USAGE_REFRESH_MS, usageView } from "./kiwoomUsage";
 
 const HEADERS = ["TR", "1분 전송", "1초 최대", "기다림 최대", "제한 응답"];
 
 export const KiwoomUsageCard = memo(function KiwoomUsageCard() {
-  const usage = useKiwoomUsage(USAGE_REFRESH_MS).data;
+  const query = useKiwoomUsage(USAGE_REFRESH_MS);
+  const usage = query.data;
   const [userChoice, setUserChoice] = useState<boolean | null>(null);
+  if (query.isPending) return <div className="rounded-m border border-line bg-surface p-4"><Skeleton label="호출 한도 불러오는 중" rows={2} /></div>;
+  if (query.isError) return <div className="rounded-m border border-line bg-surface p-2"><ErrorState message="호출 한도를 불러오지 못했습니다" retry={() => void query.refetch()} /></div>;
   if (!usage) return null;
   const view = usageView(usage);
   const limited = view.totalRateLimited > 0 || view.rows.some((row) => row.warning);

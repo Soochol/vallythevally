@@ -1,4 +1,5 @@
 .scn-window {
+  container: scn / inline-size;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -7,42 +8,16 @@
 }
 .scn-head {
   box-sizing: border-box;
-  height: var(--size-34);
+  height: var(--size-32);
   flex: none;
   display: flex;
   align-items: center;
   gap: var(--size-6);
   padding: 0 var(--s3);
   border-bottom: var(--size-1) solid var(--line);
-  background: var(--surface);
+  background: var(--strip-bg, var(--surface));
   overflow-x: auto;
   white-space: nowrap;
-}
-.scn-seg {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--size-1);
-  padding: var(--size-2);
-  border-radius: var(--r-m);
-  background: var(--raised);
-  flex: none;
-}
-.scn-seg-btn {
-  height: var(--size-20);
-  padding: 0 var(--size-6);
-  border-radius: var(--r-s);
-  font-size: var(--fs-xs);
-  color: var(--text-2);
-  white-space: nowrap;
-}
-.scn-seg-btn:hover {
-  background: var(--hover);
-  color: var(--text);
-}
-.scn-seg-btn[aria-pressed="true"] {
-  background: var(--bg);
-  color: var(--text);
-  font-weight: 700;
 }
 .scn-spacer {
   flex: 1;
@@ -60,6 +35,11 @@
   background: var(--hover);
   color: var(--text);
 }
+.scn-ctrl[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 .scn-body {
   flex: 1;
   min-height: 0;
@@ -68,11 +48,31 @@
 .scn-colhead,
 .scn-row {
   display: grid;
-  grid-template-columns: 72px minmax(100px, 1.2fr) 74px 66px 76px minmax(90px, 1fr);
+  grid-template-columns: 72px minmax(90px, 1.2fr) 74px 66px 76px minmax(90px, 1fr);
   align-items: center;
   gap: var(--s2);
   padding: 0 var(--s3);
   font-variant-numeric: tabular-nums;
+}
+@container scn (width < 480px) {
+  .scn-colhead,
+  .scn-row {
+    grid-template-columns: 64px minmax(80px, 1.2fr) 68px 62px 68px;
+  }
+  .scn-colhead > :nth-child(6),
+  .scn-row > :nth-child(6) {
+    display: none;
+  }
+}
+@container scn (width < 360px) {
+  .scn-colhead,
+  .scn-row {
+    grid-template-columns: 58px minmax(72px, 1fr) 64px 58px;
+  }
+  .scn-colhead > :nth-child(5),
+  .scn-row > :nth-child(5) {
+    display: none;
+  }
 }
 .scn-colhead {
   position: sticky;
@@ -80,13 +80,13 @@
   z-index: 2;
   height: var(--size-24);
   border-bottom: var(--size-1) solid var(--line);
-  background: var(--surface);
+  background: var(--strip-bg, var(--surface));
   color: var(--text-3);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 500;
 }
 .scn-row {
-  height: var(--size-30);
+  height: var(--row-h);
   width: 100%;
   border-bottom: var(--size-1) solid var(--line-subtle);
   text-align: left;
@@ -97,7 +97,7 @@
 }
 .scn-num {
   text-align: right;
-  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .scn-up {
   color: var(--up);

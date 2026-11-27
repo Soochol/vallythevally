@@ -286,7 +286,8 @@ export function OrderLadder({ rows, previousClose, groups, writable, replayLocke
         actions.place(resolved.side, resolved.price);
       }}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
-      {headerOverlay ?? <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />}
+      {headerOverlay}
+      <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />
       {exploring
         ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * rowHeightPx, paddingBottom: (rowCount - range.end) * rowHeightPx }}>{ladderView}</div>
         : ladderView}

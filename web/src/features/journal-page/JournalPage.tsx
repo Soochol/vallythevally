@@ -4,7 +4,10 @@ import type { TradingExecution } from "../../api/generated/TradingExecution";
 import { useExecutionForensics, useTradingExecutionHistory } from "../../api/trading";
 import { useOrderAccount } from "../order/useOrderAccount";
 import { ErrorState, Skeleton } from "../overlay/State";
+import { PageFrame } from "../pages/PageFrame";
 import { JOURNAL_ANALYTICS_PATH } from "../page-rail/pages";
+import { PublicUnavailable } from "../../public-mode/PublicUnavailable";
+import { usePublicMode } from "../../public-mode/serverMode";
 import { JournalAnalyticsView } from "./JournalAnalyticsView";
 import {
   aggregateSummary,
@@ -28,6 +31,7 @@ interface AccumulatedHistory {
 export function JournalPage() {
   const { pathname } = useLocation();
   const isAnalytics = pathname.replace(/\/+$/, "") === JOURNAL_ANALYTICS_PATH;
+  const publicMode = usePublicMode();
   const orderAccount = useOrderAccount();
   const accountRef = orderAccount.current?.ref ?? null;
   const accountKey = accountRef ?? "";
@@ -42,7 +46,7 @@ export function JournalPage() {
 
   const fallbackToday = useMemo(() => todayKstIso(), []);
   const historyRange = useMemo(() => computeHistoryQueryRange(period, fallbackToday), [period, fallbackToday]);
-  const historyQuery = useTradingExecutionHistory(accountRef, historyRange, !demoMode);
+  const historyQuery = useTradingExecutionHistory(accountRef, historyRange, !publicMode && !demoMode);
   const { data: historyData, isFetching: historyFetching, isError: historyHasError, isPending: historyPending, refetch: refetchHistory } = historyQuery;
 
   const serverToday = useMemo(() => {
@@ -59,7 +63,7 @@ export function JournalPage() {
     return anchor.replace(/-/g, "");
   }, [period.type, period.anchor, today]);
 
-  const forensicsQuery = useExecutionForensics(accountRef, !demoMode, forensicsDate);
+  const forensicsQuery = useExecutionForensics(accountRef, !publicMode && !demoMode, forensicsDate);
 
   const [accumulated, setAccumulated] = useState<AccumulatedHistory>(() => ({
     accountKey,
@@ -170,49 +174,57 @@ export function JournalPage() {
     void forensicsQuery.refetch();
   };
 
+  const pageTitle = isAnalytics ? "수익 분석" : "매매 복기";
+
   return (
-    <div className="jrn-root" data-testid="journal-page">
-      {isInitialLoading ? (
-        <div className="jrn-state-wrap">
-          <Skeleton label="매매 복기 데이터를 불러오는 중" rows={8} />
-        </div>
-      ) : isInitialError ? (
-        <div className="jrn-state-wrap">
-          <ErrorState
-            message="매매 복기 데이터를 불러오지 못했습니다"
-            retry={retryHistory}
+    <PageFrame title={pageTitle} fullWidth hideLinkColorPicker>
+      <div className="jrn-root" data-testid="journal-page">
+        {publicMode ? (
+          <div className="jrn-state-wrap">
+            <PublicUnavailable />
+          </div>
+        ) : isInitialLoading ? (
+          <div className="jrn-state-wrap">
+            <Skeleton label="매매 복기 데이터를 불러오는 중" rows={8} />
+          </div>
+        ) : isInitialError ? (
+          <div className="jrn-state-wrap">
+            <ErrorState
+              message="매매 복기 데이터를 불러오지 못했습니다"
+              retry={retryHistory}
+            />
+          </div>
+        ) : isAnalytics ? (
+          <JournalAnalyticsView
+            allTrades={allTrades}
+            filteredAllTrades={filteredAllTrades}
+            periodTrades={periodTrades}
+            filteredTrades={filteredTrades}
+            summary={summary}
+            range={range}
+            today={today}
+            isSyncingHistory={isSyncingHistory}
+            pendingDays={pendingDays}
+            historyError={historyError}
+            onRetryHistory={retryHistory}
           />
-        </div>
-      ) : isAnalytics ? (
-        <JournalAnalyticsView
-          allTrades={allTrades}
-          filteredAllTrades={filteredAllTrades}
-          periodTrades={periodTrades}
-          filteredTrades={filteredTrades}
-          summary={summary}
-          range={range}
-          today={today}
-          isSyncingHistory={isSyncingHistory}
-          pendingDays={pendingDays}
-          historyError={historyError}
-          onRetryHistory={retryHistory}
-        />
-      ) : (
-        <JournalStudioView
-          allTrades={allTrades}
-          periodTrades={periodTrades}
-          filteredTrades={filteredTrades}
-          visibleList={visibleList}
-          summary={summary}
-          range={range}
-          today={today}
-          hasRealTrades={realTrades.length > 0}
-          isSyncingHistory={isSyncingHistory}
-          pendingDays={pendingDays}
-          historyError={historyError}
-          onRetryHistory={retryHistory}
-        />
-      )}
-    </div>
+        ) : (
+          <JournalStudioView
+            allTrades={allTrades}
+            periodTrades={periodTrades}
+            filteredTrades={filteredTrades}
+            visibleList={visibleList}
+            summary={summary}
+            range={range}
+            today={today}
+            hasRealTrades={realTrades.length > 0}
+            isSyncingHistory={isSyncingHistory}
+            pendingDays={pendingDays}
+            historyError={historyError}
+            onRetryHistory={retryHistory}
+          />
+        )}
+      </div>
+    </PageFrame>
   );
 }

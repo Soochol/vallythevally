@@ -1,10 +1,14 @@
+import { useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import type { CellStatus } from "../../chart/ChartController";
 import { direction, formatChange, formatPercent, formatPrice } from "../../lib/format";
 import { isIndexCode, symbolSub } from "../../lib/symbol";
 import type { ChartWindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { CameraIcon } from "../icons";
+import { CameraIcon, WorkspaceIcon } from "../icons";
+import { Menu, type MenuItem } from "../menu/Menu";
+import { RAIL_PAGES } from "../page-rail/pages";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
 import { PhoneSystemButton } from "../system-settings/SystemButton";
 import { VenuePicker } from "../venue/VenuePicker";
@@ -13,6 +17,26 @@ import { usePublicMode } from "../../public-mode/serverMode";
 import { ConnectionIndicator, useConnectionView } from "../status/ConnectionIndicator";
 
 const DIR_CLASS = { up: "text-up", down: "text-down", flat: "text-text-2" } as const;
+
+function PhonePageMenuButton() {
+  const navigate = useNavigate();
+  const root = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const items: MenuItem[] = RAIL_PAGES.map(({ id, path, label }) => ({
+    kind: "radio",
+    label,
+    checked: id === "workspace",
+    onSelect: () => navigate(path),
+  }));
+  return (
+    <div ref={root} className="flex-none">
+      <button type="button" className="icon-btn h-9 w-9" aria-label="페이지 이동" title="페이지 이동" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <WorkspaceIcon size={19} />
+      </button>
+      {open && <Menu label="페이지 이동" root={root} items={items} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
 
 /**
  * 휴대폰 머리(frontend.md §4): 종목, 현재 봉 종가(24px, 등락색), 등락, 그리고 셋째 줄에
@@ -31,6 +55,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
     <header className="hidden px-3 pb-1 pt-2 [grid-area:mhead] max-md:block">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
+          <PhonePageMenuButton />
           <button type="button" className="min-w-0 flex-1 truncate text-left" aria-haspopup="dialog" onClick={() => openSearch()}>
             <b className="text-l font-[600]">{info?.name ?? cell.symbol}</b>
             <small className="ml-1 text-s text-text-3">{symbolSub(cell.symbol, info)}</small>
@@ -42,7 +67,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
           <div className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
           {ready ? (
             <>
-              <strong className={`text-[24px] font-[600] tracking-[-0.02em] ${dir}`}>{formatPrice(ready.latest.c, isIndex)}</strong>
+              <strong className={`text-h font-[600] tracking-[-0.02em] ${dir}`}>{formatPrice(ready.latest.c, isIndex)}</strong>
               {ready.prev && (
                 <span className={`whitespace-pre ${dir}`}>
                   {formatChange(chg, isIndex)} {formatPercent((chg / ready.prev.c) * 100)}
@@ -50,7 +75,7 @@ export function PhoneHeader({ cell, info, status }: { cell: ChartWindowState; in
               )}
             </>
           ) : (
-            <strong className="text-[24px] font-[600] text-text-3">—</strong>
+            <strong className="text-h font-[600] text-text-3">—</strong>
           )}
           </div>
           <VenuePicker variant="phone" />

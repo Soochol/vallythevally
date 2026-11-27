@@ -69,7 +69,7 @@ export function TableView({ snapshots, cursor, testIdPrefix = "broker" }: TableV
   }, [active]);
 
   const netTone = active === null ? "none" : netTotal > 0 ? "up" : netTotal < 0 ? "down" : "none";
-  const foreignTone = foreignNet === null ? "none" : foreignNet >= 0 ? "up" : "down";
+  const foreignTone = foreignNet === null || foreignNet === 0 ? "none" : foreignNet > 0 ? "up" : "down";
 
   return (
     <div className="br-tbl" data-testid={`${testIdPrefix}-table`}>

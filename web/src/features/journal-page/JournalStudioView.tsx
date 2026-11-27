@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { Select } from "../menu/Select";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { JOURNAL_ANALYTICS_PATH } from "../page-rail/pages";
+import { Segmented } from "../ui/Segmented";
 import { JournalCandleChart } from "./JournalCandleChart";
 import {
   activeFilterTokens,
@@ -197,15 +199,20 @@ export function JournalStudioView({
     <div ref={rootRef} className="jrn-shell">
       <header className="jrn-top">
         <div className="jrn-top-inner">
-          <span className="jrn-brand">매매 복기</span>
-          <span className="jrn-vsep" />
-          <div className="jrn-seg" role="group" aria-label="기간 단위">
-            {(["day", "week", "month", "year", "all"] as const).map((p) => (
-              <button key={p} type="button" aria-pressed={period.type === p} onClick={() => setPeriodType(p)}>
-                {p === "day" ? "일" : p === "week" ? "주" : p === "month" ? "월" : p === "year" ? "년" : "전체"}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="기간 단위"
+            mode="pressed"
+            size="sm"
+            value={period.type}
+            options={[
+              { value: "day", label: "일" },
+              { value: "week", label: "주" },
+              { value: "month", label: "월" },
+              { value: "year", label: "년" },
+              { value: "all", label: "전체" },
+            ]}
+            onChange={(p) => setPeriodType(p)}
+          />
           <div className="jrn-step">
             <button
               type="button"
@@ -234,34 +241,26 @@ export function JournalStudioView({
               </button>
             )}
           </div>
-          <select
+          <Select
+            label="종목 거르기"
             className="jrn-select"
-            aria-label="종목 거르기"
-            data-active={filters.sym !== null ? "true" : undefined}
             value={filters.sym ?? ""}
-            onChange={(e) => setFilter("sym", e.target.value === "" ? null : e.target.value)}
-          >
-            <option value="">전체 종목</option>
-            {periodSymbols.map(([code, name]) => (
-              <option key={code} value={code}>
-                {name}
-              </option>
-            ))}
-          </select>
-          <select
+            options={[
+              { value: "", label: "전체 종목" },
+              ...periodSymbols.map(([code, name]) => ({ value: code, label: name })),
+            ]}
+            onChange={(next) => setFilter("sym", next === "" ? null : next)}
+          />
+          <Select
+            label="태그 거르기"
             className="jrn-select"
-            aria-label="태그 거르기"
-            data-active={filters.tag !== null ? "true" : undefined}
             value={filters.tag ?? ""}
-            onChange={(e) => setFilter("tag", e.target.value === "" ? null : e.target.value)}
-          >
-            <option value="">전체 태그</option>
-            {DEFAULT_TAGS.map((tg) => (
-              <option key={tg} value={tg}>
-                {`#${tg}`}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: "", label: "전체 태그" },
+              ...DEFAULT_TAGS.map((tg) => ({ value: tg, label: `#${tg}` })),
+            ]}
+            onChange={(next) => setFilter("tag", next === "" ? null : next)}
+          />
           <div className="jrn-tokens" aria-label="적용된 조건">
             {extraTokens.map((tk) => (
               <button
@@ -320,11 +319,18 @@ export function JournalStudioView({
           <aside className="jrn-list-col">
             <div className="jrn-list-top">
               <span className="jrn-list-count" data-testid="journal-list-count">{`거래 ${sortedList.length}건`}</span>
-              <div className="jrn-seg" role="group" aria-label="정렬">
-                <button type="button" aria-pressed={sort === "time"} onClick={() => setSort("time")}>시간</button>
-                <button type="button" aria-pressed={sort === "pnl"} onClick={() => setSort("pnl")}>손익</button>
-                <button type="button" aria-pressed={sort === "ret"} onClick={() => setSort("ret")}>수익률</button>
-              </div>
+              <Segmented
+                label="정렬"
+                mode="pressed"
+                size="sm"
+                value={sort}
+                options={[
+                  { value: "time", label: "시간" },
+                  { value: "pnl", label: "손익" },
+                  { value: "ret", label: "수익률" },
+                ]}
+                onChange={setSort}
+              />
             </div>
             <div className="jrn-list-subbar">
               <div className="jrn-quick-links" role="group" aria-label="거래 형태 빠른 거르기">
@@ -427,7 +433,7 @@ export function JournalStudioView({
                           <svg width="84" height="20" aria-hidden="true">
                             <line className="jrn-g-line" x1={gx(t.mae)} x2={gx(t.mfe)} y1="10" y2="10" />
                             <line className="jrn-g-tick" x1="42" x2="42" y1="5" y2="15" />
-                            <circle className={t.exitRet >= 0 ? "jrn-f-up" : "jrn-f-dn"} cx={gx(t.exitRet)} cy="10" r="3" />
+                            <circle className={t.exitRet > 0 ? "jrn-f-up" : t.exitRet < 0 ? "jrn-f-dn" : "jrn-f-flat"} cx={gx(t.exitRet)} cy="10" r="3" />
                           </svg>
                         </span>
                         <span className={`jrn-r-pnl${pTone ? ` jrn-${pTone}` : ""}`}>{formatWon(p)}</span>
@@ -477,13 +483,14 @@ export function JournalStudioView({
                         {formatPct(tradeRetPct(selectedTrade, afterCost))}
                       </span>
                     </div>
-                    <div className="jrn-seg" role="group" aria-label="봉 주기">
-                      {JOURNAL_TFS.map(({ tf, label }) => (
-                        <button key={tf} type="button" aria-pressed={activeTf === tf} onClick={() => setTf(tf)}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                    <Segmented
+                      label="봉 주기"
+                      mode="pressed"
+                      size="sm"
+                      value={activeTf}
+                      options={JOURNAL_TFS.map(({ tf, label }) => ({ value: tf, label }))}
+                      onChange={(tf) => setTf(tf)}
+                    />
                   </div>
                 </div>
 

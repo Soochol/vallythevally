@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { MaMethod } from "../../api/generated/MaMethod";
 import { colorsFrom, INDICATOR_COLORS, indicatorCssColor, shownColor, specName, type IndicatorColor, type IndicatorToken, type SpecOf } from "../../chart/indicators/kinds";
 import type { IndicatorConfig, LineWidth } from "../../chart/settings";
@@ -6,6 +6,7 @@ import type { WindowId } from "../../layout/kinds";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { ColorStyleTrigger } from "../color/ColorStylePopover";
 import type { ThemeSwatch } from "../color/ColorTable";
+import { Errors } from "../dialog/DialogParts";
 import { CloseIcon, EyeIcon, PlusIcon } from "../icons";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { nextColor } from "./indicatorForm";
@@ -55,6 +56,7 @@ function MaLineRow({
 }) {
   const [periodText, setPeriodText] = useState(String(line.spec.period));
   const [error, setError] = useState(false);
+  const errorId = useId();
 
   useEffect(() => {
     setPeriodText(String(line.spec.period));
@@ -128,6 +130,7 @@ function MaLineRow({
           inputMode="numeric"
           aria-label={`${name} 기간`}
           aria-invalid={error}
+          aria-describedby={error ? errorId : undefined}
           value={periodText}
           autoComplete="off"
           className="ui-field ic-ma-period-input"
@@ -156,6 +159,7 @@ function MaLineRow({
       >
         <CloseIcon size={14} />
       </button>
+      {error && <div className="col-span-full"><Errors id={errorId} messages={["1 이상의 정수를 입력하세요"]} /></div>}
     </div>
   );
 }
@@ -170,6 +174,7 @@ export function MaGroupEditorView({ cellId, allIndicators }: { cellId: WindowId;
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [newPeriod, setNewPeriod] = useState("");
   const [addError, setAddError] = useState(false);
+  const addErrorId = useId();
 
   const maLines = allIndicators.filter(isMaConfig);
   const visibleCount = maLines.filter((line) => line.visible).length;
@@ -284,6 +289,7 @@ export function MaGroupEditorView({ cellId, allIndicators }: { cellId: WindowId;
             inputMode="numeric"
             aria-label="추가할 이동평균 기간"
             aria-invalid={addError}
+            aria-describedby={addError ? addErrorId : undefined}
             value={newPeriod}
             placeholder="기간 (예: 20)"
             autoComplete="off"
@@ -305,6 +311,7 @@ export function MaGroupEditorView({ cellId, allIndicators }: { cellId: WindowId;
             이동평균선 추가
           </button>
         </div>
+        {addError && <Errors id={addErrorId} messages={["1 이상의 정수를 입력하세요"]} />}
       </section>
     </>
   );

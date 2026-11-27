@@ -11,6 +11,7 @@ import { sameContent } from "../../chart/drawings/history";
 import { toolOf } from "../../chart/drawings/tools";
 import type { DrawingBody } from "../../chart/drawings/types";
 import { isMinutePeriod, PERIODS, PERIOD_LABEL } from "../../lib/symbol";
+import { formatPercent, MINUS } from "../../lib/format";
 import { useDrawingSession, type DrawingEditor } from "../../stores/drawingSession";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
@@ -88,7 +89,7 @@ function DetailsTemplateMenu({ cellId, editor }: { cellId: WindowId; editor: Dra
 
   return (
     <>
-      <button ref={anchor} type="button" className="tb-btn draw-tpl-trigger" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <button ref={anchor} type="button" className="btn draw-tpl-trigger" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span>템플릿</span>
         <span aria-hidden="true">▾</span>
       </button>
@@ -277,9 +278,9 @@ export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; e
           {priceDiff !== null && (
             <div className="draw-coord-summary">
               <span>구간 요약</span>
-              <strong>
-                {priceDiff >= 0 ? "+" : ""}{ctx ? ctx.formatPrice(priceDiff) : priceDiff.toLocaleString()}
-                {pricePct !== null ? ` (${pricePct >= 0 ? "+" : ""}${pricePct.toFixed(2)}%)` : ""}
+              <strong className={priceDiff > 0 ? "text-up" : priceDiff < 0 ? "text-down" : "text-text-2"}>
+                {priceDiff > 0 ? "+" : priceDiff < 0 ? MINUS : ""}{ctx ? ctx.formatPrice(Math.abs(priceDiff)) : Math.abs(priceDiff).toLocaleString("ko-KR")}
+                {pricePct !== null ? ` (${formatPercent(pricePct)})` : ""}
               </strong>
               {barsSpan !== null && <span className="draw-coord-bars">{barsSpan.count}봉</span>}
             </div>
@@ -347,7 +348,7 @@ export function DrawingDetails({ cellId, editor, anchor }: { cellId: WindowId; e
       <div className="draw-settings-foot">
         <DetailsTemplateMenu cellId={cellId} editor={editor} />
         <span />
-        <button className="tb-btn" type="button" onClick={() => close(cellId)}>취소</button>
+        <button className="btn" type="button" onClick={() => close(cellId)}>취소</button>
         <button className="btn-primary" type="button" onClick={() => confirm(cellId, { ...editor, draft: { ...editor.draft, text: meaningful(editor.draft.text) } })}>확인</button>
       </div>
     </Popover>
@@ -366,6 +367,6 @@ export function DrawingTextEditor({ cellId, editor }: { cellId: WindowId; editor
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
       if (e.key === "Escape") { e.preventDefault(); close(cellId); }
-    }} /><div><span>Enter 확인 · Shift+Enter 줄바꿈</span><button className="tb-btn" onClick={() => useDrawingSession.getState().patchCell(cellId, { editor: { ...typed, kind: "settings" } })}>세부 설정</button><button className="tb-btn" onClick={() => close(cellId)}>취소</button><button className="btn-primary" onClick={submit}>확인</button></div>
+    }} /><div><span>Enter 확인 · Shift+Enter 줄바꿈</span><button type="button" className="btn btn-sm" onClick={() => useDrawingSession.getState().patchCell(cellId, { editor: { ...typed, kind: "settings" } })}>세부 설정</button><button type="button" className="btn btn-sm" onClick={() => close(cellId)}>취소</button><button type="button" className="btn-primary btn-sm" onClick={submit}>확인</button></div>
   </Popover></div>;
 }

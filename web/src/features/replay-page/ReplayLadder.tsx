@@ -497,8 +497,8 @@ export function ReplayLadder({
       setText(ratioAskPctRef.current, `매도 ${snapshot.askPct}%`);
       setText(ratioBidPctRef.current, `매수 ${snapshot.bidPct}%`);
       if (obiRef.current) {
-        obiRef.current.className = snapshot.obi >= 0 ? "rp-up" : "rp-down";
-        setText(obiRef.current, `${snapshot.obi >= 0 ? "+" : ""}${snapshot.obi.toFixed(2)}`);
+        obiRef.current.className = snapshot.obi > 0 ? "rp-up" : snapshot.obi < 0 ? "rp-down" : "rp-muted";
+        setText(obiRef.current, `${snapshot.obi > 0 ? "+" : ""}${snapshot.obi.toFixed(2)}`);
       }
     };
 

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { DocumentKind } from "../../api/generated/DocumentKind";
 import { CloseIcon, InfoIcon } from "../icons";
 import { saveBeforeReload } from "./saveBeforeReload";
+import { saveFailureText, useSaveView } from "./SaveStatus";
 import { useSelectionStore } from "../../stores/selection";
 import { useSetupChangeStore } from "../../stores/setupChange";
 
@@ -21,6 +22,8 @@ export const setupChangedText = (kinds: readonly DocumentKind[]): string => `${S
 
 export function SetupChangedNotice() {
   const kinds = useSetupChangeStore((s) => s.kinds);
+  const { indicator, offline } = useSaveView();
+  const hasPhoneSaveBand = Boolean(offline ?? saveFailureText(indicator));
   const [busy, setBusy] = useState(false);
   const attempt = useRef(0);
   if (kinds.length === 0) return null;
@@ -46,7 +49,7 @@ export function SetupChangedNotice() {
   };
 
   return (
-    <div role="status" data-tone="info" className="ui-toast fixed bottom-10 right-3 z-50 max-md:inset-x-3 max-md:bottom-16">
+    <div role="status" data-tone="info" className={`ui-toast fixed bottom-10 right-3 z-[var(--z-notice)] max-md:inset-x-3 ${hasPhoneSaveBand ? "max-md:bottom-28" : "max-md:bottom-16"}`}>
       <span className="ui-toast-icon"><InfoIcon /></span>
       <span className="ui-toast-text">{setupChangedText(kinds)}</span>
       <button type="button" className="btn-primary btn-sm" disabled={busy} onClick={() => void refresh()}>새로 고침</button>

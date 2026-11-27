@@ -1,6 +1,7 @@
 import type { AutoOrderRule } from "../../api/generated/AutoOrderRule";
 import type { AutoOrderType } from "../../api/generated/AutoOrderType";
 import type { AutoOrderUpsertInput } from "../../api/generated/AutoOrderUpsertInput";
+import { MINUS } from "../../lib/format";
 import { isActiveAutoOrder, useAutoOrdersStore } from "../../stores/autoOrders";
 import { useDrawingSession } from "../../stores/drawingSession";
 import type { ChartExtension, ChartHost } from "../extensions";
@@ -36,12 +37,15 @@ function toUpsertInput(rule: AutoOrderRule, patch: Partial<AutoOrderUpsertInput>
 
 function formatWonMan(diffWon: number): string {
   const man = Math.round(diffWon / 10_000);
-  return `${man >= 0 ? "+" : ""}${man.toLocaleString("ko-KR")}만`;
+  const sign = man > 0 ? "+" : man < 0 ? MINUS : "";
+  return `${sign}${Math.abs(man).toLocaleString("ko-KR")}만`;
 }
 
 function formatPct(price: number, entry: number): string {
   const pct = entry > 0 ? ((price - entry) / entry) * 100 : 0;
-  return `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  const rounded = Number(pct.toFixed(1));
+  const sign = rounded > 0 ? "+" : rounded < 0 ? MINUS : "";
+  return `${sign}${Math.abs(rounded).toFixed(1)}%`;
 }
 
 export class AutoGuardLayer implements ChartExtension {
@@ -189,8 +193,9 @@ export class AutoGuardLayer implements ChartExtension {
     const pill = document.createElement("div");
     pill.style.cssText = `position:absolute;right:8px;top:-4px;height:24px;display:inline-flex;align-items:center;border-radius:var(--r-s);background:${opts.color};color:var(--on-data);font-size:var(--fs-xs);font-weight:700;font-variant-numeric:tabular-nums;box-shadow:var(--shadow-s);overflow:hidden;`;
 
-    const textBtn = document.createElement("span");
-    textBtn.style.cssText = "padding:0 8px;cursor:pointer;";
+    const textBtn = document.createElement("button");
+    textBtn.type = "button";
+    textBtn.style.cssText = "height:100%;padding:0 8px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;";
     textBtn.textContent = opts.label;
     textBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -198,8 +203,10 @@ export class AutoGuardLayer implements ChartExtension {
       this.scheduleRender();
     });
 
-    const closeBtn = document.createElement("span");
-    closeBtn.style.cssText = "padding:0 7px;border-left:1px solid color-mix(in srgb, var(--on-data) 28%, transparent);cursor:pointer;";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.setAttribute("aria-label", `${opts.leg.toUpperCase()} 규칙 삭제`);
+    closeBtn.style.cssText = "height:100%;padding:0 7px;border:0;border-left:1px solid color-mix(in srgb, var(--on-data) 28%, transparent);background:transparent;color:inherit;font:inherit;cursor:pointer;";
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -260,7 +267,9 @@ export class AutoGuardLayer implements ChartExtension {
 
   private appendPopover(leg: DragLeg, y: number, rule: AutoOrderRule): void {
     const pop = document.createElement("div");
-    pop.style.cssText = `position:absolute;right:80px;top:${Math.max(8, y + 14)}px;width:220px;padding:10px;border-radius:var(--r-m);background:var(--surface);border:1px solid var(--line-strong);color:var(--text);font-size:var(--fs-xs);box-shadow:var(--shadow);pointer-events:auto;z-index:25;`;
+    const maxTop = Math.max(8, this.host.el.clientHeight - 136);
+    const clampedTop = Math.min(maxTop, Math.max(8, y + 14));
+    pop.style.cssText = `position:absolute;right:80px;top:${clampedTop}px;width:220px;padding:10px;border-radius:var(--r-m);background:var(--surface);border:1px solid var(--line-strong);color:var(--text);font-size:var(--fs-xs);box-shadow:var(--shadow);pointer-events:auto;z-index:var(--z-chart-panel);`;
 
     const title = document.createElement("div");
     title.style.cssText = "font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between;";
@@ -269,7 +278,7 @@ export class AutoGuardLayer implements ChartExtension {
 
     if (leg === "sl") {
       const sel = document.createElement("select");
-      sel.style.cssText = "width:100%;margin-bottom:6px;padding:4px;border-radius:5px;background:var(--bg);color:inherit;border:1px solid var(--line);";
+      sel.style.cssText = "width:100%;margin-bottom:6px;padding:4px;border-radius:var(--r-s);background:var(--bg);color:inherit;border:1px solid var(--line);";
       for (const [val, lbl] of Object.entries(ORDER_TYPE_LABEL)) {
         const opt = document.createElement("option");
         opt.value = val;
@@ -284,7 +293,7 @@ export class AutoGuardLayer implements ChartExtension {
 
       const trailBtn = document.createElement("button");
       trailBtn.type = "button";
-      trailBtn.style.cssText = "width:100%;padding:5px;border-radius:5px;background:var(--bg);color:inherit;border:1px solid var(--line);cursor:pointer;";
+      trailBtn.style.cssText = "width:100%;padding:5px;border-radius:var(--r-s);background:var(--bg);color:inherit;border:1px solid var(--line);cursor:pointer;";
       trailBtn.textContent = rule.trailingEnabled ? `트레일링 ON (-${rule.trailingPct}%)` : "트레일링 OFF (켜기)";
       trailBtn.addEventListener("click", () => {
         void useAutoOrdersStore.getState().updateRuleOptimistic(rule.id, toUpsertInput(rule, { trailingEnabled: !rule.trailingEnabled }));
@@ -293,7 +302,7 @@ export class AutoGuardLayer implements ChartExtension {
     } else {
       const beBtn = document.createElement("button");
       beBtn.type = "button";
-      beBtn.style.cssText = "width:100%;padding:5px;border-radius:5px;background:var(--bg);color:inherit;border:1px solid var(--line);cursor:pointer;";
+      beBtn.style.cssText = "width:100%;padding:5px;border-radius:var(--r-s);background:var(--bg);color:inherit;border:1px solid var(--line);cursor:pointer;";
       beBtn.textContent = rule.breakevenOnTp1 ? "1차 익절 시 본절 이동: ON" : "1차 익절 시 본절 이동: OFF";
       beBtn.addEventListener("click", () => {
         void useAutoOrdersStore.getState().updateRuleOptimistic(rule.id, toUpsertInput(rule, { breakevenOnTp1: !rule.breakevenOnTp1 }));

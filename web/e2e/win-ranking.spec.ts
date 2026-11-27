@@ -40,7 +40,7 @@ const openConditions = async (page: Page) => {
   if (!(await conditions(page).isVisible())) await page.getByRole("button", { name: "조건", exact: true }).click();
 };
 const closeConditions = (page: Page) => page.keyboard.press("Escape");
-const pickShared = async (page: Page, label: "시장" | "거래소", value: string) => {
+const pickChoice = async (page: Page, label: string, value: string) => {
   await field(page, label).click();
   await page.getByRole("menu", { name: `순위 ${label}`, exact: true }).locator(`[data-option-value="${value}"]`).click();
 };
@@ -81,9 +81,9 @@ test("분류와 순위를 고르면 그 순위의 조건만 보이고 고른 순
   await expect(page.getByRole("tab", { name: "상승률", selected: true })).toBeVisible();
   await openConditions(page);
   await expect(page.getByRole("button", { name: "상·하한가 포함" })).toHaveAttribute("aria-pressed", "true");
-  await expect(field(page, "거래대금")).toHaveValue("any");
-  await pickShared(page, "시장", "kosdaq");
-  await pickShared(page, "거래소", "krx");
+  await expect(field(page, "거래대금")).toHaveAttribute("data-value", "any");
+  await pickChoice(page, "시장", "kosdaq");
+  await pickChoice(page, "거래소", "krx");
   await page.getByRole("button", { name: "관리종목 빼기" }).click();
   await page.getByRole("button", { name: "상·하한가 포함" }).click();
   await closeConditions(page);
@@ -111,7 +111,7 @@ test("분류와 순위를 고르면 그 순위의 조건만 보이고 고른 순
   await openConditions(page);
   await expect(field(page, "거래소")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "관리종목 빼기" })).toHaveCount(0);
-  await field(page, "투자자").selectOption("foreignFirm");
+  await pickChoice(page, "투자자", "foreignFirm");
   await closeConditions(page);
   await page.getByRole("tab", { name: "프로그램" }).click();
   await openConditions(page);
@@ -125,14 +125,14 @@ test("분류와 순위를 고르면 그 순위의 조건만 보이고 고른 순
   await page.getByRole("tab", { name: "많이 본 종목" }).click();
   await openConditions(page);
   await expect(field(page, "시장")).toHaveCount(0);
-  await field(page, "구간").selectOption("hour1");
+  await pickChoice(page, "구간", "hour1");
   const expected: Ranking = { kind: "mostViewed", span: "hour1", excludes: { etfEtn: true, preferred: false } };
   await pollSaved(() => savedRanking(scenario)).toEqual(expected);
 
   await page.reload();
   await expect(page.getByRole("tab", { name: "많이 본 종목", selected: true })).toBeVisible();
   await openConditions(page);
-  await expect(field(page, "구간")).toHaveValue("hour1");
+  await expect(field(page, "구간")).toHaveAttribute("data-value", "hour1");
   expect(savedRanking(scenario)).toEqual(expected);
 });
 
@@ -539,7 +539,7 @@ test("시장을 공용 콤보박스로 바꾸면 저장된 순위 설정이 바�
   await open(page);
   await openConditions(page);
   await expect(field(page, "시장")).toHaveAttribute("data-value", "all");
-  await pickShared(page, "시장", "kosdaq");
+  await pickChoice(page, "시장", "kosdaq");
   await pollSaved(() => savedRanking(scenario)).toEqual({ ...TRADE_AMOUNT, market: "kosdaq" });
   await expect(field(page, "시장")).toHaveAttribute("data-value", "kosdaq");
 });

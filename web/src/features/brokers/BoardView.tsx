@@ -8,6 +8,7 @@ import { barBins, barBinSeconds, barPeakWithoutFirst, type BrokerTrackEvent, cum
 import { axisGapRanges, type AxisGapRange } from "./history";
 
 const signed = (value: number) => withSign(value, formatQuantity(Math.abs(value)).replace("-", MINUS));
+const signedTone = (value: number) => (value > 0 ? "up" : value < 0 ? "down" : "none");
 const BAR_VIEW_WIDTH = 184;
 const NUMBER_ROW_HEIGHT_PX = 16;
 const NUMBER_ROW_OVERSCAN = 16;
@@ -83,8 +84,8 @@ const BrokerNumberRows = memo(function BrokerNumberRows({ rows, mode }: { rows: 
           {visible.map((event) => (
             <span key={event.t} className="br-num-row" data-testid="broker-number-row">
               <i>{formatClock(event.t).slice(0, 5)}</i>
-              <em data-tone={event.net >= 0 ? "up" : "down"}>{signed(event.net)}</em>
-              <em className="br-num-cum" data-tone={event.cumulative >= 0 ? "up" : "down"}>{signed(event.cumulative)}</em>
+              <em data-tone={signedTone(event.net)}>{signed(event.net)}</em>
+              <em className="br-num-cum" data-tone={signedTone(event.cumulative)}>{signed(event.cumulative)}</em>
             </span>
           ))}
         </span>
@@ -92,8 +93,8 @@ const BrokerNumberRows = memo(function BrokerNumberRows({ rows, mode }: { rows: 
         visible.map((event) => (
           <span key={event.t} className="br-num-row" data-testid="broker-number-row">
             <i>{formatClock(event.t).slice(0, 5)}</i>
-            <em data-tone={event.net >= 0 ? "up" : "down"}>{signed(event.net)}</em>
-            <em className="br-num-cum" data-tone={event.cumulative >= 0 ? "up" : "down"}>{signed(event.cumulative)}</em>
+            <em data-tone={signedTone(event.net)}>{signed(event.net)}</em>
+            <em className="br-num-cum" data-tone={signedTone(event.cumulative)}>{signed(event.cumulative)}</em>
           </span>
         ))
       )}
@@ -156,7 +157,7 @@ const BrokerCard = memo(function BrokerCard({
           <b>{track.name}</b>
           {foreign && <span className="br-fb">외</span>}
         </span>
-        <span className="br-card-cum" data-testid="broker-cumulative" data-tone={cumulative === null ? "none" : cumulative >= 0 ? "up" : "down"}>
+        <span className="br-card-cum" data-testid="broker-cumulative" data-tone={cumulative === null ? "none" : signedTone(cumulative)}>
           {cumulative === null ? "-" : signed(cumulative)}
         </span>
       </div>

@@ -1,13 +1,13 @@
 import { useSyncExternalStore } from "react";
 import { Link } from "react-router";
 import { appliedThemeMode, chooseThemeMode, DEFAULT_THEME_MODE, subscribeTheme } from "../../persist/theme";
-import { ClockIcon, EtfIcon, HeatmapIcon, KeyboardIcon, MarketIcon, MoonIcon, SunIcon, WorkspaceIcon } from "../icons";
+import { ClockIcon, EtfIcon, HeatmapIcon, JournalIcon, KeyboardIcon, MarketIcon, MoonIcon, SunIcon, WorkspaceIcon } from "../icons";
 import { SystemButton } from "../system-settings/SystemButton";
 import { useSelectionStore } from "../../stores/selection";
 import { RAIL_PAGES, type PageId } from "./pages";
 import "./pageRail.css";
 
-const ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon, replay: ClockIcon, journal: ClockIcon } as const;
+const ICONS = { workspace: WorkspaceIcon, market: MarketIcon, heatmap: HeatmapIcon, etf: EtfIcon, replay: ClockIcon, journal: JournalIcon } as const;
 
 export function PageRail({ page }: { page: PageId }) {
   const mode = useSyncExternalStore(subscribeTheme, () => appliedThemeMode(), () => DEFAULT_THEME_MODE);

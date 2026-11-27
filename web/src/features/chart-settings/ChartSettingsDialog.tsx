@@ -1,17 +1,16 @@
 import { Fragment, type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { CHART_STYLE_LABEL, type ChartSettings, type ChartStyle, clampVisibleBars, DEFAULT_CHART_SETTINGS, type ExtremeBasis, type PriceScale, shownScale, VISIBLE_BARS_MAX, VISIBLE_BARS_MIN } from "../../chart/settings";
 import type { IndicatorWindow } from "../../persist/uiState";
-import { chartWindow, useCell, useLayoutStore } from "../../stores/layout";
-import { useUiStore } from "../../stores/ui";
-import { CloseIcon } from "../icons";
-import { AXIS_LOCKED, LOG_LOCKED, pressScale, stepIndex } from "../indicator-dialog/compareForm";
-import { useShownIndicatorWindow } from "../indicator-command/open";
 import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL } from "../../lib/symbol";
-import { DialogFrame } from "../dialog/DialogParts";
+import { useCell, useLayoutStore } from "../../stores/layout";
+import { useUiStore } from "../../stores/ui";
+import { AXIS_LOCKED, LOG_LOCKED, pressScale, stepIndex } from "../indicator-dialog/compareForm";
+import { useShownIndicatorWindow } from "../indicator-command/open";
 import { Badge } from "../ui/Badge";
 import { Kbd } from "../ui/Kbd";
 import { Segmented, type SegmentedOption } from "../ui/Segmented";
+import { Switch } from "../ui/Switch";
 import type { WindowId } from "../../layout/kinds";
 import { CHART_SETTINGS_SECTIONS, type ChartSettingsScope, type ChartSettingsSectionId, SCOPE_LABEL, scopeTitle } from "./menus";
 
@@ -303,44 +302,19 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
   );
 }
 
-export function ChartSettingsDialog({ cellId, onClose }: { cellId: WindowId; onClose(): void }) {
-  const cell = useCell(cellId);
-  const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
-  const cellName = `${name} · ${PERIOD_LABEL[cell.period]}`;
-  const [initialSettings] = useState(() => chartWindow(useLayoutStore.getState().layout, cellId).chartSettings);
-  const [initialIndicatorWindow] = useState(() => useUiStore.getState().prefs.indicatorWindow);
-  const id = useId();
-
-  const handleClose = (reason?: "escape" | "outside") => {
-    if (reason === "escape") {
-      useLayoutStore.getState().setChartSettings(cellId, initialSettings);
-      useUiStore.getState().setIndicatorWindow(initialIndicatorWindow);
-    }
-    onClose();
-  };
-
-  return (
-    <DialogFrame solid scrim={false} width="cs-dialog" labelledBy={`${id}-title`} onClose={handleClose}>
-      <div data-chart-control="" className="cs-body">
-        <header className="cs-head">
-          <h2 id={`${id}-title`}>차트 설정</h2>
-          <span className="cs-cell">{cellName}</span>
-          <button type="button" className="icon-btn flex-none" aria-label="닫기" onClick={() => handleClose()}><CloseIcon /></button>
-        </header>
-        <ChartSettingsSections cellId={cellId} compact />
-      </div>
-    </DialogFrame>
-  );
-}
-
 function SettingSwitch({ label, detail, checked, onChange }: { label: string; detail: string; checked: boolean; onChange(on: boolean): void }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} title={detail} className="ui-switch cs-switch" onClick={() => onChange(!checked)}>
-      <span className="cs-switch-text">
-        <span className="cs-name">{label}</span>
-        <span className="cs-detail">{detail}</span>
-      </span>
-      <span aria-hidden="true" className="ui-switch-track"><span /></span>
-    </button>
+    <Switch
+      checked={checked}
+      title={detail}
+      className="cs-switch"
+      label={
+        <span className="cs-switch-text">
+          <span className="cs-name">{label}</span>
+          <span className="cs-detail">{detail}</span>
+        </span>
+      }
+      onChange={onChange}
+    />
   );
 }

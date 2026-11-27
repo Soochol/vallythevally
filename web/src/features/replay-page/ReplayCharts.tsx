@@ -247,8 +247,8 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
       setText(totalsAskRef.current, shownAsk !== null ? formatPrice(shownAsk, false) : "-");
       setText(totalsBidRef.current, shownBid !== null ? formatPrice(shownBid, false) : "-");
       if (obiValRef.current) {
-        obiValRef.current.className = shownObi !== null ? (shownObi >= 0 ? "rp-up" : "rp-down") : "rp-muted";
-        setText(obiValRef.current, shownObi !== null ? `${shownObi >= 0 ? "+" : ""}${shownObi.toFixed(1)}%` : "-");
+        obiValRef.current.className = shownObi !== null ? (shownObi > 0 ? "rp-up" : shownObi < 0 ? "rp-down" : "rp-muted") : "rp-muted";
+        setText(obiValRef.current, shownObi !== null ? `${shownObi > 0 ? "+" : ""}${shownObi.toFixed(1)}%` : "-");
       }
       if (strengthValRef.current) {
         strengthValRef.current.className = shownStrength !== null ? (shownStrength >= 100 ? "rp-up" : "rp-down") : "rp-muted";
@@ -256,7 +256,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
       }
       if (programValRef.current) {
         if (shownProgQty !== null) {
-          programValRef.current.className = shownProgQty >= 0 ? "rp-up" : "rp-down";
+          programValRef.current.className = shownProgQty > 0 ? "rp-up" : shownProgQty < 0 ? "rp-down" : "rp-muted";
           setText(
             programValRef.current,
             `${formatSignedQty(shownProgQty)}주${shownProgAmt !== null ? ` (${formatWonCompact(shownProgAmt * 1_000_000)})` : ""}`,

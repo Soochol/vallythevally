@@ -4,9 +4,12 @@
   --fs-xs: 11px; --fs-s: 12px; --fs-b: 13px; --fs-m: 14px; --fs-l: 17px; --fs-h: 20px; --fs-xl: 28px;
   --fs-display: clamp(34px, 6vw, 88px); --fs-title: clamp(26px, 3vw, 40px); --fs-lead: clamp(15px, 1.4vw, 19px);
   --s1: 2px; --s2: 4px; --s3: 8px; --s4: 12px; --s5: 16px; --s6: 24px;
-  --r-s: 2px; --r-m: 2px; --r-l: 0px; --r-pill: 2px;
+  --r-s: 2px; --r-m: 2px; --r-l: 0px; --r-pill: 2px; --r-round: 9999px;
   --island-gap: 6px; --island-h: 48px; --sentence-editor-max-h: 785px;
-  --ctl-xs: 22px; --ctl-s: 26px; --ctl-m: 30px; --ctl-l: 36px; --row-h: 34px;
+  --ctl-xs: 22px; --ctl-s: 26px; --ctl-m: 30px; --ctl-l: 36px; --row-h: 34px; --row-h-sm: 24px;
+  --z-chart-extreme: 3; --z-chart-hud: 6; --z-chart-drawing: 7; --z-chart-quickbar: 9; --z-chart-panel: 10; --z-chart-guard: 14; --z-chart-state: 15;
+  --z-dock-divider: 20; --z-dock-junction: 21; --z-dock-floats: 25; --z-dock-overlay: 40; --z-dock-drag: 110;
+  --z-chrome: 20; --z-banner: 30; --z-notice: 50; --z-modal: 60; --z-drag-ghost: 120;
   --dur-fast: 80ms; --dur: 140ms; --dur-slow: 220ms; --ease: cubic-bezier(0.2, 0, 0, 1);
   --bg: #0B0B0B; --chart-bg: #0B0B0B; --surface: #111111; --raised: #242424; --overlay: #303030; --line: rgba(255, 255, 255, 0.11); --line-subtle: rgba(255, 255, 255, 0.055); --line-strong: rgba(255, 255, 255, 0.22); --grid: rgba(255, 255, 255, 0.04); --grid-h: rgba(255, 255, 255, 0.06);
   --text: #F3F1EC; --text-name: #DDDAD2; --text-price: #F5F3EE; --text-2: #B6B3AB; --text-3: #8E8B84;
@@ -24,7 +27,9 @@
   --draw: #FFE100; --cloud-up: rgba(255, 114, 114, 0.10); --cloud-down: rgba(111, 171, 255, 0.10);
   --shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 18px 48px rgba(0, 0, 0, 0.56); --scrim: rgba(6, 6, 6, 0.72);
   --shadow-s: 0 0 0 1px rgba(255, 255, 255, 0.12), 0 4px 14px rgba(0, 0, 0, 0.42); --scrim-nested: rgba(6, 6, 6, 0.5);
+  --seg-shadow: none; --card-shadow: none; --active-card-shadow: none;
   --glass: rgba(23, 23, 23, 0.88); --glass-solid: #171717; --glass-blur: blur(16px);
+  --glass-backdrop-glow: none; --glass-control: var(--raised); --glass-search: var(--raised); --glass-search-inset: none; --glass-kbd: var(--raised);
   --picker-sv: linear-gradient(0deg, #000000, transparent), linear-gradient(90deg, #FFFFFF, transparent);
   --picker-hue: linear-gradient(to right, #FF0000, #FFFF00, #00FF00, #00FFFF, #0000FF, #FF00FF, #FF0000);
   --size-1: 1px;
@@ -120,6 +125,7 @@
   --draw: #FFE100; --cloud-up: rgba(255, 118, 128, 0.11); --cloud-down: rgba(116, 178, 255, 0.11);
   --shadow: 0 14px 40px rgba(0, 2, 6, 0.68); --scrim: rgba(2, 4, 8, 0.76);
   --shadow-s: 0 4px 16px rgba(0, 2, 6, 0.52); --scrim-nested: rgba(2, 4, 8, 0.56);
+  --seg-shadow: 0 1px 4px rgba(3, 7, 14, 0.34);
   --glass: rgba(16, 20, 28, 0.90); --glass-solid: #131720; --glass-blur: blur(18px);
   color-scheme: dark;
 }
@@ -141,6 +147,9 @@
   --draw: #330000; --cloud-up: rgba(184, 25, 47, 0.09); --cloud-down: rgba(17, 75, 184, 0.09);
   --shadow: 0 12px 36px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(25, 31, 40, 0.06); --scrim: rgba(15, 23, 42, 0.36);
   --shadow-s: 0 2px 10px rgba(15, 23, 42, 0.06); --scrim-nested: rgba(15, 23, 42, 0.22);
+  --seg-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+  --active-card-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 48%, transparent), 0 4px 14px rgba(15, 23, 42, 0.05);
   --glass: rgba(255, 255, 255, 0.90); --glass-solid: #FFFFFF; --glass-blur: blur(18px);
   color-scheme: light;
 }
@@ -167,6 +176,7 @@
   --draw: #FFE100; --cloud-up: rgba(255, 118, 128, 0.11); --cloud-down: rgba(116, 178, 255, 0.11);
   --shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 16px 44px rgba(0, 0, 0, 0.84); --scrim: rgba(0, 0, 0, 0.80);
   --shadow-s: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 6px 18px rgba(0, 0, 0, 0.72); --scrim-nested: rgba(0, 0, 0, 0.60);
+  --seg-shadow: 0 1px 4px rgba(3, 7, 14, 0.34);
   --glass: rgba(14, 15, 18, 0.92); --glass-solid: #101215; --glass-blur: blur(18px);
   color-scheme: dark;
 }
@@ -188,6 +198,9 @@
   --draw: #330000; --cloud-up: rgba(184, 25, 47, 0.09); --cloud-down: rgba(17, 75, 184, 0.09);
   --shadow: 0 12px 36px rgba(16, 17, 20, 0.12), 0 0 0 1px rgba(20, 22, 26, 0.06); --scrim: rgba(16, 17, 20, 0.36);
   --shadow-s: 0 2px 10px rgba(16, 17, 20, 0.06); --scrim-nested: rgba(16, 17, 20, 0.22);
+  --seg-shadow: 0 1px 3px rgba(15, 23, 42, 0.14);
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.03);
+  --active-card-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 48%, transparent), 0 4px 14px rgba(15, 23, 42, 0.05);
   --glass: rgba(255, 255, 255, 0.90); --glass-solid: #FFFFFF; --glass-blur: blur(18px);
   color-scheme: light;
 }
@@ -214,7 +227,10 @@
   --draw: #FFE100; --cloud-up: rgba(255, 118, 130, 0.11); --cloud-down: rgba(116, 178, 255, 0.11);
   --shadow: 0 0 0 1px rgba(216, 224, 255, 0.18), 0 22px 54px rgba(3, 5, 16, 0.68), inset 0 1px 0 rgba(255, 255, 255, 0.12); --scrim: rgba(6, 8, 18, 0.68);
   --shadow-s: 0 0 0 1px rgba(216, 224, 255, 0.14), 0 8px 24px rgba(3, 5, 16, 0.50), inset 0 1px 0 rgba(255, 255, 255, 0.08); --scrim-nested: rgba(6, 8, 18, 0.50);
+  --active-card-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent), 0 10px 28px rgba(3, 5, 16, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   --glass: rgba(22, 26, 44, 0.68); --glass-solid: #171C2F; --glass-blur: blur(22px);
+  --glass-backdrop-glow: radial-gradient(62% 52% at 14% 8%, rgba(180, 155, 255, 0.22), transparent 62%), radial-gradient(50% 48% at 86% 18%, rgba(92, 168, 255, 0.17), transparent 60%), radial-gradient(54% 46% at 52% 96%, rgba(126, 98, 240, 0.16), transparent 64%);
+  --glass-control: rgba(255, 255, 255, 0.045); --glass-search: rgba(255, 255, 255, 0.05); --glass-search-inset: inset 0 1px 0 rgba(255, 255, 255, 0.08); --glass-kbd: rgba(255, 255, 255, 0.06);
   color-scheme: dark;
 }
 
@@ -235,7 +251,10 @@
   --draw: #330000; --cloud-up: rgba(180, 25, 50, 0.10); --cloud-down: rgba(18, 75, 184, 0.10);
   --shadow: 0 0 0 1px rgba(255, 255, 255, 0.85), 0 18px 46px rgba(42, 46, 92, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.92); --scrim: rgba(26, 28, 56, 0.36);
   --shadow-s: 0 0 0 1px rgba(255, 255, 255, 0.78), 0 8px 24px rgba(42, 46, 92, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.88); --scrim-nested: rgba(26, 28, 56, 0.22);
+  --active-card-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent), 0 10px 26px rgba(42, 46, 92, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.90);
   --glass: rgba(255, 255, 255, 0.74); --glass-solid: #F5F6FC; --glass-blur: blur(22px);
+  --glass-backdrop-glow: radial-gradient(62% 52% at 14% 8%, rgba(124, 92, 235, 0.16), transparent 62%), radial-gradient(50% 48% at 86% 18%, rgba(74, 154, 255, 0.15), transparent 60%), radial-gradient(54% 46% at 52% 96%, rgba(168, 128, 248, 0.13), transparent 64%);
+  --glass-control: rgba(255, 255, 255, 0.50); --glass-search: rgba(255, 255, 255, 0.56); --glass-search-inset: inset 0 1px 0 rgba(255, 255, 255, 0.85); --glass-kbd: rgba(255, 255, 255, 0.65);
   color-scheme: light;
 }
 
@@ -282,8 +301,9 @@
   --draw: #330000; --cloud-up: rgba(180, 26, 48, 0.09); --cloud-down: rgba(19, 78, 184, 0.09);
   --shadow: 0 0 0 1px rgba(22, 36, 22, 0.12), 0 18px 44px rgba(18, 30, 18, 0.12); --scrim: rgba(16, 24, 16, 0.36);
   --shadow-s: 0 0 0 1px rgba(22, 36, 22, 0.10), 0 4px 12px rgba(18, 30, 18, 0.08); --scrim-nested: rgba(16, 24, 16, 0.22);
+  --card-shadow: 0 1px 2px rgba(22, 36, 22, 0.04);
   --glass: rgba(246, 249, 244, 0.86); --glass-solid: #F2F6EE; --glass-blur: blur(22px) saturate(1.4);
   color-scheme: light;
 }
 
-[data-density="compact"] { --row-h: 28px; }
+[data-density="compact"] { --row-h: 28px; --row-h-sm: 21px; }

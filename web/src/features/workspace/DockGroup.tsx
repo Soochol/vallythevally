@@ -7,7 +7,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { chartNumber, chartWindows, useCell, useLayoutStore, useWindowName, type WindowState } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { applySymbolDrop, hasDraggedSymbol, isSymbolDropKind, readDraggedSymbol, useSymbolDragStore } from "../../stores/symbolDrag";
-import { ChevronIcon, CloseIcon } from "../icons";
+import { ChevronIcon, CloseIcon, CollapseIcon } from "../icons";
 import { IntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { Menu, type MenuItem } from "../menu/Menu";
@@ -240,7 +240,7 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
         </div>
         {stripOverflow.overflowing && <TabListMenu group={group} onSelect={select} />}
         <AddWindowMenu targetGroup={group.id} />
-        {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}>↙</button>}
+        {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}><CollapseIcon size={14} /></button>}
       </div>
       <div ref={panelRef} id={panelId(group.id)} role="tabpanel" aria-labelledby={tabId(shown.id)} data-window-id={shown.id} className={`dock-panel ${overflow === "auto" ? "overflow-auto" : "overflow-hidden"}`} />
       {panelDropActive && dragPayload && <SymbolDropOverlay kind={shown.kind} payload={dragPayload} />}

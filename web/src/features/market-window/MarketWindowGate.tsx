@@ -14,12 +14,22 @@ export function useLinkedSymbol(id: WindowId): SymbolCode | null {
   return useLayoutStore((s) => linkedWindowSymbol(s.layout, id, activeCell, s.groupSymbols));
 }
 
+export function FeedConnectGate({ message, testId }: { message?: string | null; testId?: string }) {
+  return (
+    <div className="mw-gate" data-testid={testId} title={message ?? undefined}>
+      <EmptyState title="키움 연결 전입니다" action="연결" onAction={() => openSystemSettings("kiwoom")}>
+        {message && <p>{message}</p>}
+      </EmptyState>
+    </div>
+  );
+}
+
 export function MarketWindowGate({ id, children }: { id: WindowId; children(code: SymbolCode): ReactNode }) {
   const code = useLinkedSymbol(id);
   const link = useKiwoomLinkStore((s) => s.status);
   if (code === null) return <EmptyState title="연동된 종목이 없습니다" />;
   if (isIndexCode(code)) return <EmptyState title="이 창은 주식만 보입니다" />;
-  if (link !== null && link.state !== "connected") return <div className="mw-gate" data-testid="market-window-gate" title={link.message ?? undefined}><EmptyState title="키움 연결 전입니다" action="연결" onAction={() => openSystemSettings("kiwoom")} /></div>;
+  if (link !== null && link.state !== "connected") return <FeedConnectGate testId="market-window-gate" message={link.message} />;
   return <>{children(code)}</>;
 }
 

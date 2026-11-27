@@ -50,7 +50,7 @@ export function KiwoomIpHelp({ status, openByItself, checked, onChecked, command
       {!inline && (
         <button type="button" aria-expanded={open} className="flex h-11 w-full items-center justify-between rounded-m px-4 text-left font-semibold hover:bg-hover" onClick={() => setUserChoice(!open)}>
           <span>공인 IP 확인 · 포털 안내</span>
-          <span aria-hidden="true" className={`text-text-3 transition-transform ${open ? "rotate-180" : ""}`}><ChevronIcon /></span>
+          <span aria-hidden="true" className={`text-text-3 transition-transform ${open ? "" : "-rotate-90"}`}><ChevronIcon /></span>
         </button>
       )}
       {open && (

@@ -346,3 +346,15 @@ export const ClockIcon = ({ size = 12 }: P) => (
 );
 export const UndoIcon = ({ size = 16 }: P) => <Icon size={size} path="M9 8H15a4.5 4.5 0 0 1 0 9H8M9 4 5 8l4 4" />;
 export const LogScaleIcon = ({ size = 16 }: P) => <Icon size={size} path="M4 20h16M4 4v16M7 17c4 0 5-3 7-6s3-4 5-5" />;
+export const JournalIcon = ({ size = 16 }: P) => (
+  <Icon size={size}>
+    <rect x="4" y="3.5" width="16" height="17" rx="2" />
+    <path d="M8 3.5v17M11.5 9h5M11.5 13h5M11.5 17h3" />
+  </Icon>
+);
+export const LockIcon = ({ size = 14 }: P) => (
+  <Icon size={size}>
+    <rect x="5" y="11" width="14" height="9.5" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </Icon>
+);

@@ -17,7 +17,7 @@ import { removalUndo } from "../watch/removalUndo";
 import { useSendSymbol } from "../pages/sendSymbol";
 import { PutTargetPill } from "./PutTargetPill";
 import { COMMAND_GROUPS, COMMAND_GROUP_LABEL, type CommandGroup, type SearchCommand, searchCommandsSnapshot, subscribeSearchCommands } from "../commands/registry";
-import { ChevronIcon, CloseIcon, Icon, ICON_PATHS, SearchIcon } from "../icons";
+import { ChevronIcon, CloseIcon, Icon, ICON_PATHS, LockIcon, SearchIcon } from "../icons";
 import { RateBadge, type ChangeDirection } from "../list/listRow";
 import { formatPercent } from "../../lib/format";
 import { Kbd } from "../ui/Kbd";
@@ -259,7 +259,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       )}
       {purpose === "open" && mode.kind === "symbols" && activeWinLocked && activeWin && (
         <div role="status" className="flex flex-none items-center justify-between gap-2 border-b border-line bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-4 py-1.5 text-xs text-warning" data-testid="search-lock-warning">
-          <span>🔒 활성 창({windowName(layoutWindows, activeWin)})은 종목 고정 상태입니다.</span>
+          <span className="inline-flex items-center gap-1.5"><LockIcon size={13} />활성 창({windowName(layoutWindows, activeWin)})은 종목 고정 상태입니다.</span>
           <button
             type="button"
             className="btn text-xs"
@@ -273,7 +273,7 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
           </button>
         </div>
       )}
-      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-3">
+      <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-3 focus-within:border-accent">
         <label className="flex min-w-[180px] flex-1 items-center gap-2 text-l text-text-3">
           <SearchIcon size={20} />
           <input ref={inputRef} onKeyDown={onKeyDown} autoFocus value={input} onChange={(e) => setInput(e.target.value)}

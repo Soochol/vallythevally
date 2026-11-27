@@ -66,7 +66,7 @@ function NameDialog({ naming: { operation, value, error }, input }: { naming: La
           <p id={`${id}-rule`} className="text-xs text-text-2">1~20자</p>
           <Errors id={`${id}-error`} messages={error ? [error] : []} />
         </div>
-        <footer className="ui-dialog-foot justify-end"><button type="button" className="tb-btn" disabled={busy} onClick={layoutMenu.closeNaming}>취소</button><button type="submit" className="btn-primary" disabled={busy}>저장</button></footer>
+        <footer className="ui-dialog-foot justify-end"><button type="button" className="btn" disabled={busy} onClick={layoutMenu.closeNaming}>취소</button><button type="submit" className="btn-primary" disabled={busy}>저장</button></footer>
       </form>
     </DialogFrame>
   );

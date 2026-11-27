@@ -4,7 +4,9 @@ import { INDICATOR_COLORS, indicatorCssColor, isFlow, KINDS, type IndicatorColor
 import { loadValidator } from "../../chart/indicators/validate";
 import { BAR_OPACITY_MAX, BAR_OPACITY_MIN, DEFAULT_ICHIMOKU_STYLE, ICHIMOKU_CLOUD_OPACITY_MAX, ICHIMOKU_CLOUD_OPACITY_MIN, type IchimokuStyle, type LineWidth } from "../../chart/settings";
 import { isHexColor, type HexColor } from "../../lib/colors";
-import { Errors, Row, Segment } from "../dialog/DialogParts";
+import { Errors, Row } from "../dialog/DialogParts";
+import { Segmented } from "../ui/Segmented";
+import { Switch } from "../ui/Switch";
 import { ColorStyleTrigger } from "../color/ColorStylePopover";
 import { ColorTable, type ThemeSwatch } from "../color/ColorTable";
 import { useColorMore } from "../color/colorMore";
@@ -135,7 +137,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
           if (f.type === "method") {
             return (
               <Row key={f.key} label={f.label}>
-                <Segment label={f.label} options={METHODS} value={text} onChange={(v) => setText(f.key, v)} />
+                <Segmented label={f.label} mode="pressed" variant="boxed" options={METHODS.map(([value, label]) => ({ value, label }))} value={text as MaMethod} onChange={(v) => setText(f.key, v)} />
                 <Errors id={errorId} messages={errors} />
               </Row>
             );
@@ -144,7 +146,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
             const disabled = isFlow(KINDS[kind].defaults) && f.key === "aggregation" && draft.form.text.displayMode === "both";
             return (
               <Row key={f.key} label={f.label}>
-                <Segment label={f.label} options={f.options} value={text} disabled={disabled} onChange={(v) => setText(f.key, v)} />
+                <Segmented label={f.label} mode="pressed" variant="boxed" options={f.options.map(([value, label]) => ({ value: String(value), label }))} value={text} disabled={disabled} onChange={(v) => setText(f.key, v)} />
                 <Errors id={errorId} messages={errors} />
               </Row>
             );
@@ -157,10 +159,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
               && KINDS.tickCvd.fields.filter((field) => draft.form.text[field.key] === "true").length <= 1;
             return (
               <Row key={f.key} label={f.label}>
-                <button type="button" role="switch" aria-label={f.label} aria-checked={checked} disabled={lockLastTier} className="ui-switch min-h-[var(--size-30)] text-s disabled:opacity-50" onClick={() => setText(f.key, checked ? "false" : "true")}>
-                  <span className="flex-1 text-left">{checked ? "켜짐" : "꺼짐"}</span>
-                  <span aria-hidden="true" className="ui-switch-track"><span /></span>
-                </button>
+                <Switch ariaLabel={f.label} label={checked ? "켜짐" : "꺼짐"} checked={checked} disabled={lockLastTier} className="min-h-[var(--size-30)] text-s" onChange={(next) => setText(f.key, next ? "true" : "false")} />
                 <Errors id={errorId} messages={errors} />
               </Row>
             );
@@ -192,10 +191,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
             <Row key={f.key} label={f.label} labelFor={inputId}>
               <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 {f.type === "optionalInt" && (
-                  <button type="button" role="switch" aria-checked={on} className="ui-switch min-h-[var(--size-30)] text-s" onClick={() => setEnabled(f.key, !on)}>
-                    <span className="flex-1 text-left">{f.toggle}</span>
-                    <span aria-hidden="true" className="ui-switch-track"><span /></span>
-                  </button>
+                  <Switch label={f.toggle} checked={on} className="min-h-[var(--size-30)] text-s" onChange={(next) => setEnabled(f.key, next)} />
                 )}
                 {!usePopover && kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
                   {PERIOD_PRESETS.map((preset) => <button key={preset} type="button" aria-pressed={text === preset} className="h-6 rounded-s border border-line bg-bg px-2 text-xs text-text-2 hover:text-text aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-accent-ink" onClick={() => setText(f.key, preset)}>{preset}</button>)}
@@ -221,10 +217,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
           );
         })}
         {canOverlayPrice(kind) && <Row label="패널">
-          <button type="button" role="switch" aria-checked={draft.placement === "price"} aria-describedby={`${ids}-overlay`} className="ui-switch min-h-[30px] text-s" onClick={() => onChange({ ...draft, placement: draft.placement === "price" ? "panel" : "price" })}>
-            <span className="flex-1 text-left">가격 패널에 겹치기</span>
-            <span aria-hidden="true" className="ui-switch-track"><span /></span>
-          </button>
+          <Switch label="가격 패널에 겹치기" checked={draft.placement === "price"} ariaDescribedBy={`${ids}-overlay`} className="min-h-[var(--size-30)] text-s" onChange={(next) => onChange({ ...draft, placement: next ? "price" : "panel" })} />
           <p id={`${ids}-overlay`} className="text-xs text-text-3">거래량을 봉 아래쪽에 겹쳐 그립니다. 끄면 별도 패널</p>
         </Row>}
         {hasBarOpacity(draft.form) && <Row label="막대 불투명도" labelFor={`${ids}-opacity`}>
@@ -278,18 +271,14 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
               {ICHIMOKU_TOGGLES.map(([key, label]) => {
                 const checked = ichi[key];
                 return (
-                  <button
+                  <Switch
                     key={key}
-                    type="button"
-                    role="switch"
-                    aria-label={label}
-                    aria-checked={checked}
-                    className="ui-switch min-h-[var(--size-30)] text-s"
-                    onClick={() => onChange({ ...draft, ichimoku: { ...ichi, [key]: !checked } })}
-                  >
-                    <span className="flex-1 text-left">{label}</span>
-                    <span aria-hidden="true" className="ui-switch-track"><span /></span>
-                  </button>
+                    ariaLabel={label}
+                    label={label}
+                    checked={checked}
+                    className="min-h-[var(--size-30)] text-s"
+                    onChange={(next) => onChange({ ...draft, ichimoku: { ...ichi, [key]: next } })}
+                  />
                 );
               })}
             </div>

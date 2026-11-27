@@ -4,6 +4,7 @@ import type { WindowId } from "../../layout/kinds";
 import { useSelectionStore } from "../../stores/selection";
 import { DialogFrame, Errors } from "../dialog/DialogParts";
 import { CloseIcon } from "../icons";
+import { Kbd } from "../ui/Kbd";
 import { SentenceConditions } from "../screener/SentenceFields";
 import { removeChosen, useScreenEditing } from "../screener/useScreenEditing";
 import { type ExcludeGroup, excludesIn, MARKETS, type ScreenDraft, toggleExclude, toggleMarket } from "./screenForm";
@@ -68,17 +69,17 @@ function ScreenDialogBody({ window }: { window: WindowId | null }) {
           </div>
         )}
         <div className="ui-dialog-foot">
-          <button type="button" className="h-8 flex-none rounded-m px-3 text-danger hover:bg-raised disabled:opacity-50" disabled={busy} onClick={remove}>
+          <button type="button" className="btn-danger flex-none" disabled={busy} onClick={remove}>
             삭제
           </button>
           <span className="flex items-center gap-2 text-s text-text-3 max-md:hidden">
-            <kbd>Enter</kbd> 저장 <kbd>Esc</kbd> 닫기
+            <Kbd>Enter</Kbd> 저장 <Kbd>Esc</Kbd> 닫기
           </span>
           <span className="flex-1" />
-          <button type="button" className="h-8 flex-none rounded-m border border-line px-4 hover:bg-raised disabled:opacity-50" disabled={busy} onClick={dismiss}>
+          <button type="button" className="btn flex-none" disabled={busy} onClick={dismiss}>
             취소
           </button>
-          <button type="submit" className="btn-primary flex-none disabled:cursor-not-allowed disabled:opacity-50" disabled={!canSave}>
+          <button type="submit" className="btn-primary flex-none" disabled={!canSave}>
             {busy ? "저장 중" : "저장"}
           </button>
         </div>

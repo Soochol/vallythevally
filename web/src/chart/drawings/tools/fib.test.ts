@@ -82,7 +82,7 @@ describe("피보나치 되돌림", () => {
   test("띠는 이웃한 수준 사이를 위 수준의 색으로 옅게 채운다", () => {
     const bands = ofKind(draw(rising), "hband");
     expect(bands).toHaveLength(6);
-    expect(bands[0]).toEqual({ kind: "hband", y1: 300, y2: 500 - 176.4, x1: 100, x2: 200, fill: { on: true, color: "#f23645", opacity: 0.12 } });
+    expect(bands[0]).toEqual({ kind: "hband", y1: 300, y2: 500 - 176.4, x1: 100, x2: 200, fill: { on: true, color: "$up", opacity: 0.12 } });
     expect(ofKind(draw(rising, restyle({ fill: { on: false, opacity: 0.12 } })), "hband")).toEqual([]);
   });
 
@@ -103,7 +103,7 @@ describe("피보나치 되돌림", () => {
 
   test("기준선은 찍은 점을 잇는 점선이고 끌 수 있다", () => {
     const dashed = (s: readonly Shape[]) => ofKind(s, "segment").filter((x) => x.stroke.dash === "dashed");
-    expect(dashed(draw(rising))).toEqual([{ kind: "segment", a: { x: 100, y: 400 }, b: { x: 200, y: 300 }, stroke: { color: "#868993", width: 1, dash: "dashed" } }]);
+    expect(dashed(draw(rising))).toEqual([{ kind: "segment", a: { x: 100, y: 400 }, b: { x: 200, y: 300 }, stroke: { color: "$text-3", width: 1, dash: "dashed" } }]);
     expect(dashed(draw(rising, restyle({ trendLine: false })))).toEqual([]);
   });
 

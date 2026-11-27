@@ -320,6 +320,7 @@ export function ColorStylePopover<T extends string = never>({
                 maxLength={7}
                 spellCheck={false}
                 aria-invalid={!customValid}
+                aria-describedby={!customValid ? `${id}-hex-error` : undefined}
                 onChange={(e) => {
                   setHexText(e.target.value);
                   const parsed = normalizeHex(e.target.value);
@@ -336,7 +337,7 @@ export function ColorStylePopover<T extends string = never>({
                 선택
               </button>
             </div>
-            {!customValid && <p role="alert" className="text-xs text-danger"># 뒤에 6자리 색상 코드를 입력하세요.</p>}
+            {!customValid && <p id={`${id}-hex-error`} role="alert" className="text-xs text-danger"># 뒤에 6자리 색상 코드를 입력하세요.</p>}
           </div>
         )}
       </div>
@@ -347,7 +348,6 @@ export function ColorStylePopover<T extends string = never>({
           <div>
             <div className="tv-style-sec-head">
               <span>불투명도</span>
-              <span className="tabular-nums">{opacityPct}%</span>
             </div>
             <div className="tv-style-opacity">
               <div className="tv-style-op-track">
@@ -382,7 +382,7 @@ export function ColorStylePopover<T extends string = never>({
               key={px}
               type="button"
               className="tv-style-width-btn"
-              aria-label={String(px)}
+              aria-label={`${px}px`}
               aria-pressed={width === px}
               onClick={() => onWidthChange(px)}
             >

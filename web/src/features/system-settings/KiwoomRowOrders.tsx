@@ -5,6 +5,7 @@ import type { OrdersAccount } from "../../api/generated/OrdersAccount";
 import { ApiRequestError } from "../../api/http";
 import { checkOrdersAccount, ORDERS_QUERY_KEY, switchOrders } from "../../api/system";
 import { WarningIcon } from "../icons";
+import { Switch } from "../ui/Switch";
 import { digitsOnly, kisCanEnableOrders, kisListingOf, NO_ACCOUNT_ORDER_NOTE } from "./kisAccount";
 import { FormActions } from "./KiwoomKeyFields";
 import { accountNumberOf, canConfirmEnable, enableTail, enableWarning, mergeOrdersStatus, orderCanTurnOff, orderCanTurnOn, orderStateSentence, orderSwitchOn } from "./orderUse";
@@ -49,10 +50,14 @@ export function KiwoomRowOrders({ entry, order, mock }: { entry: KiwoomKey; orde
     <section aria-label="주문 사용" className="flex flex-col gap-2" data-testid="key-orders">
       <h4 className="text-s font-semibold text-text-2">주문</h4>
       {!kis && <p className="text-m text-text-2">계좌번호 <span className="font-mono text-text">{accountNumberOf(order.accountTail)}</span></p>}
-      <button type="button" role="switch" aria-checked={checked} aria-describedby={stateId} aria-label="주문 사용" disabled={command.busy || confirming || !settable || (accountMissing && !checked)} className="ui-switch" onClick={() => (checked ? void apply(false) : startEnabling())}>
-        <span aria-hidden="true" className="ui-switch-track"><span /></span>
-        <span className="text-m">주문 사용</span>
-      </button>
+      <Switch
+        ariaLabel="주문 사용"
+        ariaDescribedBy={stateId}
+        label={<span className="flex-1 text-left text-m">주문 사용</span>}
+        checked={checked}
+        disabled={command.busy || confirming || !settable || (accountMissing && !checked)}
+        onChange={(next) => (next ? startEnabling() : void apply(false))}
+      />
       <p id={stateId} className={`text-s ${inUse && !mock ? "text-warning" : "text-text-2"}`}>{orderStateSentence(order.state, mock)}</p>
       {offOnly && !confirming && <button type="button" className="btn self-start" disabled={command.busy} onClick={() => void apply(false)}>주문 끄기</button>}
       {accountMissing && !confirming && orderCanTurnOn(order.state) && <p className="text-s text-text-2" data-testid="kis-no-account-note">{NO_ACCOUNT_ORDER_NOTE}</p>}

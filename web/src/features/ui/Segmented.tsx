@@ -9,20 +9,33 @@ interface Props<T extends string> {
   value: T | null;
   onChange(value: T): void;
   mode?: "radio" | "pressed";
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
+  variant?: "default" | "boxed";
+  disabled?: boolean;
   className?: string;
 }
 
-export function Segmented<T extends string>({ label, options, value, onChange, mode = "radio", size = "md", className = "" }: Props<T>) {
+export function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+  mode = "radio",
+  size = "md",
+  variant = "default",
+  disabled = false,
+  className = "",
+}: Props<T>) {
   const group = useRef<HTMLDivElement>(null);
   const radio = mode === "radio";
-  const selectedIndex = options.findIndex((option) => option.value === value && !option.disabled);
-  const entryIndex = selectedIndex >= 0 ? selectedIndex : options.findIndex((option) => !option.disabled);
+  const isDisabled = (option: SegmentedOption<T>) => disabled || option.disabled === true;
+  const selectedIndex = options.findIndex((option) => option.value === value && !isDisabled(option));
+  const entryIndex = selectedIndex >= 0 ? selectedIndex : options.findIndex((option) => !isDisabled(option));
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!radio || event.nativeEvent.isComposing) return;
+    if (event.nativeEvent.isComposing) return;
     const current = options.findIndex((_, index) => group.current?.children[index] === document.activeElement);
-    const target = rovingTarget(options.map((option) => option.disabled === true), current, event.key);
+    const target = rovingTarget(options.map(isDisabled), current, event.key);
     if (target === null) return;
     event.preventDefault();
     (group.current?.children[target] as HTMLElement | undefined)?.focus();
@@ -30,9 +43,18 @@ export function Segmented<T extends string>({ label, options, value, onChange, m
   };
 
   return (
-    <div ref={group} role={radio ? "radiogroup" : "group"} aria-label={label} data-size={size} className={`ui-seg ${className}`} onKeyDown={onKeyDown}>
+    <div
+      ref={group}
+      role={radio ? "radiogroup" : "group"}
+      aria-label={label}
+      data-size={size}
+      data-variant={variant === "boxed" ? "boxed" : undefined}
+      className={className ? `ui-seg ${className}` : "ui-seg"}
+      onKeyDown={onKeyDown}
+    >
       {options.map((option, index) => {
         const chosen = option.value === value;
+        const itemDisabled = isDisabled(option);
         return (
           <button
             key={option.value}
@@ -41,7 +63,7 @@ export function Segmented<T extends string>({ label, options, value, onChange, m
             aria-checked={radio ? chosen : undefined}
             aria-pressed={radio ? undefined : chosen}
             tabIndex={radio && index !== entryIndex ? -1 : undefined}
-            disabled={option.disabled}
+            disabled={itemDisabled}
             title={option.title}
             className="ui-seg-item"
             onClick={() => onChange(option.value)}

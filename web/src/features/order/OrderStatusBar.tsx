@@ -25,6 +25,8 @@ export function OrderStatusBar({ status, queued, blocked, feed = null, replay = 
     <MarketStatusSlot testId="order-status-slot">
       {shown ? (
         <MarketStatusLine testId="order-status" tone={tone} text={text}>
+          {feedAlert && <span className="od-queue" data-testid="order-feed-warn">시세 연결 확인</span>}
+          {replay !== null && <span className="od-replay-lock">주문 잠금</span>}
           {queued > 0 && <span className="od-queue" data-testid="order-queue">줄 서는 중 · {queued}건</span>}
           {status?.action && <button type="button" className="mw-status-button" data-testid="order-status-action" onClick={status.action.run}>{status.action.label}</button>}
           {status?.undoOrderNo && <button type="button" className="mw-status-button" onClick={() => onUndo(status.undoOrderNo!)}>되돌리기</button>}

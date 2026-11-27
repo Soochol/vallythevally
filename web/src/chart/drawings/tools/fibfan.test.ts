@@ -32,7 +32,7 @@ const ofKind = <K extends Shape["kind"]>(shapes: readonly Shape[], kind: K) => s
 const restyle = (patch: Partial<FibFanStyle>) => fibfan.parseStyle({ ...style, ...patch });
 const priceAt = (ray: Extract<Shape, { kind: "segment" }>, x: number) => 500 - (ray.a.y + ((ray.b.y - ray.a.y) * (x - ray.a.x)) / (ray.b.x - ray.a.x));
 const rayOf = (shapes: readonly Shape[], color: string) => ofKind(shapes, "segment").find((s) => s.stroke.color === color)!;
-const HALF = "#4caf50";
+const HALF = "$ind-4";
 
 describe("피보나치 팬", () => {
   test("두 점을 찍고 기본 수준은 0~1의 일곱 개다", () => {
@@ -75,7 +75,7 @@ describe("피보나치 팬", () => {
   test("이웃한 선 사이를 위 수준의 색으로 옅게 칠하고 끌 수 있다", () => {
     const wedges = ofKind(draw(points), "polyline");
     expect(wedges).toHaveLength(6);
-    expect(wedges[0]).toMatchObject({ closed: true, fill: { on: true, color: "#f23645", opacity: 0.12 } });
+    expect(wedges[0]).toMatchObject({ closed: true, fill: { on: true, color: "$up", opacity: 0.12 } });
     const corners: ScreenPoint[] = [...wedges[0]!.points];
     expect(corners[0]).toEqual({ x: 100, y: 400 });
     expect(corners.slice(1).map((p) => p.x)).toEqual([800, 800]);
@@ -90,7 +90,7 @@ describe("피보나치 팬", () => {
 
   test("두 점의 가로 자리가 같으면 두 점을 잇는 선만 긋는다", () => {
     expect(draw([{ t: 1000, price: 100 }, { t: 1000, price: 300 }])).toEqual([
-      { kind: "segment", a: { x: 100, y: 400 }, b: { x: 100, y: 200 }, stroke: { color: "#787b86", width: 1, dash: "solid" } },
+      { kind: "segment", a: { x: 100, y: 400 }, b: { x: 100, y: 200 }, stroke: { color: "$text-3", width: 1, dash: "solid" } },
     ]);
   });
 
@@ -110,7 +110,7 @@ describe("피보나치 팬", () => {
     const levels = style.levels.map((l, i) => (i === 0 ? { ...l, on: false } : l));
     const next = fibfan.parseStyle(fibfan.bar.lineColor?.set(restyle({ levels }), "#123456")) as FibFanStyle;
     expect(next.levels.slice(1).every((l) => l.color === "#123456")).toBe(true);
-    expect(next.levels[0]?.color).toBe("#787b86");
+    expect(next.levels[0]?.color).toBe("$text-3");
     expect(fibfan.parseStyle(fibfan.bar.width?.set(style, 3))).toMatchObject({ line: { width: 3, dash: "solid" } });
   });
 

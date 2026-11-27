@@ -5,8 +5,8 @@ import { CheckIcon } from "../icons";
 import { Kbd } from "../ui/Kbd";
 
 export type MenuItem =
-  | { kind: "radio"; label: string; value?: string; icon?: ReactNode; hint?: string; shortcut?: string; checked: boolean; onSelect(): void }
-  | { kind: "check"; label: string; value?: string; icon?: ReactNode; hint?: string; shortcut?: string; checked: boolean; onSelect(): void }
+  | { kind: "radio"; label: string; value?: string; icon?: ReactNode; hint?: string; shortcut?: string; disabled?: boolean; checked: boolean; onSelect(): void }
+  | { kind: "check"; label: string; value?: string; icon?: ReactNode; hint?: string; shortcut?: string; disabled?: boolean; checked: boolean; onSelect(): void }
   | { kind: "action"; label: string; icon?: ReactNode; hint?: string; shortcut?: string; disabled?: boolean; disabledReason?: string; danger?: boolean; onSelect(): void }
   | { kind: "heading"; label: string }
   | { kind: "group"; label: string; labelShown: boolean; items: readonly Focusable[] }
@@ -24,6 +24,7 @@ export interface MenuFilter {
 }
 
 interface Props {
+  id?: string;
   label: string;
   items: readonly MenuItem[];
   onClose: (restoreFocus: boolean) => void;
@@ -35,7 +36,7 @@ interface Props {
   children?: ReactNode;
 }
 
-export function Menu({ label, items, onClose, root, className, placement, style, filter, children }: Props) {
+export function Menu({ id, label, items, onClose, root, className, placement, style, filter, children }: Props) {
   const point = typeof style?.left === "number" && typeof style?.top === "number" ? { x: style.left, y: style.top } : undefined;
   const trigger = useRef<HTMLElement | null>(point ? null : root.current?.tagName === "BUTTON" ? root.current : root.current?.querySelector<HTMLElement>("[aria-expanded=true]") ?? root.current?.querySelector<HTMLElement>("button") ?? null);
   const focusTarget = useRef<HTMLElement | null>(point
@@ -75,6 +76,7 @@ export function Menu({ label, items, onClose, root, className, placement, style,
   buttons.current = [];
   return (
     <Popover
+      id={id}
       anchor={trigger}
       point={point}
       placement={placement}
@@ -84,7 +86,7 @@ export function Menu({ label, items, onClose, root, className, placement, style,
       aria-label={label}
       onKeyDown={onKeyDown}
       style={{ minWidth: style?.minWidth }}
-      className={`z-40 flex min-w-[120px] flex-col whitespace-nowrap p-1 ${className ?? ""}`}
+      className={`flex min-w-[120px] flex-col whitespace-nowrap p-1 ${className ?? ""}`}
     >
       {filter && <MenuFilterInput filter={filter} />}
       {items.map((item, i) => {
@@ -143,7 +145,8 @@ function MenuButton({ item, onClose, register }: { item: Focusable; onClose: Pro
       aria-labelledby={reason ? labelId : undefined}
       aria-describedby={reason ? reasonId : undefined}
       data-option-value={checkable ? item.value : undefined}
-      disabled={item.kind === "action" ? item.disabled : undefined}
+      title={item.disabled && item.hint ? item.hint : undefined}
+      disabled={item.disabled}
       className={`group flex min-h-8 shrink-0 items-center gap-2 rounded-m px-2 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] disabled:hover:bg-transparent aria-checked:text-accent max-md:min-h-[40px] ${item.kind === "action" && item.danger ? "text-danger" : ""}`}
       onClick={() => {
         item.onSelect();

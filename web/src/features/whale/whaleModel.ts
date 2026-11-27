@@ -1,6 +1,7 @@
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { WhaleEvent } from "../../api/generated/WhaleEvent";
 import type { WhaleSide } from "../../api/generated/WhaleSide";
+import { MINUS } from "../../lib/format";
 
 export type WhaleViewMode = "stream" | "rank";
 export type WhaleSideFilter = "all" | WhaleSide;
@@ -55,7 +56,7 @@ export function parseCustomWon(raw: string): number | null {
 
 export function formatWhaleWon(won: number, signed = false): string {
   const abs = Math.abs(won);
-  const sign = signed ? (won > 0 ? "+" : won < 0 ? "-" : "") : won < 0 ? "-" : "";
+  const sign = signed ? (won > 0 ? "+" : won < 0 ? MINUS : "") : won < 0 ? MINUS : "";
   if (abs >= 100_000_000) {
     const eok = abs / 100_000_000;
     return `${sign}${eok.toFixed(abs >= 1_000_000_000 ? 1 : 2)}억`;

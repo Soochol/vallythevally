@@ -14,6 +14,7 @@ const colorCache = new Map<string, string>();
 
 export function drawingColor(color: string): string {
   if (!color.startsWith("$")) return color;
+  if (typeof document === "undefined") return "#12b5a5";
   const root = document.documentElement;
   const theme = `${root.dataset.style ?? ""}:${root.dataset.theme ?? ""}`;
   if (theme !== colorTheme) {

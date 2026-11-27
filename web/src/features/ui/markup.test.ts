@@ -6,6 +6,7 @@ import { Chip } from "./Chip";
 import { Field, SecretField, trimSecret } from "./Field";
 import { Notice } from "./Notice";
 import { Segmented } from "./Segmented";
+import { Switch } from "./Switch";
 import { panelDomId, Tabs, tabDomId } from "./Tabs";
 
 const noop = () => undefined;
@@ -64,10 +65,15 @@ test("Tabs는 값이 어느 탭과도 맞지 않아도 첫 활성 탭을 탭 순
   expect(out.match(/tabindex="0"/g)).toHaveLength(1);
 });
 
-test("Chip은 눌림을, Badge는 톤을, Notice는 톤에 맞는 역할을 낸다", () => {
+test("Chip은 눌림을, Badge는 톤을, Notice는 톤에 맞는 역할을, Switch는 스위치 역할을 낸다", () => {
   expect(html(h(Chip, { pressed: true, onPressedChange: noop, children: "켬" }))).toContain('aria-pressed="true"');
   expect(html(h(Badge, { tone: "danger", children: "위험" }))).toContain('data-tone="danger"');
+  expect(html(h(Badge, { tone: "up", children: "상승" }))).toContain('data-tone="up"');
   expect(html(h(Notice, { tone: "danger", children: "오류" }))).toContain('role="alert"');
   expect(html(h(Notice, { children: "안내" }))).toContain('role="status"');
   expect(html(h(Notice, { action: { label: "열기", onClick: noop }, children: "안내" }))).toContain("열기");
+  const sw = html(h(Switch, { checked: true, label: "주문 사용", onChange: noop }));
+  expect(sw).toContain('role="switch"');
+  expect(sw).toContain('aria-checked="true"');
+  expect(sw).toContain("주문 사용");
 });

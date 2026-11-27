@@ -4,7 +4,7 @@ import type { ProgramTradeTimeline } from "../../api/generated/ProgramTradeTimel
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import { getJson } from "../../api/http";
 import type { WindowId } from "../../layout/kinds";
-import { formatPrice, MINUS } from "../../lib/format";
+import { formatPrice } from "../../lib/format";
 import { useFrameFold } from "../../lib/useFrameFold";
 import { useMarketSourceRevision } from "../../stores/kiwoomLink";
 import { marketSocket } from "../../stores/realtime";
@@ -61,7 +61,7 @@ function useLiveProgram(code: SymbolCode, today: string, sourceRevision: number,
   return live;
 }
 
-const priceText = (row: ProgramRow): string => (row.price === null ? "–" : formatPrice(row.price, false));
+const priceText = (row: ProgramRow): string => (row.price === null ? "—" : formatPrice(row.price, false));
 const changeText = (row: ProgramRow): string => withSign(row.netQtyChange, quantityFormat.format(Math.abs(row.netQtyChange)));
 
 function useWidestColumns(rows: readonly ProgramRow[]): ColumnWidths {
@@ -126,7 +126,7 @@ const Table = memo(function Table({ lines, previousClose }: { lines: readonly Pr
                 <span role="cell" className="pg-time">{line.row.time}</span>
                 <span role="cell" className={`pg-price pg-num ${line.row.price === null ? "" : TONE_CLASS[priceTone(line.row.price, previousClose)] ?? ""}`}>{priceText(line.row)}</span>
                 <span role="cell" className="pg-change pg-num" data-testid="program-change">
-                  <em className={line.row.netQtyChange > 0 ? "mw-up" : line.row.netQtyChange < 0 ? "mw-down" : undefined}>{changeText(line.row).replace("-", MINUS)}</em>
+                  <em className={line.row.netQtyChange > 0 ? "mw-up" : line.row.netQtyChange < 0 ? "mw-down" : undefined}>{changeText(line.row)}</em>
                 </span>
               </div>
             ),

@@ -51,7 +51,7 @@ function DaemonBand({ page }: { page: CollectorStatusPage }) {
         {page.received_at === null ? "받은 상태 없음" : receivedIso === null ? <>마지막으로 받은 상태 {receivedAtText(page.received_at)}</> : <>마지막으로 받은 상태 <time dateTime={receivedIso}>{receivedAtText(page.received_at)}</time></>}
       </span>
       <span className="ml-auto text-s text-text-2">
-        {notifications.access === "default" && <button type="button" className="tb-btn" onClick={notifications.ask}>브라우저 알림 허용</button>}
+        {notifications.access === "default" && <button type="button" className="btn btn-sm" onClick={notifications.ask}>브라우저 알림 허용</button>}
         {notifications.access === "granted" && "브라우저 알림 켜짐"}
         {notifications.access === "denied" && "브라우저 알림이 막혀 있습니다. 브라우저 설정에서 허용하세요"}
       </span>

@@ -15,8 +15,6 @@ interface Props {
   onChange(next: Ranking): void;
 }
 
-const SHARED_SELECT: ReadonlySet<string> = new Set(["market", "venue"]);
-
 export function RankingHead({ ranking, onChange, status }: Props & { status: ReactNode }) {
   const venue = useVenue();
   const category = categoryOf(ranking.kind);
@@ -83,23 +81,16 @@ function Conditions({ ranking, onChange }: Props) {
         return (
           <div key={condition.id} className="rk-field">
             <span>{condition.label}</span>
-            {SHARED_SELECT.has(condition.id) ? (
-              <Select
-                label={label}
-                value={condition.value}
-                className="ui-field px-2"
-                options={condition.options.map((option) => ({ value: option.value, label: option.label, hint: allowed(option.value) ? undefined : FEED_CHOICE_TOOLTIP }))}
-                onChange={(next) => allowed(next) && onChange(condition.set(next))}
-              />
-            ) : (
-              <select aria-label={label} className="ui-field px-2" value={condition.value} onChange={(e) => onChange(condition.set(e.target.value))}>
-                {condition.options.map((option) => (
-                  <option key={option.value} value={option.value} {...(allowed(option.value) ? {} : { disabled: true, title: FEED_CHOICE_TOOLTIP, "data-feed-refused": "" })}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            )}
+            <Select
+              label={label}
+              value={condition.value}
+              className="ui-field px-2"
+              options={condition.options.map((option) => {
+                const ok = allowed(option.value);
+                return { value: option.value, label: option.label, disabled: !ok, hint: ok ? undefined : FEED_CHOICE_TOOLTIP };
+              })}
+              onChange={(next) => allowed(next) && onChange(condition.set(next))}
+            />
           </div>
         );
       })}

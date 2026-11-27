@@ -5,17 +5,16 @@ import { drawingColor } from "../../chart/drawings/DrawingLayer";
 import { TEXT_SIZE } from "../../chart/drawings/styleKit";
 import type { Dash, TextStyle, Width } from "../../chart/drawings/types";
 import { ColorPicker } from "../color/ColorPicker";
+import { CloseIcon } from "../icons";
+import { Switch } from "../ui/Switch";
 
 export const INPUT = "draw-input";
 export function ColorInput({ label, value, compact = false, onChange }: { label: string; value: string; compact?: boolean; onChange(v: string): void }) {
   const color = drawingColor(value);
   return <ColorPicker label={label} value={color} compact={compact} onChange={onChange} />;
 }
-function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange(v: boolean): void }) {
-  return <button type="button" role="switch" aria-checked={checked} aria-label={label} className="ui-switch draw-switch" onClick={() => onChange(!checked)}><span aria-hidden="true" className="ui-switch-track"><span /></span></button>;
-}
 function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange(v: boolean): void }) {
-  return <div className="draw-toggle"><span>{label}</span><Switch label={label} checked={checked} onChange={onChange} /></div>;
+  return <Switch label={label} ariaLabel={label} checked={checked} className="draw-toggle" onChange={onChange} />;
 }
 function LineSample({ label, color, look }: { label: string; color: string; look: { width: number; dash: Dash } | null }) {
   const dash = look?.dash ?? "solid";
@@ -116,7 +115,7 @@ export function StyleFields({ fields, style, text, change, setText }: { fields: 
       case "width": input = <WidthInput label={field.label} value={field.lens.get(style)} onChange={(v) => set(field.lens, v)} />; break;
       case "dash": input = <DashInput label={field.label} value={field.lens.get(style)} onChange={(v) => set(field.lens, v)} />; break;
       case "toggle":
-        nodes.push(<div className="draw-field" data-kind="toggle" key={field.label}><span>{field.label}</span><Switch label={field.label} checked={field.lens.get(style)} onChange={(v) => set(field.lens, v)} /></div>);
+        nodes.push(<div className="draw-field" data-kind="toggle" key={field.label}><ToggleRow label={field.label} checked={field.lens.get(style)} onChange={(v) => set(field.lens, v)} /></div>);
         continue;
       case "number": input = <NumberInput label={field.label} min={field.min} max={field.max} step={field.step} value={field.lens.get(style)} onChange={(v) => set(field.lens, v)} />; break;
       case "select": input = <Select label={field.label} className={INPUT} value={field.lens.get(style)} onChange={(value) => set(field.lens, value)} options={field.options} />; break;
@@ -166,15 +165,15 @@ export function StyleFields({ fields, style, text, change, setText }: { fields: 
               const name = `수준 ${i + 1}`;
               return (
                 <div className="draw-level" role="group" aria-label={name} key={i}>
-                  <Switch label={`${name} 켜기`} checked={level.on} onChange={(on) => replace({ on })} />
+                  <Switch ariaLabel={`${name} 켜기`} checked={level.on} className="draw-switch" onChange={(on) => replace({ on })} />
                   <input aria-label={`${name} 값`} className={INPUT} type="number" step="any" value={level.value} onChange={(e) => { if (Number.isFinite(e.target.valueAsNumber)) replace({ value: e.target.valueAsNumber }); }} />
                   <ColorInput compact label={`${name} 색`} value={level.color} onChange={(color) => replace({ color })} />
                   <LineSample label={`${name} 선 견본`} color={level.color} look={look} />
-                  <button type="button" className="icon-btn" aria-label={`${name} 지우기`} onClick={() => set(field.lens, levels.filter((_, j) => j !== i))}>×</button>
+                  <button type="button" className="icon-btn" aria-label={`${name} 지우기`} onClick={() => set(field.lens, levels.filter((_, j) => j !== i))}><CloseIcon size={14} /></button>
                 </div>
               );
             })}
-            <button type="button" className="tb-btn" disabled={levels.length >= field.max} onClick={() => set(field.lens, [...levels, { value: 1, color: "$draw", on: true }])}>수준 추가</button>
+            <button type="button" className="btn self-start" disabled={levels.length >= field.max} onClick={() => set(field.lens, [...levels, { value: 1, color: "$draw", on: true }])}>수준 추가</button>
           </div>
         );
         break;

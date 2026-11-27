@@ -11,9 +11,11 @@ export function SyncIndicator() {
   const view = syncView(useAccountStore((s) => s.status));
   if (!view) return null;
   return (
-    <button type="button" role="status" aria-label={`계정 동기화: ${view.label}`} title="계정 메뉴 열기" className={`${STATUS_BUTTON} min-w-0`} onClick={() => openSystemSettings("account")}>
-      <span aria-hidden="true" data-tone={view.tone} className={`flex flex-none ${TONE_TEXT[view.tone]}`}><SyncIcon /></span>
-      <span className="min-w-0 truncate">{view.label}</span>
-    </button>
+    <span role="status" aria-label={`계정 동기화: ${view.label}`} className="inline-flex min-w-0">
+      <button type="button" title="계정 메뉴 열기" className={`${STATUS_BUTTON} min-w-0`} onClick={() => openSystemSettings("account")}>
+        <span aria-hidden="true" data-tone={view.tone} className={`flex flex-none ${TONE_TEXT[view.tone]}`}><SyncIcon /></span>
+        <span className="min-w-0 truncate">{view.label}</span>
+      </button>
+    </span>
   );
 }

@@ -4,6 +4,7 @@ import { DELETE_PHRASE, deleteFailureText, formatSignedInAt } from "../features/
 import { PROVIDER_NAME } from "../features/account/provider";
 import { useReturnFocus } from "../features/account/useReturnFocus";
 import { useCommand } from "../features/system-settings/useCommand";
+import { Field } from "../features/ui/Field";
 import { useAccountStore } from "../stores/account";
 import { deletePublicAccount, logoutPublic } from "./accountActions";
 
@@ -40,21 +41,18 @@ export function PublicAccountMenu() {
         <dd className="max-md:mb-2">{formatSignedInAt(status.signedInAt)}</dd>
       </dl>
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="tb-btn h-9 border border-line px-3" disabled={command.busy} onClick={() => void command.run(logoutPublic)}>로그아웃</button>
-        {!deleting && <button ref={deleteButton} type="button" className="tb-btn h-9 border border-line px-3 text-danger" onClick={() => setDeleting(true)}>계정 삭제</button>}
+        <button type="button" className="btn" disabled={command.busy} onClick={() => void command.run(logoutPublic)}>로그아웃</button>
+        {!deleting && <button ref={deleteButton} type="button" className="btn text-danger" onClick={() => setDeleting(true)}>계정 삭제</button>}
       </div>
       {deleting && (
         <section aria-label="계정 삭제" className="flex flex-col gap-3 rounded-m border border-line bg-surface p-4">
           <p className="text-m">{DELETE_WARNING}</p>
-          <label className="flex flex-col gap-1 text-m">
-            <span className="text-text-2">확인하려면 “{DELETE_PHRASE}”을 입력하세요</span>
-            <input autoFocus className="ui-field" value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
-          </label>
+          <Field label={`확인하려면 “${DELETE_PHRASE}”을 입력하세요`} autoFocus value={phrase} autoComplete="off" spellCheck={false} onChange={(e) => setPhrase(e.target.value)} />
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="tb-btn h-9 bg-[color-mix(in_srgb,var(--danger)_16%,transparent)] px-3 font-semibold text-danger disabled:opacity-50" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>
+            <button type="button" className="btn" disabled={command.busy} onClick={() => { setDeleting(false); setPhrase(""); setDeleteError(null); }}>취소</button>
+            <button type="button" className="btn-danger" disabled={phrase.trim() !== DELETE_PHRASE || command.busy} onClick={() => void remove()}>
               계정 삭제 실행
             </button>
-            <button type="button" className="tb-btn h-9 px-3" disabled={command.busy} onClick={() => { setDeleting(false); setPhrase(""); setDeleteError(null); }}>취소</button>
           </div>
           {deleteError && <p role="alert" className="text-m text-danger">{deleteError}</p>}
         </section>

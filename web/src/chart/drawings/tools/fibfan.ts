@@ -5,13 +5,13 @@ import { type Band, fanRay, fanSide, fanWedge, levelColor, type LineLook, mainCo
 import { cornerLabels, cornersOf } from "./rect";
 
 export const FIBFAN_LEVELS: readonly Level[] = [
-  { value: 0, color: "#787b86", on: true },
-  { value: 0.25, color: "#f23645", on: true },
-  { value: 0.382, color: "#ff9800", on: true },
-  { value: 0.5, color: "#4caf50", on: true },
-  { value: 0.618, color: "#089981", on: true },
-  { value: 0.75, color: "#00bcd4", on: true },
-  { value: 1, color: "#787b86", on: true },
+  { value: 0, color: "$text-3", on: true },
+  { value: 0.25, color: "$up", on: true },
+  { value: 0.382, color: "$ind-1", on: true },
+  { value: 0.5, color: "$ind-4", on: true },
+  { value: 0.618, color: "$accent", on: true },
+  { value: 0.75, color: "$ind-2", on: true },
+  { value: 1, color: "$text-3", on: true },
 ];
 
 export interface FibFanStyle {

@@ -105,8 +105,8 @@ describe("표식(.ui2)이 있는 폴더 규칙", () => {
     expect(ui2("const s = { fontWeight: 300 };", "A.tsx").map((violation) => violation.rule)).toEqual(["글자 굵기"]);
   });
 
-  it("표식이 있는 폴더의 허용 밖 px 글자 크기를 잡는다", () => {
-    expect(ui2(".a { font-size: 10px; } .b { font-size: 15px; }").map((violation) => violation.detail)).toEqual(["10px", "15px"]);
+  it("표식이 있는 폴더의 허용 밖 px 글자 크기와 --size-* 우회를 잡는다", () => {
+    expect(ui2(".a { font-size: 10px; } .b { font-size: 15px; } .c { font-size: var(--size-10); }").map((violation) => violation.detail)).toEqual(["10px", "15px", "--size-10"]);
     expect(ui2(".a { font-size: 11px; } .b { font-size: 28px; } .c { font-size: var(--fs-s); } .d { font: 600 13px/1.4 serif; }")).toEqual([]);
     expect(ui2("const s = { fontSize: 21 };", "A.tsx").map((violation) => violation.rule)).toEqual(["글자 크기"]);
   });

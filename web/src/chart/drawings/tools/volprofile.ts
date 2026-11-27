@@ -27,10 +27,10 @@ export const volProfileDefaults = (): VolProfileStyle => ({
   rows: 24,
   widthPercent: 40,
   valuePercent: 70,
-  bars: { on: true, color: "#787b86", opacity: 0.35 },
-  valueArea: { on: true, color: "#2962ff", opacity: 0.45 },
+  bars: { on: true, color: "$text-3", opacity: 0.35 },
+  valueArea: { on: true, color: "$accent", opacity: 0.45 },
   poc: true,
-  pocLine: { color: "#f23645", width: 2, dash: "solid" },
+  pocLine: { color: "$up", width: 2, dash: "solid" },
   pocLabel: true,
   basisLabel: true,
 });

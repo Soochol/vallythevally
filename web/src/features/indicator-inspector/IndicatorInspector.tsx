@@ -158,7 +158,7 @@ function IndicatorRow({ cellId, row, open, onToggle, children }: { cellId: Windo
       <button type="button" aria-expanded={open} aria-label={row.kind === "current" ? `${name} 설정` : `${name} 추가 후보`} onClick={onToggle} className="flex h-full min-w-0 flex-1 items-center gap-2 text-left">
         <span className="flex-none font-medium">{label}</span>
         <span className="min-w-0 flex-1 truncate text-xs text-text-2">{row.kind === "current" ? summary(row.config.spec) : ""}</span>
-        <span aria-hidden="true" className={`flex-none text-text-2 transition-transform ${open ? "rotate-180" : ""}`}><ChevronIcon /></span>
+        <span aria-hidden="true" className={`flex-none text-text-2 transition-transform ${open ? "" : "-rotate-90"}`}><ChevronIcon /></span>
       </button>
       {row.kind === "current" && <>
         <button type="button" className="icon-btn size-6" aria-label={`${name} ${row.config.visible ? "숨기기" : "보이기"}`} onClick={() => useLayoutStore.getState().updateIndicator(cellId, row.config.id, { visible: !row.config.visible })}><EyeIcon size={14} off={!row.config.visible} /></button>

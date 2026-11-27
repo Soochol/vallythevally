@@ -121,7 +121,7 @@ function DrawingRail({ help, setHelp, helpAnchor, helpDialog }: RailHelp) {
     <div className="draw-separator" />
     <button className="draw-tool" data-tone={prefs.lockAll ? "warn" : undefined} aria-label="모든 드로잉 잠그기" title={prefs.lockAll ? "모든 드로잉 잠금 풀기" : "모든 드로잉 잠그기"} aria-pressed={prefs.lockAll} onClick={() => action(() => setPrefs({ lockAll: !prefs.lockAll }))}><Icon path={prefs.lockAll ? DRAWING_ICONS.lockAll : DRAWING_ICONS.unlocked} /></button>
     <button className="draw-tool" data-tone={prefs.hideAll ? "warn" : undefined} aria-label="모든 드로잉 숨기기" title={keyTitle(prefs.hideAll ? "모든 드로잉 보이기" : "모든 드로잉 숨기기", keys, "hideAll")} aria-pressed={prefs.hideAll} onClick={() => action(() => setPrefs({ hideAll: !prefs.hideAll }))}><Icon path={prefs.hideAll ? DRAWING_ICONS.eyeOff : DRAWING_ICONS.eye} /></button>
-    <button className="draw-tool" aria-label="개체 트리" title="개체 트리 열기/닫기" aria-pressed={treeOpen} onClick={() => action(() => useDrawingSession.getState().patchCell(cellId, { objectTreeOpen: !treeOpen }))}><Icon path={DRAWING_ICONS.tree} /></button>
+    <button className="draw-tool" aria-label="개체 트리" title="개체 트리 열기/닫기" aria-pressed={treeOpen} onClick={() => action(() => { if (!treeOpen && useSelectionStore.getState().chartDock?.cellId === cellId) useSelectionStore.getState().closeChartDock(); useDrawingSession.getState().patchCell(cellId, { objectTreeOpen: !treeOpen }); })}><Icon path={DRAWING_ICONS.tree} /></button>
     <RemoveAllButton cellId={cellId} action={action} />
     <div className="draw-toolbar-end">
       <button ref={helpAnchor} className="draw-tool" aria-label="드로잉 단축키 도움말" title="드로잉 단축키" onClick={() => setHelp(!help)}>?</button>

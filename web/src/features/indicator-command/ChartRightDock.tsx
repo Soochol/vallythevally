@@ -4,6 +4,7 @@ import type { IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { symbolSub } from "../../lib/symbol";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
+import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
 import { defaultIndicatorMode, useSelectionStore, type ChartPanelMode, type IndicatorCommandMode } from "../../stores/selection";
 import { ChartSettingsSections } from "../chart-settings/ChartSettingsDialog";
 import { ChevronIcon, CloseIcon, EyeIcon, SearchIcon } from "../icons";
@@ -11,7 +12,7 @@ import { primaryLabel } from "../indicator-dialog/indicatorForm";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
-import { EmptyState } from "../overlay/State";
+import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { CompareSection } from "./CompareSection";
 import { unifiedIndicatorRows, type TreeCandidateRow, type TreeDialogRow } from "./model";
 import { useIndicatorCommand, useIndicatorDraft, type EditorAction } from "./useIndicatorCommand";
@@ -49,7 +50,7 @@ function DockDetailEditor({ cellId, config, instanceIndex, onBack }: { cellId: W
           <EyeIcon size={15} off={!shown} />
         </button>
         <button type="button" className="icon-btn text-danger" aria-label={`${specName(config.spec)} 지우기`} onClick={() => { removeIndicatorWithUndo(cellId, config); onBack(); }}>
-          <CloseIcon size={15} />
+          <CloseIcon size={14} />
         </button>
       </div>
       <div className="ic-ed-head">
@@ -99,7 +100,10 @@ export function ChartRightDock({ cellId, hostRef }: { cellId: WindowId; hostRef:
   useEffect(() => {
     if (!active) return;
     setDetailTarget(active.indicatorId ? { kind: "current", id: active.indicatorId } : null);
-  }, [active?.cellId, active?.mode, active?.indicatorId]);
+    if (cellDrawing(useDrawingSession.getState(), cellId).objectTreeOpen) {
+      useDrawingSession.getState().patchCell(cellId, { objectTreeOpen: false, hoveredId: null });
+    }
+  }, [active?.cellId, active?.mode, active?.indicatorId, cellId]);
 
   useEffect(() => {
     if (!active) return;
@@ -134,7 +138,7 @@ function ChartRightDockBody({ cellId, mode, detailTarget, setDetailTarget, input
 }) {
   const cmdMode: IndicatorCommandMode = mode === "settings" ? "current" : mode;
   const command = useIndicatorCommand(cellId, cmdMode, detailTarget?.kind === "current" ? detailTarget.id : null);
-  const { cell, input, rows: rawRows, compareButton } = command;
+  const { cell, input, rows: rawRows, symbols, search, compareButton } = command;
   const [collapsedKinds, setCollapsedKinds] = useState<ReadonlySet<IndicatorKind>>(() => new Set());
 
   useEffect(() => {
@@ -196,7 +200,7 @@ function ChartRightDockBody({ cellId, mode, detailTarget, setDetailTarget, input
           <button type="button" aria-pressed={section === "compare"} onClick={() => switchSection("compare")}>비교</button>
         </div>
         <button type="button" className="cd-mode-btn" aria-label="가운데 모달로 전환" onClick={() => useSelectionStore.getState().openIndicatorDialog(cellId, mode, detailTarget?.kind === "current" ? detailTarget.id : null)}>모달</button>
-        <button type="button" className="icon-btn" aria-label="닫기" onClick={() => useSelectionStore.getState().closeChartDock()}><CloseIcon size={15} /></button>
+        <button type="button" className="icon-btn" aria-label="닫기" onClick={() => useSelectionStore.getState().closeChartDock()}><CloseIcon size={14} /></button>
       </header>
 
       {section === "settings" ? (
@@ -275,8 +279,14 @@ function ChartRightDockBody({ cellId, mode, detailTarget, setDetailTarget, input
                     </li>
                   );
                 })}
-                {rows.length === 0 && (
+                {rows.length === 0 && !(section === "compare" && (search.isFetching || search.isError)) && (
                   <li><EmptyState title="맞는 항목이 없습니다" action="입력 지우기" onAction={() => { command.type(""); inputRef.current?.focus(); }}>이름·약어·초성으로 찾아보세요.</EmptyState></li>
+                )}
+                {section === "compare" && !symbols.selectable && search.isFetching && (
+                  <li><Skeleton label="비교 종목 찾는 중" /></li>
+                )}
+                {section === "compare" && search.isError && (
+                  <li><ErrorState message="종목을 찾지 못했습니다. 다시 시도해 보세요." retry={() => void search.refetch()} /></li>
                 )}
               </ul>
             </div>

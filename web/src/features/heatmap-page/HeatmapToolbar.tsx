@@ -47,7 +47,7 @@ function SegmentTabs<T extends string>({ label, values, labels, value, onSelect 
   return (
     <div role="tablist" aria-label={label} className="ui-seg hm-tabs" data-size="sm">
       {values.map((item) => (
-        <button key={item} type="button" role="tab" className="ui-seg-item" aria-selected={value === item} aria-pressed={value === item} onClick={() => onSelect(item)}>
+        <button key={item} type="button" role="tab" className="ui-seg-item" aria-selected={value === item} onClick={() => onSelect(item)}>
           {labels[item]}
         </button>
       ))}

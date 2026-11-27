@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ownsChartKeyboard } from "../overlay/topLayer";
+import { Segmented } from "../ui/Segmented";
+import { Switch } from "../ui/Switch";
 import {
   activeFilterTokens,
   buildCalendarWeeks,
@@ -239,7 +241,7 @@ export function JournalAnalyticsView({
       bw,
       labels: filteredLabels,
       endY: cy(endCum),
-      areaColor: cum >= 0 ? "var(--up)" : "var(--down)",
+      areaColor: cum > 0 ? "var(--up)" : cum < 0 ? "var(--down)" : "var(--text-3)",
     };
   }, [filteredTrades, tradingDaysInRange, range, afterCost, tlSize]);
 
@@ -325,14 +327,20 @@ export function JournalAnalyticsView({
             ← 매매복기
           </button>
           <span className="jrn-vsep" />
-          <span className="jrn-brand">수익 분석</span>
-          <div className="jrn-seg" role="group" aria-label="기간 단위">
-            {(["day", "week", "month", "year", "all"] as const).map((p) => (
-              <button key={p} type="button" aria-pressed={period.type === p} onClick={() => setPeriodType(p)}>
-                {p === "day" ? "일" : p === "week" ? "주" : p === "month" ? "월" : p === "year" ? "년" : "전체"}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="기간 단위"
+            mode="pressed"
+            size="sm"
+            value={period.type}
+            options={[
+              { value: "day", label: "일" },
+              { value: "week", label: "주" },
+              { value: "month", label: "월" },
+              { value: "year", label: "년" },
+              { value: "all", label: "전체" },
+            ]}
+            onChange={(p) => setPeriodType(p)}
+          />
           <div className="jrn-step">
             <button
               type="button"
@@ -390,19 +398,14 @@ export function JournalAnalyticsView({
               예시 데이터 닫기
             </button>
           )}
-          <button
-            type="button"
-            className="jrn-txt-btn"
-            role="switch"
-            aria-checked={afterCost}
-            data-testid="analytics-cost-switch"
-            onClick={toggleAfterCost}
-          >
-            <span className="jrn-sw">
-              <i />
-              {afterCost ? "세후" : "세전"}
-            </span>
-          </button>
+          <Switch
+            size="sm"
+            checked={afterCost}
+            testId="analytics-cost-switch"
+            className="jrn-cost-switch"
+            label={<span className="text-s text-text-2">{afterCost ? "세후" : "세전"}</span>}
+            onChange={toggleAfterCost}
+          />
           <button
             type="button"
             className="jrn-route-btn jrn-route-primary"
@@ -462,19 +465,15 @@ export function JournalAnalyticsView({
                 <span>총 매입</span>
                 <b>{`${MINUS}${formatWon(summary.buyAmt, false)}원`}</b>
               </div>
-              <button
-                type="button"
-                className="jrn-ledger-row"
-                role="switch"
-                aria-checked={afterCost}
-                onClick={toggleAfterCost}
-              >
-                <span className="jrn-sw">
-                  <i />
-                  수수료·세금 반영
-                </span>
-                <b>{`${MINUS}${formatWon(summary.cost, false)}원`}</b>
-              </button>
+              <div className="jrn-ledger-row">
+                <Switch
+                  size="sm"
+                  checked={afterCost}
+                  label={<span className="text-s text-text-2">수수료·세금 반영</span>}
+                  onChange={toggleAfterCost}
+                />
+                <b className={afterCost ? undefined : "jrn-mute line-through"}>{`${MINUS}${formatWon(summary.cost, false)}원`}</b>
+              </div>
               <div className="jrn-ledger-row jrn-ledger-total">
                 <span>{afterCost ? "순 실현손익 (세후)" : "실현손익 (세전)"}</span>
                 <b className={netTone ? `jrn-${netTone}` : ""}>{`${formatWon(summary.net)}원`}</b>
@@ -484,21 +483,34 @@ export function JournalAnalyticsView({
 
           <div className="jrn-tl-col">
             <div className="jrn-tl-head">
-              <div className="jrn-seg" role="group" aria-label="기간별 보기">
-                <button type="button" aria-pressed={view === "flow"} onClick={() => setView("flow")}>흐름</button>
-                <button type="button" aria-pressed={view === "cal"} onClick={() => setView("cal")}>달력</button>
-                <button type="button" aria-pressed={view === "table"} onClick={() => setView("table")}>표</button>
-              </div>
+              <Segmented
+                label="기간별 보기"
+                mode="pressed"
+                size="sm"
+                value={view}
+                options={[
+                  { value: "flow", label: "흐름" },
+                  { value: "cal", label: "달력" },
+                  { value: "table", label: "표" },
+                ]}
+                onChange={setView}
+              />
               <div className="jrn-tl-right">
                 <span>{tlMetaText}</span>
                 {view === "table" && (
-                  <div className="jrn-seg" role="group" aria-label="표 묶음 단위">
-                    {(["day", "month", "year", "sym"] as const).map((g) => (
-                      <button key={g} type="button" aria-pressed={grain === g} onClick={() => setGrain(g)}>
-                        {g === "day" ? "일별" : g === "month" ? "월별" : g === "year" ? "연별" : "종목별"}
-                      </button>
-                    ))}
-                  </div>
+                  <Segmented
+                    label="표 묶음 단위"
+                    mode="pressed"
+                    size="sm"
+                    value={grain}
+                    options={[
+                      { value: "day", label: "일별" },
+                      { value: "month", label: "월별" },
+                      { value: "year", label: "연별" },
+                      { value: "sym", label: "종목별" },
+                    ]}
+                    onChange={setGrain}
+                  />
                 )}
               </div>
             </div>
@@ -586,7 +598,7 @@ export function JournalAnalyticsView({
                         return (
                           <rect
                             key={i}
-                            className={b.v >= 0 ? "jrn-f-up" : "jrn-f-dn"}
+                            className={b.v > 0 ? "jrn-f-up" : b.v < 0 ? "jrn-f-dn" : "jrn-f-flat"}
                             x={b.x - flowModel.bw / 2}
                             y={b.v >= 0 ? flowModel.by0 - bh : flowModel.by0}
                             width={flowModel.bw}
@@ -644,7 +656,7 @@ export function JournalAnalyticsView({
                           <button
                             key={mo.ym}
                             type="button"
-                            className={`jrn-cal-c${mo.count > 0 ? (mo.pnl >= 0 ? " jrn-cal-up" : " jrn-cal-dn") : ""}`}
+                            className={`jrn-cal-c${mo.count > 0 ? (mo.pnl > 0 ? " jrn-cal-up" : mo.pnl < 0 ? " jrn-cal-dn" : "") : ""}`}
                             onClick={() => jumpToMonth(mo.firstDay)}
                           >
                             <div className="jrn-cal-top">
@@ -688,7 +700,7 @@ export function JournalAnalyticsView({
                                   key={c.day}
                                   type="button"
                                   data-testid={`analytics-cal-day-${c.day}`}
-                                  className={`jrn-cal-c${c.inRange ? "" : " jrn-cal-out"}${c.count > 0 ? (c.pnl >= 0 ? " jrn-cal-up" : " jrn-cal-dn") : ""}`}
+                                  className={`jrn-cal-c${c.inRange ? "" : " jrn-cal-out"}${c.count > 0 ? (c.pnl > 0 ? " jrn-cal-up" : c.pnl < 0 ? " jrn-cal-dn" : "") : ""}`}
                                   aria-pressed={period.type === "day" && range[0] === c.day}
                                   onClick={() => jumpToDay(c.day)}
                                 >

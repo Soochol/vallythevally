@@ -29,13 +29,13 @@ export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }:
   const isOwnToggle = (target: Node) => target instanceof Element && target.closest("[data-indicator-command=toggle]")?.closest("[data-indicator-row]")?.getAttribute("data-indicator-row") === initial.id && editRoot.contains(target);
 
   return <Popover isInside={(target) => target instanceof Element && editRoot.contains(target.closest("[data-indicator-edit]"))} releasesClick={isOwnToggle} anchor={trigger} solid follow fitBelow={MIN_ROOM_BELOW} onClose={close} role="dialog" aria-label={`${specName(initial.spec)} 설정`} data-chart-control="" className="ip-popover">
-    <div className="ip-body">
-    <div className="mb-3 flex items-center gap-2">
+    <div className="ip-head">
       <h3 className="flex-1 text-m font-semibold">{KINDS[initial.spec.kind].label}</h3>
-      <button type="button" className="icon-btn" aria-label={shown ? "지표 숨기기" : "지표 보이기"} aria-pressed={!shown} title={shown ? "숨기기" : "보이기"} onClick={() => useLayoutStore.getState().updateIndicator(cellId, initial.id, { visible: !shown })}><EyeIcon size={16} off={!shown} /></button>
-      <button type="button" className="icon-btn text-danger" aria-label="지표 지우기" title="지우기" onClick={() => { useLayoutStore.getState().removeIndicator(cellId, initial.id); onClose(); }}><Icon path={DRAWING_ICONS.trash} size={16} /></button>
-      <button type="button" className="icon-btn" aria-label="설정 닫기" onClick={() => close()}><CloseIcon size={16} /></button>
+      <button type="button" className="icon-btn" aria-label={shown ? "지표 숨기기" : "지표 보이기"} aria-pressed={!shown} title={shown ? "숨기기" : "보이기"} onClick={() => useLayoutStore.getState().updateIndicator(cellId, initial.id, { visible: !shown })}><EyeIcon size={15} off={!shown} /></button>
+      <button type="button" className="icon-btn text-danger" aria-label="지표 지우기" title="지우기" onClick={() => { useLayoutStore.getState().removeIndicator(cellId, initial.id); onClose(); }}><Icon path={DRAWING_ICONS.trash} size={15} /></button>
+      <button type="button" className="icon-btn" aria-label="설정 닫기" onClick={() => close()}><CloseIcon size={14} /></button>
     </div>
+    <div className="ip-body">
     <div role="group" aria-label="설정값" className="flex flex-col gap-3">
       <IndicatorSettingsForm draft={draft} color={color} errors={check.errors} onChange={setDraft} foldColors />
       {check.errors.filter((error) => !KINDS[draft.form.kind].fields.some((f) => f.key === error.field)).map((error, i) => <p key={i} className="text-s text-danger">{error.message}</p>)}
