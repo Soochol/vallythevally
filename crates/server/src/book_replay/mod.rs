@@ -16,13 +16,18 @@ use axum::routing::get;
 use domain::{KstDate, StockCode, Symbol};
 
 use crate::api;
+use crate::collected::TradeWindowQuery;
 use crate::collected_store::{CollectedStore, DayIndexState, FileStamp, StampLru, read_stamp};
-use crate::http::{ApiFailure, AppState};
+use crate::http::{ApiFailure, AppState, venue_param};
+use crate::quotes::effective_venue;
 
 const SPAN_CACHE_CAPACITY: usize = 64;
 const IMMUTABLE_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
 const LIVE_CACHE_CONTROL: &str = "no-store";
 const ZSTD_SPAN_LEVEL: i32 = 3;
+const MAX_SECOND_OF_DAY: u32 = 86_399;
+const DEFAULT_TRADE_LIMIT: usize = 200;
+const MAX_TRADE_LIMIT: usize = 500;
 
 #[derive(Clone)]
 struct EncodedSpan {
@@ -60,6 +65,8 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/symbols/{code}/book-replay/days", get(days))
         .route("/api/symbols/{code}/book-replay/meta", get(day_meta))
         .route("/api/symbols/{code}/book-replay/span", get(day_span))
+        .route("/api/symbols/{code}/book-replay/trades", get(day_trades))
+        .route("/api/symbols/{code}/book-replay/program", get(day_program))
         .route("/api/symbols/{code}/book-replay", get(day_replay))
 }
 
@@ -122,6 +129,118 @@ fn parse_start_minute(q: &HashMap<String, String>) -> Result<u16, ApiFailure> {
         )));
     }
     Ok(minute)
+}
+
+fn parse_until_sec(q: &HashMap<String, String>) -> Result<u32, ApiFailure> {
+    let raw = q
+        .get("untilSec")
+        .map(String::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ApiFailure::bad_request("untilSec 쿼리가 필요합니다"))?;
+    let sec: u32 = raw
+        .parse()
+        .map_err(|_| ApiFailure::bad_request(format!("untilSec는 0~{MAX_SECOND_OF_DAY} 정수여야 합니다: {raw}")))?;
+    if sec > MAX_SECOND_OF_DAY {
+        return Err(ApiFailure::bad_request(format!("untilSec는 0~{MAX_SECOND_OF_DAY} 범위여야 합니다: {sec}")));
+    }
+    Ok(sec)
+}
+
+fn parse_min_won(q: &HashMap<String, String>) -> Result<u64, ApiFailure> {
+    match q.get("minWon") {
+        None => Ok(0),
+        Some(raw) => raw
+            .parse::<u64>()
+            .map_err(|_| ApiFailure::bad_request(format!("minWon은 0 이상의 정수여야 합니다: {raw}"))),
+    }
+}
+
+fn parse_trade_limit(q: &HashMap<String, String>) -> Result<usize, ApiFailure> {
+    match q.get("limit") {
+        None => Ok(DEFAULT_TRADE_LIMIT),
+        Some(raw) => raw
+            .parse::<usize>()
+            .ok()
+            .filter(|n| (1..=MAX_TRADE_LIMIT).contains(n))
+            .ok_or_else(|| ApiFailure::bad_request(format!("limit은 1~{MAX_TRADE_LIMIT}입니다: {raw}"))),
+    }
+}
+
+fn resolve_venue(st: &AppState, code: StockCode, requested: domain::Venue) -> domain::Venue {
+    if requested != domain::Venue::Nxt {
+        return requested;
+    }
+    let Some(directory) = st.symbols.updates().borrow().clone() else {
+        return requested;
+    };
+    let nxt_enabled = directory.get(Symbol::Stock(code)).is_some_and(|info| info.nxt_enabled);
+    effective_venue(requested, nxt_enabled)
+}
+
+async fn day_trades(
+    State(st): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<api::BookReplayTrades>, ApiFailure> {
+    let _ = replay_dirs(&st)?;
+    let stock = parse_stock(&code)?;
+    let (date_str, date, _) = parse_date_query(&q)?;
+    let until_sec = parse_until_sec(&q)?;
+    let requested_venue = venue_param(&q)?.unwrap_or(domain::Venue::Combined);
+    let venue = resolve_venue(&st, stock, requested_venue);
+    let min_won = parse_min_won(&q)?;
+    let limit = parse_trade_limit(&q)?;
+    let slice = st
+        .collected
+        .ticks_window_at(
+            st.collector_paths.snapshot(),
+            TradeWindowQuery {
+                stock,
+                date,
+                date_str: date_str.clone(),
+                until_sec,
+                venue,
+                min_won,
+                limit,
+                now: st.clock.now(),
+            },
+        )
+        .await
+        .map_err(|e| internal_error("호가 복기 체결 자료를 읽지 못했습니다", e))?;
+    Ok(Json(api::BookReplayTrades {
+        symbol: symbol_code(stock),
+        date: date_str,
+        coverage: slice.coverage,
+        venue: venue.into(),
+        gaps: slice.gaps,
+        cum_volume: slice.cum_volume,
+        cum_buy_qty: slice.cum_buy_qty,
+        cum_sell_qty: slice.cum_sell_qty,
+        strength: slice.strength,
+        trades: slice.trades,
+    }))
+}
+
+async fn day_program(
+    State(st): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<api::BookReplayProgramDay>, ApiFailure> {
+    let _ = replay_dirs(&st)?;
+    let stock = parse_stock(&code)?;
+    let (date_str, date, _) = parse_date_query(&q)?;
+    let slice = st
+        .collected
+        .program_replay_day(st.collector_paths.snapshot(), stock, date, &date_str, st.clock.now())
+        .await
+        .map_err(|e| internal_error("호가 복기 프로그램 자료를 읽지 못했습니다", e))?;
+    Ok(Json(api::BookReplayProgramDay {
+        symbol: symbol_code(stock),
+        date: date_str,
+        coverage: slice.coverage,
+        gaps: slice.gaps,
+        rows: slice.rows,
+    }))
 }
 
 async fn access(State(st): State<Arc<AppState>>) -> Json<api::BookReplayAccess> {

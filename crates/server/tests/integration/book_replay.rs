@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{Router, body::Body, http::Request};
-use domain::KstDate;
+use domain::{KstDate, Market, Symbol, SymbolInfo, SymbolKind};
 use duckdb::Connection;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -15,7 +15,7 @@ use server::http::router;
 use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::stream::KiwoomStream;
-use server::symbols::SymbolDirectory;
+use server::symbols::{Directory, SymbolDirectory};
 use support::ScriptedTransport;
 use tower::ServiceExt;
 
@@ -28,6 +28,7 @@ fn at(hour: u32, minute: u32, second: u32) -> i64 {
 struct Harness {
     app: Router,
     fake: ScriptedTransport,
+    symbols: Arc<SymbolDirectory>,
     data: PathBuf,
     _tmp: tempfile::TempDir,
 }
@@ -44,12 +45,21 @@ impl Harness {
         let (_events, events) = tokio::sync::mpsc::channel(1);
         let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
         let symbols = Arc::new(SymbolDirectory::default());
-        let state = application(ApplicationInputs { rest, clock, symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
+        let state = application(ApplicationInputs {
+            rest,
+            clock,
+            symbols: Arc::clone(&symbols),
+            db,
+            screener_store: store,
+            stream: (stream, events),
+            static_dir: tmp.path().to_owned(),
+            screener_update_on_connect: false,
+        });
         let data = tmp.path().join("hoga");
         if enabled {
             state.collector_paths.configure(server::shared_data::CollectorPaths::hoga_only(data.clone()));
         }
-        Harness { app: router(state), fake, data, _tmp: tmp }
+        Harness { app: router(state), fake, symbols, data, _tmp: tmp }
     }
 
     async fn get(&self, path: &str) -> (u16, Value) {
@@ -197,4 +207,248 @@ async fn replay_is_off_without_a_data_folder() {
         let (status, body) = on.get(path).await;
         assert_eq!((status, &body["error"]["code"]), (400, &json!("bad_request")), "{path} {body}");
     }
+}
+
+fn detailed_trade_sql(symbol: &str, recv_ms: i64, time: &str, price: i64, quantity: i64, plus: bool, exchange: Option<&str>) -> String {
+    let venue_sql = match exchange {
+        Some(v) => format!("'{v}'::VARCHAR"),
+        None => "CAST(NULL AS VARCHAR)".to_owned(),
+    };
+    format!(
+        "SELECT '{symbol}' AS symbol, {recv_ms}::BIGINT AS recv_ms, '{time}' AS f20, ({price})::BIGINT AS f10, ({quantity})::BIGINT AS f15, {plus}::BOOLEAN AS f15_plus, {venue_sql} AS f9081"
+    )
+}
+
+struct ProgramSqlSpec<'a> {
+    symbol: &'a str,
+    recv_ms: i64,
+    time: &'a str,
+    price: Option<i64>,
+    sell_qty: i64,
+    buy_qty: i64,
+    net_qty: i64,
+    net_change: i64,
+    net_amt_million: i64,
+}
+
+fn program_sql(spec: ProgramSqlSpec<'_>) -> String {
+    let price_sql = match spec.price {
+        Some(p) => format!("({p})::BIGINT"),
+        None => "CAST(NULL AS BIGINT)".to_owned(),
+    };
+    format!(
+        "SELECT '{}' AS symbol, {}::BIGINT AS recv_ms, '{}' AS f20, {price_sql} AS f10, ({})::BIGINT AS f202, 0::BIGINT AS f204, ({})::BIGINT AS f206, 0::BIGINT AS f208, ({})::BIGINT AS f210, ({})::BIGINT AS f211, ({})::BIGINT AS f212, 0::BIGINT AS f213",
+        spec.symbol, spec.recv_ms, spec.time, spec.sell_qty, spec.buy_qty, spec.net_qty, spec.net_change, spec.net_amt_million
+    )
+}
+
+#[tokio::test]
+async fn closed_day_trades_filter_by_cutoff_venue_min_won_and_limit() {
+    let harness = Harness::start(true).await;
+    harness.symbols.replace(Directory::build(vec![
+        SymbolInfo { symbol: Symbol::parse("005930").unwrap(), name: "삼성전자".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: true },
+        SymbolInfo { symbol: Symbol::parse("035420").unwrap(), name: "NAVER".into(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled: false },
+    ]));
+    let folder = harness.day_folder("20261123");
+    let gaps = json!([{"from_ms": at(9, 10, 0), "to_ms": at(9, 12, 30)}]);
+    write_complete(
+        &folder,
+        20_261_123,
+        vec![
+            stock("005930", true, gaps),
+            stock("035420", true, json!([])),
+            stock("000660", false, json!([])),
+        ],
+    );
+
+    let samsung_trades = vec![
+        detailed_trade_sql("005930_AL", at(9, 0, 5), "090005", 100_000, 1_100, true, Some("KRX")),
+        detailed_trade_sql("005930_AL", at(9, 1, 10), "090110", 100_000, 400, true, Some("NXT")),
+        detailed_trade_sql("005930_AL", at(9, 2, 0), "090200", 100_000, -500, false, Some("KRX")),
+        detailed_trade_sql("005930_AL", at(9, 2, 10) + 999, "090210", 100_000, 100, false, None),
+        detailed_trade_sql("005930_AL", at(9, 2, 11), "090211", 100_000, 999, true, Some("KRX")),
+    ];
+    write_parquet(&folder.join("0B").join(SAMSUNG_BUCKET), &samsung_trades);
+
+    let naver_bucket = format!("{:03}.parquet", fnv1a_test_bucket("035420_AL"));
+    let naver_trades = vec![
+        detailed_trade_sql("035420_AL", at(9, 0, 1), "090001", 200_000, 10, true, Some("KRX")),
+        detailed_trade_sql("035420_AL", at(9, 0, 2), "090002", 200_000, 5, true, Some("NXT")),
+    ];
+    write_parquet(&folder.join("0B").join(&naver_bucket), &naver_trades);
+
+    let (status, body) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["symbol"], json!("005930"));
+    assert_eq!(body["date"], json!("20261123"));
+    assert_eq!(body["coverage"], json!("collected"));
+    assert_eq!(body["venue"], json!("combined"));
+    assert_eq!(body["gaps"], json!([[kst(KstDate::new(2026, 11, 23).unwrap(), 9, 10, 0).unix(), kst(KstDate::new(2026, 11, 23).unwrap(), 9, 12, 30).unix()]]));
+    assert_eq!(body["cumVolume"], json!(2_100));
+    assert_eq!(body["cumBuyQty"], json!(1_500));
+    assert_eq!(body["cumSellQty"], json!(500));
+    assert_eq!(body["strength"], json!(300.0));
+    assert_eq!(
+        body["trades"],
+        json!([
+            {"secondOfDay": 32_530, "price": 100_000, "quantity": 100, "side": "none", "venue": null},
+            {"secondOfDay": 32_520, "price": 100_000, "quantity": 500, "side": "sell", "venue": "krx"},
+            {"secondOfDay": 32_470, "price": 100_000, "quantity": 400, "side": "buy", "venue": "nxt"},
+            {"secondOfDay": 32_405, "price": 100_000, "quantity": 1_100, "side": "buy", "venue": "krx"},
+        ])
+    );
+
+    let (status, capped) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530&limit=2").await;
+    assert_eq!(status, 200, "{capped}");
+    assert_eq!(capped["cumVolume"], json!(2_100));
+    assert_eq!(capped["trades"].as_array().unwrap().len(), 2);
+    assert_eq!(capped["trades"][0]["secondOfDay"], json!(32_530));
+    assert_eq!(capped["trades"][1]["secondOfDay"], json!(32_520));
+
+    let (status, krx) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530&venue=krx").await;
+    assert_eq!(status, 200, "{krx}");
+    assert_eq!(krx["venue"], json!("krx"));
+    assert_eq!(krx["cumVolume"], json!(1_600));
+    assert_eq!(krx["cumBuyQty"], json!(1_100));
+    assert_eq!(krx["cumSellQty"], json!(500));
+    assert!((krx["strength"].as_f64().unwrap() - 220.0).abs() < 1e-9, "{krx}");
+    assert_eq!(krx["trades"].as_array().unwrap().len(), 2);
+
+    let (status, nxt) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530&venue=nxt").await;
+    assert_eq!(status, 200, "{nxt}");
+    assert_eq!(nxt["venue"], json!("nxt"));
+    assert_eq!(nxt["cumVolume"], json!(400));
+    assert_eq!(nxt["cumBuyQty"], json!(400));
+    assert_eq!(nxt["cumSellQty"], json!(0));
+    assert_eq!(nxt["strength"], json!(500.0));
+    assert_eq!(nxt["trades"].as_array().unwrap().len(), 1);
+
+    let (status, fallback) = harness.get("/api/symbols/035420/book-replay/trades?date=20261123&untilSec=32530&venue=nxt").await;
+    assert_eq!(status, 200, "{fallback}");
+    assert_eq!(fallback["venue"], json!("combined"));
+    assert_eq!(fallback["cumVolume"], json!(15));
+    assert_eq!(fallback["strength"], json!(500.0));
+    assert_eq!(fallback["trades"].as_array().unwrap().len(), 2);
+
+    let (status, min30) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530&minWon=30000000").await;
+    assert_eq!(status, 200, "{min30}");
+    assert_eq!(min30["cumVolume"], json!(2_100));
+    assert_eq!(min30["trades"].as_array().unwrap().len(), 3);
+
+    let (status, min100) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32530&minWon=100000000").await;
+    assert_eq!(status, 200, "{min100}");
+    assert_eq!(min100["cumVolume"], json!(2_100));
+    assert_eq!(
+        min100["trades"],
+        json!([{"secondOfDay": 32_405, "price": 100_000, "quantity": 1_100, "side": "buy", "venue": "krx"}])
+    );
+
+    let (status, early) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32400").await;
+    assert_eq!(status, 200, "{early}");
+    assert_eq!((&early["cumVolume"], &early["strength"], &early["trades"]), (&json!(0), &json!(null), &json!([])));
+
+    let (status, missing_sym) = harness.get("/api/symbols/000660/book-replay/trades?date=20261123&untilSec=32530").await;
+    assert_eq!((status, &missing_sym["coverage"]), (200, &json!("symbol_not_collected")));
+
+    let (status, missing_day) = harness.get("/api/symbols/005930/book-replay/trades?date=20261122&untilSec=32530").await;
+    assert_eq!((status, &missing_day["coverage"]), (200, &json!("day_not_collected")));
+
+    let unsupported = harness.day_folder("20261121");
+    std::fs::create_dir_all(&unsupported).unwrap();
+    std::fs::write(unsupported.join("complete.json"), r#"{"format_version":99,"stocks":[]}"#).unwrap();
+    let (status, bad_ver) = harness.get("/api/symbols/005930/book-replay/trades?date=20261121&untilSec=32530").await;
+    assert_eq!((status, &bad_ver["coverage"]), (200, &json!("day_not_collected")));
+}
+
+#[tokio::test]
+async fn closed_day_program_returns_rows_gaps_and_coverage() {
+    let harness = Harness::start(true).await;
+    let folder = harness.day_folder("20261123");
+    let gaps = json!([{"from_ms": at(10, 0, 0), "to_ms": at(10, 5, 0)}]);
+    write_complete(&folder, 20_261_123, vec![stock("005930", true, gaps), stock("000660", false, json!([]))]);
+    let rows = vec![
+        program_sql(ProgramSqlSpec {
+            symbol: "005930_AL",
+            recv_ms: at(9, 0, 30),
+            time: "090030",
+            price: Some(71_000),
+            sell_qty: 100,
+            buy_qty: 350,
+            net_qty: 250,
+            net_change: 250,
+            net_amt_million: 18,
+        }),
+        program_sql(ProgramSqlSpec {
+            symbol: "005930_AL",
+            recv_ms: at(9, 1, 0),
+            time: "090100",
+            price: None,
+            sell_qty: 200,
+            buy_qty: 350,
+            net_qty: 150,
+            net_change: -100,
+            net_amt_million: 11,
+        }),
+    ];
+    write_parquet(&folder.join("0w").join(SAMSUNG_BUCKET), &rows);
+
+    let (status, body) = harness.get("/api/symbols/005930/book-replay/program?date=20261123").await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["symbol"], json!("005930"));
+    assert_eq!(body["date"], json!("20261123"));
+    assert_eq!(body["coverage"], json!("collected"));
+    assert_eq!(body["gaps"], json!([[kst(KstDate::new(2026, 11, 23).unwrap(), 10, 0, 0).unix(), kst(KstDate::new(2026, 11, 23).unwrap(), 10, 5, 0).unix()]]));
+    assert_eq!(
+        body["rows"],
+        json!([
+            {"secondOfDay": 32_430, "price": 71_000, "buyQty": 350, "sellQty": 100, "netQty": 250, "netQtyChange": 250, "netAmountMillionWon": 18},
+            {"secondOfDay": 32_460, "price": null, "buyQty": 350, "sellQty": 200, "netQty": 150, "netQtyChange": -100, "netAmountMillionWon": 11},
+        ])
+    );
+
+    let (status, missing_sym) = harness.get("/api/symbols/000660/book-replay/program?date=20261123").await;
+    assert_eq!((status, &missing_sym["coverage"]), (200, &json!("symbol_not_collected")));
+
+    let (status, missing_day) = harness.get("/api/symbols/005930/book-replay/program?date=20261122").await;
+    assert_eq!((status, &missing_day["coverage"]), (200, &json!("day_not_collected")));
+}
+
+#[tokio::test]
+async fn trades_and_program_validate_inputs_and_respect_disabled_flag() {
+    let off = Harness::start(false).await;
+    for path in [
+        "/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32400",
+        "/api/symbols/005930/book-replay/program?date=20261123",
+    ] {
+        let (status, body) = off.get(path).await;
+        assert_eq!((status, &body["error"]["code"]), (404, &json!("not_found")), "{path} {body}");
+    }
+
+    let on = Harness::start(true).await;
+    for path in [
+        "/api/symbols/005930/book-replay/trades?date=20261123",
+        "/api/symbols/005930/book-replay/trades?date=20261123&untilSec=86400",
+        "/api/symbols/005930/book-replay/trades?date=20261123&untilSec=-1",
+        "/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32400&venue=other",
+        "/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32400&minWon=-5",
+        "/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32400&limit=0",
+        "/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32400&limit=501",
+        "/api/symbols/005930/book-replay/trades?date=2026-11-23&untilSec=32400",
+        "/api/symbols/IDX:001/book-replay/trades?date=20261123&untilSec=32400",
+        "/api/symbols/005930/book-replay/program",
+        "/api/symbols/005930/book-replay/program?date=bad",
+        "/api/symbols/IDX:001/book-replay/program?date=20261123",
+    ] {
+        let (status, body) = on.get(path).await;
+        assert_eq!((status, &body["error"]["code"]), (400, &json!("bad_request")), "{path} {body}");
+    }
+}
+
+fn fnv1a_test_bucket(symbol: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in symbol.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash % 64
 }

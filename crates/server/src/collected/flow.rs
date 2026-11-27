@@ -144,6 +144,30 @@ impl<K: CollectedKind> FlowCache<K> {
         now: KstTime,
         after: Option<(u64, usize)>,
     ) -> Result<Option<FlowSlice<K::View>>, String> {
+        self.with_tail(shared_dir, date, date_str, symbol, now, |tail| tail.slice(after))
+    }
+
+    pub(super) fn read_with<R>(
+        &self,
+        shared_dir: &Path,
+        date: KstDate,
+        date_str: &str,
+        symbol: &str,
+        now: KstTime,
+        f: impl FnOnce(&[(i64, K::View)], &[[i64; 2]]) -> R,
+    ) -> Result<Option<R>, String> {
+        self.with_tail(shared_dir, date, date_str, symbol, now, |tail| f(&tail.rows, &tail.gaps))
+    }
+
+    fn with_tail<R>(
+        &self,
+        shared_dir: &Path,
+        date: KstDate,
+        date_str: &str,
+        symbol: &str,
+        now: KstTime,
+        f: impl FnOnce(&FlowTail<K::View>) -> R,
+    ) -> Result<Option<R>, String> {
         let cache_key = (date_str.to_owned(), symbol.to_owned());
         let tail_arc = {
             let mut entries = self.entries.lock().expect("collected flow cache");
@@ -162,7 +186,7 @@ impl<K: CollectedKind> FlowCache<K> {
         };
         let mut tail = tail_arc.lock().expect("collected flow tail");
         if tail.initialized && now.unix() - tail.last_read.unix() < READ_INTERVAL_SECS {
-            return Ok(Some(tail.slice(after)));
+            return Ok(Some(f(&tail)));
         }
         let discovered = list_key_files(shared_dir, date_str, K::TYPE_CODE, symbol)?;
         if discovered.is_empty() {
@@ -176,7 +200,7 @@ impl<K: CollectedKind> FlowCache<K> {
         let needs_reset = !tail.initialized || tail.keys.keys().any(|existing| !discovered.contains_key(existing));
         if needs_reset {
             self.rebuild_tail(&mut tail, discovered, shared_dir, date, date_str, symbol, now);
-            return Ok(Some(tail.slice(after)));
+            return Ok(Some(f(&tail)));
         }
         for (key, path) in &discovered {
             tail.keys.entry(key.clone()).or_insert_with(|| KeyTail::new(path.clone()));
@@ -184,7 +208,7 @@ impl<K: CollectedKind> FlowCache<K> {
         let (new_rows, restarted) = read_all_keys::<K>(&mut tail.keys, symbol);
         if restarted {
             self.rebuild_tail(&mut tail, discovered, shared_dir, date, date_str, symbol, now);
-            return Ok(Some(tail.slice(after)));
+            return Ok(Some(f(&tail)));
         }
         let reordered = merge_into_rows(&mut tail.rows, new_rows);
         if reordered {
@@ -194,7 +218,7 @@ impl<K: CollectedKind> FlowCache<K> {
         tail.gaps = gaps;
         tail.live = live;
         tail.last_read = now;
-        Ok(Some(tail.slice(after)))
+        Ok(Some(f(&tail)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -564,5 +588,24 @@ mod tests {
         assert_eq!(tail.link_events.len(), 2);
         assert_eq!(tail.link_events[0].event, FlowLinkEvent::Live);
         assert_eq!(tail.link_events[1].event, FlowLinkEvent::Alive);
+    }
+
+    #[test]
+    fn read_with_borrows_cached_rows_and_gaps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let date = KstDate::new(2026, 11, 24).unwrap();
+        let fids: Vec<u32> = (141..=180).collect();
+        let path = flow_path(tmp.path(), "20261124", Brokers::TYPE_CODE, "005930", "k1");
+        FlowWriter::open(&path, FlowDescription::new(Brokers::TYPE_CODE, "005930", "20261124", "k1", &fids))
+            .unwrap()
+            .append(&[sample_row(ts(9, 0, 1), "10"), sample_row(ts(9, 0, 2), "25")])
+            .unwrap();
+        write_links_file(tmp.path(), "k1", &[(ts(8, 0, 0), "live"), (ts(9, 59, 50), "alive")]);
+        let cache: FlowCache<Brokers> = FlowCache::new();
+        let summary = cache
+            .read_with(tmp.path(), date, "20261124", "005930", ts(10, 0, 0), |rows, gaps| (rows.len(), gaps.len()))
+            .unwrap();
+        assert_eq!(summary, Some((2, 0)));
+        assert_eq!(cache.read_with(tmp.path(), date, "20261124", "000660", ts(10, 0, 0), |rows, _| rows.len()).unwrap(), None);
     }
 }

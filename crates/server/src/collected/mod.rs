@@ -5,4 +5,4 @@ mod source;
 mod store;
 
 pub use routes::routes;
-pub use source::{Collected, DaySlice};
+pub use source::{Collected, DaySlice, ProgramDaySlice, TradeWindowQuery, TradeWindowSlice};
