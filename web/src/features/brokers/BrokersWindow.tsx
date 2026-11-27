@@ -17,6 +17,7 @@ import { BoardView } from "./BoardView";
 import { DetailTable } from "./DetailTable";
 import { ListView } from "./ListView";
 import { TableView } from "./TableView";
+import { TransferView } from "./TransferView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "./board";
 import { type BrokerSyncTarget, resolveBrokerSyncTarget, useBrokerChartPointer } from "./chartSync";
 import { formatMonthDay, kstDateOf, priceAt } from "./history";
@@ -27,6 +28,7 @@ const VIEW_OPTIONS: readonly SegmentOption<BrokerView>[] = [
   { value: "board", label: "입체" },
   { value: "list", label: "거래원" },
   { value: "table", label: "기본" },
+  { value: "transfer", label: "이동" },
 ];
 
 const CARD_OPTIONS: readonly SegmentOption<BrokerCards>[] = [
@@ -83,13 +85,6 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const syncedCursor = syncTarget.kind === "synced" ? syncTarget.cursor : null;
   const effectiveCursor = localCursor ?? syncedCursor;
 
-  const day = useBrokerDay(code, activeDate, isToday, onWorkspace, allowFallback);
-  const isFallback = day.mode === "fallback" && day.date !== null;
-  const displayDate = isFallback ? day.date : activeDate;
-  const displayIsToday = isToday && !isFallback;
-  const minuteBarsEnabled = !chartSync || selected !== null || localCursor !== null;
-  const bars = useBrokerMinuteBars(code, displayDate, displayIsToday, onWorkspace && day.source !== "store", minuteBarsEnabled);
-
   const view = useLayoutStore((s) => {
     const win = s.layout.windows.find((w) => w.id === id);
     return win?.kind === "brokers" ? (win.view ?? "board") : "board";
@@ -100,6 +95,13 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   });
   const setBrokersView = useLayoutStore((s) => s.setBrokersView);
   const setBrokersCards = useLayoutStore((s) => s.setBrokersCards);
+
+  const day = useBrokerDay(code, activeDate, isToday, onWorkspace, allowFallback);
+  const isFallback = day.mode === "fallback" && day.date !== null;
+  const displayDate = isFallback ? day.date : activeDate;
+  const displayIsToday = isToday && !isFallback;
+  const minuteBarsEnabled = !chartSync || selected !== null || localCursor !== null || view === "transfer";
+  const bars = useBrokerMinuteBars(code, displayDate, displayIsToday, onWorkspace && day.source !== "store", minuteBarsEnabled);
 
   const grid = day.state.grid;
   const staleDay = day.mode === "collected" && day.date !== null && day.date !== activeDate;
@@ -205,6 +207,9 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
       )}
       {showContent && view === "table" && (
         <TableView snapshots={grid.snapshots} cursor={displayCursor} />
+      )}
+      {showContent && view === "transfer" && (
+        <TransferView snapshots={grid.snapshots} gapBefore={grid.gapBefore} gaps={gaps} bars={bars} axis={axis} />
       )}
     </div>
   );
