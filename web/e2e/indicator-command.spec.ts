@@ -231,3 +231,36 @@ test("이 칸에 띄운 지표 탭과 지표 추가 탭에서 각각 현재 탭 
   await expect(dialog.getByRole("tab", { name: "지표 추가", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(dialog.getByRole("option", { name: "RSI 14 추가 후보", exact: true })).toBeVisible();
 });
+
+test("우측 도킹에서 이동평균선 그룹 편집기를 열어도 React 오류 없이 선을 편집·추가할 수 있다", async ({ page, scenario }) => {
+  useCenterIndicatorWindow(scenario);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  await page.getByRole("button", { name: "지표", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  await dialog.getByRole("tab", { name: "지표 추가", exact: true }).click();
+  const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
+  await input.fill("이평 20");
+  await input.press("Enter");
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "ma"]);
+
+  await dialog.getByRole("button", { name: "차트 오른쪽에 도킹", exact: true }).click();
+  const dock = page.getByRole("complementary", { name: "차트 우측 설정 패널" });
+  await expect(dock).toBeVisible();
+  await dock.getByRole("tab", { name: /^적용됨/ }).click();
+  await dock.getByRole("button", { name: "이동평균선 (1)", exact: true }).click();
+
+  await expect(dock.getByRole("heading", { name: "이동평균선 (1)", exact: true })).toBeVisible();
+  await dock.getByRole("textbox", { name: "추가할 이동평균 기간", exact: true }).fill("60");
+  await dock.getByRole("button", { name: "이동평균선 추가", exact: true }).click();
+  await expect(dock.getByRole("heading", { name: "이동평균선 (2)", exact: true })).toBeVisible();
+  await pollSaved(async () => (await settings(scenario)).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.spec)).toEqual([
+    { kind: "ma", method: "sma", period: 20 },
+    { kind: "ma", method: "sma", period: 60 },
+  ]);
+  expect(errors).toEqual([]);
+});
