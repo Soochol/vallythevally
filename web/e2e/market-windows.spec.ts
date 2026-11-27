@@ -270,3 +270,43 @@ test("키움 연결 전 시세 창에는 연결 버튼이 있고 누르면 키�
   await gate.getByRole("button", { name: "연결" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
 });
+
+test("차트가 연동 끔 상태인 레이아웃에서 프로그램 체결 창을 열면 고아 연동 색 없이 활성 차트 종목을 바로 보인다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
+    ...layout.windows.filter((w) => w.kind !== "chart"),
+  ];
+  scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+  serve(scenario);
+  await start(page);
+
+  await addWindow(page, "program");
+  const program = page.getByTestId("program-window");
+  await expect(program).toBeVisible();
+  await expect(page.getByText("연동된 종목이 없습니다")).toHaveCount(0);
+  await expect(program).toHaveAttribute("data-symbol", CODE);
+  await expect(program.getByTestId("market-symbol-name")).toHaveText(NAME);
+  await expect(windowTabs(page).locator('[role=tab][data-window-id="program"] + .link-dot')).toHaveAccessibleName("연동 색: 끔");
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "program")).toEqual([{ id: "program", link: null, kind: "program" }]);
+});
+
+test("연동 차트를 끔으로 바꾼 뒤 프로그램 체결 창을 열고 새로고침해도 고아 연동 색 없이 종목을 유지한다", async ({ page, scenario }) => {
+  layoutWith(scenario);
+  serve(scenario);
+  await start(page);
+
+  await windowTabs(page).locator('[role=tab][data-window-id="cell-0"] + .link-dot').click();
+  await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^끔/ }).click();
+  await addWindow(page, "program");
+
+  const program = page.getByTestId("program-window");
+  await expect(program).toBeVisible();
+  await expect(program).toHaveAttribute("data-symbol", CODE);
+  await pollSaved(() => scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.filter((w) => w.kind === "program")).toEqual([{ id: "program", link: null, kind: "program" }]);
+
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByText("연동된 종목이 없습니다")).toHaveCount(0);
+  await expect(page.getByTestId("program-window")).toHaveAttribute("data-symbol", CODE);
+});
