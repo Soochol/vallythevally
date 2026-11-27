@@ -5,6 +5,7 @@ import { moveRect, resizeRect, type ResizeHandle } from "../../layout/canvas/sna
 import type { WindowId, WindowRef } from "../../layout/kinds";
 import type { CanvasPlacement, Rect } from "../../layout/placement";
 import { useLayoutStore, windowName, type WindowState } from "../../stores/layout";
+import { touchWindow } from "../../stores/activeWindow";
 import { ladderRateHidden, useUiStore } from "../../stores/ui";
 import { useSelectionStore } from "../../stores/selection";
 import { closeWindow } from "./manage";
@@ -89,7 +90,10 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
 
   useEffect(() => { setMaximization(null); }, [session, topology]);
 
-  const choose = (window: WindowState) => { if (window.kind === "chart") useSelectionStore.getState().setActiveCell(window.id); };
+  const choose = (window: WindowState) => {
+    touchWindow(window.id);
+    if (window.kind === "chart") useSelectionStore.getState().setActiveCell(window.id);
+  };
   const toggleMaximize = (window: WindowState) => {
     gesture.cancel();
     const state = useLayoutStore.getState();

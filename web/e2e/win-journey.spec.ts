@@ -161,7 +161,9 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
   expect((await boxOf(group(page, second.id))).y).toBeGreaterThan((await boxOf(group(page, "cell-0"))).y);
   await linked(page, "watchlist");
   await linked(page, "cell-0");
-  await linked(page, first.id);
+  await expect(tab(page, first.id).locator("+ .link-dot")).toHaveAccessibleName("연동 색: A");
+  await chooseLink(page, tab(page, second.id).locator("+ .link-dot"), "끔");
+  await expect(tab(page, second.id).locator("+ .link-dot")).toHaveAccessibleName("연동 색: 끔");
   await page.getByRole("complementary", { name: "관심종목" }).locator('li[data-code="035420"] [data-main]').click();
   await expect(cell(page)).toHaveAttribute("aria-label", /NAVER/);
   await expect(cell(page, 2)).toHaveAttribute("aria-label", /NAVER/);

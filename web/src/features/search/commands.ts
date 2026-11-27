@@ -33,7 +33,7 @@ export const screenerRunCommand = (editingOf: (client: QueryClient) => Pick<Scre
   run: async ({ queryClient }) => {
     const selection = useSelectionStore.getState();
     selection.setPhoneTab("screener");
-    useLayoutStore.getState().showWindow("screener");
+    useLayoutStore.getState().showWindow("screener", undefined, { activeWindow: selection.activeCell });
     const outcome = await editingOf(queryClient).run();
     const message = outcome.kind === "failed" ? outcome.message : RUN_TOAST[outcome.kind];
     if (message) selection.showToast(message);
@@ -102,7 +102,7 @@ export const defaultSearchCommands = (keys: ActionKeys): readonly SearchCommand[
         const next = cell && pressScale(cell.chartSettings, "log");
         if (next) layout.setScale(cellId, next);
       } }];
-      case "showWatchlist": return [{ id: "watch-panel", label, shortcut, group: "window", icon: ListIcon, run: () => useLayoutStore.getState().showWindow("watchlist") }];
+      case "showWatchlist": return [{ id: "watch-panel", label, shortcut, group: "window", icon: ListIcon, run: () => useLayoutStore.getState().showWindow("watchlist", undefined, { activeWindow: useSelectionStore.getState().activeCell }) }];
       case "systemSettings": return [{ id: "system-settings", label, keywords: "설정 키움 연결 키 system", shortcut, group: "system", icon: GearIcon, run: () => openSystemSettings() }];
       case "snapshot": return [{ id: `snapshot-${action.mode}`, label, shortcut, group: "chart", icon: action.mode === "copy" ? CopyIcon : CameraIcon, run: ({ cellId }) => saveSnapshot(cellId, action.mode) }];
       default: return [];

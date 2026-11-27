@@ -42,7 +42,7 @@ const BROKERS: FeedBrokers = { t: at("09:30:00"), buys: [{ code: "151", name: "í
 function layoutWith(scenario: Scenario, extra: LayoutWindow[] = []) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
-    { id: "cell-0", link: null, kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "cell-0", link: "a", kind: "chart", symbol: CODE, venue: "combined", period: "D", chartSettings: SETTINGS },
     ...layout.windows.filter((w) => w.kind !== "chart"),
     ...extra,
   ];

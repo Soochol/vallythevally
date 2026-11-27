@@ -35,6 +35,7 @@ export const floatPanelId = (id: WindowId) => `float-panel-${id}`;
 export const focusTab = (id: WindowId) => requestAnimationFrame(() => focusWithoutActivation(document.getElementById(`window-tab-${id}`) ?? document.querySelector<HTMLElement>(`[data-window-header="${id}"]`)));
 
 function choose(id: WindowId) {
+  touchWindow(id);
   if (useLayoutStore.getState().layout.windows.some((window) => window.id === id && window.kind === "chart")) useSelectionStore.getState().setActiveCell(id);
 }
 
@@ -45,7 +46,6 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
     current.current.onPick(id);
     useLayoutStore.getState().selectTab(id);
     choose(id);
-    touchWindow(id);
   };
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [dragging, setDragging] = useState(false);

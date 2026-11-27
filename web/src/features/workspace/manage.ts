@@ -1,5 +1,6 @@
 import { findGroup } from "../../layout/dock/tree";
 import { isSingleton, MAX_WINDOWS, type WindowId, type WindowKind } from "../../layout/kinds";
+import { touchWindow } from "../../stores/activeWindow";
 import { chartWindows, fittedDock, type DockRoom, useLayoutStore } from "../../stores/layout";
 import { type ToastUndo, useSelectionStore } from "../../stores/selection";
 import { currentDockGap } from "./size";
@@ -15,15 +16,25 @@ export function workspaceRoom(): DockRoom | null {
 }
 
 export function addWindow(kind: WindowKind, room: DockRoom | null, targetGroup?: string): WindowId | null {
+  const activeWindow = useSelectionStore.getState().activeCell;
   if (kind !== "chart") {
     const state = useLayoutStore.getState();
-    if (!isSingleton(kind)) return state.openWindow(kind, targetGroup);
+    if (!isSingleton(kind)) {
+      const id = state.openWindow(kind, targetGroup, { activeWindow });
+      if (id) touchWindow(id);
+      return id;
+    }
     if (targetGroup && useLayoutStore.getState().canvasArea === null && !findGroup(fittedDock(state.layout).root, targetGroup)) return null;
-    state.showWindow(kind, targetGroup);
-    return useLayoutStore.getState().layout.windows.find((window) => window.kind === kind)?.id ?? null;
+    state.showWindow(kind, targetGroup, { activeWindow });
+    const id = useLayoutStore.getState().layout.windows.find((window) => window.kind === kind)?.id ?? null;
+    if (id) touchWindow(id);
+    return id;
   }
-  const id = useLayoutStore.getState().addChart(useSelectionStore.getState().activeCell, room, targetGroup);
-  if (id) useSelectionStore.getState().setActiveCell(id);
+  const id = useLayoutStore.getState().addChart(activeWindow, room, targetGroup);
+  if (id) {
+    useSelectionStore.getState().setActiveCell(id);
+    touchWindow(id);
+  }
   return id;
 }
 
