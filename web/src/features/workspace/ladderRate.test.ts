@@ -20,7 +20,7 @@ const layout: EditableLayout = {
 beforeEach(() => {
   useUiStore.getState().load({ ...DEFAULT_UI_PREFS, layoutMode: "canvas" }, {});
   state().load(layout);
-  state().setWorkspaceArea({ w: 1440, h: 948 });
+  state().setWorkspaceArea({ w: 1440, h: 900 });
   state().setCanvasArea(area);
 });
 

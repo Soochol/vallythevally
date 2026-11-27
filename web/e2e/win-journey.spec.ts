@@ -174,9 +174,10 @@ test("하루의 창 편집을 두 방식과 이름 저장·다시 열기·새로
   await expect(frame(page, "cell-0")).toBeVisible();
   const source = await boxOf(head(page, "cell-0"));
   await drag(page, head(page, first.id), { x: source.x + 100, y: source.y + 60 });
-  await expect(page.getByRole("button", { name: /^가지런히/ }).locator(".ui-badge")).toHaveCount(1);
-  await page.getByRole("button", { name: /^가지런히/ }).click();
-  await expect(page.getByRole("button", { name: /^가지런히/ }).locator(".ui-badge")).toHaveCount(0);
+  await expect(arrangeButton(page).locator(".ui-badge")).toHaveCount(1);
+  await arrangeButton(page).click();
+  await arrangeMenu(page).getByRole("menuitem", { name: /^가지런히/ }).click();
+  await expect(arrangeButton(page).locator(".ui-badge")).toHaveCount(0);
   await pollSaved(() => placement(scenario).canvas).not.toBeNull();
   await layoutButton(page).click();
   await layoutMenu(page).getByRole("menuitem", { name: "새 이름으로 저장…", exact: true }).click();
@@ -266,7 +267,10 @@ for (const mode of MODES) {
     await page.addInitScript(installChartProbe);
     await page.goto("/");
     await ready(page, 8);
-    if (mode === "canvas") await page.getByRole("button", { name: /^가지런히/ }).click();
+    if (mode === "canvas") {
+      await arrangeButton(page).click();
+      await arrangeMenu(page).getByRole("menuitem", { name: /^가지런히/ }).click();
+    }
     await pollSaved(() => scenario.live.subscriptions().length).toBe(8);
     expect(scenario.live.bar("005930", bar(88_800))).toBe(8);
     for (let n = 1; n <= 8; n++) await expect(chartOf(cell(page, n))).toHaveAttribute("data-last-close", "88800");
@@ -277,14 +281,13 @@ for (const mode of MODES) {
       const x = probe.chart.timeScale().timeToCoordinate(time);
       const rect = probe.chart.chartElement().getBoundingClientRect();
       if (x === null) throw new Error("십자선을 보낼 봉이 없습니다");
-      return { x: rect.x + x, y: rect.y + rect.height * .65 };
+      return { x: rect.x + x, y: rect.y + rect.height * .45 };
     }, toChartTime(NOV9 - 86400));
     await page.mouse.move(point.x, point.y);
     for (let n = 2; n <= 8; n++) await expect(chartOf(cell(page, n)).locator("[data-synced-crosshair]")).toBeVisible();
     await topbar(page).getByRole("button", { name: "창 더하기", exact: true }).click();
     await expect(page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^차트/ })).toBeDisabled();
     await page.keyboard.press("Escape");
-    if (mode === "canvas") await expect(page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "차트 창 더하기" })).toBeDisabled();
     expect(charts(scenario)).toHaveLength(8);
   });
 
@@ -347,11 +350,8 @@ for (const mode of MODES) {
     const moved = await boxOf(mode === "dock" ? group(page, "screener") : frame(page, "watchlist"));
     expect(moved).not.toEqual(original);
     await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
-    if (mode === "canvas") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "지표 창 더하기" }).click();
-    else {
-      await topbar(page).getByRole("button", { name: "창 더하기", exact: true }).click();
-      await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
-    }
+    await topbar(page).getByRole("button", { name: "창 더하기", exact: true }).click();
+    await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
     await page.getByRole("button", { name: "지표 닫기", exact: true }).click();
     await expect.poll(() => page.getByRole("button", { name: "지표 닫기", exact: true }).count()).toBe(0);
     await expect(page.getByTestId("shell-banner")).toContainText("저장하지 못했습니다");
@@ -456,7 +456,10 @@ for (const mode of MODES) {
       await expect(cell(page, 4)).toHaveAttribute("aria-busy", "false");
       await expect(chartOf(cell(page, 4))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
     }
-    if (mode === "canvas") await page.getByRole("button", { name: /^가지런히/ }).click();
+    if (mode === "canvas") {
+      await arrangeButton(page).click();
+      await arrangeMenu(page).getByRole("menuitem", { name: /^가지런히/ }).click();
+    }
     await atSizes(page, testInfo, `${mode}-four-charts`);
     await noScroll(page);
   });

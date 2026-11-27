@@ -8,6 +8,18 @@ import { ladderRateHidden } from "../../stores/ui";
 import { watchPointerCapture } from "./pointerCapture";
 
 export type Point = { x: number; y: number };
+export type GestureCursor = "grabbing" | "ns-resize" | "ew-resize" | "nwse-resize" | "nesw-resize";
+
+export const RESIZE_CURSOR: Readonly<Record<ResizeHandle, GestureCursor>> = {
+  n: "ns-resize",
+  s: "ns-resize",
+  e: "ew-resize",
+  w: "ew-resize",
+  nw: "nwse-resize",
+  se: "nwse-resize",
+  ne: "nesw-resize",
+  sw: "nesw-resize",
+};
 
 export const NO_GUIDES: Guides = { x: null, y: null };
 

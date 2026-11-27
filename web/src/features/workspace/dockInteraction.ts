@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type MouseEvent, type PointerEvent, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { minWindowSize, toPx, toRatio, workArea, type Area } from "../../layout/canvas/geometry";
 import { moveRect, resizeRect, type Guides, type ResizeHandle } from "../../layout/canvas/snap";
 import { carryMove } from "../../layout/dock/carry";
@@ -18,16 +18,19 @@ import type { FrameBindings } from "./WindowFrame";
 import {
   applyArrowGeometry,
   ARROWS,
+  type GestureCursor,
   isInteractiveTarget,
   minimumWindowNotice,
   NO_GUIDES,
   type Point,
+  RESIZE_CURSOR,
   topologyOf,
   usePointerGesture,
 } from "./windowGesture";
 
 export type TabMenu = { window: WindowId; x: number; y: number };
 type Operation = { kind: "tab" } | { kind: "float-move"; rect: Rect } | { kind: "float-resize"; rect: Rect; handle: ResizeHandle };
+type ActiveDrag = { window: WindowId; operation: Operation };
 type Start = { pointer: number; window: WindowState; operation: Operation; point: Point; area: Area; dock: DockPlacement; saved: DockPlacement; expected: DockPlacement | null; session: number; topology: string; capture: HTMLElement };
 export type TabGrab = { window: WindowId; point: Point };
 type Outcome = { draft: DockPlacement; next: DockPlacement; preview: DockPlan; guides: Guides; atMinimum: boolean; grab: TabGrab | null };
@@ -48,11 +51,27 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
     choose(id);
   };
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [menu, setMenu] = useState<TabMenu | null>(null);
+  const dragging = activeDrag !== null;
+  const dragCursor: GestureCursor | null = activeDrag
+    ? activeDrag.operation.kind === "float-resize"
+      ? RESIZE_CURSOR[activeDrag.operation.handle]
+      : "grabbing"
+    : null;
+  const activeResize = activeDrag?.operation.kind === "float-resize" ? { window: activeDrag.window, handle: activeDrag.operation.handle } : null;
   const session = useLayoutStore((s) => s.session);
   const windows = useLayoutStore((s) => s.layout.windows);
   const topology = topologyOf(windows);
+
+  useLayoutEffect(() => {
+    const rootElement = document.documentElement;
+    if (dragCursor) rootElement.dataset.dockCursor = dragCursor;
+    else delete rootElement.dataset.dockCursor;
+    return () => {
+      delete rootElement.dataset.dockCursor;
+    };
+  }, [dragCursor]);
 
   const valid = (start: Start) => {
     const state = useLayoutStore.getState();
@@ -98,12 +117,12 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
     valid,
     onDrag(start, point, shift) {
       setOutcome(evaluate(start, point, shift));
-      setDragging(true);
+      setActiveDrag((now) => (now?.window === start.window.id && now.operation === start.operation ? now : { window: start.window.id, operation: start.operation }));
       setMenu(null);
     },
     onFinish(start, reason) {
       setOutcome(null);
-      setDragging(false);
+      setActiveDrag(null);
       if (reason === "cancel") focusTab(start.window.id);
     },
     onComplete(start, point, shift, wasDragging, accepted) {
@@ -216,7 +235,7 @@ export function useDockInteraction({ root, dock, saved, space, enabled, onPick }
       resize: (handle) => (event) => { if (rect) press(event, window, { kind: "float-resize", rect, handle }); },
     };
   };
-  return { grab: outcome?.grab ?? null, grabbed: outcome?.grab?.window ?? null, shown: outcome?.draft ?? dock, guides: outcome?.guides ?? NO_GUIDES, dragging, preview: outcome?.preview ?? null, menu, setMenu, execute, detach, canDetach: (window: WindowId) => canDetach(dock, window), plan: (command: DockCommand): DockPlan => (space ? evaluateView({ saved, drawn: dock }, command, space).plan : { kind: "unchanged" }), floatBindings, pressTab: (event: PointerEvent<HTMLButtonElement>, id: WindowId) => { const window = windows.find((window) => window.id === id); if (window) press(event, window, { kind: "tab" }); }, contextTab, keyTab, selectTab, lostCapture };
+  return { grab: outcome?.grab ?? null, grabbed: outcome?.grab?.window ?? null, shown: outcome?.draft ?? dock, guides: outcome?.guides ?? NO_GUIDES, dragging, dragCursor, activeResize, preview: outcome?.preview ?? null, menu, setMenu, execute, detach, canDetach: (window: WindowId) => canDetach(dock, window), plan: (command: DockCommand): DockPlan => (space ? evaluateView({ saved, drawn: dock }, command, space).plan : { kind: "unchanged" }), floatBindings, pressTab: (event: PointerEvent<HTMLButtonElement>, id: WindowId) => { const window = windows.find((window) => window.id === id); if (window) press(event, window, { kind: "tab" }); }, contextTab, keyTab, selectTab, lostCapture };
 }
 
 export type DockInteraction = ReturnType<typeof useDockInteraction>;

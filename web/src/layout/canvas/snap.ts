@@ -36,8 +36,8 @@ function edgeTargets(axis: Axis, side: Side, others: readonly Rect[], area: Area
   for (const other of others) {
     const { start, size } = spanOf(other, axis);
     const end = start + size;
-    if (side === "start") targets.push(start, end, end + WINDOW_GAP);
-    else targets.push(end, start, start - WINDOW_GAP);
+    if (side === "start") targets.push(start, end + WINDOW_GAP);
+    else targets.push(end, start - WINDOW_GAP);
   }
   return targets;
 }

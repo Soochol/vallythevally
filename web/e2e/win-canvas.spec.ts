@@ -14,7 +14,17 @@ const stage = (page: Page) => page.locator("[data-canvas-stage]");
 const frame = (page: Page, id: string) => page.locator(`[data-canvas-window="${id}"]`);
 const header = (page: Page, id: string) => page.locator(`[data-window-header="${id}"]`);
 const saved = (scenario: Scenario) => parsePlacement(scenario.documents.layout(DEFAULT_LAYOUT_ID).placement);
-const tidy = (page: Page) => page.getByRole("button", { name: /^가지런히/ });
+const arrange = (page: Page) => page.getByRole("button", { name: "배치", exact: true });
+
+async function runTidy(page: Page) {
+  await arrange(page).click();
+  await page.getByRole("menuitem", { name: /^가지런히/ }).click();
+}
+
+async function addFromTopbar(page: Page, name: string) {
+  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
+  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: new RegExp(`^${name}`) }).click();
+}
 
 async function boxOf(locator: Locator) {
   const box = await locator.boundingBox();
@@ -80,9 +90,11 @@ test("실제 도킹 자리를 보존해 전환하고 차트 인스턴스와 두 
   }
   await expect(chartOf(cell(page))).toHaveAttribute("data-retained-probe", "same-chart");
   expect(barsRequests()).toBe(requests);
-  const lane = await boxOf(page.getByRole("navigation", { name: "창 종류" }));
+  await expect(page.getByRole("navigation", { name: "창 종류" })).toHaveCount(0);
+  const workspace = await boxOf(page.getByRole("main", { name: "작업 영역" }));
   const area = await boxOf(stage(page));
-  expect(lane.y).toBeGreaterThanOrEqual(area.y + area.height);
+  expect(Math.abs(area.y - workspace.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(area.y + area.height - (workspace.y + workspace.height))).toBeLessThanOrEqual(1);
   await pollSaved(() => scenario.documents.uiPrefs().layoutMode).toBe("canvas");
   await drag(page, header(page, "cell-0"), 100, 50);
   await drag(page, frame(page, "cell-0").locator('[data-resize-handle="ne"]'), -80, 40);
@@ -154,26 +166,20 @@ test("활성 차트를 닫은 알림의 되돌리기 한 번은 남은 차트가
   await pollSaved(() => saved(scenario).canvas).toEqual(before);
 });
 
-test("크게 본 차트 위에서도 창 종류와 위 막대가 기존 관심종목을 드러낸다", async ({ page, scenario }) => {
+test("크게 본 차트 위에서도 위 막대가 기존 관심종목을 드러낸다", async ({ page, scenario }) => {
   seedCanvas(scenario);
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
   const before = saved(scenario).canvas!.rects;
   const original = await boxOf(frame(page, "cell-1"));
-  for (const source of ["kind", "topbar"]) {
-    await frame(page, "cell-1").getByRole("button", { name: "차트 크게 보기" }).click();
-    await expect(frame(page, "cell-1")).toHaveAttribute("data-maximized", "");
-    if (source === "kind") await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "관심종목 창 더하기" }).click();
-    else {
-      await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
-      await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^관심종목/ }).click();
-    }
-    await expect(frame(page, "cell-1")).not.toHaveAttribute("data-maximized");
-    expect(await boxOf(frame(page, "cell-1"))).toEqual(original);
-    const requested = await boxOf(header(page, "watchlist"));
-    await expect.poll(() => page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-canvas-window]")?.getAttribute("data-canvas-window"), { x: requested.x + 60, y: requested.y + 17 })).toBe("watchlist");
-    expect(saved(scenario).canvas!.rects).toEqual(before);
-  }
+  await frame(page, "cell-1").getByRole("button", { name: "차트 크게 보기" }).click();
+  await expect(frame(page, "cell-1")).toHaveAttribute("data-maximized", "");
+  await addFromTopbar(page, "관심종목");
+  await expect(frame(page, "cell-1")).not.toHaveAttribute("data-maximized");
+  expect(await boxOf(frame(page, "cell-1"))).toEqual(original);
+  const requested = await boxOf(header(page, "watchlist"));
+  await expect.poll(() => page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest("[data-canvas-window]")?.getAttribute("data-canvas-window"), { x: requested.x + 60, y: requested.y + 17 })).toBe("watchlist");
+  expect(saved(scenario).canvas!.rects).toEqual(before);
 });
 
 test("뒤 차트를 Enter로 크게 보면 활성 칸이 따라가고 도구 막대는 창 밖에 그대로 있으며 다음 창 요청이 크게 보기를 끝낸다", async ({ page, scenario }) => {
@@ -194,7 +200,7 @@ test("뒤 차트를 Enter로 크게 보면 활성 칸이 따라가고 도구 막
   expect(scenario.documents.layout(DEFAULT_LAYOUT_ID).windows.find((window) => window.id === "cell-1")).toMatchObject({ period: "D" });
   await expect(frame(page, "cell-0")).toHaveAttribute("data-maximized", "");
   expect(saved(scenario).canvas!.rects).toEqual(before);
-  await page.getByRole("navigation", { name: "창 종류" }).getByRole("button", { name: "관심종목 창 더하기" }).click();
+  await addFromTopbar(page, "관심종목");
   await expect(frame(page, "cell-0")).not.toHaveAttribute("data-maximized");
   const total = await page.locator("[data-canvas-window]").count();
   await expect(frame(page, "watchlist-2")).toHaveCSS("z-index", String(total));
@@ -241,11 +247,11 @@ test("실제 머리 끌기는 안내선으로 가장자리에 붙고 크기 조�
   expect(await boxOf(frame(page, "cell-1"))).toEqual(minimum);
 });
 
-test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크게 보기와 닫기 되돌리기가 작동한다", async ({ page, scenario }) => {
+test("겹친 창을 누르면 앞으로 오고 가지런히·크게 보기와 닫기 되돌리기가 작동한다", async ({ page, scenario }) => {
   seedCanvas(scenario);
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  await expect(tidy(page).locator(".ui-badge")).toHaveText("겹침 1");
+  await expect(arrange(page).locator(".ui-badge")).toHaveText("겹침 1");
   await screenshot(page, "overlap");
   await header(page, "cell-0").click({ position: { x: 60, y: 17 } });
   expect(Number(await frame(page, "cell-0").evaluate((el) => el.style.zIndex))).toBeGreaterThan(Number(await frame(page, "cell-1").evaluate((el) => el.style.zIndex)));
@@ -273,8 +279,10 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   await frame(page, "cell-0").getByRole("button", { name: "차트 크게 보기" }).click();
   await frame(page, "cell-0").getByRole("button", { name: "차트 원래 크기로" }).click();
   expect(await boxOf(frame(page, "cell-0"))).toEqual(original);
-  await tidy(page).click();
-  await expect(tidy(page).locator(".ui-badge")).toHaveCount(0);
+  await arrange(page).click();
+  await expect(page.getByRole("menuitem", { name: /^가지런히/ })).toContainText("겹침 1");
+  await page.getByRole("menuitem", { name: /^가지런히/ }).click();
+  await expect(arrange(page).locator(".ui-badge")).toHaveCount(0);
   const area = await boxOf(stage(page));
   for (const item of await page.locator("[data-canvas-window]").all()) {
     const box = await boxOf(item);
@@ -285,17 +293,15 @@ test("겹친 창을 누르면 앞으로 오고 가지런히·기본 배치·크�
   }
   await screenshot(page, "tidied");
   await drag(page, header(page, "cell-1"), 60, 30);
-  await page.getByRole("button", { name: "배치", exact: true }).click();
-  await page.getByRole("menuitem", { name: "기본 배치로" }).click();
-  await expect(tidy(page).locator(".ui-badge")).toHaveCount(0);
+  await runTidy(page);
+  await expect(arrange(page).locator(".ui-badge")).toHaveCount(0);
 });
 
-test("창 종류와 위 막대는 가운데에 차트를 더하고 기존 창을 앞으로 올리며 닫은 차트는 도킹에서도 빠진다", async ({ page, scenario }) => {
+test("위 막대는 가운데에 차트를 더하고 새 창을 앞으로 올리며 닫은 차트는 도킹에서도 빠진다", async ({ page, scenario }) => {
   seedCanvas(scenario);
   await page.goto("/");
   await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
-  const dock = page.getByRole("navigation", { name: "창 종류" });
-  await dock.getByRole("button", { name: "차트 창 더하기" }).click();
+  await addFromTopbar(page, "차트");
   await expect(page.locator("[data-canvas-window]")).toHaveCount(4);
   await expect(cell(page, 3)).toHaveAttribute("aria-busy", "false");
   const added = page.locator("[data-canvas-window]").filter({ has: cell(page, 3) });
@@ -303,11 +309,10 @@ test("창 종류와 위 막대는 가운데에 차트를 더하고 기존 창을
   expect(Math.abs(box.x + box.width / 2 - area.x - area.width / 2)).toBeLessThan(25);
   expect(Math.abs(box.y + box.height / 2 - area.y - area.height / 2)).toBeLessThan(25);
   await expect(added).toHaveAttribute("data-active-cell", "");
-  await dock.getByRole("button", { name: "관심종목 창 더하기" }).click();
+  await addFromTopbar(page, "관심종목");
   await expect(page.locator("[data-canvas-window]")).toHaveCount(5);
   await pollSaved(() => saved(scenario).canvas?.order.at(-1)).toBe("watchlist-2");
-  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "창 더하기" }).click();
-  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^차트/ }).click();
+  await addFromTopbar(page, "차트");
   await expect(cell(page, 4)).toHaveAttribute("aria-busy", "false");
   const topAdded = page.locator("[data-canvas-window]").filter({ has: cell(page, 4) });
   const topBox = await boxOf(topAdded);
@@ -481,4 +486,146 @@ test("잡기를 잃으면 다음 포인터 이벤트 없이도 끌기를 확정 
   await page.mouse.up();
   expect(await boxOf(frame(page, "cell-1"))).toEqual(original);
   expect(saved(scenario).canvas).toEqual(persisted);
+});
+
+test("다른 창 근처로 끌면 6px 간격으로 달라붙고 0px로는 달라붙지 않는다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "cell-1", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "D", chartSettings: SETTINGS },
+  ];
+  const canvas = { rects: { "cell-0": { x: .04, y: .08, w: .32, h: .5 }, "cell-1": { x: .52, y: .08, w: .32, h: .5 } }, order: ["cell-0", "cell-1"] };
+  scenario.documents.saveLayout({ ...layout, windows, placement: { v: 1, dock: null, canvas }, revision: layout.revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+  const left = await boxOf(frame(page, "cell-0"));
+  const right = await boxOf(frame(page, "cell-1"));
+  const gapDx = (left.x + left.width + 6) - right.x + 3;
+  await drag(page, header(page, "cell-1"), gapDx, 0, false);
+  await expect(page.locator('[data-canvas-guide="x"]')).toBeVisible();
+  await page.mouse.up();
+  const snapped = await boxOf(frame(page, "cell-1"));
+  expect(Math.abs(snapped.x - (left.x + left.width + 6))).toBeLessThanOrEqual(1);
+  const zeroTouchPastDx = (left.x + left.width - 3) - snapped.x;
+  await drag(page, header(page, "cell-1"), zeroTouchPastDx, 0, false);
+  await expect(page.locator('[data-canvas-guide="x"]')).toHaveCount(0);
+  await page.mouse.up();
+  const dropped = await boxOf(frame(page, "cell-1"));
+  expect(Math.abs(dropped.x - (left.x + left.width - 3))).toBeLessThanOrEqual(1);
+});
+
+test("네 대각선 모서리 모두 가로·세로를 동시에 조절하고 커서와 닫기 버튼·최소 크기·6px 간격을 지킨다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "watchlist", link: null, kind: "watchlist" },
+  ];
+  const canvas = { rects: { watchlist: { x: .02, y: .22, w: .18, h: .45 }, "cell-0": { x: .28, y: .22, w: .4, h: .45 } }, order: ["watchlist", "cell-0"] };
+  scenario.documents.saveLayout({ ...layout, windows, placement: { v: 1, dock: null, canvas }, revision: layout.revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas" });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  const corners = [
+    { handle: "nw", cursor: "nwse-resize", dx: -30, dy: -24, dw: 30, dh: 24, keepRight: true, keepBottom: true },
+    { handle: "ne", cursor: "nesw-resize", dx: 30, dy: -24, dw: 30, dh: 24, keepRight: false, keepBottom: true },
+    { handle: "sw", cursor: "nesw-resize", dx: -30, dy: 24, dw: 30, dh: 24, keepRight: true, keepBottom: false },
+    { handle: "se", cursor: "nwse-resize", dx: 30, dy: 24, dw: 30, dh: 24, keepRight: false, keepBottom: false },
+  ] as const;
+
+  for (const spec of corners) {
+    const before = await boxOf(frame(page, "cell-0"));
+    const handle = frame(page, "cell-0").locator(`[data-resize-handle="${spec.handle}"]`);
+    await expect(handle).toHaveCSS("cursor", spec.cursor);
+    const hit = await boxOf(handle);
+    await page.mouse.move(hit.x + hit.width / 2, hit.y + hit.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hit.x + hit.width / 2 + spec.dx, hit.y + hit.height / 2 + spec.dy, { steps: 6 });
+    await expect(page.locator("html")).toHaveAttribute("data-canvas-cursor", spec.cursor);
+    await expect(page.locator(".canvas-input-shield")).toHaveCSS("cursor", spec.cursor);
+    await expect(handle).toHaveAttribute("data-active-handle", "");
+    await page.mouse.up();
+    await expect(page.locator("html")).not.toHaveAttribute("data-canvas-cursor");
+    const after = await boxOf(frame(page, "cell-0"));
+    expect(Math.abs(after.width - (before.width + spec.dw))).toBeLessThanOrEqual(2);
+    expect(Math.abs(after.height - (before.height + spec.dh))).toBeLessThanOrEqual(2);
+    if (spec.keepRight) expect(Math.abs((after.x + after.width) - (before.x + before.width))).toBeLessThanOrEqual(2);
+    else expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(2);
+    if (spec.keepBottom) expect(Math.abs((after.y + after.height) - (before.y + before.height))).toBeLessThanOrEqual(2);
+    else expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(2);
+  }
+
+  const neighbor = await boxOf(frame(page, "watchlist"));
+  const beforeSnap = await boxOf(frame(page, "cell-0"));
+  const nwHandle = await boxOf(frame(page, "cell-0").locator('[data-resize-handle="nw"]'));
+  const snapDx = (neighbor.x + neighbor.width + 6) - beforeSnap.x + 3;
+  await page.mouse.move(nwHandle.x + nwHandle.width / 2, nwHandle.y + nwHandle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(nwHandle.x + nwHandle.width / 2 + snapDx, nwHandle.y + nwHandle.height / 2, { steps: 6 });
+  await expect(page.locator('[data-canvas-guide="x"]')).toBeVisible();
+  await page.mouse.up();
+  const snapped = await boxOf(frame(page, "cell-0"));
+  expect(Math.abs(snapped.x - (neighbor.x + neighbor.width + 6))).toBeLessThanOrEqual(1);
+
+  const nwMin = await boxOf(frame(page, "cell-0").locator('[data-resize-handle="nw"]'));
+  await page.mouse.move(nwMin.x + nwMin.width / 2, nwMin.y + nwMin.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(nwMin.x + 900, nwMin.y + 900, { steps: 8 });
+  await page.mouse.up();
+  const minimum = await boxOf(frame(page, "cell-0"));
+  expect(minimum.width).toBe(280);
+  expect(minimum.height).toBe(194);
+  expect(Math.abs((minimum.x + minimum.width) - (snapped.x + snapped.width))).toBeLessThanOrEqual(2);
+  expect(Math.abs((minimum.y + minimum.height) - (snapped.y + snapped.height))).toBeLessThanOrEqual(2);
+
+  await frame(page, "watchlist").getByRole("button", { name: "관심종목 닫기" }).click();
+  await expect(frame(page, "watchlist")).toHaveCount(0);
+});
+
+test("6px 간격으로 붙은 인접 창과 NE 주변 테두리는 다른 창 핸들을 가로채거나 빈 틈을 남기지 않는다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: null, kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "cell-1", link: null, kind: "chart", symbol: "000660", venue: "combined", period: "D", chartSettings: SETTINGS },
+  ];
+  const canvas = { rects: { "cell-0": { x: .04, y: .08, w: .32, h: .5 }, "cell-1": { x: .52, y: .08, w: .32, h: .5 } }, order: ["cell-1", "cell-0"] };
+  scenario.documents.saveLayout({ ...layout, windows, placement: { v: 1, dock: null, canvas }, revision: layout.revision + 1 });
+  scenario.documents.saveUiState({ ...scenario.documents.uiState(), layoutMode: "canvas", themeStyle: "bento" });
+  await page.goto("/");
+  await expect(cell(page, 2)).toHaveAttribute("aria-busy", "false");
+
+  const leftInitial = await boxOf(frame(page, "cell-0"));
+  const rightInitial = await boxOf(frame(page, "cell-1"));
+  await drag(page, header(page, "cell-1"), (leftInitial.x + leftInitial.width + 6) - rightInitial.x + 3, 0);
+  await header(page, "cell-0").click({ position: { x: 60, y: 17 } });
+
+  const leftBox = await boxOf(frame(page, "cell-0"));
+  const rightBox = await boxOf(frame(page, "cell-1"));
+  expect(Math.round(rightBox.x - (leftBox.x + leftBox.width))).toBe(6);
+
+  const rightNw = await boxOf(frame(page, "cell-1").locator('[data-resize-handle="nw"]'));
+  const grabX = rightBox.x - 2;
+  const grabY = rightBox.y + 2;
+  expect(grabX).toBeGreaterThanOrEqual(rightNw.x);
+  await page.mouse.move(grabX, grabY);
+  await page.mouse.down();
+  await page.mouse.move(grabX + 40, grabY + 40, { steps: 6 });
+  await expect(page.locator("html")).toHaveAttribute("data-canvas-cursor", "nwse-resize");
+  await page.mouse.up();
+  const leftAfter = await boxOf(frame(page, "cell-0"));
+  const rightAfter = await boxOf(frame(page, "cell-1"));
+  expect(Math.abs(leftAfter.width - leftBox.width)).toBeLessThanOrEqual(1);
+  expect(rightAfter.width).toBeLessThan(rightBox.width - 20);
+
+  const probeBox = await boxOf(frame(page, "cell-0"));
+  const edgeProbe = await page.evaluate(({ tx, ty, rx, ry }) => {
+    const topEl = document.elementFromPoint(tx, ty);
+    const rightEl = document.elementFromPoint(rx, ry);
+    return {
+      topHandle: topEl?.getAttribute("data-resize-handle") ?? null,
+      rightHandle: rightEl?.getAttribute("data-resize-handle") ?? null,
+    };
+  }, { tx: probeBox.x + probeBox.width - 11, ty: probeBox.y + 1, rx: probeBox.x + probeBox.width - 1, ry: probeBox.y + 11 });
+  expect(edgeProbe).toEqual({ topHandle: "n", rightHandle: "e" });
 });

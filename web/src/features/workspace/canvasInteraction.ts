@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type PointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { bringToFront, rectsForArea } from "../../layout/canvas/arrange";
 import { minWindowSize, toRatio, type Area } from "../../layout/canvas/geometry";
 import { moveRect, resizeRect, type ResizeHandle } from "../../layout/canvas/snap";
@@ -14,15 +14,18 @@ import type { FrameBindings } from "./WindowFrame";
 import {
   applyArrowGeometry,
   ARROWS,
+  type GestureCursor,
   isInteractiveTarget,
   minimumWindowNotice,
   NO_GUIDES,
   type Point,
+  RESIZE_CURSOR,
   topologyOf,
   usePointerGesture,
 } from "./windowGesture";
 
 type Operation = { kind: "move" } | { kind: "resize"; handle: ResizeHandle };
+type ActiveDrag = { window: WindowId; operation: Operation };
 type Start = { pointer: number; window: WindowState; operation: Operation; point: Point; rect: Rect; area: Area; expected: CanvasPlacement; session: number; topology: string; capture: HTMLElement };
 type PendingCanvas = { next: CanvasPlacement; atMinimum: boolean };
 type Maximization = { window: WindowId; base: CanvasPlacement };
@@ -34,11 +37,27 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
   const pendingRef = useRef<PendingCanvas | null>(null);
   const [draft, setDraft] = useState<CanvasPlacement | null>(null);
   const [guides, setGuides] = useState(NO_GUIDES);
-  const [dragging, setDragging] = useState(false);
+  const [activeDrag, setActiveDrag] = useState<ActiveDrag | null>(null);
   const [maximization, setMaximization] = useState<Maximization | null>(null);
+  const dragging = activeDrag !== null;
+  const dragCursor: GestureCursor | null = activeDrag
+    ? activeDrag.operation.kind === "move"
+      ? "grabbing"
+      : RESIZE_CURSOR[activeDrag.operation.handle]
+    : null;
+  const activeResize = activeDrag?.operation.kind === "resize" ? { window: activeDrag.window, handle: activeDrag.operation.handle } : null;
   const maximized = maximization?.base === canvas ? maximization.window : null;
   const session = useLayoutStore((s) => s.session);
   const topology = topologyOf(windows);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (dragCursor) root.dataset.canvasCursor = dragCursor;
+    else delete root.dataset.canvasCursor;
+    return () => {
+      delete root.dataset.canvasCursor;
+    };
+  }, [dragCursor]);
 
   const valid = (start: Start) => {
     const state = useLayoutStore.getState();
@@ -64,12 +83,12 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
       pendingRef.current = { next, atMinimum: result.atMinimum };
       setDraft(next);
       setGuides(result.guides);
-      setDragging(true);
+      setActiveDrag((now) => (now?.window === start.window.id && now.operation === start.operation ? now : { window: start.window.id, operation: start.operation }));
     },
     onFinish(_start, reason) {
       setDraft(null);
       setGuides(NO_GUIDES);
-      setDragging(false);
+      setActiveDrag(null);
       if (reason === "cancel") pendingRef.current = null;
     },
     onComplete(start, _point, _shift, wasDragging, accepted) {
@@ -162,5 +181,5 @@ export function useCanvasInteraction(canvas: CanvasPlacement, windows: readonly 
     },
     resize: (handle) => (event) => press(event, window, { kind: "resize", handle }),
   });
-  return { shown: draft ?? canvas, guides, dragging, maximized, toggleMaximize, bindings };
+  return { shown: draft ?? canvas, guides, dragging, dragCursor, activeResize, maximized, toggleMaximize, bindings };
 }
