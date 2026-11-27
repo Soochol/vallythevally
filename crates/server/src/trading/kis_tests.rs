@@ -64,16 +64,25 @@ impl KisSent {
     }
 }
 
+type KisFillsHook = Box<dyn Fn(&KisSent) -> Result<HttpResponse, TransportError> + Send + Sync>;
+
 struct FakeKis {
     sent: Mutex<Vec<KisSent>>,
     write: Mutex<KisWrite>,
     rate_limited: AtomicUsize,
     balance_fails: Mutex<bool>,
+    fills_hook: Mutex<Option<KisFillsHook>>,
 }
 
 impl FakeKis {
     fn new() -> Arc<FakeKis> {
-        Arc::new(FakeKis { sent: Mutex::default(), write: Mutex::new(KisWrite::Accept), rate_limited: AtomicUsize::new(0), balance_fails: Mutex::new(false) })
+        Arc::new(FakeKis {
+            sent: Mutex::default(),
+            write: Mutex::new(KisWrite::Accept),
+            rate_limited: AtomicUsize::new(0),
+            balance_fails: Mutex::new(false),
+            fills_hook: Mutex::new(None),
+        })
     }
 
     fn sent(&self) -> Vec<KisSent> {
@@ -88,7 +97,8 @@ impl FakeKis {
         self.sent().into_iter().filter(|sent| sent.tr_id.ends_with('U')).collect()
     }
 
-    fn reply_to(&self, tr_id: &str) -> Result<HttpResponse, TransportError> {
+    fn reply_to(&self, sent: &KisSent) -> Result<HttpResponse, TransportError> {
+        let tr_id = sent.tr_id.as_str();
         let ok = |body: Value| Ok(HttpResponse { status: 200, tr_cont: None, body: body.to_string() });
         let fine = |mut body: Value| {
             body["rt_cd"] = "0".into();
@@ -96,6 +106,11 @@ impl FakeKis {
             body["msg1"] = "정상처리 되었습니다".into();
             ok(body)
         };
+        if tr_id == "TTTC0081R"
+            && let Some(hook) = self.fills_hook.lock().unwrap().as_ref()
+        {
+            return hook(sent);
+        }
         match tr_id {
             "TTTC8434R" if *self.balance_fails.lock().unwrap() => ok(json!({"rt_cd": "1", "msg_cd": "OPSQ0002", "msg1": "합성 계좌 오류"})),
             "TTTC8434R" => fine(json!({
@@ -145,11 +160,12 @@ impl Transport for FakeKis {
     fn send(&self, req: HttpRequest) -> BoxFuture<'static, Result<HttpResponse, TransportError>> {
         let body: Value = req.body.as_ref().and_then(|body| serde_json::from_str(body.expose()).ok()).unwrap_or(Value::Null);
         let tr_id = req.header("tr_id").unwrap_or_default().to_owned();
-        self.sent.lock().unwrap().push(KisSent { tr_id: tr_id.clone(), query: req.query.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect(), body });
+        let recorded = KisSent { tr_id: tr_id.clone(), query: req.query.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect(), body };
+        self.sent.lock().unwrap().push(recorded.clone());
         let response = match req.path {
             "/oauth2/Approval" => Ok(HttpResponse { status: 200, tr_cont: None, body: json!({"approval_key": "FAKE-KIS-APPROVAL-kisorders"}).to_string() }),
             "/oauth2/tokenP" => Ok(HttpResponse { status: 200, tr_cont: None, body: json!({"access_token": "FAKE-KIS-TOKEN-kisorders", "expires_in": 86_400}).to_string() }),
-            _ => self.reply_to(&tr_id),
+            _ => self.reply_to(&recorded),
         };
         Box::pin(async move { response })
     }
@@ -720,4 +736,74 @@ async fn kis_loan_rows_are_sent_apart_and_an_unreadable_one_does_not_block_the_b
     assert_eq!(code, StatusCode::OK, "{balance}");
     assert_eq!(balance["holdings"].as_array().unwrap().iter().map(|h| h["code"].clone()).collect::<Vec<_>>(), vec![json!("005930")]);
     assert_eq!(balance["creditHoldings"], json!([{"code": "000660", "name": "융자종목", "quantity": 5, "sellableQuantity": 5, "averagePrice": 1000, "currentPrice": 1000, "evaluationProfit": 0, "profitRateCenti": 0}]), "읽을 수 있는 융자 행만 따로 오고, 못 읽는 융자 행은 잔고를 막지 않는다");
+}
+
+#[tokio::test]
+async fn kis_executions_history_fetches_multi_day_range_with_continuation_and_caches_closed_days() {
+    let f = kis_fixture(Some(KIS_ACCOUNT), None).await;
+    let (_, reference_b) = f.enable_both().await;
+    *f.kis.fills_hook.lock().unwrap() = Some(Box::new(|sent| {
+        let nk = sent.query("CTX_AREA_NK100").unwrap_or("");
+        if nk.is_empty() {
+            Ok(HttpResponse {
+                status: 200,
+                tr_cont: Some("M".to_owned()),
+                body: json!({
+                    "rt_cd": "0",
+                    "msg_cd": "KIOK0000",
+                    "msg1": "정상",
+                    "ctx_area_fk100": "FK1",
+                    "ctx_area_nk100": "NK1",
+                    "output1": [
+                        {"ord_dt": "20261103", "odno": "0000010001", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "02", "tot_ccld_qty": "10", "avg_prvs": "70000", "ord_tmd": "091000", "excg_id_dvsn_Cd": "KRX"},
+                        {"ord_dt": "20261106", "odno": "0000010002", "pdno": "005930", "prdt_name": "삼성전자", "sll_buy_dvsn_cd": "01", "tot_ccld_qty": "10", "avg_prvs": "72000", "ord_tmd": "101500", "excg_id_dvsn_Cd": "KRX"}
+                    ]
+                })
+                .to_string(),
+            })
+        } else {
+            Ok(HttpResponse {
+                status: 200,
+                tr_cont: None,
+                body: json!({
+                    "rt_cd": "0",
+                    "msg_cd": "KIOK0000",
+                    "msg1": "정상",
+                    "ctx_area_fk100": "",
+                    "ctx_area_nk100": "",
+                    "output1": [
+                        {"ord_dt": "20261109", "odno": "0000010003", "pdno": "000660", "prdt_name": "SK하이닉스", "sll_buy_dvsn_cd": "02", "tot_ccld_qty": "5", "avg_prvs": "200000", "ord_tmd": "093000", "excg_id_dvsn_Cd": "NXT"}
+                    ]
+                })
+                .to_string(),
+            })
+        }
+    }));
+
+    let kiwoom_before = f.kiwoom.sent().len();
+    let (status, history) = get(&f.app, &format!("/api/trading/executions/history?account={reference_b}&from=2026-11-02&to=2026-11-09")).await;
+    assert_eq!(status, StatusCode::OK, "{history}");
+    assert_eq!(history["today"], "2026-11-09");
+    assert_eq!(history["pendingDays"], 0);
+    let days: Vec<&str> = history["days"].as_array().unwrap().iter().map(|d| d["day"].as_str().unwrap()).collect();
+    assert_eq!(days, vec!["2026-11-03", "2026-11-06", "2026-11-09"]);
+    assert_eq!(f.kiwoom.sent().len(), kiwoom_before, "한투 이력 조회는 키움에 가지 않는다");
+
+    let fill_calls: Vec<KisSent> = f.kis.sent().into_iter().filter(|s| s.tr_id == "TTTC0081R").collect();
+    assert_eq!(fill_calls.len(), 2, "연속조회 두 페이지를 모두 받는다");
+    assert_eq!((fill_calls[0].query("INQR_STRT_DT"), fill_calls[0].query("INQR_END_DT")), (Some("20261102"), Some("20261109")));
+    assert_eq!(fill_calls[1].query("CTX_AREA_NK100"), Some("NK1"));
+
+    let kis_before_cached = f.kis.sent().len();
+    let (status, cached) = get(&f.app, &format!("/api/trading/executions/history?account={reference_b}&from=2026-11-02&to=2026-11-06")).await;
+    assert_eq!(status, StatusCode::OK, "{cached}");
+    assert_eq!(cached["days"].as_array().unwrap().len(), 2);
+    assert_eq!(f.kis.sent().len(), kis_before_cached, "확정된 과거 구간은 한투를 다시 부르지 않는다");
+
+    let kis_before_old = f.kis.sent().len();
+    let (status, old_range) = get(&f.app, &format!("/api/trading/executions/history?account={reference_b}&from=2026-01-01&to=2026-11-09")).await;
+    assert_eq!(status, StatusCode::OK, "{old_range}");
+    let clamped_calls: Vec<KisSent> = f.kis.sent()[kis_before_old..].iter().filter(|s| s.tr_id == "TTTC0081R").cloned().collect();
+    assert!(!clamped_calls.is_empty());
+    assert!(clamped_calls.iter().all(|s| s.query("INQR_STRT_DT").unwrap() >= "20260812"), "TTTC0081R 3개월 한도를 넘겨 요청하지 않는다: {clamped_calls:?}");
 }

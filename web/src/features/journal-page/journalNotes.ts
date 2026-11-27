@@ -3,8 +3,6 @@ import type { TradingExecution } from "../../api/generated/TradingExecution";
 import type { JournalNote, StoredDayExecutions, StoredExecutionRecord } from "./journalTypes";
 
 const NOTES_STORAGE_KEY = "vally.journal.notes.v1";
-const HISTORY_STORAGE_KEY = "vally.journal.history.v1";
-const MAX_HISTORY_DAYS = 180;
 
 export function loadJournalNotes(): Record<string, JournalNote> {
   try {
@@ -32,81 +30,58 @@ export function saveJournalNotes(notes: Record<string, JournalNote>): void {
   } catch {}
 }
 
-export function loadExecutionHistory(): readonly StoredDayExecutions[] {
-  try {
-    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
-    if (raw === null) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const valid: StoredDayExecutions[] = [];
-    for (const item of parsed) {
-      if (typeof item !== "object" || item === null) continue;
-      const obj = item as Record<string, unknown>;
-      if (typeof obj.day !== "string" || !Array.isArray(obj.executions)) continue;
-      valid.push({ day: obj.day, executions: obj.executions as StoredExecutionRecord[] });
-    }
-    return valid;
-  } catch {
-    return [];
-  }
-}
-
-export function mergeAndStoreExecutions(
-  day: string,
-  executions: readonly TradingExecution[],
+export function combineDayExecutionsWithForensics(
+  daysByDate: ReadonlyMap<string, readonly TradingExecution[]>,
+  forensicsDay: string,
   forensics: readonly ExecutionForensic[],
 ): readonly StoredDayExecutions[] {
-  const existing = loadExecutionHistory();
-  if (day === "" || (executions.length === 0 && forensics.length === 0)) return existing;
-
+  const normalizedForensicsDay = forensicsDay !== "" ? normalizeDayString(forensicsDay) : "";
   const forensicByOrder = new Map<string, ExecutionForensic>();
-  for (const f of forensics) forensicByOrder.set(f.orderNo, f);
-
-  const normalizedDay = normalizeDayString(day);
-  const records: StoredExecutionRecord[] =
-    executions.length > 0
-      ? executions.map((ex) => {
-          const f = forensicByOrder.get(ex.orderNo);
-          return {
-            orderNo: ex.orderNo,
-            code: ex.code,
-            name: ex.name,
-            side: ex.side,
-            quantity: ex.quantity,
-            price: ex.price,
-            time: ex.time,
-            venue: ex.venue,
-            mfePct: f?.mfePct ?? null,
-            maePct: f?.maePct ?? null,
-            fillAt: f?.fillAt ?? null,
-          };
-        })
-      : forensics.map((f) => ({
-          orderNo: f.orderNo,
-          code: f.code,
-          name: f.name,
-          side: f.side,
-          quantity: f.quantity,
-          price: f.price,
-          time: f.time,
-          venue: "krx",
-          mfePct: f.mfePct,
-          maePct: f.maePct,
-          fillAt: f.fillAt,
-        }));
+  for (const item of forensics) forensicByOrder.set(item.orderNo, item);
 
   const byDay = new Map<string, StoredDayExecutions>();
-  for (const entry of existing) byDay.set(normalizeDayString(entry.day), entry);
-  byDay.set(normalizedDay, { day: normalizedDay, executions: records });
+  for (const [rawDay, executions] of daysByDate.entries()) {
+    const day = normalizeDayString(rawDay);
+    const matchesForensics = normalizedForensicsDay !== "" && day === normalizedForensicsDay;
+    const records: StoredExecutionRecord[] = executions.map((ex) => {
+      const f = matchesForensics ? forensicByOrder.get(ex.orderNo) : undefined;
+      return {
+        orderNo: ex.orderNo,
+        code: ex.code,
+        name: ex.name,
+        side: ex.side,
+        quantity: ex.quantity,
+        price: ex.price,
+        time: ex.time,
+        venue: ex.venue,
+        mfePct: f?.mfePct ?? null,
+        maePct: f?.maePct ?? null,
+        fillAt: f?.fillAt ?? null,
+      };
+    });
+    if (records.length > 0) byDay.set(day, { day, executions: records });
+  }
 
-  const merged = [...byDay.values()]
-    .sort((a, b) => a.day.localeCompare(b.day))
-    .slice(-MAX_HISTORY_DAYS);
+  if (normalizedForensicsDay !== "" && !byDay.has(normalizedForensicsDay) && forensics.length > 0) {
+    byDay.set(normalizedForensicsDay, {
+      day: normalizedForensicsDay,
+      executions: forensics.map((f) => ({
+        orderNo: f.orderNo,
+        code: f.code,
+        name: f.name,
+        side: f.side,
+        quantity: f.quantity,
+        price: f.price,
+        time: f.time,
+        venue: "krx",
+        mfePct: f.mfePct,
+        maePct: f.maePct,
+        fillAt: f.fillAt,
+      })),
+    });
+  }
 
-  try {
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(merged));
-  } catch {}
-  return merged;
+  return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 export function normalizeDayString(raw: string): string {

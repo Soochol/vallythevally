@@ -146,9 +146,20 @@ export function retBucketOf(retPct: number): number {
   return i;
 }
 
+export function tfStepMinutes(tf: JournalTf): number {
+  if (tf === "1") return 1;
+  if (tf === "3") return 3;
+  if (tf === "5") return 5;
+  if (tf === "10") return 10;
+  return 1440;
+}
+
 export function autoTfOf(trade: JournalTrade): JournalTf {
   if (trade.swing) return "D";
-  return trade.holdMin <= 40 ? "1" : "5";
+  if (trade.holdMin <= 15) return "1";
+  if (trade.holdMin <= 40) return "3";
+  if (trade.holdMin <= 120) return "5";
+  return "10";
 }
 
 export function formatHoldDuration(trade: JournalTrade): string {
@@ -424,6 +435,26 @@ export function computePeriodRange(
   }
   const y = dt.getUTCFullYear();
   return [`${y}-01-01`, `${y}-12-31`];
+}
+
+export function computeHistoryQueryRange(
+  period: JournalPeriod,
+  today: string,
+): readonly [string, string] | null {
+  if (period.type === "all") return null;
+  const anchor = period.anchor || today;
+  const ms = parseDayUtcMs(anchor);
+  const dt = new Date(ms);
+  const y = dt.getUTCFullYear();
+  if (period.type === "year") return [`${y}-01-01`, `${y}-12-31`];
+  const m = dt.getUTCMonth();
+  const monthFirst = formatUtcMsToDay(Date.UTC(y, m, 1));
+  const monthLast = formatUtcMsToDay(Date.UTC(y, m + 1, 0));
+  if (period.type === "week") {
+    const [weekStart, weekEnd] = computePeriodRange(period, [], today);
+    return [weekStart < monthFirst ? weekStart : monthFirst, weekEnd > monthLast ? weekEnd : monthLast];
+  }
+  return [monthFirst, monthLast];
 }
 
 export function stepPeriodAnchor(period: JournalPeriod, dir: -1 | 1, today: string): string {
@@ -876,7 +907,8 @@ export function generateDemoTrades(anchorToday: string): readonly JournalTrade[]
 
 export function synthesizeDemoBars(trade: JournalTrade, tf: JournalTf): readonly JournalBar[] {
   const seed = trade.demoSeed ?? 1234567;
-  const r = seededRng(seed ^ (tf === "D" ? 911 : tf === "5" ? 505 : 101));
+  const tfSalt = tf === "D" ? 911 : tf === "10" ? 1009 : tf === "5" ? 505 : tf === "3" ? 303 : 101;
+  const r = seededRng(seed ^ tfSalt);
   const bars: JournalBar[] = [];
   const basePx = trade.buys[0]?.price ?? trade.avgBuy;
   const endPx = trade.sells[trade.sells.length - 1]?.price ?? trade.avgSell;
@@ -921,13 +953,13 @@ export function synthesizeDemoBars(trade: JournalTrade, tf: JournalTf): readonly
       const h = snapTick(Math.max(o, c) + r() * scale * 0.9);
       const l = snapTick(Math.min(o, c) - r() * scale * 0.9);
       const day = days[i]!;
-      bars.push({ t: Math.floor(parseDayUtcMs(day) / 1000), o, h, l, c, v: Math.round(800 + r() * 2400), day, minutes: 540 });
+      bars.push({ t: Math.floor(parseDayUtcMs(day) / 1000) - 9 * 3600, o, h, l, c, v: Math.round(800 + r() * 2400), day, minutes: 540 });
       px = c;
     }
     return bars;
   }
 
-  const step = tf === "5" ? 5 : 1;
+  const step = tfStepMinutes(tf);
   const entryM = Math.floor(trade.entryMin / step) * step;
   const exitM = Math.max(entryM + step, Math.floor((trade.swing ? trade.entryMin + step * 16 : trade.exitMin) / step) * step);
   const preCount = 18;

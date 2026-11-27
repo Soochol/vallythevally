@@ -5,10 +5,15 @@ import {
   buildCalendarWeeks,
   buildRoundTrips,
   buildTableGroups,
+  computeHistoryQueryRange,
   computePeriodRange,
   matchTradeFilter,
+  synthesizeDemoBars,
+  tfStepMinutes,
 } from "./journalEngine";
-import { EMPTY_FILTERS, type StoredDayExecutions } from "./journalTypes";
+import { combineDayExecutionsWithForensics } from "./journalNotes";
+import { useJournalStore } from "./journalStore";
+import { EMPTY_FILTERS, JOURNAL_TFS, TF_TO_PERIOD, type StoredDayExecutions } from "./journalTypes";
 
 const SAMPLE_HISTORY: readonly StoredDayExecutions[] = [
   {
@@ -157,5 +162,82 @@ describe("journalEngine", () => {
     expect(bySym.map((r) => r.key)).toEqual(["042700", "000660"]);
     expect(bySym[0]!.summary.net).toBe(160_000);
     expect(bySym[1]!.summary.net).toBe(-60_000);
+  });
+
+  it("기간별 이력 조회 범위를 계산하고 월 경계 주간·전체 기간을 빠짐없이 포함한다", () => {
+    expect(computeHistoryQueryRange({ type: "day", anchor: "2026-11-27" }, "2026-11-27")).toEqual(["2026-11-01", "2026-11-30"]);
+    expect(computeHistoryQueryRange({ type: "month", anchor: "2026-10-15" }, "2026-11-27")).toEqual(["2026-10-01", "2026-10-31"]);
+    expect(computeHistoryQueryRange({ type: "week", anchor: "2026-12-02" }, "2026-12-02")).toEqual(["2026-11-30", "2026-12-31"]);
+    expect(computeHistoryQueryRange({ type: "year", anchor: "2025-06-15" }, "2026-11-27")).toEqual(["2025-01-01", "2025-12-31"]);
+    expect(computeHistoryQueryRange({ type: "all", anchor: "2026-11-27" }, "2026-11-27")).toBeNull();
+  });
+
+  it("체결 해부 지표는 같은 날짜의 동일 주문번호에만 병합된다", () => {
+    const days = new Map([
+      [
+        "2026-11-20",
+        [{ orderNo: "0001", code: "005930", name: "삼성전자", side: "buy" as const, quantity: 10, price: 70_000, time: "09:10:00", venue: "krx" as const }],
+      ],
+      [
+        "2026-11-27",
+        [{ orderNo: "0001", code: "005930", name: "삼성전자", side: "buy" as const, quantity: 10, price: 72_000, time: "09:10:00", venue: "krx" as const }],
+      ],
+    ]);
+    const merged = combineDayExecutionsWithForensics(days, "20261120", [
+      {
+        orderNo: "0001",
+        code: "005930",
+        name: "삼성전자",
+        side: "buy",
+        time: "09:10:00",
+        fillAt: 1_795_133_400,
+        price: 70_000,
+        quantity: 10,
+        collected: true,
+        diagnosis: "neutral",
+        mfePct: 1.8,
+        maePct: -0.4,
+        slippageTicks: 0,
+        preEntryCancelRatePct: 0,
+        programDeltaMillionWon: 0,
+        whaleNetDeltaMillionWon: 0,
+        summary: "",
+      },
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]!.day).toBe("2026-11-20");
+    expect(merged[0]!.executions[0]!.mfePct).toBe(1.8);
+    expect(merged[1]!.day).toBe("2026-11-27");
+    expect(merged[1]!.executions[0]!.mfePct).toBeNull();
+  });
+
+  it("초기 서버 날짜 동기화는 사용자가 과거 기간을 고른 뒤에는 기준일을 덮어쓰지 않는다", () => {
+    useJournalStore.setState({ period: { type: "month", anchor: "2026-11-01" }, anchorTouched: false });
+    useJournalStore.getState().syncInitialAnchor("2026-11-27");
+    expect(useJournalStore.getState().period.anchor).toBe("2026-11-27");
+
+    useJournalStore.getState().stepPeriod(-1, "2026-11-27");
+    expect(useJournalStore.getState().period.anchor).toBe("2026-10-15");
+
+    useJournalStore.getState().syncInitialAnchor("2026-11-27");
+    expect(useJournalStore.getState().period.anchor).toBe("2026-10-15");
+  });
+
+  it("5개 봉 주기(1·3·5·10분·일봉) 매핑과 합성 봉 간격이 정확하다", () => {
+    expect(JOURNAL_TFS.map((entry) => TF_TO_PERIOD[entry.tf])).toEqual(["1m", "3m", "5m", "10m", "D"]);
+    expect([tfStepMinutes("1"), tfStepMinutes("3"), tfStepMinutes("5"), tfStepMinutes("10")]).toEqual([1, 3, 5, 10]);
+
+    const trades = buildRoundTrips(SAMPLE_HISTORY);
+    const intraday = trades[1]!;
+    for (const tf of ["1", "3", "5", "10", "D"] as const) {
+      const bars = synthesizeDemoBars(intraday, tf);
+      expect(bars.length).toBeGreaterThan(10);
+      for (let i = 1; i < bars.length; i += 1) {
+        expect(bars[i]!.t).toBeGreaterThan(bars[i - 1]!.t);
+      }
+      if (tf !== "D") {
+        expect(bars[1]!.t - bars[0]!.t).toBe(tfStepMinutes(tf) * 60);
+      }
+    }
   });
 });

@@ -77,6 +77,26 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
       },
     );
     scenario.on(
+      (url) => url.pathname === "/api/trading/executions/history",
+      (request) => {
+        if (scenario.publicMode.kind === "public") {
+          return { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } };
+        }
+        const url = new URL(request.url());
+        const today = "2026-11-27";
+        return {
+          body: {
+            accountRef: url.searchParams.get("account") ?? "",
+            today,
+            from: url.searchParams.get("from") ?? today,
+            to: url.searchParams.get("to") ?? today,
+            days: [],
+            pendingDays: 0,
+          },
+        };
+      },
+    );
+    scenario.on(
       (url) => url.pathname === "/api/trading/executions/forensics",
       (request) => {
         if (scenario.publicMode.kind === "public") {

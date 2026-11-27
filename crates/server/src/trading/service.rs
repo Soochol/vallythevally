@@ -3,10 +3,11 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use domain::{StockCode, Venue};
+use domain::{KstDate, StockCode, Venue, Weekday};
 use sha2::{Digest, Sha256};
 use tokio::sync::broadcast;
 
+use super::history::ExecutionHistoryStore;
 use super::request::{AccountNumber, Balance, BalanceRow, Executions, OpenOrders, Orderable, OrderableReply, Rows, TradingRequest};
 use super::switch::{SwitchRecord, SwitchStore};
 use super::kis::{KisDesk, KisOrigin};
@@ -14,6 +15,7 @@ use super::kis_account::KisAccountNumber;
 use crate::api::{self, Broker, OrderSide};
 use crate::clock::Clock;
 use crate::config::Secret;
+use crate::kiwoom::error::Category as KiwoomCategory;
 use crate::kiwoom::key_file::KeyId;
 use crate::kiwoom::keys::KeyRing;
 use crate::kiwoom::rest::{Admission, ContKey, Dispatch, KiwoomError, KiwoomRest, MergeScope, Page, Priority};
@@ -26,6 +28,9 @@ use crate::kis::rest::KisError;
 
 const VERIFY_TTL_SECS: i64 = 60;
 const MAX_PAGES: usize = 100;
+const MAX_KIWOOM_SYNC_DAYS_PER_REQUEST: usize = 25;
+const DEFAULT_ALL_LOOKBACK_DAYS: i64 = 365;
+const KIS_MAX_LOOKBACK_DAYS: i64 = 89;
 const ACCOUNT_DIGITS: usize = 10;
 const TAIL_DIGITS: usize = 2;
 const USER_VISIBLE_DIGITS: usize = 8;
@@ -165,6 +170,7 @@ impl Lanes {
 pub(super) struct Shared {
     pub(super) clock: Clock,
     pub(super) journal: Journal,
+    pub(super) history: ExecutionHistoryStore,
     pub(super) symbols: Arc<SymbolDirectory>,
     pub(super) bands: Arc<PriceBands>,
     pub(super) recovered: Arc<tokio::sync::OnceCell<Result<(), String>>>,
@@ -174,11 +180,12 @@ pub(super) struct Shared {
 
 impl Shared {
     pub(super) fn new(clock: Clock, db: crate::db::AppDb, symbols: Arc<SymbolDirectory>, quote_rest: KiwoomRest) -> Shared {
-        Shared { clock, journal: Journal::new(db), symbols, bands: Arc::default(), recovered: Arc::default(), changes: broadcast::channel(16).0, quote_rest }
+        let history = ExecutionHistoryStore::new(db.clone());
+        Shared { clock, journal: Journal::new(db), history, symbols, bands: Arc::default(), recovered: Arc::default(), changes: broadcast::channel(16).0, quote_rest }
     }
 
     pub(super) fn clone_parts(&self) -> Shared {
-        Shared { clock: self.clock.clone(), journal: self.journal.clone(), symbols: self.symbols.clone(), bands: self.bands.clone(), recovered: self.recovered.clone(), changes: self.changes.clone(), quote_rest: self.quote_rest.clone() }
+        Shared { clock: self.clock.clone(), journal: self.journal.clone(), history: self.history.clone(), symbols: self.symbols.clone(), bands: self.bands.clone(), recovered: self.recovered.clone(), changes: self.changes.clone(), quote_rest: self.quote_rest.clone() }
     }
 }
 
@@ -194,6 +201,7 @@ pub struct Trading {
     write: tokio::sync::Mutex<()>,
     changes: broadcast::Sender<AccountChanged>,
     pub(super) journal: Journal,
+    pub(super) history: ExecutionHistoryStore,
     pub(super) symbols: Arc<SymbolDirectory>,
     pub(super) recovered: Arc<tokio::sync::OnceCell<Result<(), String>>>,
     pub(super) turns: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -251,7 +259,7 @@ impl Trading {
     }
 
     pub(super) fn assemble(lanes: Lanes, key: KeyId, store: Arc<SwitchStore>, shared: Shared) -> Arc<Trading> {
-        let Shared { clock, journal, symbols, bands, recovered, changes, quote_rest } = shared;
+        let Shared { clock, journal, history, symbols, bands, recovered, changes, quote_rest } = shared;
         let trading = Arc::new(Trading {
             lanes,
             quote_rest,
@@ -264,6 +272,7 @@ impl Trading {
             write: tokio::sync::Mutex::new(()),
             changes,
             journal,
+            history,
             symbols,
             recovered,
             turns: Mutex::new(HashMap::new()),
@@ -663,13 +672,43 @@ impl Trading {
         self.executions_at(Priority::Screen).await
     }
 
+    pub async fn executions_on(&self, day: KstDate) -> Result<api::TradingExecutions, TradingError> {
+        self.executions_for_day(day, Priority::Screen).await
+    }
+
     pub(super) async fn executions_at(&self, priority: Priority) -> Result<api::TradingExecutions, TradingError> {
-        let account = self.verified(priority).await?;
         let day = self.clock.now().kst_date();
-        if self.broker() == Broker::Kis {
-            let executions = self.kis_executions(&self.kis_desk_of(&account)?, day, priority).await?;
+        self.executions_for_day(day, priority).await
+    }
+
+    async fn executions_for_day(&self, day: KstDate, priority: Priority) -> Result<api::TradingExecutions, TradingError> {
+        let account = self.verified(priority).await?;
+        let now = self.clock.now();
+        let today = now.kst_date();
+        if day > today {
+            return Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions: Vec::new() });
+        }
+        if day < today && self.history.is_finalized(&account.account_ref, day).await? {
+            let executions = self.history.load_day(&account.account_ref, day).await?;
             return Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions });
         }
+        let executions = if self.broker() == Broker::Kis {
+            if day < today.add_days(-KIS_MAX_LOOKBACK_DAYS) {
+                return Ok(api::TradingExecutions {
+                    account_ref: account.account_ref.clone(),
+                    day: api::KstDate(day),
+                    executions: self.history.load_day(&account.account_ref, day).await?,
+                });
+            }
+            self.kis_executions(&self.kis_desk_of(&account)?, day, priority).await?
+        } else {
+            self.kiwoom_executions_on(day, priority).await?
+        };
+        self.history.save_day(&account.account_ref, day, day < today, &executions, now.unix()).await?;
+        Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions })
+    }
+
+    async fn kiwoom_executions_on(&self, day: KstDate, priority: Priority) -> Result<Vec<api::TradingExecution>, TradingError> {
         let mut executions = Vec::new();
         for row in self.pages(&Executions::of_day(day), priority).await?.into_iter().flat_map(Rows::into_rows) {
             let quantity = unsigned(&row.cntr_qty)?;
@@ -688,7 +727,92 @@ impl Trading {
                 venue: venue(&[&row.dmst_stex_tp])?.into(),
             });
         }
-        Ok(api::TradingExecutions { account_ref: account.account_ref, day: api::KstDate(day), executions })
+        Ok(executions)
+    }
+
+    pub async fn executions_history(&self, requested_from: Option<KstDate>, requested_to: Option<KstDate>) -> Result<api::TradingExecutionHistory, TradingError> {
+        let priority = Priority::Screen;
+        let account = self.verified(priority).await?;
+        let now = self.clock.now();
+        let today = now.kst_date();
+        let lookback_start = today.add_days(-DEFAULT_ALL_LOOKBACK_DAYS);
+        let (from, to, sync_from) = match (requested_from, requested_to) {
+            (Some(from), Some(to)) => (from, to, from),
+            (None, None) => {
+                let earliest = self.history.earliest_day(&account.account_ref).await?;
+                let from = earliest.map_or(lookback_start, |day| day.min(lookback_start));
+                (from, today, lookback_start)
+            }
+            _ => return Err(TradingError::BadRequest("from과 to는 함께 지정하거나 모두 비워야 합니다")),
+        };
+        let sync_to = to.min(today);
+        let mut pending_days = 0u32;
+        if sync_from <= sync_to {
+            match self.broker() {
+                Broker::Kis => {
+                    let kis_from = sync_from.max(today.add_days(-KIS_MAX_LOOKBACK_DAYS));
+                    if kis_from <= sync_to {
+                        self.sync_kis_history(&account, kis_from, sync_to, today, now.unix(), priority).await?;
+                    }
+                }
+                Broker::Kiwoom => {
+                    pending_days = self.sync_kiwoom_history(&account, sync_from, sync_to, today, now.unix(), priority).await?;
+                }
+            }
+        }
+        let days = self.history.load_range(&account.account_ref, from, to).await?;
+        Ok(api::TradingExecutionHistory {
+            account_ref: account.account_ref,
+            today: api::KstDate(today),
+            from: api::KstDate(from),
+            to: api::KstDate(to),
+            days,
+            pending_days,
+        })
+    }
+
+    async fn sync_kis_history(&self, account: &Verified, from: KstDate, to: KstDate, today: KstDate, synced_at: i64, priority: Priority) -> Result<(), TradingError> {
+        let finalized = self.history.finalized_days(&account.account_ref, from, to).await?;
+        let missing = sync_candidate_days(from, to, today, &finalized);
+        let (Some(&fetch_from), Some(&fetch_to)) = (missing.iter().min(), missing.iter().max()) else {
+            return Ok(());
+        };
+        let desk = self.kis_desk_of(account)?;
+        let mut fetched = self.kis_executions_range(&desk, fetch_from, fetch_to, priority).await?;
+        let mut to_save = Vec::new();
+        let mut day = fetch_from;
+        while day <= fetch_to {
+            let fills = fetched.remove(&day).unwrap_or_default();
+            if is_sync_day(day, today) || !fills.is_empty() {
+                to_save.push((day, day < today, fills));
+            }
+            day = day.add_days(1);
+        }
+        self.history.save_days(&account.account_ref, &to_save, synced_at).await?;
+        Ok(())
+    }
+
+    async fn sync_kiwoom_history(&self, account: &Verified, from: KstDate, to: KstDate, today: KstDate, synced_at: i64, priority: Priority) -> Result<u32, TradingError> {
+        let finalized = self.history.finalized_days(&account.account_ref, from, to).await?;
+        let mut missing = sync_candidate_days(from, to, today, &finalized);
+        missing.reverse();
+        let batch_len = missing.len().min(MAX_KIWOOM_SYNC_DAYS_PER_REQUEST);
+        let mut pending_days = missing.len().saturating_sub(batch_len) as u32;
+        let bulk_priority = if batch_len > 5 { Priority::ScreenBulk } else { priority };
+        for day in missing.into_iter().take(batch_len) {
+            let day_priority = if day == today { priority } else { bulk_priority };
+            match self.kiwoom_executions_on(day, day_priority).await {
+                Ok(executions) => {
+                    self.history.save_day(&account.account_ref, day, day < today, &executions, synced_at).await?;
+                }
+                Err(TradingError::Kiwoom(KiwoomError::Failed(ref failure))) if day < today && failure.category() == KiwoomCategory::BusinessRejected => {
+                    pending_days = 0;
+                    break;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(pending_days)
     }
 
     fn on_account_event(&self, event: &AccountEvent) {
@@ -882,6 +1006,22 @@ fn venue(labels: &[&str]) -> Result<Venue, TradingError> {
         }
     }
     Err(TradingError::Unreadable("거래소구분"))
+}
+
+fn is_sync_day(day: KstDate, today: KstDate) -> bool {
+    day == today || !matches!(day.weekday(), Weekday::Sat | Weekday::Sun)
+}
+
+fn sync_candidate_days(from: KstDate, to: KstDate, today: KstDate, finalized: &HashSet<KstDate>) -> Vec<KstDate> {
+    let mut out = Vec::new();
+    let mut day = from;
+    while day <= to {
+        if is_sync_day(day, today) && (day == today || !finalized.contains(&day)) {
+            out.push(day);
+        }
+        day = day.add_days(1);
+    }
+    out
 }
 
 #[cfg(test)]

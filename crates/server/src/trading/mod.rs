@@ -1,6 +1,7 @@
 mod accounts;
 pub mod auto_orders;
 pub mod forensics;
+mod history;
 mod journal;
 mod kis;
 mod kis_account;

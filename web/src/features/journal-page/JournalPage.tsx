@@ -1,26 +1,36 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
-import { useExecutionForensics, useTradingExecutions } from "../../api/trading";
+import type { TradingExecution } from "../../api/generated/TradingExecution";
+import { useExecutionForensics, useTradingExecutionHistory } from "../../api/trading";
+import { useOrderAccount } from "../order/useOrderAccount";
 import { ErrorState, Skeleton } from "../overlay/State";
 import { JOURNAL_ANALYTICS_PATH } from "../page-rail/pages";
 import { JournalAnalyticsView } from "./JournalAnalyticsView";
 import {
   aggregateSummary,
   buildRoundTrips,
+  computeHistoryQueryRange,
   computePeriodRange,
   generateDemoTrades,
   matchTradeFilter,
   todayKstIso,
 } from "./journalEngine";
-import { loadExecutionHistory, mergeAndStoreExecutions, normalizeDayString } from "./journalNotes";
+import { combineDayExecutionsWithForensics, normalizeDayString } from "./journalNotes";
 import { useJournalStore } from "./journalStore";
 import { JournalStudioView } from "./JournalStudioView";
 import "./journalPage.css";
 
+interface AccumulatedHistory {
+  readonly accountKey: string;
+  readonly days: ReadonlyMap<string, readonly TradingExecution[]>;
+}
+
 export function JournalPage() {
   const { pathname } = useLocation();
   const isAnalytics = pathname.replace(/\/+$/, "") === JOURNAL_ANALYTICS_PATH;
-  const syncedDayRef = useRef<string | null>(null);
+  const orderAccount = useOrderAccount();
+  const accountRef = orderAccount.current?.ref ?? null;
+  const accountKey = accountRef ?? "";
 
   const period = useJournalStore((s) => s.period);
   const afterCost = useJournalStore((s) => s.afterCost);
@@ -28,36 +38,97 @@ export function JournalPage() {
   const quick = useJournalStore((s) => s.quick);
   const demoMode = useJournalStore((s) => s.demoMode);
   const notes = useJournalStore((s) => s.notes);
-  const setPeriod = useJournalStore((s) => s.setPeriod);
+  const syncInitialAnchor = useJournalStore((s) => s.syncInitialAnchor);
 
-  const executionsQuery = useTradingExecutions(null, true);
-  const forensicsQuery = useExecutionForensics(null, true);
+  const fallbackToday = useMemo(() => todayKstIso(), []);
+  const historyRange = useMemo(() => computeHistoryQueryRange(period, fallbackToday), [period, fallbackToday]);
+  const historyQuery = useTradingExecutionHistory(accountRef, historyRange, !demoMode);
+  const { data: historyData, isFetching: historyFetching, isError: historyHasError, isPending: historyPending, refetch: refetchHistory } = historyQuery;
 
-  const serverDay = useMemo(() => {
-    const raw = executionsQuery.data?.day || forensicsQuery.data?.date || "";
+  const serverToday = useMemo(() => {
+    const raw = historyData?.today ?? "";
     return raw !== "" ? normalizeDayString(raw) : "";
-  }, [executionsQuery.data?.day, forensicsQuery.data?.date]);
+  }, [historyData?.today]);
 
-  const today = serverDay || todayKstIso();
+  const today = serverToday || fallbackToday;
 
-  const mergedHistory = useMemo(() => {
-    const execs = executionsQuery.data?.executions ?? [];
-    const forensics = forensicsQuery.data?.items ?? [];
-    if (serverDay !== "" && (execs.length > 0 || forensics.length > 0)) {
-      return mergeAndStoreExecutions(serverDay, execs, forensics);
+  const forensicsDate = useMemo(() => {
+    if (period.type !== "day") return undefined;
+    const anchor = normalizeDayString(period.anchor || today);
+    if (anchor === "" || anchor > today) return undefined;
+    return anchor.replace(/-/g, "");
+  }, [period.type, period.anchor, today]);
+
+  const forensicsQuery = useExecutionForensics(accountRef, !demoMode, forensicsDate);
+
+  const [accumulated, setAccumulated] = useState<AccumulatedHistory>(() => ({
+    accountKey,
+    days: new Map(),
+  }));
+
+  useEffect(() => {
+    setAccumulated((prev) =>
+      prev.accountKey === accountKey ? prev : { accountKey, days: new Map() },
+    );
+  }, [accountKey]);
+
+  useEffect(() => {
+    if (historyData === undefined) return;
+    setAccumulated((prev) => {
+      const next = prev.accountKey === accountKey ? new Map(prev.days) : new Map<string, readonly TradingExecution[]>();
+      const returnedDays = new Set<string>();
+      for (const entry of historyData.days) {
+        const day = normalizeDayString(entry.day);
+        returnedDays.add(day);
+        next.set(day, entry.executions);
+      }
+      if (historyData.pendingDays === 0) {
+        const from = normalizeDayString(historyData.from);
+        const to = normalizeDayString(historyData.to);
+        for (const existingDay of [...next.keys()]) {
+          if (existingDay >= from && existingDay <= to && !returnedDays.has(existingDay)) {
+            next.delete(existingDay);
+          }
+        }
+      }
+      return { accountKey, days: next };
+    });
+  }, [accountKey, historyData]);
+
+  const rangeKey = historyRange === null ? "all" : `${historyRange[0]}..${historyRange[1]}`;
+  const backfillStateRef = useRef<{ key: string; pending: number | null }>({ key: "", pending: null });
+  const pendingFromServer = historyData?.pendingDays ?? 0;
+
+  useEffect(() => {
+    const fullKey = `${accountKey}|${rangeKey}`;
+    if (backfillStateRef.current.key !== fullKey) {
+      backfillStateRef.current = { key: fullKey, pending: null };
     }
-    return loadExecutionHistory();
-  }, [serverDay, executionsQuery.data?.executions, forensicsQuery.data?.items]);
+    if (demoMode || pendingFromServer <= 0 || historyFetching || historyHasError) return;
+    if (backfillStateRef.current.pending !== null && pendingFromServer >= backfillStateRef.current.pending) return;
+    backfillStateRef.current = { key: fullKey, pending: pendingFromServer };
+    void refetchHistory();
+  }, [accountKey, rangeKey, demoMode, pendingFromServer, historyFetching, historyHasError, refetchHistory]);
+
+  useEffect(() => {
+    if (serverToday !== "") syncInitialAnchor(serverToday);
+  }, [serverToday, syncInitialAnchor]);
+
+  const daysForAccount = accumulated.accountKey === accountKey ? accumulated.days : new Map<string, readonly TradingExecution[]>();
+
+  const mergedHistory = useMemo(
+    () =>
+      combineDayExecutionsWithForensics(
+        daysForAccount,
+        forensicsQuery.data?.date ?? "",
+        forensicsQuery.data?.items ?? [],
+      ),
+    [daysForAccount, forensicsQuery.data?.date, forensicsQuery.data?.items],
+  );
 
   const realTrades = useMemo(() => buildRoundTrips(mergedHistory), [mergedHistory]);
   const demoTrades = useMemo(() => (demoMode ? generateDemoTrades(today) : []), [demoMode, today]);
   const allTrades = demoMode ? demoTrades : realTrades;
-
-  useEffect(() => {
-    if (serverDay === "" || syncedDayRef.current === serverDay) return;
-    syncedDayRef.current = serverDay;
-    setPeriod({ type: period.type, anchor: serverDay });
-  }, [serverDay, period.type, setPeriod]);
 
   const range = useMemo(() => computePeriodRange(period, allTrades, today), [period, allTrades, today]);
 
@@ -89,23 +160,27 @@ export function JournalPage() {
 
   const summary = useMemo(() => aggregateSummary(filteredTrades, afterCost), [filteredTrades, afterCost]);
 
-  const isLoading = !demoMode && executionsQuery.isPending && forensicsQuery.isPending && realTrades.length === 0;
-  const isError = !demoMode && executionsQuery.isError && forensicsQuery.isError && realTrades.length === 0;
+  const pendingDays = demoMode ? 0 : pendingFromServer;
+  const isSyncingHistory = !demoMode && (historyFetching || pendingDays > 0);
+  const isInitialLoading = !demoMode && historyPending && realTrades.length === 0;
+  const isInitialError = !demoMode && historyHasError && realTrades.length === 0;
+  const historyError = !demoMode && historyHasError ? "체결 이력을 불러오지 못했습니다" : null;
+  const retryHistory = () => {
+    void refetchHistory();
+    void forensicsQuery.refetch();
+  };
 
   return (
     <div className="jrn-root" data-testid="journal-page">
-      {isLoading ? (
+      {isInitialLoading ? (
         <div className="jrn-state-wrap">
           <Skeleton label="매매 복기 데이터를 불러오는 중" rows={8} />
         </div>
-      ) : isError ? (
+      ) : isInitialError ? (
         <div className="jrn-state-wrap">
           <ErrorState
             message="매매 복기 데이터를 불러오지 못했습니다"
-            retry={() => {
-              void executionsQuery.refetch();
-              void forensicsQuery.refetch();
-            }}
+            retry={retryHistory}
           />
         </div>
       ) : isAnalytics ? (
@@ -117,6 +192,10 @@ export function JournalPage() {
           summary={summary}
           range={range}
           today={today}
+          isSyncingHistory={isSyncingHistory}
+          pendingDays={pendingDays}
+          historyError={historyError}
+          onRetryHistory={retryHistory}
         />
       ) : (
         <JournalStudioView
@@ -128,6 +207,10 @@ export function JournalPage() {
           range={range}
           today={today}
           hasRealTrades={realTrades.length > 0}
+          isSyncingHistory={isSyncingHistory}
+          pendingDays={pendingDays}
+          historyError={historyError}
+          onRetryHistory={retryHistory}
         />
       )}
     </div>

@@ -1,41 +1,53 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchBarsPage, fetchJumpPage, jumpAsBarsPage } from "../../api/bars";
-import type { Bar } from "../../api/generated/Bar";
-import type { Venue } from "../../api/generated/Venue";
-import { subscribeTheme } from "../../persist/theme";
 import {
-  clamp,
+  CandlestickSeries,
+  createChart,
+  CrosshairMode,
+  HistogramSeries,
+  type IChartApi,
+  type ISeriesApi,
+  LineStyle,
+  type MouseEventParams,
+  type TickMarkType,
+  type Time,
+  type UTCTimestamp,
+} from "lightweight-charts";
+import { useEffect, useRef, useState } from "react";
+import { fetchBarsPage, fetchJumpPage } from "../../api/bars";
+import type { Bar } from "../../api/generated/Bar";
+import type { Period } from "../../api/generated/Period";
+import type { Venue } from "../../api/generated/Venue";
+import { axisPriceFormat } from "../../chart/axisFormat";
+import { displayBars, type History } from "../../chart/barFeed";
+import { DaySeparators } from "../../chart/daySeparators";
+import { JumpableFeed } from "../../chart/jumpFeed";
+import { readThemeTokens, type ThemeTokens } from "../../chart/theme";
+import { formatBarTime, formatTickMark, fromChartTime, isIntraday, toChartTime } from "../../chart/time";
+import { PendingScroll } from "../../chart/timeAxis";
+import { subscribeTheme } from "../../persist/theme";
+import { findBarIndexForFill, JournalTradeOverlay } from "./journalChartOverlay";
+import {
   dayShortLabel,
   formatMinutes,
   formatPct,
   formatUtcMsToDay,
   formatWon,
-  snapTick,
   synthesizeDemoBars,
-  todayKstIso,
   toneClass,
-  tradePnl,
 } from "./journalEngine";
-import { TF_TO_PERIOD, type JournalBar, type JournalFill, type JournalTf, type JournalTrade } from "./journalTypes";
+import { JOURNAL_TFS, TF_TO_PERIOD, type JournalBar, type JournalFill, type JournalTf, type JournalTrade } from "./journalTypes";
+
+const LOAD_OLDER_WITHIN = 50;
+const MAX_INITIAL_OLDER_PAGES = 10;
+const RIGHT_OFFSET_BARS = 12;
 
 interface Props {
   readonly trade: JournalTrade;
   readonly tf: JournalTf;
+  readonly today: string;
   readonly isAutoTf: boolean;
   readonly afterCost: boolean;
   readonly highlightFill: JournalFill | null;
   readonly resetTick: number;
-}
-
-interface ViewRange {
-  from: number;
-  to: number;
-}
-
-interface HoverPoint {
-  x: number;
-  y: number;
 }
 
 interface LegendState {
@@ -58,540 +70,431 @@ function toJournalBars(bars: readonly Bar[]): readonly JournalBar[] {
   });
 }
 
-function findBarIndexForFill(bars: readonly JournalBar[], fill: JournalFill, tf: JournalTf): number {
-  if (bars.length === 0) return 0;
-  if (tf === "D") {
-    const exact = bars.findIndex((b) => b.day === fill.day);
-    if (exact >= 0) return exact;
-    let best = 0;
-    let bestDiff = Infinity;
-    for (let i = 0; i < bars.length; i += 1) {
-      const diff = Math.abs(bars[i]!.day.localeCompare(fill.day));
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = i;
-      }
-    }
-    return best;
+function findBarIndexByTime(bars: readonly JournalBar[], t: number): number {
+  let lo = 0;
+  let hi = bars.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const midT = bars[mid]!.t;
+    if (midT === t) return mid;
+    if (midT < t) lo = mid + 1;
+    else hi = mid - 1;
   }
-  const step = tf === "5" ? 5 : 1;
-  const bucketMin = Math.floor(fill.minutes / step) * step;
-  const exact = bars.findIndex((b) => b.day === fill.day && b.minutes === bucketMin);
-  if (exact >= 0) return exact;
-  let best = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < bars.length; i += 1) {
-    const b = bars[i]!;
-    const dayPenalty = b.day === fill.day ? 0 : 100000;
-    const dist = dayPenalty + Math.abs(b.minutes - fill.minutes);
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = i;
-    }
-  }
-  return best;
+  return -1;
 }
 
-export function JournalCandleChart({ trade, tf, isAutoTf, afterCost, highlightFill, resetTick }: Props) {
-  const boxRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const viewRef = useRef<ViewRange>({ from: 0, to: 40 });
-  const hoverRef = useRef<HoverPoint | null>(null);
-  const dragRef = useRef<{ x: number; from: number; to: number } | null>(null);
-  const rafRef = useRef<number>(0);
+function buildLegendState(bar: JournalBar, trade: JournalTrade, tf: JournalTf, bars: readonly JournalBar[], idx: number): LegendState {
+  const chgPct = bar.o > 0 ? ((bar.c - bar.o) / bar.o) * 100 : 0;
+  const dateLabel = tf === "D" ? dayShortLabel(bar.day) : `${dayShortLabel(bar.day)} ${formatMinutes(bar.minutes)}`;
+  const hereB = trade.buys.filter((f) => findBarIndexForFill(bars, f, tf) === idx);
+  const hereS = trade.sells.filter((f) => findBarIndexForFill(bars, f, tf) === idx);
+  const notes: string[] = [];
+  if (hereB.length > 0) notes.push(`▲ 매수 ${hereB.map((f) => `${formatWon(f.price, false)}×${f.qty}`).join(", ")}`);
+  if (hereS.length > 0) notes.push(`▼ 매도 ${hereS.map((f) => `${formatWon(f.price, false)}×${f.qty}`).join(", ")}`);
+  return { dateLabel, o: bar.o, h: bar.h, l: bar.l, c: bar.c, chgPct, fillNote: notes.join("  ") };
+}
 
-  const [themeRev, setThemeRev] = useState(0);
-  const [sizeRev, setSizeRev] = useState(0);
+function chartOptionsOf(tokens: ThemeTokens, period: Period) {
+  const crossLine = { color: tokens.crosshair, style: LineStyle.Dashed, width: 1 as const, labelBackgroundColor: tokens.raised };
+  return {
+    layout: {
+      background: { color: tokens.chartBg || tokens.raised },
+      textColor: tokens.text2,
+      fontFamily: tokens.fontFamily,
+      fontSize: tokens.fontSize,
+      attributionLogo: false,
+    },
+    grid: {
+      vertLines: { visible: true, color: tokens.grid },
+      horzLines: { visible: true, color: tokens.gridH },
+    },
+    crosshair: {
+      mode: CrosshairMode.Normal,
+      vertLine: crossLine,
+      horzLine: crossLine,
+    },
+    rightPriceScale: {
+      minimumWidth: 68,
+      alignLabels: true,
+      entireTextOnly: true,
+      borderColor: tokens.line,
+      scaleMargins: { top: 0.14, bottom: 0.22 },
+    },
+    timeScale: {
+      borderColor: tokens.line,
+      rightOffset: RIGHT_OFFSET_BARS,
+      fixLeftEdge: false,
+      fixRightEdge: false,
+      timeVisible: isIntraday(period),
+      secondsVisible: false,
+      tickMarkFormatter: (time: Time, type: TickMarkType) => formatTickMark(time as UTCTimestamp, type, period),
+    },
+    handleScroll: {
+      mouseWheel: true,
+      pressedMouseMove: true,
+      horzTouchDrag: true,
+      vertTouchDrag: true,
+    },
+    handleScale: {
+      axisPressedMouseMove: { time: true, price: true },
+      axisDoubleClickReset: { time: true, price: true },
+      mouseWheel: true,
+      pinch: true,
+    },
+    localization: {
+      locale: "ko-KR",
+      timeFormatter: (time: Time) => formatBarTime(fromChartTime(time as UTCTimestamp), period),
+    },
+  };
+}
+
+function computeTradeFocusRange(bars: readonly JournalBar[], trade: JournalTrade, tf: JournalTf): { from: number; to: number } {
+  const n = bars.length;
+  if (n === 0) return { from: 0, to: 1 };
+  const firstBuy = trade.buys[0];
+  const lastSell = trade.sells[trade.sells.length - 1];
+  const entryIdx = firstBuy ? findBarIndexForFill(bars, firstBuy, tf) : 0;
+  const exitIdx = lastSell ? findBarIndexForFill(bars, lastSell, tf) : n - 1;
+  const lo = Math.max(0, Math.min(entryIdx, exitIdx));
+  const hi = Math.max(0, Math.max(entryIdx, exitIdx));
+  if (tf === "D") {
+    const pad = Math.max(18, Math.round((hi - lo) * 0.8));
+    return { from: lo - pad, to: hi + Math.max(10, Math.round(pad * 0.4)) };
+  }
+  const span = hi - lo;
+  const pad = Math.max(20, Math.round(span * 0.6));
+  let from = lo - pad;
+  let to = hi + pad + 1;
+  if (to - from < 60) {
+    const mid = (from + to) / 2;
+    from = mid - 30;
+    to = mid + 30;
+  }
+  return { from, to };
+}
+
+export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, highlightFill, resetTick }: Props) {
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const overlayRef = useRef<JournalTradeOverlay | null>(null);
+  const daySepsRef = useRef<DaySeparators | null>(null);
+  const feedRef = useRef<JumpableFeed | null>(null);
+  const pendingScrollRef = useRef<PendingScroll | null>(null);
+  const barsRef = useRef<readonly JournalBar[]>([]);
+  const settingDataRef = useRef(false);
+  const tokensRef = useRef<ThemeTokens>(readThemeTokens());
+
+  const propsRef = useRef({ trade, tf, today, afterCost, highlightFill });
+  propsRef.current = { trade, tf, today, afterCost, highlightFill };
+
   const [legend, setLegend] = useState<LegendState | null>(null);
 
-  const isDemo = trade.demoSeed !== null;
-  const venueParam: Venue = trade.venue === "nxt" ? "nxt" : "krx";
   const period = TF_TO_PERIOD[tf];
-  const today = todayKstIso();
+  const venueParam: Venue = trade.venue;
+  const isDemo = trade.demoSeed !== null;
 
-  const barsQuery = useQuery({
-    queryKey: ["journal", "bars", trade.code, venueParam, period, trade.exitDay],
-    enabled: !isDemo,
-    staleTime: 60_000,
-    retry: false,
-    queryFn: async ({ signal }) => {
-      if (tf !== "D" && trade.exitDay < today) {
-        try {
-          const jumped = await fetchJumpPage(
-            { symbol: trade.code, venue: venueParam, period, date: trade.exitDay, limit: 300 },
-            signal,
-          );
-          return jumpAsBarsPage(jumped).bars;
-        } catch {
-          const fallback = await fetchBarsPage(
-            { symbol: trade.code, venue: venueParam, period, limit: 300 },
-            signal,
-          );
-          return fallback.bars;
+  const updateLegendForIndex = (idx: number) => {
+    const bars = barsRef.current;
+    if (bars.length === 0) return;
+    const clamped = Math.max(0, Math.min(bars.length - 1, idx));
+    const bar = bars[clamped]!;
+    const { trade: curTrade, tf: curTf } = propsRef.current;
+    setLegend(buildLegendState(bar, curTrade, curTf, bars, clamped));
+  };
+
+  const applyBars = (bars: readonly JournalBar[], shiftLogicalBy: number | null) => {
+    const chart = chartRef.current;
+    const candle = candleRef.current;
+    const volume = volumeRef.current;
+    const overlay = overlayRef.current;
+    if (!chart || !candle || !volume || !overlay) return;
+
+    const prevRange = shiftLogicalBy !== null ? chart.timeScale().getVisibleLogicalRange() : null;
+    barsRef.current = bars;
+    const tokens = tokensRef.current;
+
+    settingDataRef.current = true;
+    try {
+      candle.setData(
+        bars.map((b) => ({
+          time: toChartTime(b.t),
+          open: b.o,
+          high: b.h,
+          low: b.l,
+          close: b.c,
+        })),
+      );
+      volume.setData(
+        bars.map((b) => ({
+          time: toChartTime(b.t),
+          value: b.v,
+          color: b.c >= b.o ? tokens.upVol : tokens.downVol,
+        })),
+      );
+      if (prevRange !== null && shiftLogicalBy !== null && shiftLogicalBy > 0) {
+        chart.timeScale().setVisibleLogicalRange({
+          from: prevRange.from + shiftLogicalBy,
+          to: prevRange.to + shiftLogicalBy,
+        });
+      }
+    } finally {
+      settingDataRef.current = false;
+    }
+
+    const { trade: curTrade, tf: curTf, afterCost: curAfterCost, highlightFill: curHighlight } = propsRef.current;
+    overlay.setState({ trade: curTrade, tf: curTf, bars, afterCost: curAfterCost, highlightFill: curHighlight });
+    daySepsRef.current?.sync();
+
+    const box = boxRef.current;
+    if (box) {
+      box.dataset.barCount = String(bars.length);
+      box.dataset.firstBarT = String(bars[0]?.t ?? "");
+      box.dataset.lastBarT = String(bars[bars.length - 1]?.t ?? "");
+    }
+
+    if (shiftLogicalBy === null && bars.length > 0) {
+      const focus = computeTradeFocusRange(bars, curTrade, curTf);
+      chart.timeScale().setVisibleLogicalRange(focus);
+      const lastSell = curTrade.sells[curTrade.sells.length - 1];
+      const idx = lastSell ? findBarIndexForFill(bars, lastSell, curTf) : bars.length - 1;
+      updateLegendForIndex(idx >= 0 ? idx : bars.length - 1);
+    }
+  };
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const tokens = readThemeTokens();
+    tokensRef.current = tokens;
+    const initialPeriod = TF_TO_PERIOD[propsRef.current.tf];
+    const chart = createChart(host, { ...chartOptionsOf(tokens, initialPeriod), autoSize: true });
+    chartRef.current = chart;
+
+    const candle = chart.addSeries(CandlestickSeries, {
+      priceFormat: axisPriceFormat("price", 1),
+      lastValueVisible: false,
+      priceLineVisible: false,
+      upColor: tokens.up,
+      downColor: tokens.down,
+      borderUpColor: tokens.up,
+      borderDownColor: tokens.down,
+      wickUpColor: tokens.up,
+      wickDownColor: tokens.down,
+    });
+    candleRef.current = candle;
+
+    const volume = chart.addSeries(HistogramSeries, {
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume",
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    chart.priceScale("volume").applyOptions({
+      visible: false,
+      scaleMargins: { top: 0.82, bottom: 0 },
+    });
+    volumeRef.current = volume;
+
+    const overlay = new JournalTradeOverlay();
+    candle.attachPrimitive(overlay);
+    overlayRef.current = overlay;
+
+    const daySeps = new DaySeparators(chart, {
+      shown: () => isIntraday(TF_TO_PERIOD[propsRef.current.tf]),
+      bars: () => barsRef.current,
+      color: () => tokensRef.current.text3,
+    });
+    daySepsRef.current = daySeps;
+
+    const pendingScroll = new PendingScroll((callback) => requestAnimationFrame(callback));
+    pendingScrollRef.current = pendingScroll;
+
+    const onWheel = (event: WheelEvent) => {
+      if (event.defaultPrevented || event.deltaY === 0) return;
+      const timeScale = chart.timeScale();
+      const focused = event.ctrlKey || event.metaKey;
+      if (event.shiftKey && !focused) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 32 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 120 : 1;
+        const shift = (event.deltaY * unit * 0.8) / Math.max(1, timeScale.options().barSpacing);
+        pendingScroll.scrollByUser(timeScale, shift);
+        return;
+      }
+      const rightBarStaysOnScroll = !focused;
+      if (timeScale.options().rightBarStaysOnScroll !== rightBarStaysOnScroll) {
+        timeScale.applyOptions({ rightBarStaysOnScroll });
+      }
+    };
+    chart.chartElement().addEventListener("wheel", onWheel, { capture: true, passive: false });
+
+    const onRangeChange = (range: { from: number; to: number } | null) => {
+      if (boxRef.current && range !== null) {
+        boxRef.current.dataset.visibleFrom = range.from.toFixed(1);
+        boxRef.current.dataset.visibleTo = range.to.toFixed(1);
+      }
+      if (settingDataRef.current || range === null) return;
+      if (range.from < LOAD_OLDER_WITHIN) {
+        feedRef.current?.needOlder();
+      }
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange);
+
+    const onCrosshair = (param: MouseEventParams<Time>) => {
+      const bars = barsRef.current;
+      if (bars.length === 0) return;
+      if (param.time !== undefined && typeof param.time === "number") {
+        const unixT = fromChartTime(param.time as UTCTimestamp);
+        const idx = findBarIndexByTime(bars, unixT);
+        if (idx >= 0) {
+          updateLegendForIndex(idx);
+          return;
         }
       }
-      const page = await fetchBarsPage(
-        { symbol: trade.code, venue: venueParam, period, limit: 300 },
-        signal,
-      );
-      return page.bars;
-    },
-  });
-
-  const bars = useMemo<readonly JournalBar[]>(() => {
-    if (isDemo) return synthesizeDemoBars(trade, tf);
-    const raw = barsQuery.data ?? [];
-    if (raw.length > 0) return toJournalBars(raw);
-    return synthesizeDemoBars({ ...trade, demoSeed: 777123 }, tf);
-  }, [isDemo, barsQuery.data, trade, tf]);
-
-  const entryIdx = useMemo(
-    () => (trade.buys[0] ? findBarIndexForFill(bars, trade.buys[0], tf) : 0),
-    [bars, trade.buys, tf],
-  );
-  const exitIdx = useMemo(() => {
-    const lastSell = trade.sells[trade.sells.length - 1];
-    return lastSell ? findBarIndexForFill(bars, lastSell, tf) : Math.max(0, bars.length - 1);
-  }, [bars, trade.sells, tf]);
-
-  const highlightIdx = useMemo(
-    () => (highlightFill ? findBarIndexForFill(bars, highlightFill, tf) : null),
-    [bars, highlightFill, tf],
-  );
-
-  const computeDefaultRange = useMemo(() => {
-    return (): ViewRange => {
-      const n = bars.length;
-      if (n === 0) return { from: 0, to: 1 };
-      if (tf === "D") {
-        return { from: Math.max(-1, n - 52), to: n + 4 };
-      }
-      const lo = Math.min(entryIdx, exitIdx);
-      const hi = Math.max(entryIdx, exitIdx);
-      const span = hi - lo;
-      const padB = Math.max(18, span * 0.55);
-      let from = lo - padB;
-      let to = hi + padB + 1;
-      if (to - from < 56) {
-        const mid = (from + to) / 2;
-        from = mid - 28;
-        to = mid + 28;
-      }
-      if (to > n + 3) {
-        from -= to - (n + 3);
-        to = n + 3;
-      }
-      if (from < -2) {
-        to = Math.min(n + 3, to + (-2 - from));
-        from = -2;
-      }
-      return { from, to };
+      const { trade: curTrade, tf: curTf } = propsRef.current;
+      const lastSell = curTrade.sells[curTrade.sells.length - 1];
+      const idx = lastSell ? findBarIndexForFill(bars, lastSell, curTf) : bars.length - 1;
+      updateLegendForIndex(idx >= 0 ? idx : bars.length - 1);
     };
-  }, [bars.length, entryIdx, exitIdx, tf]);
+    chart.subscribeCrosshairMove(onCrosshair);
 
-  useEffect(() => {
-    viewRef.current = computeDefaultRange();
-  }, [computeDefaultRange, trade.id, tf, resetTick]);
+    const unsubTheme = subscribeTheme(() => {
+      const nextTokens = readThemeTokens();
+      tokensRef.current = nextTokens;
+      chart.applyOptions(chartOptionsOf(nextTokens, TF_TO_PERIOD[propsRef.current.tf]));
+      candle.applyOptions({
+        upColor: nextTokens.up,
+        downColor: nextTokens.down,
+        borderUpColor: nextTokens.up,
+        borderDownColor: nextTokens.down,
+        wickUpColor: nextTokens.up,
+        wickDownColor: nextTokens.down,
+      });
+      if (barsRef.current.length > 0) {
+        volume.setData(
+          barsRef.current.map((b) => ({
+            time: toChartTime(b.t),
+            value: b.v,
+            color: b.c >= b.o ? nextTokens.upVol : nextTokens.downVol,
+          })),
+        );
+      }
+      overlay.refreshTheme();
+      daySeps.sync();
+    });
 
-  useEffect(() => subscribeTheme(() => setThemeRev((v) => v + 1)), []);
-
-  useEffect(() => {
-    const box = boxRef.current;
-    if (box === null) return;
-    const ro = new ResizeObserver(() => setSizeRev((v) => v + 1));
-    ro.observe(box);
-    return () => ro.disconnect();
+    return () => {
+      unsubTheme();
+      chart.unsubscribeCrosshairMove(onCrosshair);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange);
+      chart.chartElement().removeEventListener("wheel", onWheel, true);
+      feedRef.current?.dispose();
+      feedRef.current = null;
+      chart.remove();
+      chartRef.current = null;
+      candleRef.current = null;
+      volumeRef.current = null;
+      overlayRef.current = null;
+      daySepsRef.current = null;
+      pendingScrollRef.current = null;
+    };
   }, []);
 
-  const drawRef = useRef<() => void>(() => {});
-  drawRef.current = () => {
-    const box = boxRef.current;
-    const cv = canvasRef.current;
-    if (box === null || cv === null || bars.length === 0) return;
-    const w = box.clientWidth;
-    const h = box.clientHeight;
-    if (w <= 0 || h <= 0) return;
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.applyOptions(chartOptionsOf(tokensRef.current, period));
+    feedRef.current?.dispose();
+    feedRef.current = null;
 
-    const dpr = window.devicePixelRatio || 1;
-    const targetW = Math.round(w * dpr);
-    const targetH = Math.round(h * dpr);
-    if (cv.width !== targetW || cv.height !== targetH) {
-      cv.width = targetW;
-      cv.height = targetH;
+    if (isDemo) {
+      applyBars(synthesizeDemoBars(trade, tf), null);
+      return;
     }
 
-    const ctx = cv.getContext("2d");
-    if (ctx === null) return;
+    let disposed = false;
+    let initialPages = 0;
 
-    const styles = getComputedStyle(document.documentElement);
-    const cssVar = (name: string) => styles.getPropertyValue(name).trim();
-    const isProfit = tradePnl(trade, afterCost) >= 0;
-    const C = {
-      up: cssVar("--up"),
-      down: cssVar("--down"),
-      upVol: cssVar("--up-vol"),
-      dnVol: cssVar("--down-vol"),
-      t1: cssVar("--text"),
-      t2: cssVar("--text-2"),
-      t3: cssVar("--text-3"),
-      grid: cssVar("--grid-h"),
-      surf: cssVar("--surface"),
-      raised: cssVar("--raised"),
-      hold: isProfit ? cssVar("--cloud-up") : cssVar("--cloud-down"),
-      cross: cssVar("--crosshair"),
-    };
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
-    const PL = 10;
-    const PR = 68;
-    const PT = 34;
-    const PB = 24;
-    const pw = Math.max(10, w - PL - PR);
-    const ph = Math.max(10, h - PT - PB);
-    const volH = Math.round(ph * 0.14);
-    const priceH = Math.max(10, ph - volH - 10);
-
-    const { from, to } = viewRef.current;
-    const bw = pw / Math.max(1, to - from);
-    const i0 = Math.max(0, Math.floor(from));
-    const i1 = Math.min(bars.length - 1, Math.ceil(to));
-
-    let lo = Infinity;
-    let hi = -Infinity;
-    let vmax = 1;
-    for (let i = i0; i <= i1; i += 1) {
-      const b = bars[i]!;
-      if (b.l < lo) lo = b.l;
-      if (b.h > hi) hi = b.h;
-      if (b.v > vmax) vmax = b.v;
-    }
-    if (exitIdx >= i0 && entryIdx <= i1) {
-      lo = Math.min(lo, trade.avgBuy);
-      hi = Math.max(hi, trade.avgBuy);
-    }
-    if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
-      lo = trade.avgBuy * 0.98;
-      hi = trade.avgBuy * 1.02;
-    }
-    const padP = (hi - lo) * 0.16 || hi * 0.01;
-    lo -= padP;
-    hi += padP;
-
-    const X = (idx: number) => PL + (idx - from + 0.5) * bw;
-    const Y = (price: number) => PT + ((hi - price) / (hi - lo)) * priceH;
-    const setFont = (px: number, wt = 500) => {
-      ctx.font = `${wt} ${px}px "Pretendard Variable", Pretendard, system-ui, sans-serif`;
-    };
-
-    const rawStep = (hi - lo) / 5;
-    const pow = Math.pow(10, Math.floor(Math.log10(Math.max(1, rawStep))));
-    const stepP = [1, 2, 2.5, 5, 10].map((m) => m * pow).find((m) => m >= rawStep) ?? pow;
-    setFont(11, 400);
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "left";
-    for (let p = Math.ceil(lo / stepP) * stepP; p <= hi; p += stepP) {
-      const y = Math.round(Y(p)) + 0.5;
-      if (y < PT || y > PT + priceH) continue;
-      ctx.strokeStyle = C.grid;
-      ctx.beginPath();
-      ctx.moveTo(PL, y);
-      ctx.lineTo(PL + pw, y);
-      ctx.stroke();
-      ctx.fillStyle = C.t3;
-      ctx.fillText(formatWon(p, false), PL + pw + 8, y);
-    }
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(PL, PT - 6, pw, ph + 6);
-    ctx.clip();
-
-    const hx0 = X(Math.min(entryIdx, exitIdx)) - bw / 2;
-    const hx1 = X(Math.max(entryIdx, exitIdx)) + bw / 2;
-    ctx.fillStyle = C.hold;
-    ctx.fillRect(hx0, PT, Math.max(bw, hx1 - hx0), ph);
-
-    if (highlightIdx !== null && highlightIdx >= i0 && highlightIdx <= i1) {
-      ctx.fillStyle = C.raised;
-      ctx.globalAlpha = 0.7;
-      ctx.fillRect(X(highlightIdx) - Math.max(bw * 0.65, 6), PT, Math.max(bw * 1.3, 12), ph);
-      ctx.globalAlpha = 1;
-    }
-
-    const bodyW = Math.max(1.5, Math.min(bw * 0.66, 13));
-    const vy0 = PT + ph;
-    for (let i = i0; i <= i1; i += 1) {
-      const b = bars[i]!;
-      const x = X(i);
-      const upc = b.c >= b.o;
-      const cx = Math.round(x) + 0.5;
-      ctx.fillStyle = upc ? C.upVol : C.dnVol;
-      const vh = (b.v / vmax) * volH;
-      ctx.fillRect(x - bodyW / 2, vy0 - vh, bodyW, vh);
-      ctx.strokeStyle = ctx.fillStyle = upc ? C.up : C.down;
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(cx, Y(b.h));
-      ctx.lineTo(cx, Y(b.l));
-      ctx.stroke();
-      const yo = Y(b.o);
-      const yc = Y(b.c);
-      ctx.fillRect(x - bodyW / 2, Math.min(yo, yc), bodyW, Math.max(1.5, Math.abs(yc - yo)));
-    }
-
-    const ya = Math.round(Y(trade.avgBuy)) + 0.5;
-    ctx.strokeStyle = C.t2;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(hx0, ya);
-    ctx.lineTo(hx1, ya);
-    ctx.stroke();
-    ctx.globalAlpha = 0.35;
-    ctx.beginPath();
-    ctx.moveTo(hx1, ya);
-    ctx.lineTo(PL + pw, ya);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    ctx.setLineDash([]);
-
-    const stackB = new Map<number, number>();
-    const stackS = new Map<number, number>();
-    const half = Math.max(bodyW / 2 + 4, 6);
-    const marks: { x: number; y: number }[] = [];
-
-    const drawFill = (f: JournalFill, isSell: boolean, seq: number, multi: boolean) => {
-      const idx = findBarIndexForFill(bars, f, tf);
-      const b = bars[idx];
-      if (b === undefined) return;
-      const x = X(idx);
-      const yp = Math.round(Y(f.price)) + 0.5;
-      const mp = isSell ? stackS : stackB;
-      const k = mp.get(idx) ?? 0;
-      mp.set(idx, k + 1);
-
-      ctx.strokeStyle = ctx.fillStyle = isSell ? C.down : C.up;
-      ctx.lineWidth = 1.8;
-      ctx.beginPath();
-      ctx.moveTo(x - half, yp);
-      ctx.lineTo(x + half, yp);
-      ctx.stroke();
-      ctx.lineWidth = 1;
-
-      const s = isSell ? -1 : 1;
-      const gapY = multi ? 13 : 11;
-      const y = isSell ? Y(b.h) - 10 - k * gapY : Y(b.l) + 10 + k * gapY;
-      ctx.beginPath();
-      ctx.moveTo(x, y - 4.5 * s);
-      ctx.lineTo(x - 5, y + 4 * s);
-      ctx.lineTo(x + 5, y + 4 * s);
-      ctx.closePath();
-      ctx.fill();
-
-      if (multi) {
-        setFont(11, 700);
-        ctx.textAlign = "left";
-        ctx.textBaseline = "middle";
-        ctx.fillText(String(seq), x + 7, y);
-      }
-      marks.push({ x, y });
-    };
-
-    trade.buys.forEach((f, idx) => drawFill(f, false, idx + 1, trade.buys.length > 1));
-    trade.sells.forEach((f, idx) => drawFill(f, true, idx + 1, trade.sells.length > 1));
-
-    const holdLo = Math.min(entryIdx, exitIdx);
-    const holdHi = Math.max(entryIdx, exitIdx);
-    if (holdHi > holdLo) {
-      let hiBar = holdLo;
-      let loBar = holdLo;
-      for (let i = holdLo; i <= holdHi; i += 1) {
-        if (bars[i]!.h > bars[hiBar]!.h) hiBar = i;
-        if (bars[i]!.l < bars[loBar]!.l) loBar = i;
-      }
-      const clearY = (x: number, y: number, dir: -1 | 1) => {
-        let outY = y;
-        for (const m of marks) {
-          if (Math.abs(m.x - x) < 48) outY = dir < 0 ? Math.min(outY, m.y - 12) : Math.max(outY, m.y + 12);
+    const handleHistory = (history: History, mode: "reset" | "prepended" | "jump", added = 0) => {
+      if (disposed) return;
+      const raw = displayBars(history);
+      if (raw.length === 0) {
+        if (mode === "reset" || mode === "jump") {
+          applyBars(synthesizeDemoBars({ ...trade, demoSeed: 777123 }, tf), null);
         }
-        return outY;
-      };
-      const halo = (txt: string, x: number, y: number, color: string) => {
-        ctx.strokeStyle = C.surf;
-        ctx.lineWidth = 3.5;
-        ctx.lineJoin = "round";
-        ctx.strokeText(txt, x, y);
-        ctx.fillStyle = color;
-        ctx.fillText(txt, x, y);
-      };
-      setFont(11, 600);
-      ctx.textAlign = "center";
-      const xH = clamp(X(hiBar), PL + 38, PL + pw - 38);
-      const xL = clamp(X(loBar), PL + 38, PL + pw - 38);
-      ctx.textBaseline = "bottom";
-      halo(`최고 ${formatPct(trade.mfe)}`, xH, clearY(xH, Y(bars[hiBar]!.h) - 6, -1), C.up);
-      ctx.textBaseline = "top";
-      halo(`최저 ${formatPct(trade.mae)}`, xL, clearY(xL, Y(bars[loBar]!.l) + 6, 1), C.down);
-    }
-
-    ctx.restore();
-
-    if (ya >= PT && ya <= PT + priceH) {
-      setFont(11, 600);
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "left";
-      ctx.fillStyle = C.raised;
-      ctx.fillRect(PL + pw + 2, ya - 9, PR - 6, 18);
-      ctx.fillStyle = C.t1;
-      ctx.fillText(formatWon(trade.avgBuy, false), PL + pw + 8, ya);
-    }
-
-    setFont(11, 400);
-    ctx.textBaseline = "alphabetic";
-    ctx.textAlign = "center";
-    const need = Math.ceil(68 / Math.max(1, bw));
-    if (tf === "D") {
-      const stepB = [1, 2, 5, 10, 20].find((x) => x >= need) ?? 40;
-      ctx.fillStyle = C.t3;
-      for (let i = i0; i <= i1; i += 1) {
-        if (i % stepB === 0) ctx.fillText(dayShortLabel(bars[i]!.day), X(i), h - 7);
+        return;
       }
-    } else {
-      const stepB = Math.max(1, need);
-      let prevDay = "";
-      for (let i = i0; i <= i1; i += 1) {
-        const b = bars[i]!;
-        const x = X(i);
-        if (x < PL + 20 || x > PL + pw - 20) continue;
-        if (b.day !== prevDay) {
-          prevDay = b.day;
-          ctx.fillStyle = C.t2;
-          ctx.fillText(dayShortLabel(b.day), x, h - 7);
-        } else if (i % stepB === 0) {
-          ctx.fillStyle = C.t3;
-          ctx.fillText(formatMinutes(b.minutes), x, h - 7);
+      const converted = toJournalBars(raw);
+      if (mode === "prepended") {
+        applyBars(converted, added);
+        return;
+      }
+      applyBars(converted, null);
+
+      const earliestDay = converted[0]!.day;
+      if (mode === "reset") {
+        if (tf === "D" && trade.entryDay < earliestDay && history.nextBefore !== null) {
+          void feed.olderUntil((h) => {
+            initialPages += 1;
+            const list = displayBars(h);
+            if (list.length === 0 || initialPages >= MAX_INITIAL_OLDER_PAGES) return true;
+            const firstDay = toJournalBars([list[0]!])[0]!.day;
+            return firstDay <= trade.entryDay;
+          }).then(() => {
+            if (!disposed && chartRef.current && barsRef.current.length > 0) {
+              chartRef.current.timeScale().setVisibleLogicalRange(
+                computeTradeFocusRange(barsRef.current, propsRef.current.trade, propsRef.current.tf),
+              );
+            }
+          });
+        } else if (tf !== "D" && trade.exitDay < earliestDay && trade.exitDay < today) {
+          void feed.enterMode(trade.exitDay);
         }
       }
-    }
+    };
 
-    let legendBar = bars[clamp(exitIdx, 0, bars.length - 1)]!;
-    let fillNote = "";
-    const hv = hoverRef.current;
-    if (hv !== null && hv.x >= PL && hv.x <= PL + pw && hv.y >= PT && hv.y <= PT + ph) {
-      const idx = clamp(Math.floor((hv.x - PL) / bw + from), 0, bars.length - 1);
-      const cx = Math.round(X(idx)) + 0.5;
-      const cy = Math.round(hv.y) + 0.5;
-      legendBar = bars[idx]!;
-      ctx.strokeStyle = C.cross;
-      ctx.setLineDash([2, 3]);
-      ctx.beginPath();
-      ctx.moveTo(cx, PT);
-      ctx.lineTo(cx, PT + ph);
-      ctx.moveTo(PL, cy);
-      ctx.lineTo(PL + pw, cy);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    const feed = new JumpableFeed(
+      (q, signal) => fetchBarsPage(q, signal),
+      (q, signal) => fetchJumpPage(q, signal),
+      {
+        reset: (history) => handleHistory(history, "reset"),
+        jumpEntered: (history) => handleHistory(history, "jump"),
+        prepended: (history, added) => handleHistory(history, "prepended", added),
+        failed: () => {
+          if (!disposed) applyBars(synthesizeDemoBars({ ...trade, demoSeed: 777123 }, tf), null);
+        },
+        olderFailed: () => {},
+        live: () => {},
+        confirmed: () => {},
+        subError: () => {},
+        modeChanged: () => {},
+      },
+    );
+    feedRef.current = feed;
+    feed.open({ symbol: trade.code, venue: venueParam, period });
 
-      if (hv.y <= PT + priceH) {
-        const p = hi - ((hv.y - PT) / priceH) * (hi - lo);
-        setFont(11, 600);
-        ctx.textBaseline = "middle";
-        ctx.textAlign = "left";
-        ctx.fillStyle = C.t1;
-        ctx.fillRect(PL + pw + 2, cy - 9, PR - 6, 18);
-        ctx.fillStyle = C.surf;
-        ctx.fillText(formatWon(snapTick(p), false), PL + pw + 8, cy);
-      }
-
-      const hereB = trade.buys.filter((f) => findBarIndexForFill(bars, f, tf) === idx);
-      const hereS = trade.sells.filter((f) => findBarIndexForFill(bars, f, tf) === idx);
-      const notes: string[] = [];
-      if (hereB.length > 0) notes.push(`▲ 매수 ${hereB.map((f) => `${formatWon(f.price, false)}×${f.qty}`).join(", ")}`);
-      if (hereS.length > 0) notes.push(`▼ 매도 ${hereS.map((f) => `${formatWon(f.price, false)}×${f.qty}`).join(", ")}`);
-      fillNote = notes.join("  ");
-    }
-
-    const chgPct = legendBar.o > 0 ? ((legendBar.c - legendBar.o) / legendBar.o) * 100 : 0;
-    const dateLabel =
-      tf === "D" ? dayShortLabel(legendBar.day) : `${dayShortLabel(legendBar.day)} ${formatMinutes(legendBar.minutes)}`;
-    setLegend((prev) => {
-      if (
-        prev !== null &&
-        prev.dateLabel === dateLabel &&
-        prev.o === legendBar.o &&
-        prev.h === legendBar.h &&
-        prev.l === legendBar.l &&
-        prev.c === legendBar.c &&
-        prev.fillNote === fillNote
-      ) {
-        return prev;
-      }
-      return { dateLabel, o: legendBar.o, h: legendBar.h, l: legendBar.l, c: legendBar.c, chgPct, fillNote };
-    });
-  };
-
-  const scheduleDraw = () => {
-    if (rafRef.current !== 0) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = 0;
-      drawRef.current();
-    });
-  };
+    return () => {
+      disposed = true;
+      feed.dispose();
+      if (feedRef.current === feed) feedRef.current = null;
+    };
+  }, [trade.id, trade.code, trade.exitDay, trade.entryDay, venueParam, period, tf, isDemo, today]);
 
   useEffect(() => {
-    scheduleDraw();
-    return () => {
-      if (rafRef.current !== 0) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = 0;
-      }
-    };
-  }, [bars, trade, tf, afterCost, highlightIdx, themeRev, sizeRev, resetTick]);
+    const overlay = overlayRef.current;
+    if (!overlay || barsRef.current.length === 0) return;
+    overlay.setState({ trade, tf, bars: barsRef.current, afterCost, highlightFill });
+  }, [trade, tf, afterCost, highlightFill]);
 
   useEffect(() => {
-    const box = boxRef.current;
-    if (box === null) return;
-    const clampView = () => {
-      const n = bars.length;
-      const cur = viewRef.current;
-      const span = clamp(cur.to - cur.from, 16, n + 8);
-      const from = clamp(cur.from, -4, n + 4 - span);
-      viewRef.current = { from, to: from + span };
-    };
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = box.getBoundingClientRect();
-      const pw = Math.max(1, rect.width - 78);
-      const cur = viewRef.current;
-      const span = cur.to - cur.from;
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        const dx = (e.deltaX / pw) * span;
-        viewRef.current = { from: cur.from + dx, to: cur.to + dx };
-      } else {
-        const k = e.deltaY > 0 ? 1.14 : 1 / 1.14;
-        const px = e.clientX - rect.left;
-        const at = cur.from + (clamp(px - 10, 0, pw) / pw) * span;
-        const ns = clamp(span * k, 16, bars.length + 8);
-        const from = at - ((at - cur.from) / span) * ns;
-        viewRef.current = { from, to: from + ns };
-      }
-      clampView();
-      scheduleDraw();
-    };
-    const onMouseUp = () => {
-      dragRef.current = null;
-    };
-    box.addEventListener("wheel", onWheel, { passive: false });
-    window.addEventListener("mouseup", onMouseUp);
-    return () => {
-      box.removeEventListener("wheel", onWheel);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-  }, [bars.length]);
+    if (resetTick === 0 || !chartRef.current || barsRef.current.length === 0) return;
+    chartRef.current.timeScale().setVisibleLogicalRange(computeTradeFocusRange(barsRef.current, trade, tf));
+  }, [resetTick, trade, tf]);
 
-  const tfName = tf === "D" ? "일봉" : tf === "5" ? "5분봉" : "1분봉";
+  const tfName = JOURNAL_TFS.find((entry) => entry.tf === tf)?.label ?? tf;
 
   return (
     <div
@@ -599,37 +502,13 @@ export function JournalCandleChart({ trade, tf, isAutoTf, afterCost, highlightFi
       className="jrn-chart-box"
       data-testid="journal-candle-chart"
       data-tf={tf}
-      onMouseDown={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        dragRef.current = { x: e.clientX - rect.left, from: viewRef.current.from, to: viewRef.current.to };
-      }}
-      onMouseMove={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const pw = Math.max(1, rect.width - 78);
-        if (dragRef.current !== null) {
-          const span = dragRef.current.to - dragRef.current.from;
-          const dx = ((dragRef.current.x - x) / pw) * span;
-          const n = bars.length;
-          const nextSpan = clamp(span, 16, n + 8);
-          const nextFrom = clamp(dragRef.current.from + dx, -4, n + 4 - nextSpan);
-          viewRef.current = { from: nextFrom, to: nextFrom + nextSpan };
-        }
-        hoverRef.current = { x, y };
-        scheduleDraw();
-      }}
-      onMouseLeave={() => {
-        hoverRef.current = null;
-        dragRef.current = null;
-        scheduleDraw();
-      }}
+      data-period={period}
       onDoubleClick={() => {
-        viewRef.current = computeDefaultRange();
-        scheduleDraw();
+        if (!chartRef.current || barsRef.current.length === 0) return;
+        chartRef.current.timeScale().setVisibleLogicalRange(computeTradeFocusRange(barsRef.current, trade, tf));
       }}
     >
-      <canvas ref={canvasRef} />
+      <div ref={hostRef} className="jrn-chart-host" />
       {legend !== null && (
         <div className="jrn-chart-legend">
           <span>{`${tfName}${isAutoTf ? " (자동)" : ""}`}</span>

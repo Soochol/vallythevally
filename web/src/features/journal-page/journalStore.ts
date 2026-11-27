@@ -18,6 +18,7 @@ import {
 
 interface JournalStoreState {
   period: JournalPeriod;
+  anchorTouched: boolean;
   afterCost: boolean;
   filters: JournalFilters;
   metric: JournalMetric;
@@ -34,6 +35,7 @@ interface JournalStoreState {
 
   setPeriodType: (type: JournalPeriodType) => void;
   setPeriod: (period: JournalPeriod) => void;
+  syncInitialAnchor: (day: string) => void;
   stepPeriod: (dir: -1 | 1, today: string) => void;
   jumpToday: (today: string) => void;
   toggleAfterCost: () => void;
@@ -58,6 +60,7 @@ const defaultGrainFor = (type: JournalPeriodType): JournalGrain =>
 
 export const useJournalStore = create<JournalStoreState>((set) => ({
   period: { type: "month", anchor: todayKstIso() },
+  anchorTouched: false,
   afterCost: true,
   filters: EMPTY_FILTERS,
   metric: "pnl",
@@ -81,17 +84,27 @@ export const useJournalStore = create<JournalStoreState>((set) => ({
   setPeriod: (period) =>
     set({
       period,
+      anchorTouched: true,
       grain: defaultGrainFor(period.type),
     }),
+
+  syncInitialAnchor: (day) =>
+    set((s) =>
+      s.anchorTouched || day === "" || s.period.anchor === day
+        ? s
+        : { period: { type: s.period.type, anchor: day } },
+    ),
 
   stepPeriod: (dir, today) =>
     set((s) => ({
       period: { type: s.period.type, anchor: stepPeriodAnchor(s.period, dir, today) },
+      anchorTouched: true,
     })),
 
   jumpToday: (today) =>
     set((s) => ({
       period: { type: s.period.type, anchor: today },
+      anchorTouched: true,
     })),
 
   toggleAfterCost: () => set((s) => ({ afterCost: !s.afterCost })),

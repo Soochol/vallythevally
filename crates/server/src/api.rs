@@ -2716,6 +2716,27 @@ pub struct TradingExecutions {
     pub executions: Vec<TradingExecution>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingExecutionDay {
+    pub day: KstDate,
+    pub executions: Vec<TradingExecution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TradingExecutionHistory {
+    pub account_ref: String,
+    pub today: KstDate,
+    pub from: KstDate,
+    pub to: KstDate,
+    pub days: Vec<TradingExecutionDay>,
+    #[ts(type = "number")]
+    pub pending_days: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]

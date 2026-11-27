@@ -1,7 +1,7 @@
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import type { TradingBalance } from "../../api/generated/TradingBalance";
-import { EXECUTION_FORENSICS_QUERY_KEY } from "../../api/trading";
+import { EXECUTION_FORENSICS_QUERY_KEY, TRADING_EXECUTION_HISTORY_QUERY_KEY } from "../../api/trading";
 import { marketSocket, quoteBook } from "../../stores/realtime";
 import { fetchBalance } from "./orderApi";
 import { installOrderSoundPrimer, observeOrderFill } from "./orderSound";
@@ -51,6 +51,7 @@ class BalanceHub {
         if (changed.fill) observeOrderFill(this.client, changed.accountRef, changed.fill);
         void this.client.invalidateQueries({ queryKey: ORDER_QUERY_KEY });
         void this.client.invalidateQueries({ queryKey: EXECUTION_FORENSICS_QUERY_KEY });
+        void this.client.invalidateQueries({ queryKey: TRADING_EXECUTION_HISTORY_QUERY_KEY });
       }
     });
     this.stop = () => {
