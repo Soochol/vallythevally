@@ -14,6 +14,7 @@ import {
   formatPeriodLabel,
   formatUtcMsToDay,
   formatWon,
+  isPeriodAtToday,
   MINUS,
   pad2,
   parseDayUtcMs,
@@ -31,6 +32,10 @@ interface Props {
   readonly summary: JournalSummary;
   readonly range: readonly [string, string];
   readonly today: string;
+  readonly isSyncingHistory: boolean;
+  readonly pendingDays: number;
+  readonly historyError: string | null;
+  readonly onRetryHistory: () => void;
 }
 
 interface FlowHover {
@@ -49,6 +54,10 @@ export function JournalAnalyticsView({
   summary,
   range,
   today,
+  isSyncingHistory,
+  pendingDays,
+  historyError,
+  onRetryHistory,
 }: Props) {
   const navigate = useNavigate();
   const tlRef = useRef<HTMLDivElement | null>(null);
@@ -106,7 +115,7 @@ export function JournalAnalyticsView({
   }, [allTrades]);
 
   const tokens = useMemo(() => activeFilterTokens(filters, symbolNames), [filters, symbolNames]);
-  const isAtToday = range[1] >= today;
+  const isAtToday = isPeriodAtToday(period, range, today);
 
   const tradingDaysInRange = useMemo(() => {
     const out: string[] = [];
@@ -366,6 +375,16 @@ export function JournalAnalyticsView({
             )}
           </div>
           <span className="jrn-grow" />
+          {isSyncingHistory && (
+            <span className="jrn-mute jrn-fs-xs" data-testid="analytics-sync-status">
+              {pendingDays > 0 ? `과거 체결 불러오는 중 (${pendingDays}일 남음)` : "체결 불러오는 중…"}
+            </span>
+          )}
+          {historyError !== null && (
+            <button type="button" className="jrn-txt-btn" data-testid="analytics-retry-history" onClick={onRetryHistory}>
+              {`${historyError} · 다시 시도`}
+            </button>
+          )}
           {demoMode && (
             <button type="button" className="jrn-txt-btn" onClick={() => setDemoMode(false)}>
               예시 데이터 닫기

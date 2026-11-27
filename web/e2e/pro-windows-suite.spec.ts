@@ -61,22 +61,31 @@ test("신규 창 3종(스캐너·테마·미니그리드)을 창 더하기에서
 });
 
 test("매매 복기 전용 페이지(/journal)가 네비게이션과 직접 경로로 열린다", async ({ page, scenario }) => {
-  scenario.on("/api/trading/executions", () => ({
-    status: 200,
-    body: {
-      day: "2026-11-27",
-      accountRef: "acc-1",
-      executions: [],
-    },
-  }));
-  scenario.on("/api/trading/executions/forensics", () => ({
-    status: 200,
-    body: {
-      date: "2026-11-27",
-      account: "acc-1",
-      items: [],
-    },
-  }));
+  scenario.on(
+    (url) => url.pathname === "/api/trading/executions/history",
+    () => ({
+      status: 200,
+      body: {
+        accountRef: "acc-1",
+        today: "2026-11-27",
+        from: "2026-11-01",
+        to: "2026-11-30",
+        days: [],
+        pendingDays: 0,
+      },
+    }),
+  );
+  scenario.on(
+    (url) => url.pathname === "/api/trading/executions/forensics",
+    () => ({
+      status: 200,
+      body: {
+        date: "20261127",
+        account: "acc-1",
+        items: [],
+      },
+    }),
+  );
   await page.goto("/journal");
   await expect(page.getByRole("main", { name: "매매 복기", exact: true })).toBeVisible();
   await expect(page.getByTestId("journal-page")).toBeVisible();

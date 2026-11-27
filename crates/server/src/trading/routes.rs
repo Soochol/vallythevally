@@ -46,6 +46,7 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/trading/open-orders", get(open_orders))
         .route("/api/trading/orderable", get(orderable))
         .route("/api/trading/executions", get(executions))
+        .route("/api/trading/executions/history", get(execution_history))
         .route("/api/trading/executions/forensics", get(execution_forensics))
         .route("/api/trading/auto-orders", get(auto_orders_list).post(auto_orders_create))
         .route("/api/trading/auto-orders/master", put(auto_orders_master))
@@ -112,8 +113,43 @@ async fn orderable(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<Stri
     st.accounts.orderable(account_of(&q), code, side, price).await.map(Json).map_err(ApiFailure::trading)
 }
 
+const MAX_HISTORY_RANGE_DAYS: i64 = 3660;
+
+fn parse_optional_date(q: &HashMap<String, String>, key: &str) -> Result<Option<KstDate>, ApiFailure> {
+    let Some(raw) = q.get(key).map(String::as_str).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed = raw
+        .parse::<api::KstDate>()
+        .map(|d| d.0)
+        .or_else(|_| KstDate::parse_yyyymmdd(raw).ok_or_else(|| format!("{key}는 YYYY-MM-DD 또는 YYYYMMDD 형식입니다: {raw}")))
+        .map_err(ApiFailure::bad_request)?;
+    Ok(Some(parsed))
+}
+
 async fn executions(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::TradingExecutions>, ApiFailure> {
-    st.accounts.executions(account_of(&q)).await.map(Json).map_err(ApiFailure::trading)
+    let account = account_of(&q);
+    match parse_optional_date(&q, "date")? {
+        Some(day) => st.accounts.executions_on(account, day).await.map(Json).map_err(ApiFailure::trading),
+        None => st.accounts.executions(account).await.map(Json).map_err(ApiFailure::trading),
+    }
+}
+
+async fn execution_history(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<String, String>>) -> Result<Json<api::TradingExecutionHistory>, ApiFailure> {
+    let from = parse_optional_date(&q, "from")?;
+    let to = parse_optional_date(&q, "to")?;
+    if from.is_some() != to.is_some() {
+        return Err(ApiFailure::bad_request("from과 to는 함께 지정하거나 모두 비워야 합니다"));
+    }
+    if let (Some(start), Some(end)) = (from, to) {
+        if start > end {
+            return Err(ApiFailure::bad_request("from은 to보다 늦을 수 없습니다"));
+        }
+        if end.days_since_epoch() - start.days_since_epoch() + 1 > MAX_HISTORY_RANGE_DAYS {
+            return Err(ApiFailure::bad_request(format!("조회 범위는 {MAX_HISTORY_RANGE_DAYS}일까지입니다")));
+        }
+    }
+    st.accounts.executions_history(account_of(&q), from, to).await.map(Json).map_err(ApiFailure::trading)
 }
 
 async fn execution_forensics(
@@ -133,7 +169,7 @@ async fn execution_forensics(
         }
     };
     let account = account_of(&q);
-    let fills = st.accounts.executions(account).await.map_err(ApiFailure::trading)?;
+    let fills = st.accounts.executions_on(account, date).await.map_err(ApiFailure::trading)?;
     let result = compute_forensics(ForensicsInputs {
         collected: &st.collected,
         micro_events: &st.micro_events,

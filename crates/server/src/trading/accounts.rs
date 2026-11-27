@@ -220,6 +220,14 @@ impl Accounts {
         self.by_ref(account)?.executions().await
     }
 
+    pub async fn executions_on(&self, account: Option<&str>, day: domain::KstDate) -> Result<api::TradingExecutions, TradingError> {
+        self.by_ref(account)?.executions_on(day).await
+    }
+
+    pub async fn executions_history(&self, account: Option<&str>, from: Option<domain::KstDate>, to: Option<domain::KstDate>) -> Result<api::TradingExecutionHistory, TradingError> {
+        self.by_ref(account)?.executions_history(from, to).await
+    }
+
     pub async fn place(&self, input: api::OrderPlaceInput) -> Result<api::OrderCommand, TradingError> {
         self.by_ref(input.account.as_deref())?.place(input).await
     }
