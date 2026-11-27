@@ -30,6 +30,7 @@ import { NOT_CONNECTED_FALLBACK, beforeConnect } from "../status/beforeConnect";
 import { useKiwoomLinkStore } from "../../stores/kiwoomLink";
 import { BeforeConnectCard } from "../status/BeforeConnectCard";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
+import { useAutoGuardLayer } from "../../chart/autoGuard/useAutoGuardLayer";
 import { useShownSettings } from "../indicator-command/preview";
 import { AxisMode } from "./AxisMode";
 import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
@@ -198,6 +199,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, [theme]);
 
   useDrawingSurface(ctl, cellId);
+  useAutoGuardLayer(ctl);
 
   const cellNumber = useLayoutStore((s) => chartNumber(s.layout, cellId));
   const name = info?.name ?? cell.symbol;

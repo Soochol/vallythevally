@@ -8,7 +8,7 @@ use axum::middleware::{self, Next};
 use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::response::Json;
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use domain::{KstDate, StockCode};
 
 use super::forensics::{ForensicsCache, ForensicsInputs, compute_forensics};
@@ -47,6 +47,9 @@ pub fn routes(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/trading/orderable", get(orderable))
         .route("/api/trading/executions", get(executions))
         .route("/api/trading/executions/forensics", get(execution_forensics))
+        .route("/api/trading/auto-orders", get(auto_orders_list).post(auto_orders_create))
+        .route("/api/trading/auto-orders/master", put(auto_orders_master))
+        .route("/api/trading/auto-orders/{id}", put(auto_orders_update).delete(auto_orders_delete))
         .layer(Extension(ForensicsCache::new()))
         .layer(middleware::from_fn_with_state(state, crate::write_guard::guard_writes))
 }
@@ -192,4 +195,27 @@ async fn commands(State(st): State<Arc<AppState>>, Query(q): Query<HashMap<Strin
 
 async fn command(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<Json<api::OrderCommand>, ApiFailure> {
     st.accounts.command(&id).await.map(Json).map_err(ApiFailure::trading)
+}
+
+async fn auto_orders_list(State(st): State<Arc<AppState>>) -> Result<Json<api::AutoOrderList>, ApiFailure> {
+    st.auto_orders.list().await.map(Json).map_err(ApiFailure::bad_request)
+}
+
+async fn auto_orders_create(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::AutoOrderRule>, ApiFailure> {
+    let input: api::AutoOrderUpsertInput = read_json(body).await?;
+    st.auto_orders.create(input).await.map(Json).map_err(ApiFailure::bad_request)
+}
+
+async fn auto_orders_update(State(st): State<Arc<AppState>>, Path(id): Path<String>, body: Body) -> Result<Json<api::AutoOrderRule>, ApiFailure> {
+    let input: api::AutoOrderUpsertInput = read_json(body).await?;
+    st.auto_orders.update(&id, input).await.map(Json).map_err(ApiFailure::bad_request)
+}
+
+async fn auto_orders_delete(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Result<axum::http::StatusCode, ApiFailure> {
+    st.auto_orders.delete(&id).await.map(|()| axum::http::StatusCode::NO_CONTENT).map_err(ApiFailure::bad_request)
+}
+
+async fn auto_orders_master(State(st): State<Arc<AppState>>, body: Body) -> Result<Json<api::AutoOrderMasterState>, ApiFailure> {
+    let input: api::AutoOrderMasterInput = read_json(body).await?;
+    st.auto_orders.set_master(input.enabled).await.map(Json).map_err(ApiFailure::bad_request)
 }

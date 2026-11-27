@@ -166,6 +166,13 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
         route.clone(),
     );
     let accounts = crate::trading::Accounts::new(keys.clone(), rest.clone(), account_feed, clock.clone(), order_switch.unwrap_or_else(crate::trading::SwitchStore::memory), db.clone(), symbols.clone());
+    let auto_orders = crate::trading::AutoOrderEngine::new(db.clone(), clock.clone());
+    let auto_orders_boot = auto_orders.clone();
+    tokio::spawn(async move {
+        if let Err(error) = auto_orders_boot.load_from_db().await {
+            tracing::warn!(error, "자동감시 규칙 초기 로드 실패");
+        }
+    });
     let collected_store = crate::collected_store::CollectedStore::new();
     let collected = crate::collected::Collected::new(collected_store.clone());
     let premarket = crate::premarket::PreMarketService::new(collected.clone());
@@ -186,6 +193,7 @@ pub fn application_with_source(inputs: ApplicationInputs, startup: impl Into<Sys
         registered,
         seat_rules,
         accounts,
+        auto_orders,
         rankings: RankingCache::with_generation(generation.clone()),
         market_overview: MarketOverview::with_generation(generation.clone()),
         etf: Default::default(),
