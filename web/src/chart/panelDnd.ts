@@ -304,7 +304,10 @@ export class PanelDnd {
 
   private activate(pending: PendingDrag, event: PointerEvent): void {
     const config = this.host.configs().find((item) => item.id === pending.indicatorId);
-    if (!config) return;
+    if (!config) {
+      this.detachListeners();
+      return;
+    }
     const tokens = this.host.tokens();
     const primary = colorLine(config.spec);
     const color = primary === null ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, primary));

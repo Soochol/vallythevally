@@ -60,9 +60,9 @@ export function layoutText(shape: TextShape, measure: TextMeasure): TextLayout {
 }
 
 export function prepareText(shape: TextShape, measure: TextMeasure): TextShape {
-  const copy = { ...shape };
-  prepared.set(copy, layoutText(copy, measure));
-  return copy;
+  if (prepared.has(shape)) return shape;
+  prepared.set(shape, layoutText(shape, measure));
+  return shape;
 }
 
 export function textLayout(shape: TextShape, measure: TextMeasure = approxTextMeasure): TextLayout {

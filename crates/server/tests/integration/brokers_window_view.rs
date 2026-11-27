@@ -23,6 +23,10 @@ fn brokers_window_keeps_its_view_and_old_windows_have_none() {
     let read: LayoutWindow = serde_json::from_value(table.clone()).unwrap();
     assert_eq!(serde_json::to_value(&read).unwrap(), table);
 
+    let transfer = window(json!({"view": "transfer"}));
+    let read: LayoutWindow = serde_json::from_value(transfer.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&read).unwrap(), transfer);
+
     let old = window(json!({}));
     let read: LayoutWindow = serde_json::from_value(old.clone()).unwrap();
     assert_eq!(serde_json::to_value(&read).unwrap(), old);

@@ -46,6 +46,7 @@ import { usePersistStore } from "./stores/persist";
 import { useSelectionStore } from "./stores/selection";
 import { useUiStore } from "./stores/ui";
 import { DrawingToolbar } from "./features/drawings/DrawingToolbar";
+import { WindowVisibleProvider } from "./features/workspace/windowVisibility";
 import { Workspace } from "./features/workspace/Workspace";
 import { DESKTOP_QUERY, useMediaQuery } from "./lib/media";
 import type { WindowId } from "./layout/kinds";
@@ -126,8 +127,10 @@ function ChartScreen({ page }: { page: PageId }) {
         <div className="flex min-h-0 min-w-0 flex-1">
           <div className="relative flex min-h-0 min-w-0 flex-1">
             <div inert={!onWorkspace} className={"absolute inset-0 flex" + (onWorkspace ? "" : " invisible")}>
-              <DrawingToolbar />
-              <Workspace />
+              <WindowVisibleProvider value={onWorkspace}>
+                <DrawingToolbar />
+                <Workspace />
+              </WindowVisibleProvider>
             </div>
             {shownPage && <PageStage page={shownPage} />}
           </div>
@@ -136,7 +139,9 @@ function ChartScreen({ page }: { page: PageId }) {
       ) : (
         <>
           <main aria-label="칸" inert={!onWorkspace} className={"grid min-h-0 min-w-0 grid-cols-1 grid-rows-1 [grid-area:grid]" + (onWorkspace ? "" : " invisible")}>
-            {publicMode ? <PublicUnavailable /> : <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />}
+            <WindowVisibleProvider value={onWorkspace}>
+              {publicMode ? <PublicUnavailable /> : <ChartCell key={cellId} cellId={cellId} status={status} onStatus={(next) => setPhoneStatus({ cellId, status: next })} />}
+            </WindowVisibleProvider>
           </main>
           {shownPage && <PageStage page={shownPage} />}
         </>

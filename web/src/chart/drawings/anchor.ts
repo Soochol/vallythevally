@@ -11,8 +11,20 @@ export interface Timeline {
   readonly starts: readonly UnixSeconds[];
 }
 
+const timelineCache = new WeakMap<readonly Bar[], Map<Period, Timeline>>();
+
 export function timelineOf(bars: readonly Bar[], period: Period): Timeline {
-  return { period, starts: bars.map((b) => b.t) };
+  let byPeriod = timelineCache.get(bars);
+  if (!byPeriod) {
+    byPeriod = new Map();
+    timelineCache.set(bars, byPeriod);
+  }
+  let cached = byPeriod.get(period);
+  if (!cached) {
+    cached = { period, starts: bars.map((b) => b.t) };
+    byPeriod.set(period, cached);
+  }
+  return cached;
 }
 
 const DAY = 86_400;

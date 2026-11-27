@@ -94,7 +94,22 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
   private coverAbort: AbortController | null = null;
   private tailAbort: AbortController | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private paused = false;
   private disposed = false;
+
+  setPaused(paused: boolean): void {
+    if (this.disposed || this.paused === paused) return;
+    this.paused = paused;
+    if (paused) {
+      this.stopTimer();
+      this.tailAbort?.abort();
+      this.tailAbort = null;
+      this.tailing = false;
+      return;
+    }
+    this.syncTimer();
+    this.onTick();
+  }
 
   constructor(private readonly deps: QuoteFeedDeps<P>) {}
 
@@ -164,7 +179,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
   private syncTimer(): void {
     const today = kstDateOf(this.deps.now());
     const coversToday = rangesContain(this.have, today);
-    const want = !this.disposed && this.key !== null && (this.failedCover || (this.available && coversToday));
+    const want = !this.disposed && !this.paused && this.key !== null && (this.failedCover || (this.available && coversToday));
     if (want && this.timer === null) this.timer = setInterval(() => this.onTick(), TAIL_EVERY_MS);
     else if (!want && this.timer !== null) this.stopTimer();
   }
@@ -233,7 +248,7 @@ export class QuoteFeed<P extends { t: UnixSeconds }> implements QuoteView<P> {
   }
 
   private onTick(): void {
-    if (this.disposed || !this.key) return;
+    if (this.disposed || this.paused || !this.key) return;
     if (typeof document !== "undefined" && document.hidden) return;
     const now = this.deps.now();
     if (this.failedCover && !this.covering && now >= this.nextCoverRetryAt) this.pumpCover();

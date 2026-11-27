@@ -201,6 +201,12 @@ export function compactBrokerGrid(grid: BrokerGrid): BrokerGrid {
   return { times, gapBefore, rows, snapshots };
 }
 
+export function compactBrokerState(state: BrokerState): BrokerState {
+  if (state.grid.times.length <= MAX_LIVE_BROKER_COLUMNS) return state;
+  const compacted = compactBrokerGrid(state.grid);
+  return compacted === state.grid ? state : { ...state, grid: compacted };
+}
+
 export function reduceBrokerEvents(state: BrokerState, events: readonly BrokerEvent[]): BrokerState {
   let next = state;
   let batch: FeedBrokers[] = [];
@@ -218,11 +224,7 @@ export function reduceBrokerEvents(state: BrokerState, events: readonly BrokerEv
     }
   }
   flush();
-  if (next.grid.times.length > MAX_LIVE_BROKER_COLUMNS) {
-    const compacted = compactBrokerGrid(next.grid);
-    if (compacted !== next.grid) next = { ...next, grid: compacted };
-  }
-  return next;
+  return compactBrokerState(next);
 }
 
 export function reduceBrokers(state: BrokerState, event: BrokerEvent): BrokerState {

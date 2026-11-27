@@ -26,7 +26,10 @@ interface CachedAxis {
   invalidatedAt: number | null;
   pending: boolean;
   failed: boolean;
+  failures: number;
 }
+
+const MAX_CONSECUTIVE_FAILURES = 3;
 
 function sameScaleConfig(a: AxisInput, b: AxisInput): boolean {
   return a.percentBaseIndex === b.percentBaseIndex
@@ -53,6 +56,7 @@ export class AxisLabelCache {
     const axis = this.axis(key, side);
     const time = document.timeline.currentTime;
     axis.formattedAt = typeof time === "number" ? time : null;
+    if (axis.failures > MAX_CONSECUTIVE_FAILURES) return;
     this.requestFrame();
   }
 
@@ -104,11 +108,18 @@ export class AxisLabelCache {
         const alreadyFormatted = axis.input !== null && axis.formattedAt === frame && sameScaleConfig(axis.input, input);
         if (!alreadyFormatted) axis.pending ||= !axis.input || !sameInput(axis.input, input);
         axis.input = input;
+        axis.failures = 0;
       } catch (error) {
         this.fail(axis, error);
       }
     }
-    if (!axis.input) deferred = true;
+    if (!axis.input) {
+      if (axis.failures > MAX_CONSECUTIVE_FAILURES) {
+        axis.pending = false;
+        return false;
+      }
+      deferred = true;
+    }
     if (!axis.pending) return deferred;
     if (axis.formattedAt === frame || axis.invalidatedAt === frame) return true;
     axis.pending = false;
@@ -118,7 +129,7 @@ export class AxisLabelCache {
       if (axis.input) axis.failed = false;
     } catch (error) {
       this.fail(axis, error);
-      deferred = true;
+      deferred = axis.failures <= MAX_CONSECUTIVE_FAILURES;
     }
     return deferred;
   }
@@ -126,7 +137,7 @@ export class AxisLabelCache {
   private axis(key: HTMLElement, side: AxisSide): CachedAxis {
     let pair = this.axes.get(key);
     if (!pair) {
-      const empty = (): CachedAxis => ({ input: null, collectedAt: null, formattedAt: null, invalidatedAt: null, pending: false, failed: false });
+      const empty = (): CachedAxis => ({ input: null, collectedAt: null, formattedAt: null, invalidatedAt: null, pending: false, failed: false, failures: 0 });
       pair = { right: empty(), left: empty() };
       this.axes.set(key, pair);
     }
@@ -136,6 +147,7 @@ export class AxisLabelCache {
   private fail(axis: CachedAxis, error: unknown): void {
     axis.input = null;
     axis.pending = true;
+    axis.failures += 1;
     if (!axis.failed) console.error("Axis label input unavailable; retrying next frame", error);
     axis.failed = true;
   }

@@ -131,8 +131,4 @@
   .conn-dot[data-tone="amber"] { background: var(--warning); }
   .conn-dot[data-tone="red"] { background: var(--danger); }
   .conn-dot[data-tone="mint"]::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--success); opacity: 0.22; transform: scale(1.9); }
-  @media (prefers-reduced-motion: no-preference) {
-    .conn-dot[data-pulse]::after { animation: conn-pulse 2.4s ease-in-out infinite; }
-  }
-  @keyframes conn-pulse { 50% { opacity: 0; transform: scale(2.6); } }
 }

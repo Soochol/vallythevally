@@ -24,12 +24,13 @@ import { formatPrice, formatVolume } from "../../lib/format";
 import { displayBars, type History } from "../barFeed";
 import { TrackedValues } from "../legendShapes";
 import type { QuoteView } from "../quotes/feed";
-import { barOpacityOf, type IndicatorConfig, type Panel } from "../settings";
+import { barOpacityOf, ichimokuStyleOf, type IndicatorConfig, type Panel } from "../settings";
 import { indicatorColorValue, type ThemeTokens } from "../theme";
 import { toChartTime } from "../time";
 import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
 import { FinancialIndicatorStore } from "./financialFamily";
+import { addIchimokuCloud, buildIchimokuCloudPoints, ichimokuPalette, type IchimokuCloudSeries } from "./ichimokuCloud";
 import { isFinancial, isFinancialBar, isFlow, isInvestorFlow, isMicro, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName } from "./kinds";
 import { InvestorFlowController, type InvestorFamilyDeps, type InvestorTarget } from "./investorFamily";
 import { type MicroFamilyDeps, MicroIndicatorController, type MicroTarget, tickCvdLineValue } from "./microFamily";
@@ -63,6 +64,7 @@ interface Shown {
   gen: number;
   status: Status;
   lines: Line[];
+  cloud?: IchimokuCloudSeries;
 }
 
 export interface LegendValue {
@@ -214,8 +216,16 @@ export class IndicatorLayer {
     this.micro.setLiveEnabled(enabled);
   }
 
+  setActive(active: boolean): void {
+    this.quotes.setActive(active);
+  }
+
   applyLiveTrade(symbol: SymbolCode, tick: FeedTrade): boolean {
     return this.micro.applyLiveTrade(symbol, tick);
+  }
+
+  applyLiveTrades(symbol: SymbolCode, ticks: readonly FeedTrade[]): boolean {
+    return this.micro.applyLiveTrades(symbol, ticks);
   }
 
   applyLiveProgram(symbol: SymbolCode, row: FeedProgramRow): boolean {
@@ -428,7 +438,10 @@ export class IndicatorLayer {
         .sort((a, b) => this.paneOf(a) - this.paneOf(b));
       for (const config of added) {
         const s = this.shown.get(config.id);
-        if (s) s.lines = this.addLines(config, []);
+        if (s) {
+          s.lines = this.addLines(config, []);
+          s.cloud = this.addCloud(config);
+        }
       }
     } else {
       this.rebuildSeries();
@@ -646,6 +659,7 @@ export class IndicatorLayer {
   }
 
   private drain(): void {
+    let cloudDirty = false;
     for (const [line, p] of this.queue.drain()) {
       try {
         if (p === "redraw") this.draw(line, line.points);
@@ -653,6 +667,12 @@ export class IndicatorLayer {
       } catch (e) {
         console.error(`지표 선(${line.id})을 점 사본으로 다시 그림: ${e instanceof Error ? e.message : String(e)}`);
         this.draw(line, line.points);
+      }
+      if (line.id === "spanA" || line.id === "spanB") cloudDirty = true;
+    }
+    if (cloudDirty) {
+      for (const s of this.shown.values()) {
+        if (s.cloud) this.drawCloud(s);
       }
     }
   }
@@ -737,16 +757,20 @@ export class IndicatorLayer {
       const values: LegendValue[] =
         state !== "ok" || time === null || !s
           ? []
-          : s.lines.map((line, i) => {
-              const pt = pointAtTime(line.points, time);
-              const color = isBarLine(line.id) ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, i));
-              return { text: this.legendText(config, pt), color };
-            });
+          : config.spec.kind === "ichimoku"
+            ? this.ichimokuLegendValues(config, s, time, tokens)
+            : s.lines.map((line, i) => {
+                const pt = pointAtTime(line.points, time);
+                const color = isBarLine(line.id) ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, i));
+                return { text: this.legendText(config, pt), color };
+              });
       const primary = lines.findIndex((l) => !isBarLine(l));
       return {
         id: config.id,
         name: specName(config.spec),
-        color: primary < 0 ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, primary)),
+        color: config.spec.kind === "ichimoku"
+          ? ichimokuPalette(tokens).conversion
+          : primary < 0 ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, primary)),
         values,
         state,
         panel: panelInfo,
@@ -769,9 +793,43 @@ export class IndicatorLayer {
       }
       const slots: (readonly string[])[] = [];
       if (shown?.status.kind === "ready") {
-        for (const line of shown.lines) {
-          this.syncLineLegend(line, config, totalTimes);
-          slots.push(line.legendValues.values);
+        if (config.spec.kind === "ichimoku") {
+          const style = ichimokuStyleOf(config.style);
+          const visibleIds: Partial<Record<LineId, boolean>> = {
+            conversion: style.showConversion,
+            base: style.showBase,
+            spanA: style.showSpanA || style.showCloud,
+            spanB: style.showSpanB || style.showCloud,
+            lagging: style.showLagging,
+          };
+          for (const line of shown.lines) {
+            if (!visibleIds[line.id]) continue;
+            this.syncLineLegend(line, config, totalTimes);
+            slots.push(line.legendValues.values);
+          }
+          const spanA = shown.lines.find((l) => l.id === "spanA")?.points ?? [];
+          const spanB = shown.lines.find((l) => l.id === "spanB")?.points ?? [];
+          const cloudTexts: string[] = [];
+          let ia = 0;
+          let ib = 0;
+          while (ia < spanA.length && ib < spanB.length) {
+            const a = spanA[ia]!;
+            const b = spanB[ib]!;
+            if (a.t < b.t) { ia++; continue; }
+            if (b.t < a.t) { ib++; continue; }
+            cloudTexts.push(this.ichimokuCloudStatusText(a.v, b.v));
+            ia++;
+            ib++;
+          }
+          if (cloudTexts.length > 0) {
+            if (cloudTexts.length < totalTimes) cloudTexts.push("—");
+            slots.push(cloudTexts);
+          }
+        } else {
+          for (const line of shown.lines) {
+            this.syncLineLegend(line, config, totalTimes);
+            slots.push(line.legendValues.values);
+          }
         }
       }
       rows.push({ id: config.id, slots });
@@ -915,6 +973,7 @@ export class IndicatorLayer {
       this.queue.forget(line);
       this.draw(line, line.points);
     });
+    if (lines && s.cloud) this.drawCloud(s);
   }
 
   private onBroken(): void {
@@ -950,11 +1009,18 @@ export class IndicatorLayer {
       old.set(id, lines);
       s.lines = [];
       for (const line of lines) this.removeLine(line);
+      if (s.cloud) {
+        this.host.chart.removeSeries(s.cloud);
+        s.cloud = undefined;
+      }
     }
     for (const config of this.configs) {
       if (this.paneOf(config) !== 0) continue;
       const s = this.shown.get(config.id);
-      if (s) s.lines = this.addLines(config, old.get(config.id) ?? []);
+      if (s) {
+        s.lines = this.addLines(config, old.get(config.id) ?? []);
+        s.cloud = this.addCloud(config);
+      }
     }
     for (let i = 0; i < this.panels.length; i++) {
       const panel = this.panels[i]!;
@@ -1015,7 +1081,10 @@ export class IndicatorLayer {
             if (line.points.length) this.draw(line, line.points);
           }
         }
-      } else for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
+      } else {
+        for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
+        if (s.cloud) this.drawCloud(s);
+      }
     }
   }
 
@@ -1062,15 +1131,101 @@ export class IndicatorLayer {
     return { price, color: this.host.tokens().line, lineWidth: 1 as const, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title: "" };
   }
 
+  private addCloud(config: IndicatorConfig): IchimokuCloudSeries | undefined {
+    if (config.spec.kind !== "ichimoku" || config.panel !== "price") return undefined;
+    return addIchimokuCloud(this.host.chart, this.cloudOptions(config), 0);
+  }
+
+  private cloudOptions(config: IndicatorConfig) {
+    const style = ichimokuStyleOf(config.style);
+    const palette = ichimokuPalette(this.host.tokens());
+    return {
+      visible: config.visible && style.showCloud,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: "",
+      bullColor: palette.spanA,
+      bearColor: palette.spanB,
+      opacity: style.cloudOpacity,
+      priceFormat: this.priceFormat(config),
+    };
+  }
+
+  private drawCloud(s: Shown): void {
+    if (!s.cloud) return;
+    const spanA = s.lines.find((l) => l.id === "spanA")?.points ?? [];
+    const spanB = s.lines.find((l) => l.id === "spanB")?.points ?? [];
+    s.cloud.setData(buildIchimokuCloudPoints(spanA, spanB, this.display));
+  }
+
+  private ichimokuLineStyle(config: IndicatorConfig, id: LineId) {
+    const style = ichimokuStyleOf(config.style);
+    const palette = ichimokuPalette(this.host.tokens());
+    const baseWidth = config.style.width;
+    switch (id) {
+      case "conversion":
+        return { visible: config.visible && style.showConversion, color: palette.conversion, lineWidth: Math.max(1.6, baseWidth), lineStyle: "solid" as const, opacity: 0.96 };
+      case "base":
+        return { visible: config.visible && style.showBase, color: palette.base, lineWidth: Math.max(2, baseWidth), lineStyle: "solid" as const, opacity: 0.98 };
+      case "spanA":
+        return { visible: config.visible && style.showSpanA, color: palette.spanA, lineWidth: 1, lineStyle: "solid" as const, opacity: 0.62 };
+      case "spanB":
+        return { visible: config.visible && style.showSpanB, color: palette.spanB, lineWidth: 1, lineStyle: "solid" as const, opacity: 0.62 };
+      case "lagging":
+        return { visible: config.visible && style.showLagging, color: palette.lagging, lineWidth: 1.2, lineStyle: "dashed" as const, opacity: 0.78 };
+      default:
+        return null;
+    }
+  }
+
+  private ichimokuCloudStatusText(spanAVal: number, spanBVal: number): string {
+    const bull = spanAVal >= spanBVal;
+    const mid = (spanAVal + spanBVal) / 2;
+    const pct = mid !== 0 ? ((Math.abs(spanAVal - spanBVal) / mid) * 100).toFixed(1) : "0.0";
+    return `${bull ? "양운" : "음운"} ${pct}%`;
+  }
+
+  private ichimokuLegendValues(config: IndicatorConfig, s: Shown, time: UnixSeconds, tokens: ThemeTokens): LegendValue[] {
+    const style = ichimokuStyleOf(config.style);
+    const palette = ichimokuPalette(tokens);
+    const out: LegendValue[] = [];
+    const labels: Partial<Record<LineId, { shown: boolean; color: string }>> = {
+      conversion: { shown: style.showConversion, color: palette.conversion },
+      base: { shown: style.showBase, color: palette.base },
+      spanA: { shown: style.showSpanA || style.showCloud, color: palette.spanA },
+      spanB: { shown: style.showSpanB || style.showCloud, color: palette.spanB },
+      lagging: { shown: style.showLagging, color: palette.lagging },
+    };
+    let spanAVal: number | undefined;
+    let spanBVal: number | undefined;
+    for (const line of s.lines) {
+      const pt = pointAtTime(line.points, time);
+      if (line.id === "spanA") spanAVal = pt?.v;
+      if (line.id === "spanB") spanBVal = pt?.v;
+      const info = labels[line.id];
+      if (!info || !info.shown) continue;
+      out.push({ text: this.legendText(config, pt), color: info.color });
+    }
+    if (spanAVal !== undefined && spanBVal !== undefined) {
+      const bull = spanAVal >= spanBVal;
+      out.push({ text: this.ichimokuCloudStatusText(spanAVal, spanBVal), color: bull ? palette.spanA : palette.spanB });
+    }
+    return out;
+  }
+
   private lineOptions(config: IndicatorConfig, id: LineId, i: number) {
     const common = { visible: config.visible, priceLineVisible: false, lastValueVisible: config.panel !== "price" && i === 0 && this.isAxisLeader(config), title: "" };
     if (isQuoteTotals(config.spec)) {
       const color = id === "quoteAsk" ? this.host.tokens().down : this.host.tokens().up;
       return { ...common, color, lineWidth: 2 as const, crosshairMarkerVisible: false };
     }
+    if (config.spec.kind === "ichimoku") {
+      const ichi = this.ichimokuLineStyle(config, id);
+      if (ichi) return { ...common, ...ichi, halo: config.id === this.previewId };
+    }
     const color = indicatorColorValue(this.host.tokens(), lineColor(config.spec, config.style.colors, i));
     if (isBarLine(id) || (isFinancial(config.spec) && isFinancialBar(config.spec.kind))) return common;
-    const line = { ...common, color, lineWidth: config.style.width };
+    const line = { ...common, color, lineWidth: config.style.width, lineStyle: "solid" as const, opacity: 1 };
     return isOverlay(config, id) ? { ...line, halo: config.id === this.previewId } : { ...line, crosshairMarkerVisible: false };
   }
 
@@ -1088,6 +1243,7 @@ export class IndicatorLayer {
       line.series.applyOptions(this.lineOptions(s.config, line.id, i));
       line.guides.forEach((g) => g.applyOptions({ color: this.host.tokens().line }));
     });
+    if (s.cloud) s.cloud.applyOptions(this.cloudOptions(s.config));
   }
 
   private priceFormat(config: IndicatorConfig): PriceFormat {
@@ -1432,6 +1588,7 @@ export class IndicatorLayer {
         this.queue.forget(line);
         this.draw(line, line.points);
       }
+      if (s.cloud) this.drawCloud(s);
     }
   }
 
@@ -1473,6 +1630,7 @@ export class IndicatorLayer {
       line.legendDirty = true;
       line.legendHasGap = false;
     }
+    if (s.cloud) s.cloud.setData([]);
   }
 
   private removeLine(line: Line): void {
@@ -1486,6 +1644,10 @@ export class IndicatorLayer {
     this.shown.delete(id);
     this.quotes.removeDepthLegend(id);
     for (const line of s.lines) this.removeLine(line);
+    if (s.cloud) {
+      this.host.chart.removeSeries(s.cloud);
+      s.cloud = undefined;
+    }
   }
 
   applyStretch(): void {
