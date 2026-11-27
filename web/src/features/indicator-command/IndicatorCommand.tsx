@@ -66,7 +66,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
   const close = useSelectionStore((s) => s.closeDialog);
   const [initialSettings] = useState(() => chartWindow(useLayoutStore.getState().layout, cellId).chartSettings);
   const [initialIndicatorWindow] = useState(() => useUiStore.getState().prefs.indicatorWindow);
-  const [panelSection, setPanelSection] = useState<"indicators" | "compare" | "settings">(
+  const [panelSection, setPanelSection] = useState<"indicators" | "settings" | "compare">(
     initialMode === "settings" ? "settings" : initialMode === "compare" ? "compare" : "indicators"
   );
   const [category, setCategory] = useState<AddCategory>("all");
@@ -110,7 +110,7 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
     if (initialMode !== "settings") command.show(initialMode);
   }, [initialMode]);
 
-  const switchSection = (next: "indicators" | "compare" | "settings") => {
+  const switchSection = (next: "indicators" | "settings" | "compare") => {
     setPanelSection(next);
     const nextMode: ChartPanelMode = next === "settings" ? "settings" : next === "compare" ? "compare" : mode === "compare" ? defaultIndicatorMode(cellId) : mode;
     useSelectionStore.getState().setIndicatorDialogMode(nextMode);
@@ -161,8 +161,8 @@ export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = n
         <h2 id={`${ids}-title`} className="sr-only">{panelSection === "settings" ? "차트 설정" : "지표·비교 입력창"}</h2>
         <div role="group" aria-label="차트 설정 영역" className="ic-section-seg">
           <button type="button" aria-pressed={panelSection === "indicators"} onClick={() => switchSection("indicators")}>지표</button>
+          <button type="button" aria-label="차트 설정" aria-pressed={panelSection === "settings"} onClick={() => switchSection("settings")}>차트</button>
           <button type="button" aria-pressed={panelSection === "compare"} onClick={() => switchSection("compare")}>비교</button>
-          <button type="button" aria-pressed={panelSection === "settings"} onClick={() => switchSection("settings")}>차트 설정</button>
         </div>
         <div className="ic-top-actions">
           {isMoved && <button type="button" className="icon-btn" aria-label="가운데로" title="가운데로 복귀" onClick={() => setDragOffset({ x: 0, y: 0 })}>⌖</button>}

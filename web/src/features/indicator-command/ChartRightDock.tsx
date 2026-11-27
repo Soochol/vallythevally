@@ -116,7 +116,7 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
   const showingDetail = isMaDetail || detailConfig !== null;
   const section = mode === "settings" ? "settings" : mode === "compare" ? "compare" : "indicators";
 
-  const switchSection = (next: "indicators" | "compare" | "settings") => {
+  const switchSection = (next: "indicators" | "settings" | "compare") => {
     setDetailId(null);
     const nextMode: ChartPanelMode = next === "indicators" ? defaultIndicatorMode(cellId) : next;
     useSelectionStore.getState().openChartDock(cellId, nextMode, null);
@@ -134,8 +134,8 @@ function ChartRightDockBody({ cellId, mode, category, setCategory, detailId, set
       <header className="cd-head">
         <div role="group" aria-label="차트 설정 영역" className="ic-section-seg">
           <button type="button" aria-pressed={section === "indicators"} onClick={() => switchSection("indicators")}>지표</button>
+          <button type="button" aria-label="차트 설정" aria-pressed={section === "settings"} onClick={() => switchSection("settings")}>차트</button>
           <button type="button" aria-pressed={section === "compare"} onClick={() => switchSection("compare")}>비교</button>
-          <button type="button" aria-pressed={section === "settings"} onClick={() => switchSection("settings")}>설정</button>
         </div>
         <button type="button" className="cd-mode-btn" aria-label="가운데 모달로 전환" onClick={() => useSelectionStore.getState().openIndicatorDialog(cellId, mode, isMaDetail ? null : detailId)}>모달</button>
         <button type="button" className="icon-btn" aria-label="닫기" onClick={() => useSelectionStore.getState().closeChartDock()}><CloseIcon size={15} /></button>

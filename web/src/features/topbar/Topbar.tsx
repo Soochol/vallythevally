@@ -17,7 +17,7 @@ import { BookReplayToggle } from "../book-replay/BookReplayToggle";
 import { AutoGuardBadge } from "./AutoGuardBadge";
 import { TopbarClock } from "./TopbarClock";
 
-type PillSection = "indicators" | "compare" | "settings";
+type PillSection = "indicators" | "settings" | "compare";
 
 function sectionOf(mode: ChartPanelMode): PillSection {
   if (mode === "compare") return "compare";
@@ -89,15 +89,15 @@ export function Topbar() {
             {indicatorCount > 0 && <span className="topbar-pill-count">{indicatorCount}</span>}
           </button>
           <span className="topbar-pill-div" aria-hidden="true" />
+          <button type="button" className="topbar-pill-btn" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={activeSection === "settings"} title="차트 설정" onClick={() => toggleSection("settings")}>
+            <SlidersIcon />
+            <span className="topbar-label-lg">차트</span>
+          </button>
+          <span className="topbar-pill-div" aria-hidden="true" />
           <button type="button" className="topbar-pill-btn" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} aria-expanded={activeSection === "compare"} title="비교 종목" onClick={() => toggleSection("compare")}>
             <CompareIcon />
             <span className="topbar-label-lg">비교</span>
             {compareCount > 0 && <span className="topbar-pill-count">{compareCount}</span>}
-          </button>
-          <span className="topbar-pill-div" aria-hidden="true" />
-          <button type="button" className="topbar-pill-btn" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={activeSection === "settings"} title="차트 설정" onClick={() => toggleSection("settings")}>
-            <SlidersIcon />
-            <span className="topbar-label-xl">차트 설정</span>
           </button>
         </div>
       </div>
