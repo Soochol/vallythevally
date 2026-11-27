@@ -22,6 +22,8 @@ const VISIBLE_ROWS = 300;
 const SPARK_WIDTH = 100;
 const SPARK_HEIGHT = 16;
 const CLOCK_TICK_MS = 60_000;
+const PROGRAM_HISTORY_STALE_MS = 15_000;
+const PROGRAM_HISTORY_GC_MS = 5 * 60_000;
 const quantityFormat = new Intl.NumberFormat("ko-KR");
 
 function useLiveProgram(code: SymbolCode, today: string, active: boolean): ProgramLiveState {
@@ -137,8 +139,8 @@ function ProgramBody({ code }: { code: SymbolCode }) {
     queryKey: ["program-trades", code, today],
     queryFn: ({ signal }) => getJson<ProgramTradeTimeline>(`/api/symbols/${encodeURIComponent(code)}/program-trades`, signal),
     enabled: windowVisible,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: PROGRAM_HISTORY_STALE_MS,
+    gcTime: PROGRAM_HISTORY_GC_MS,
     refetchOnWindowFocus: false,
   });
   const live = useLiveProgram(code, today, windowVisible);

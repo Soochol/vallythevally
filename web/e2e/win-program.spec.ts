@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { FeedProgramRow } from "../src/api/generated/FeedProgramRow";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import type { ProgramTradePoint } from "../src/api/generated/ProgramTradePoint";
-import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
+import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
 
 const SETTINGS = { v: 1, style: "candle", scale: "normal", indicators: [], compare: [], panels: [] };
 const kstSeconds = (clock: string) => Date.parse(`2026-11-09T${clock}+09:00`) / 1000;
@@ -31,6 +31,34 @@ async function emitLive(scenario: Scenario, frame: (sub: string) => Parameters<S
   const subscribe = scenario.live.messages.find((m) => m.type === "subscribe_feed" && m.kind === "program");
   if (subscribe?.type !== "subscribe_feed") throw new Error("프로그램 구독이 없습니다");
   scenario.live.emit(frame(subscribe.sub));
+}
+
+function activeProgramSub(scenario: Scenario, symbol: string): string | undefined {
+  const unsubscribed = new Set(
+    scenario.live.messages.flatMap((m) => (m.type === "unsubscribe" ? [m.sub] : [])),
+  );
+  const matching = scenario.live.messages.filter(
+    (m) => m.type === "subscribe_feed" && m.kind === "program" && m.symbol === symbol && !unsubscribed.has(m.sub),
+  );
+  const last = matching.at(-1);
+  return last?.type === "subscribe_feed" ? last.sub : undefined;
+}
+
+async function emitLiveFor(scenario: Scenario, symbol: string, frame: (sub: string) => Parameters<Scenario["live"]["emit"]>[0]) {
+  await pollSaved(() => activeProgramSub(scenario, symbol)).toBeDefined();
+  const sub = activeProgramSub(scenario, symbol);
+  if (!sub) throw new Error(`${symbol} 프로그램 구독이 없습니다`);
+  scenario.live.emit(frame(sub));
+}
+
+async function switchSymbol(page: Page, code: string) {
+  await page.getByTitle(SEARCH_BUTTON_TITLE).click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await dialog.getByRole("combobox", { name: "종목 검색" }).fill(code);
+  const option = dialog.getByRole("option").filter({ hasText: code });
+  await expect(option).toHaveAttribute("aria-disabled", "false");
+  await option.click();
+  await expect(dialog).toBeHidden();
 }
 
 const rowsOf = (page: Page) => page.getByTestId("program-row");
@@ -112,4 +140,53 @@ test("장 종료 후 직전 마감일 폴백을 배지와 함께 보이고 실�
   await expect(page.getByTestId("program-net-qty")).toHaveText("+15");
   await expect(rowsOf(page)).toHaveCount(1);
   await expect(rowsOf(page).first()).toHaveAttribute("data-source", "live");
+});
+
+test("종목을 바꿨다 돌아오면 캐시된 이력을 다시 조회하지 않고 즉시 보이며 실시간 행도 이어 붙는다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  const windows: LayoutWindow[] = [
+    { id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
+    ...layout.windows.filter((w) => w.kind !== "chart"),
+  ];
+  scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
+
+  let callsA = 0;
+  let callsB = 0;
+  scenario.on((url) => url.pathname === "/api/symbols/005930/program-trades", () => {
+    callsA += 1;
+    return { body: { symbol: "005930", points: [point("09:00:00", 10), point("09:01:00", 30)], skippedRows: 0 } };
+  });
+  scenario.on((url) => url.pathname === "/api/symbols/000660/program-trades", () => {
+    callsB += 1;
+    return { body: { symbol: "000660", points: [point("09:00:00", 100)], skippedRows: 0 } };
+  });
+
+  await openProgramWindow(page);
+  await expect(page.getByTestId("program-window")).toHaveAttribute("data-symbol", "005930");
+  await expect(rowsOf(page)).toHaveCount(2);
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+30");
+  expect(callsA).toBe(1);
+  expect(callsB).toBe(0);
+
+  await switchSymbol(page, "000660");
+  await expect(page.getByTestId("program-window")).toHaveAttribute("data-symbol", "000660");
+  await expect(rowsOf(page)).toHaveCount(1);
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+100");
+  expect(callsB).toBe(1);
+
+  await switchSymbol(page, "005930");
+  await expect(page.getByTestId("program-window")).toHaveAttribute("data-symbol", "005930");
+  await expect(rowsOf(page)).toHaveCount(2);
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+30");
+  expect(callsA).toBe(1);
+
+  await emitLiveFor(scenario, "005930", (sub) => ({ type: "feed_program", sub, row: liveRow("09:02:00", 45, 15, 2_000) }));
+  await expect(rowsOf(page)).toHaveCount(3);
+  await expect(rowsOf(page).evaluateAll((rows) => rows.map((row) => `${row.getAttribute("data-source")} ${row.querySelector(".pg-time")?.textContent}`))).resolves.toEqual([
+    "live 09:02:00",
+    "history 09:01:00",
+    "history 09:00:00",
+  ]);
+  await expect(page.getByTestId("program-net-qty")).toHaveText("+45");
+  expect(callsA).toBe(1);
 });
