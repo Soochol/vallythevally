@@ -1655,6 +1655,7 @@ pub enum BrokerView {
     Board,
     List,
     Table,
+    Transfer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
