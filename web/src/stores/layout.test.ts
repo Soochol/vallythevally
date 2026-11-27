@@ -12,7 +12,8 @@ import type { CanvasPlacement, DockNode, DockPlacement, Placement } from "../lay
 import { byteLength, PAYLOAD_LIMIT_BYTES } from "../persist/bytes";
 import type { LinkColor } from "../api/generated/LinkColor";
 import type { SymbolCode } from "../api/generated/SymbolCode";
-import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, fittedDock, linkedWindowCount, linkedWindowSymbol, useLayoutStore, watchedSymbol, windowName, windowRefs, type WindowState } from "./layout";
+import { ARRANGEMENT_STEPS, type ChartWindowState, chartWindow, chartWindows, DEFAULT_LAYOUT, DEFAULT_LINK_COLOR, fittedDock, linkedWindowCount, linkedWindowSymbol, useLayoutStore, watchedSymbol, windowName, windowRefs, type WindowState } from "./layout";
+import { resetActiveWindow, touchWindow } from "./activeWindow";
 
 const state = () => useLayoutStore.getState();
 const shownTab = (kind: string) => {
@@ -21,7 +22,10 @@ const shownTab = (kind: string) => {
   return id !== undefined && placement.dock !== null && groupOfWindow(placement.dock.root, id)?.active === id;
 };
 
-beforeEach(() => useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], redos: [] }));
+beforeEach(() => {
+  resetActiveWindow();
+  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), revision: 0, steps: [], redos: [], lastUsedLink: null });
+});
 
 const room = { area: { w: 1256, h: 684 }, gap: 6 };
 const firstChart = () => chartWindows(state().layout)[0]!;
@@ -466,7 +470,7 @@ test("창이 상한 50개라 지표 창을 더하지 못하면 인스펙터 요�
 test("같은 종류 창 더하기는 kind-2 id로 둘째 창을 만들고 그 탭을 고른다", () => {
   state().openWindow("trades");
   expect(state().openWindow("trades")).toBe("trades-2");
-  expect(state().layout.windows.filter((w) => w.kind === "trades")).toEqual([{ id: "trades", link: null, kind: "trades" }, { id: "trades-2", link: null, kind: "trades" }]);
+  expect(state().layout.windows.filter((w) => w.kind === "trades")).toEqual([{ id: "trades", link: "a", kind: "trades" }, { id: "trades-2", link: "a", kind: "trades" }]);
   expect(groupOfWindow(state().layout.placement.dock!.root, windowId("trades-2"))?.active).toBe("trades-2");
   expect(state().openWindow("watchlist")).toBe("watchlist-2");
   expect(state().layout.windows.filter((w) => w.kind === "watchlist")).toHaveLength(2);
@@ -513,12 +517,12 @@ test("새 순위 창은 앱 전체 거래소와 거래대금·시장 전체·ETF
     const id = state().openWindow("ranking");
     expect(id).toBe("ranking");
     const expected = { kind: "tradeAmount", market: "all", venue: "nxt", excludes: { etfEtn: true, preferred: false }, excludeManaged: false };
-    expect(state().layout.windows.find((w) => w.id === id)).toEqual({ id: "ranking", link: null, kind: "ranking", ranking: expected });
+    expect(state().layout.windows.find((w) => w.id === id)).toEqual({ id: "ranking", link: "a", kind: "ranking", ranking: expected });
     expect(state().openWindow("ranking")).toBe("ranking-2");
-    state().setLink(windowId("ranking"), "a");
+    state().setLink(windowId("ranking"), "b");
     const copy = state().duplicateWindow(windowId("ranking"));
     expect(copy).toBe("ranking-3");
-    expect(state().layout.windows.find((w) => w.id === copy)).toEqual({ id: "ranking-3", link: "a", kind: "ranking", ranking: expected });
+    expect(state().layout.windows.find((w) => w.id === copy)).toEqual({ id: "ranking-3", link: "b", kind: "ranking", ranking: expected });
     useUiStore.getState().setVenue("combined");
     state().openWindow("ranking");
     expect(state().layout.windows.find((w) => w.id === "ranking-4")).toMatchObject({ ranking: { venue: "combined" } });
@@ -536,20 +540,20 @@ test("창별 상태 setter 셋은 그 종류의 창에만 값을 쓰고 null이�
   state().setWindowScreen(windowId("screener"), "S-고가");
   state().pinSymbol(windowId("trades"), "005930");
   state().pinSymbol(windowId("order"), "000660");
-  expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: null, kind: "watchlist", list: "L-반도체" });
+  expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: "a", kind: "watchlist", list: "L-반도체" });
   expect(find("watchlist")).toEqual({ id: "watchlist", link: null, kind: "watchlist" });
   expect(find("screener")).toEqual({ id: "screener", link: null, kind: "screener", screen: "S-고가" });
-  expect(find("trades")).toEqual({ id: "trades", link: null, kind: "trades", symbol: "005930" });
-  expect(find("order")).toEqual({ id: "order", link: null, kind: "order", venue: "krx", symbol: "000660" });
+  expect(find("trades")).toEqual({ id: "trades", link: "a", kind: "trades", symbol: "005930" });
+  expect(find("order")).toEqual({ id: "order", link: "a", kind: "order", venue: "krx", symbol: "000660" });
   const revision = state().revision;
   state().setWindowList(windowId("watchlist-2"), "L-반도체");
   expect(state().revision).toBe(revision);
   state().setWindowList(windowId("watchlist-2"), null);
   state().setWindowScreen(windowId("screener"), null);
   state().pinSymbol(windowId("trades"), null);
-  expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: null, kind: "watchlist" });
+  expect(find("watchlist-2")).toEqual({ id: "watchlist-2", link: "a", kind: "watchlist" });
   expect(find("screener")).toEqual({ id: "screener", link: null, kind: "screener" });
-  expect(find("trades")).toEqual({ id: "trades", link: null, kind: "trades" });
+  expect(find("trades")).toEqual({ id: "trades", link: "a", kind: "trades" });
 });
 
 test("창별 상태 setter는 다른 종류의 창 id와 없는 id에는 아무것도 바꾸지 않고, 고정 종목은 지수를 받지 않는다", () => {
@@ -623,8 +627,8 @@ test("창 50개를 모두 따로 묶은 도킹 배치, 일부를 띄운 도킹 �
 
 test("시세 창이 보이는 종목은 고정 종목이 연동 색과 활성 칸보다 먼저이고, 고정이 없으면 지금 규칙과 같다", () => {
   linked();
-  state().openWindow("trades");
-  state().openWindow("book");
+  state().openWindow("trades", undefined, { link: null });
+  state().openWindow("book", undefined, { link: null });
   const layout = () => state().layout;
   const shownIn = (id: string, active: string) => linkedWindowSymbol(layout(), windowId(id), windowId(active));
   expect([shownIn("trades", "off"), shownIn("trades", "b1")]).toEqual(["000660", "035420"]);
@@ -641,7 +645,7 @@ test("시세 창이 보이는 종목은 고정 종목이 연동 색과 활성 �
 
 test("고정된 창에 연동 색을 고르면 고정이 풀리고 그 색을 따르며, 끔을 고르면 고정이 남는다", () => {
   linked();
-  state().openWindow("trades");
+  state().openWindow("trades", undefined, { link: null });
   state().pinSymbol(windowId("trades"), "005930");
   state().setLink(windowId("trades"), null);
   expect(state().layout.windows.find((w) => w.id === "trades")).toMatchObject({ symbol: "005930" });
@@ -653,12 +657,54 @@ test("고정된 창에 연동 색을 고르면 고정이 풀리고 그 색을 �
 
 test("관심종목·스크리너의 보이는 종목은 창 종목이 아니라 보내는 규칙으로만 정해진다", () => {
   linked();
-  state().openWindow("trades");
+  state().openWindow("trades", undefined, { link: null });
   state().pinSymbol(windowId("trades"), "005930");
   const layout = () => state().layout;
   expect(watchedSymbol(layout(), windowId("watchlist"), windowId("b1"))).toBe("035420");
   expect(watchedSymbol(layout(), windowId("trades"), windowId("b1"))).toBe("035420");
   expect(watchedSymbol(layout(), null, windowId("off"))).toBe("000660");
+});
+
+test("새 창은 활성 창의 연동 색을 상속하고, 활성 창이 무그룹이거나 없으면 마지막 사용 연동 색, 그것도 없으면 A로 만든다", () => {
+  linked();
+  touchWindow(windowId("b1"));
+  const bookId = state().openWindow("book")!;
+  expect(state().layout.windows.find((w) => w.id === bookId)?.link).toBe("b");
+  expect(linkedWindowSymbol(state().layout, bookId, windowId("a1"))).toBe("035420");
+
+  touchWindow(windowId("off"));
+  const tradesId = state().openWindow("trades")!;
+  expect(state().layout.windows.find((w) => w.id === tradesId)?.link).toBe("b");
+  expect(linkedWindowSymbol(state().layout, tradesId, windowId("a1"))).toBe("035420");
+
+  state().setLink(tradesId, "c");
+  state().setLink(tradesId, null);
+  touchWindow(tradesId);
+  const orderId = state().openWindow("order")!;
+  expect(state().layout.windows.find((w) => w.id === orderId)?.link).toBe("c");
+
+  resetActiveWindow();
+  useLayoutStore.setState({ layout: structuredClone(DEFAULT_LAYOUT), lastUsedLink: null });
+  const fallbackId = state().openWindow("premarket")!;
+  expect(state().layout.windows.find((w) => w.id === fallbackId)?.link).toBe(DEFAULT_LINK_COLOR);
+});
+
+test("새 차트는 활성 창의 연동 색을 상속해 그 그룹의 현재 종목을 따르고, 지표와 명시적 null은 무그룹을 유지한다", () => {
+  linked();
+  state().openWindow("trades", undefined, { link: "b" });
+  touchWindow(windowId("trades"));
+  const chartId = state().addChart(windowId("a1"), room)!;
+  expect(chartWindow(state().layout, chartId)).toMatchObject({ id: chartId, link: "b", symbol: "035420", period: "D" });
+
+  expect(state().openWindow("indicators")).toBe("indicators");
+  expect(state().layout.windows.find((w) => w.id === "indicators")?.link).toBeNull();
+
+  const explicitTrades = state().openWindow("trades", undefined, { link: null })!;
+  expect(state().layout.windows.find((w) => w.id === explicitTrades)?.link).toBeNull();
+  expect(state().lastUsedLink).toBe("b");
+
+  const explicitChart = state().addChart(windowId("a1"), room, undefined, { link: null })!;
+  expect(chartWindow(state().layout, explicitChart)).toMatchObject({ id: explicitChart, link: null, symbol: "005930" });
 });
 
 test("십자선 연동 범위를 고르면 켜지고 범위가 정해지며, 끄면 범위는 남고, 같은 값은 저장 순서를 올리지 않는다", () => {

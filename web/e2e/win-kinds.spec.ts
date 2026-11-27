@@ -60,8 +60,8 @@ for (const { kind, name } of KINDS) {
     if (!(kind in READY_BODIES)) await expect(preparing(page)).toContainText(`${name} 준비 중`);
     if (kind === "brokers") await expect(body(page, kind)).toContainText("삼성전자");
     await expect(body(page, kind)).toHaveAttribute("data-symbol", "005930");
-    await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: 끔");
-    await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: null, kind }]);
+    await expect(dotOf(page, kind)).toHaveAccessibleName("연동 색: A");
+    await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === kind)).toEqual([{ id: kind, link: "a", kind }]);
 
     await dotOf(page, kind).click();
     await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
@@ -76,7 +76,8 @@ for (const { kind, name } of KINDS) {
     await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} 1`) })).toHaveCount(1);
     await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name} 2`) })).toHaveCount(1);
     await expect(windowTabs(page).getByRole("tab", { name: new RegExp(`^${name}( \\d|$)`) })).toHaveCount(2);
-    await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === kind).map((w) => w.id)).toEqual([kind, `${kind}-2`]);
+    await expect(dotOf(page, `${kind}-2`)).toHaveAccessibleName("연동 색: B");
+    await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === kind).map((w) => [w.id, w.link])).toEqual([[kind, "b"], [`${kind}-2`, "b"]]);
   });
 }
 
@@ -91,8 +92,8 @@ test("순위 창은 창 더하기에서 열리고 고른 순위와 연동 색 �
   await expect(tabOf(page, "ranking")).toHaveAccessibleName(/^순위/);
   await expect(page.getByTestId("ranking-window")).toBeVisible();
   await expect(page.getByTestId("ranking-window")).toContainText("거래대금");
-  await expect(dotOf(page, "ranking")).toHaveAccessibleName("연동 색: 끔");
-  await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === "ranking")).toEqual([{ id: "ranking", link: null, kind: "ranking", ranking: defaultRanking }]);
+  await expect(dotOf(page, "ranking")).toHaveAccessibleName("연동 색: A");
+  await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === "ranking")).toEqual([{ id: "ranking", link: "a", kind: "ranking", ranking: defaultRanking }]);
 
   await dotOf(page, "ranking").click();
   await page.getByRole("menu", { name: "연동 색" }).getByRole("menuitemradio", { name: /^B/ }).click();
@@ -104,19 +105,47 @@ test("순위 창은 창 더하기에서 열리고 고른 순위와 연동 색 �
   await kindItem(page, "순위").click();
   await expect(windowTabs(page).getByRole("tab", { name: /^순위 1/ })).toHaveCount(1);
   await expect(windowTabs(page).getByRole("tab", { name: /^순위 2/ })).toHaveCount(1);
-  await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === "ranking").map((w) => [w.id, "ranking" in w ? w.ranking : null])).toEqual([["ranking", defaultRanking], ["ranking-2", defaultRanking]]);
+  await expect(dotOf(page, "ranking-2")).toHaveAccessibleName("연동 색: B");
+  await pollSaved(() => savedWindows(scenario).filter((w) => w.kind === "ranking").map((w) => [w.id, w.link, "ranking" in w ? w.ranking : null])).toEqual([["ranking", "b", defaultRanking], ["ranking-2", "b", defaultRanking]]);
 
   await page.reload();
   await expect(tabOf(page, "ranking")).toHaveCount(1);
   await expect(tabOf(page, "ranking-2")).toHaveCount(1);
 });
 
-test("지수 종목을 따르는 시세 창은 주식만 보인다고 알린다", async ({ page }) => {
+test("지수 종목을 따르는 시세 창은 주식만 보인다고 알린다", async ({ page, scenario }) => {
+  const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
+  scenario.documents.saveLayout({
+    ...layout,
+    windows: layout.windows.map((w) => (w.kind === "chart" ? { ...w, link: "a" } : w)),
+    revision: layout.revision + 1,
+  });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await addWindow(page, "10호가");
   await expect(page.getByText("이 창은 주식만 보입니다")).toBeVisible();
   await expect(preparing(page)).toHaveCount(0);
+});
+
+test("새 창은 활성 창의 연동 색을 상속하고 무그룹 활성 창에서는 마지막 사용 색을 따른다", async ({ page, scenario }) => {
+  twoLinkedCharts(scenario);
+  emptyTrades(scenario);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  await tabOf(page, "cell-1").click();
+  await addWindow(page, "10호가");
+  await expect(dotOf(page, "book")).toHaveAccessibleName("연동 색: B");
+  await expect(body(page, "book")).toHaveAttribute("data-symbol", "000660");
+
+  await tabOf(page, "watchlist").click();
+  await addWindow(page, "체결");
+  await expect(dotOf(page, "trades")).toHaveAccessibleName("연동 색: B");
+  await expect(body(page, "trades")).toHaveAttribute("data-symbol", "000660");
+
+  await addWindow(page, "지표");
+  await expect(dotOf(page, "indicators")).toHaveCount(0);
+  await pollSaved(() => savedWindows(scenario).find((w) => w.id === "indicators")?.link).toBeNull();
 });
 
 test("새 종류 넷을 레이아웃에 저장하면 다시 열어도 그대로 있다", async ({ page, scenario }) => {

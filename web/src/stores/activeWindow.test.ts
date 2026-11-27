@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { windowId } from "../layout/kinds";
-import { activeWatchWindow, registerWatchWindow, resetActiveWindow, touchWindow, touchWindowFromTarget, windowIdFromTarget } from "./activeWindow";
+import { activeWatchWindow, activeWindowId, clearActiveWindow, onWindowTouch, registerWatchWindow, resetActiveWindow, touchWindow, touchWindowFromTarget, windowIdFromTarget } from "./activeWindow";
 
 class FakeElement extends EventTarget {
   readonly dataset: Record<string, string | undefined>;
@@ -96,4 +96,27 @@ test("마지막으로 누른 창이 열린 관심종목일 때만 그 창 id를 
   expect(activeWatchWindow()).toBeNull();
 
   stopSecond();
+});
+
+test("마지막으로 누른 창 id를 추적하고 구독자에게 알리며 clearActiveWindow는 관심종목 등록을 유지한다", () => {
+  const seen: string[] = [];
+  const stopListen = onWindowTouch((id) => seen.push(id));
+  const stopWatch = registerWatchWindow(windowId("watchlist"));
+
+  expect(activeWindowId()).toBeNull();
+  touchWindow(windowId("cell-0"));
+  expect(activeWindowId()).toBe(windowId("cell-0"));
+  touchWindow(windowId("watchlist"));
+  expect(activeWindowId()).toBe(windowId("watchlist"));
+  expect(activeWatchWindow()).toBe(windowId("watchlist"));
+  expect(seen).toEqual(["cell-0", "watchlist"]);
+
+  clearActiveWindow();
+  expect(activeWindowId()).toBeNull();
+  expect(activeWatchWindow()).toBeNull();
+  touchWindow(windowId("watchlist"));
+  expect(activeWatchWindow()).toBe(windowId("watchlist"));
+
+  stopListen();
+  stopWatch();
 });

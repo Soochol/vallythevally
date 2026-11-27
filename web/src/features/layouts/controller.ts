@@ -11,6 +11,7 @@ import { layoutAutosave } from "../../persist/autosave";
 import { restoreLayout, type RestoredLayout } from "../../persist/restore";
 import { clearUnsaved, readUnsaved } from "../../persist/unsaved";
 import { useDrawingSession } from "../../stores/drawingSession";
+import { clearActiveWindow } from "../../stores/activeWindow";
 import { useLayoutStore, chartWindows, windowRefs } from "../../stores/layout";
 import { toWireWindow } from "../../persist/layoutWire";
 import { usePersistStore } from "../../stores/persist";
@@ -37,6 +38,7 @@ export const showLayoutError = (error: unknown) => useSelectionStore.getState().
 function install(next: RestoredLayout) {
   const autosave = layoutAutosave();
   flushSync(() => usePersistStore.getState().setPhase({ kind: "restoring" }));
+  clearActiveWindow();
   useSelectionStore.setState({ activeCell: chartWindows(next.layout)[0]!.id, dialog: null, inspector: null, toast: null });
   useDrawingSession.getState().clearCells();
   useIndicatorPreview.setState({ current: null });

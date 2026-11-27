@@ -153,13 +153,12 @@ test("첫 쪽을 받은 뒤 종목을 바꾸면 앞 종목의 전체 응답이 �
   scenario.reply((url) => url.pathname === "/api/symbols/000660/trades", { body: { symbol: "000660", venue: "combined", trades: [print("10:00:01", 190_000, 5, "krx")], skippedRows: 0 } });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chart = (id: string, symbol: string): LayoutWindow => ({ id, link: null, kind: "chart", symbol, venue: "combined", period: "D", chartSettings: SETTINGS });
-  const windows: LayoutWindow[] = [chart("cell-0", "005930"), chart("cell-1", "000660"), ...layout.windows.filter((w) => w.kind !== "chart")];
+  const windows: LayoutWindow[] = [chart("cell-0", "005930"), chart("cell-1", "000660"), ...layout.windows.filter((w) => w.kind !== "chart"), { id: "trades", link: null, kind: "trades" }];
   scenario.documents.saveLayout({ ...layout, windows, placement: {}, revision: layout.revision + 1 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await addButton(page).click();
-  await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^체결/ }).click();
+  await windowTabs(page).getByRole("tab", { name: /^체결/ }).click();
   await expect(page.getByTestId("trades-window")).toHaveAttribute("data-symbol", "005930");
   await expect(rows(page)).toHaveCount(2);
   await full.received;
