@@ -96,7 +96,10 @@ export function ReplayTradesPane({
         else refs.row.removeAttribute("data-fresh");
         jumpTargetsRef.current[i] = tr.recvMs;
 
-        setText(refs.time, formatReplayClock(tr.recvMs / 1000, withMs));
+        setText(refs.time, formatReplayClock(tr.recvMs / 1000, false));
+        if (refs.time) {
+          refs.time.title = formatReplayClock(tr.recvMs / 1000, withMs);
+        }
         if (refs.price) {
           const dir = previousClose !== null && previousClose > 0
             ? direction(tr.price - previousClose)

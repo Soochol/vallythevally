@@ -238,6 +238,20 @@ test("/replay는 test2 풀폭 배치·4대 보조지표·체결·프로그램·1
   await expect(page.getByTestId("replay-program-net-qty")).toContainText("+1,200");
   await expect(page.getByTestId("replay-program-row")).toHaveCount(1);
 
+  const progChangeHead = page.getByTestId("replay-program-pane").getByRole("columnheader", { name: "순매수 증감" });
+  expect((await progChangeHead.boundingBox())!.height).toBeLessThanOrEqual(24);
+
+  const spreadBadge = page.getByTestId("replay-spread");
+  await expect(spreadBadge).toHaveText("스프레드 1틱 (100원)");
+  const spreadClipped = await spreadBadge.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+  expect(spreadClipped).toBe(false);
+
+  const ladderBox = (await page.locator(".rp-order-ladder").boundingBox())!;
+  const bestAskBox = (await page.locator('[data-testid="replay-sim-buy-cell"][data-price="71100"]').boundingBox())!;
+  const bestBidBox = (await page.locator('[data-testid="replay-sim-buy-cell"][data-price="71000"]').boundingBox())!;
+  expect(bestAskBox.y).toBeGreaterThanOrEqual(ladderBox.y - 1);
+  expect(bestBidBox.y + bestBidBox.height).toBeLessThanOrEqual(ladderBox.y + ladderBox.height + 1);
+
   const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");
   await expect(brokersPane.getByTestId("replay-broker-view-transfer")).toHaveAttribute("aria-pressed", "true");
@@ -278,6 +292,15 @@ test("시간 단위·틱 단위 모드 전환과 밀리초 1틱 이동·체결 �
   await expect(page.getByTestId("replay-clock")).toHaveText("09:00:45.120");
   await expect(page.getByTestId("replay-total-ask")).toHaveText("7,800");
   await expect(page.getByTestId("replay-tape-row")).toHaveCount(2);
+
+  const firstTradeRow = page.getByTestId("replay-tape-row").first();
+  const tradeTime = firstTradeRow.locator(".tr-time");
+  const tradePrice = firstTradeRow.locator(".tr-price");
+  await expect(tradeTime).toHaveText("09:00:45");
+  await expect(tradeTime).toHaveAttribute("title", "09:00:45.120");
+  const timeBox = (await tradeTime.boundingBox())!;
+  const priceBox = (await tradePrice.boundingBox())!;
+  expect(timeBox.x + timeBox.width).toBeLessThanOrEqual(priceBox.x + 1);
 
   await page.getByRole("group", { name: "체결 금액 필터" }).getByRole("button", { name: "3천만", exact: true }).click();
   await expect(page.getByTestId("replay-tape-row")).toHaveCount(1);

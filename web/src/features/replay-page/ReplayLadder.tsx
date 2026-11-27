@@ -154,6 +154,7 @@ export function ReplayLadder({
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
 
   const ladderScrollRef = useRef<HTMLDivElement>(null);
+  const userScrolledRef = useRef(false);
   const spreadRef = useRef<HTMLSpanElement>(null);
   const gapBannerRef = useRef<HTMLDivElement>(null);
   const viBannerRef = useRef<HTMLDivElement>(null);
@@ -230,6 +231,36 @@ export function ReplayLadder({
   useEffect(() => {
     buyRatioPercentRef.current = buyRatioPercent;
   }, [buyRatioPercent]);
+
+  useEffect(() => {
+    userScrolledRef.current = false;
+    const el = ladderScrollRef.current;
+    if (!el) return;
+    const centerSpread = () => {
+      if (userScrolledRef.current) return;
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      if (maxScroll > 0) {
+        el.scrollTop = Math.round(maxScroll / 2);
+      }
+    };
+    const markUserScrolled = () => {
+      userScrolledRef.current = true;
+    };
+    centerSpread();
+    const rafId = requestAnimationFrame(centerSpread);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(centerSpread) : null;
+    observer?.observe(el);
+    el.addEventListener("wheel", markUserScrolled, { passive: true });
+    el.addEventListener("touchstart", markUserScrolled, { passive: true });
+    el.addEventListener("pointerdown", markUserScrolled);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer?.disconnect();
+      el.removeEventListener("wheel", markUserScrolled);
+      el.removeEventListener("touchstart", markUserScrolled);
+      el.removeEventListener("pointerdown", markUserScrolled);
+    };
+  }, [engine]);
 
   useEffect(() => {
     return paper.subscribe(() => setPaperTick((t) => t + 1));
@@ -656,7 +687,7 @@ export function ReplayLadder({
     <section className="rp-col rp-ladder-col" aria-label="10호가 사다리" data-testid="replay-ladder">
       <div className="rp-pane-head">
         <div className="rp-pane-title">
-          <span>호가주문 시뮬레이터</span>
+          <span>호가주문</span>
           <span ref={spreadRef} className="rp-badge-mini" data-testid="replay-spread">—</span>
         </div>
         <div className="rp-pane-controls">
@@ -665,8 +696,8 @@ export function ReplayLadder({
             <button type="button" aria-pressed={clickMode === "double"} onClick={() => setClickMode("double")}>더블클릭</button>
           </div>
           <div className="rp-seg" role="group" aria-label="델타 표시 기준">
-            <button type="button" aria-pressed={deltaMode === "tick"} onClick={() => onDeltaMode("tick")}>직전 틱 델타</button>
-            <button type="button" aria-pressed={deltaMode === "min"} onClick={() => onDeltaMode("min")}>1분 누적 델타</button>
+            <button type="button" aria-pressed={deltaMode === "tick"} title="직전 틱 델타" onClick={() => onDeltaMode("tick")}>직전 틱</button>
+            <button type="button" aria-pressed={deltaMode === "min"} title="1분 누적 델타" onClick={() => onDeltaMode("min")}>1분 누적</button>
             <button type="button" aria-pressed={deltaMode === "off"} onClick={() => onDeltaMode("off")}>끄기</button>
           </div>
         </div>

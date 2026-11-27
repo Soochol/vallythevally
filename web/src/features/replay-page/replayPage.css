@@ -454,9 +454,30 @@
   text-align: left;
 }
 
+.rp-col .tr-head,
+.rp-col .tr-row {
+  grid-template-columns: var(--size-60) minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--size-4);
+  padding: 0 var(--size-6);
+}
+
+.rp-col .tr-time {
+  white-space: nowrap;
+}
+
 .rp-col .pg-table {
-  --pg-time: 8ch;
-  --pg-price: 7ch;
+  --pg-time: 7.5ch;
+  --pg-price: 6.5ch;
+}
+
+.rp-col .pg-tr {
+  grid-template-columns: max(var(--pg-time), var(--size-54)) max(var(--pg-price), var(--size-48)) minmax(0, 1fr);
+  gap: var(--size-4);
+  padding: 0 var(--size-6);
+}
+
+.rp-col .pg-th > span {
+  white-space: nowrap;
 }
 
 .rp-ladder-col {
@@ -469,6 +490,11 @@
   padding: var(--size-2) var(--size-8);
   overflow-x: auto;
   scrollbar-width: none;
+}
+
+.rp-ladder-col > .rp-pane-head .rp-pane-title,
+.rp-ladder-col > .rp-pane-head .rp-pane-controls {
+  flex: none;
 }
 
 .rp-ladder-col > .rp-pane-head::-webkit-scrollbar,
