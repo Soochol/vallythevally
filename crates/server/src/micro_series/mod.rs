@@ -1402,24 +1402,28 @@ async fn program_series_daily(
     let overview = crate::market_overview::overview_source(st);
     if overview.source.is_open() && overview.source.features().contains(OverviewFeature::StockProgramDaily) {
         let req_to = to_date.unwrap_or(today);
-        let req_from = from_date.unwrap_or_else(|| req_to.add_days(-DEFAULT_DAILY_LOOKBACK_DAYS));
+        let req_from = from_date.unwrap_or_else(|| {
+            let lookback = req_to.add_days(-DEFAULT_DAILY_LOOKBACK_DAYS);
+            period.bucket(KstTime::from_kst_civil(lookback, TimeOfDay::MIDNIGHT)).start().kst_date()
+        });
         let mut by_day: BTreeMap<KstDate, DailyProgramInput> = BTreeMap::new();
         if let Some(range) = DayRange::new(req_from, req_to) {
-            let started = st.daily_program.ticket();
-            let missing = st.daily_program.missing_ranges(stock, range, today, now);
-            let mut fetched_days: BTreeMap<KstDate, api::StockProgramDailyDay> = BTreeMap::new();
-            for fetch_range in missing {
+            let snapshot = st.daily_program.snapshot(stock, range, today, now);
+            for row in snapshot.rows {
+                by_day.insert(row.day.0, DailyProgramInput::from_kiwoom_day(&row));
+            }
+            for fetch_range in snapshot.missing {
                 match overview.source.stock_program_daily(stock, fetch_range, now, Priority::Background).await {
                     Ok(history) => {
                         for row in &history.days {
                             if range.contains(row.day.0) {
-                                fetched_days.insert(row.day.0, *row);
+                                by_day.insert(row.day.0, DailyProgramInput::from_kiwoom_day(row));
                             }
                         }
-                        st.daily_program.insert_history(started, stock, fetch_range, history, today, now);
+                        st.daily_program.insert_history(snapshot.ticket, stock, fetch_range, history, today, now);
                     }
                     Err(SourceError::UnknownSymbol) => {
-                        st.daily_program.mark_exhausted(started, stock, fetch_range, today, now);
+                        st.daily_program.mark_exhausted(snapshot.ticket, stock, fetch_range, today, now);
                     }
                     Err(err) if is_fallback_source_error(&err) => {
                         return program_series_daily_fallback(st, cache, DailyFallbackQuery { paths, stock, period, from_date, to_date, now }).await;
@@ -1428,12 +1432,6 @@ async fn program_series_daily(
                         return Err(Lookup::ProgramDaily.failure(BarError::from(err), now));
                     }
                 }
-            }
-            for row in st.daily_program.rows_in_range(stock, range) {
-                by_day.insert(row.day.0, DailyProgramInput::from_kiwoom_day(&row));
-            }
-            for row in fetched_days.into_values() {
-                by_day.insert(row.day.0, DailyProgramInput::from_kiwoom_day(&row));
             }
         }
         let today_in_range = today >= req_from && today <= req_to;

@@ -1022,3 +1022,206 @@ async fn program_series_daily_falls_back_to_daily_micro_when_overview_source_is_
     assert!((pts[0]["programSharePct"].as_f64().unwrap() - 15.0).abs() < 1e-6);
     assert_eq!(ka90013_calls(&transport).len(), 0);
 }
+
+#[tokio::test]
+async fn program_series_daily_disjoint_ranges_preserve_unfetched_middle_gap() {
+    let transport = ScriptedTransport::new();
+    transport.script(
+        "ka90013",
+        vec![
+            ScriptedReply {
+                status: 200,
+                body: ka90013_page(
+                    vec![
+                        ka90013_row("20261105", ("+70000", "1000"), ("10", "30", "+20"), ("100", "300", "+200")),
+                        ka90013_row("20261101", ("+69000", "1000"), ("5", "15", "+10"), ("50", "150", "+100")),
+                    ],
+                    None,
+                ),
+                delay: std::time::Duration::ZERO,
+            },
+            ScriptedReply {
+                status: 200,
+                body: ka90013_page(
+                    vec![
+                        ka90013_row("20261123", ("+71000", "1000"), ("10", "40", "+30"), ("100", "400", "+300")),
+                        ka90013_row("20261120", ("+70500", "1000"), ("5", "20", "+15"), ("50", "200", "+150")),
+                    ],
+                    None,
+                ),
+                delay: std::time::Duration::ZERO,
+            },
+            ScriptedReply {
+                status: 200,
+                body: ka90013_page(
+                    vec![
+                        ka90013_row("20261116", ("+70500", "1000"), ("8", "50", "+42"), ("80", "500", "+420")),
+                        ka90013_row("20261112", ("+70000", "1000"), ("4", "14", "+10"), ("40", "140", "+100")),
+                    ],
+                    None,
+                ),
+                delay: std::time::Duration::ZERO,
+            },
+        ],
+    );
+    let h = Harness::with_kiwoom(false, transport.transport()).await;
+
+    let left_from = kst(date_of(1), 0, 0, 0).unix();
+    let left_to = kst(date_of(10), 0, 0, 0).unix();
+    let right_from = kst(date_of(20), 0, 0, 0).unix();
+    let right_to = kst(date_of(24), 0, 0, 0).unix();
+    let mid_from = kst(date_of(12), 0, 0, 0).unix();
+    let mid_to = kst(date_of(18), 0, 0, 0).unix();
+
+    let (sl, _) = h.get(&format!("/api/symbols/005930/program-series?period=D&from={left_from}&to={left_to}")).await;
+    assert_eq!(sl, 200);
+    let (sr, _) = h.get(&format!("/api/symbols/005930/program-series?period=D&from={right_from}&to={right_to}")).await;
+    assert_eq!(sr, 200);
+    assert_eq!(ka90013_calls(&transport).len(), 2);
+
+    let (sm, mid) = h.get(&format!("/api/symbols/005930/program-series?period=D&from={mid_from}&to={mid_to}")).await;
+    assert_eq!(sm, 200, "{mid}");
+    assert_eq!(ka90013_calls(&transport).len(), 3);
+    let pts = mid["points"].as_array().unwrap();
+    assert_eq!(pts.len(), 2, "{mid}");
+    assert_eq!(pts[0]["t"], kst(date_of(12), 0, 0, 0).unix());
+    assert_eq!(pts[1]["t"], kst(date_of(16), 0, 0, 0).unix());
+    assert!((pts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 42.0).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn program_series_daily_refreshes_unconfirmed_intraday_row_after_midnight_before_daily_reset() {
+    let transport = ScriptedTransport::new();
+    transport.script(
+        "ka90013",
+        vec![
+            ScriptedReply {
+                status: 200,
+                body: ka90013_page(
+                    vec![
+                        ka90013_row("20261124", ("+72000", "1000"), ("10", "30", "+20"), ("100", "300", "+200")),
+                        ka90013_row("20261123", ("+71000", "1000"), ("40", "10", "--30"), ("400", "100", "--300")),
+                    ],
+                    None,
+                ),
+                delay: std::time::Duration::ZERO,
+            },
+            ScriptedReply {
+                status: 200,
+                body: ka90013_page(
+                    vec![
+                        ka90013_row("20261124", ("+73000", "2000"), ("15", "100", "+85"), ("150", "1000", "+850")),
+                        ka90013_row("20261123", ("+71000", "1000"), ("40", "10", "--30"), ("400", "100", "--300")),
+                    ],
+                    None,
+                ),
+                delay: std::time::Duration::ZERO,
+            },
+        ],
+    );
+    let h = Harness::with_kiwoom(false, transport.transport()).await;
+    let from = at_sec(23, 0, 0, 0);
+    let to = kst(date_of(25), 0, 0, 0).unix();
+    let url = format!("/api/symbols/005930/program-series?period=D&from={from}&to={to}");
+
+    let (s1, p1) = h.get(&url).await;
+    assert_eq!(s1, 200, "{p1}");
+    assert!((p1["points"][1]["netBuyAmountMillionWon"].as_f64().unwrap() - 20.0).abs() < 1e-6);
+    assert_eq!(ka90013_calls(&transport).len(), 1);
+
+    h.clock.jump(15 * 3600);
+    let (s2, p2) = h.get(&url).await;
+    assert_eq!(s2, 200, "{p2}");
+    assert_eq!(ka90013_calls(&transport).len(), 2);
+    let pts = p2["points"].as_array().unwrap();
+    assert_eq!(pts.len(), 2, "{p2}");
+    assert_eq!(pts[1]["t"], at_sec(24, 0, 0, 0));
+    assert!((pts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 85.0).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn program_series_daily_midflight_clear_does_not_truncate_pan_left_response() {
+    let transport = ScriptedTransport::new();
+    transport.script(
+        "ka90013",
+        vec![
+            ScriptedReply {
+                status: 200,
+                body: ka90013_page(
+                    vec![
+                        ka90013_row("20261124", ("+72500", "1000"), ("10", "50", "+40"), ("100", "500", "+400")),
+                        ka90013_row("20261118", ("+70000", "1000"), ("20", "30", "+10"), ("200", "300", "+100")),
+                    ],
+                    None,
+                ),
+                delay: std::time::Duration::ZERO,
+            },
+            ScriptedReply {
+                status: 200,
+                body: ka90013_page(
+                    vec![ka90013_row("20261110", ("+68000", "1000"), ("20", "5", "--15"), ("200", "50", "--150"))],
+                    None,
+                ),
+                delay: std::time::Duration::from_millis(60),
+            },
+        ],
+    );
+    let h = Harness::with_kiwoom(false, transport.transport()).await;
+
+    let init_from = kst(date_of(18), 0, 0, 0).unix();
+    let init_to = at_sec(24, 0, 0, 0);
+    let (s1, p1) = h.get(&format!("/api/symbols/005930/program-series?period=D&from={init_from}&to={init_to}")).await;
+    assert_eq!(s1, 200, "{p1}");
+    assert_eq!(p1["points"].as_array().unwrap().len(), 2);
+
+    let pan_from = kst(date_of(1), 0, 0, 0).unix();
+    let app = h.app.clone();
+    let state = h.state.clone();
+    let req_task = tokio::spawn(async move {
+        let path = format!("/api/symbols/005930/program-series?period=D&from={pan_from}&to={init_to}");
+        let response = app.oneshot(Request::get(&path).body(Body::empty()).unwrap()).await.unwrap();
+        let status = response.status().as_u16();
+        let body: Value = serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+        (status, body)
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    state.daily_program.clear();
+
+    let (s2, p2) = req_task.await.unwrap();
+    assert_eq!(s2, 200, "{p2}");
+    let pts = p2["points"].as_array().unwrap();
+    assert_eq!(pts.len(), 3, "{p2}");
+    assert_eq!(pts[0]["t"], kst(date_of(10), 0, 0, 0).unix());
+    assert_eq!(pts[1]["t"], kst(date_of(18), 0, 0, 0).unix());
+    assert_eq!(pts[2]["t"], at_sec(24, 0, 0, 0));
+}
+
+#[tokio::test]
+async fn program_series_daily_omitted_from_aligns_to_higher_timeframe_bucket_start() {
+    let transport = ScriptedTransport::new();
+    transport.script(
+        "ka90013",
+        vec![ScriptedReply {
+            status: 200,
+            body: ka90013_page(
+                vec![
+                    ka90013_row("20261124", ("+72000", "1000"), ("10", "110", "+100"), ("100", "1100", "+1000")),
+                    ka90013_row("20251125", ("+65000", "1000"), ("10", "60", "+50"), ("100", "600", "+500")),
+                    ka90013_row("20251105", ("+64000", "1000"), ("20", "320", "+300"), ("200", "3200", "+3000")),
+                ],
+                None,
+            ),
+            delay: std::time::Duration::ZERO,
+        }],
+    );
+    let h = Harness::with_kiwoom(false, transport.transport()).await;
+
+    let (status, monthly) = h.get("/api/symbols/005930/program-series?period=M").await;
+    assert_eq!(status, 200, "{monthly}");
+    let pts = monthly["points"].as_array().unwrap();
+    assert_eq!(pts.len(), 2, "{monthly}");
+    assert_eq!(pts[0]["t"], kst(KstDate::new(2025, 11, 1).unwrap(), 0, 0, 0).unix());
+    assert!((pts[0]["netBuyAmountMillionWon"].as_f64().unwrap() - 350.0).abs() < 1e-6);
+    assert_eq!(pts[1]["t"], kst(KstDate::new(2026, 11, 1).unwrap(), 0, 0, 0).unix());
+    assert!((pts[1]["netBuyAmountMillionWon"].as_f64().unwrap() - 100.0).abs() < 1e-6);
+}

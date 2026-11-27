@@ -16,24 +16,71 @@ pub struct DailyCacheTicket {
     epoch: u64,
 }
 
-#[derive(Clone)]
+pub struct DailyCacheSnapshot {
+    pub ticket: DailyCacheTicket,
+    pub missing: Vec<DayRange>,
+    pub rows: Vec<api::StockProgramDailyDay>,
+}
+
+#[derive(Clone, Copy)]
+struct TodaySnapshot {
+    date: KstDate,
+    fetched_at: KstTime,
+    row: Option<api::StockProgramDailyDay>,
+}
+
+impl TodaySnapshot {
+    fn is_fresh(self, today: KstDate, now: KstTime) -> bool {
+        self.date == today
+            && now.unix() >= self.fetched_at.unix()
+            && now.unix() - self.fetched_at.unix() < DAILY_PROGRAM_TODAY_TTL_SECS
+    }
+}
+
+#[derive(Clone, Default)]
 struct CachedDailyProgram {
-    days: BTreeMap<KstDate, api::StockProgramDailyDay>,
-    covered_from: KstDate,
-    covered_to: KstDate,
-    exhausted: bool,
-    today_fetched: Option<(KstDate, KstTime)>,
+    confirmed_days: BTreeMap<KstDate, api::StockProgramDailyDay>,
+    confirmed_ranges: Vec<DayRange>,
+    exhausted_before: Option<KstDate>,
+    today: Option<TodaySnapshot>,
 }
 
 impl CachedDailyProgram {
-    fn today_is_fresh(&self, today: KstDate, now: KstTime) -> bool {
-        matches!(
-            self.today_fetched,
-            Some((fetched_day, fetched_at))
-                if fetched_day == today
-                    && now.unix() >= fetched_at.unix()
-                    && now.unix() - fetched_at.unix() < DAILY_PROGRAM_TODAY_TTL_SECS
-        )
+    fn add_confirmed_range(&mut self, range: DayRange) {
+        self.confirmed_ranges.push(range);
+        self.confirmed_ranges.sort_by_key(|r| (r.from(), r.to()));
+        let mut merged: Vec<DayRange> = Vec::with_capacity(self.confirmed_ranges.len());
+        for next in self.confirmed_ranges.drain(..) {
+            if let Some(last) = merged.last_mut()
+                && last.to().add_days(1) >= next.from()
+            {
+                let combined_to = last.to().max(next.to());
+                if let Some(combined) = DayRange::new(last.from(), combined_to) {
+                    *last = combined;
+                }
+            } else {
+                merged.push(next);
+            }
+        }
+        self.confirmed_ranges = merged;
+    }
+
+    fn rows_in_range(&self, range: DayRange, today: KstDate, now: KstTime) -> Vec<api::StockProgramDailyDay> {
+        let yesterday = today.add_days(-1);
+        let mut rows: Vec<api::StockProgramDailyDay> = if range.from() <= yesterday {
+            let hist_to = range.to().min(yesterday);
+            self.confirmed_days.range(range.from()..=hist_to).map(|(_, day)| *day).collect()
+        } else {
+            Vec::new()
+        };
+        if range.contains(today)
+            && let Some(snap) = self.today
+            && snap.is_fresh(today, now)
+            && let Some(row) = snap.row
+        {
+            rows.push(row);
+        }
+        rows
     }
 }
 
@@ -61,6 +108,38 @@ impl DailyProgramStore {
     }
 }
 
+fn subtract_ranges(req: DayRange, covered: &[DayRange], exhausted_before: Option<KstDate>) -> Vec<DayRange> {
+    let mut cursor = match exhausted_before {
+        Some(floor) if req.to() < floor => return Vec::new(),
+        Some(floor) => req.from().max(floor),
+        None => req.from(),
+    };
+    let mut missing = Vec::new();
+    for cov in covered {
+        if cov.to() < cursor {
+            continue;
+        }
+        if cov.from() > req.to() {
+            break;
+        }
+        if cov.from() > cursor
+            && let Some(gap) = DayRange::new(cursor, cov.from().add_days(-1))
+        {
+            missing.push(gap);
+        }
+        cursor = cov.to().add_days(1);
+        if cursor > req.to() {
+            break;
+        }
+    }
+    if cursor <= req.to()
+        && let Some(tail) = DayRange::new(cursor, req.to())
+    {
+        missing.push(tail);
+    }
+    missing
+}
+
 fn missing_fetch_ranges(entry: Option<&CachedDailyProgram>, req: DayRange, today: KstDate, now: KstTime) -> Vec<DayRange> {
     let fetch_to = req.to().min(today);
     if req.from() > fetch_to {
@@ -69,28 +148,21 @@ fn missing_fetch_ranges(entry: Option<&CachedDailyProgram>, req: DayRange, today
     let Some(cached) = entry else {
         return DayRange::new(req.from(), fetch_to).into_iter().collect();
     };
-    let mut ranges = Vec::new();
-    if !cached.exhausted && req.from() < cached.covered_from {
-        let older_to = cached.covered_from.add_days(-1).min(today);
-        if let Some(older) = DayRange::new(req.from(), older_to) {
-            ranges.push(older);
-        }
-    }
-    let newer_covers_today = if fetch_to > cached.covered_to {
-        let newer_from = cached.covered_to.add_days(1);
-        if let Some(newer) = DayRange::new(newer_from, fetch_to) {
-            ranges.push(newer);
-            fetch_to == today
-        } else {
-            false
-        }
-    } else {
-        false
+    let yesterday = today.add_days(-1);
+    let mut ranges = match DayRange::new(req.from(), fetch_to.min(yesterday)) {
+        Some(hist_req) => subtract_ranges(hist_req, &cached.confirmed_ranges, cached.exhausted_before),
+        None => Vec::new(),
     };
-    if fetch_to == today && !newer_covers_today && !cached.today_is_fresh(today, now)
-        && let Some(today_only) = DayRange::new(today, today)
-    {
-        ranges.push(today_only);
+    let needs_today = fetch_to == today && !cached.today.is_some_and(|snap| snap.is_fresh(today, now));
+    if needs_today {
+        if let Some(last) = ranges.last_mut()
+            && last.to() == yesterday
+            && let Some(extended) = DayRange::new(last.from(), today)
+        {
+            *last = extended;
+        } else if let Some(today_only) = DayRange::new(today, today) {
+            ranges.push(today_only);
+        }
     }
     ranges
 }
@@ -98,6 +170,16 @@ fn missing_fetch_ranges(entry: Option<&CachedDailyProgram>, req: DayRange, today
 pub struct DailyProgramCache {
     store: GenerationScoped<DailyProgramStore>,
     epoch: AtomicU64,
+}
+
+struct FetchRecord {
+    started: DailyCacheTicket,
+    stock: StockCode,
+    fetch_range: DayRange,
+    days: Vec<api::StockProgramDailyDay>,
+    hit_start: bool,
+    today: KstDate,
+    now: KstTime,
 }
 
 impl DailyProgramCache {
@@ -120,8 +202,15 @@ impl DailyProgramCache {
         }
     }
 
-    pub fn missing_ranges(&self, stock: StockCode, range: DayRange, today: KstDate, now: KstTime) -> Vec<DayRange> {
-        self.store.read(|store| missing_fetch_ranges(store.entries.get(&stock), range, today, now))
+    pub fn snapshot(&self, stock: StockCode, range: DayRange, today: KstDate, now: KstTime) -> DailyCacheSnapshot {
+        let ticket = self.ticket();
+        let (missing, rows) = self.store.read(|store| {
+            let entry = store.entries.get(&stock);
+            let missing = missing_fetch_ranges(entry, range, today, now);
+            let rows = entry.map(|cached| cached.rows_in_range(range, today, now)).unwrap_or_default();
+            (missing, rows)
+        });
+        DailyCacheSnapshot { ticket, missing, rows }
     }
 
     pub fn insert_history(
@@ -134,45 +223,7 @@ impl DailyProgramCache {
         now: KstTime,
     ) {
         let hit_start = !matches!(history.coverage, api::RangeCoverage::WholeRange);
-        let fetched_today = fetch_range.contains(today).then_some((today, now));
-        self.store.keep(started.generation, |store| {
-            if self.epoch.load(Ordering::SeqCst) != started.epoch {
-                return;
-            }
-            store.touch(stock);
-            match store.entries.get_mut(&stock) {
-                Some(entry) => {
-                    for day in history.days {
-                        entry.days.insert(day.day.0, day);
-                    }
-                    let reaches_left = fetch_range.from() <= entry.covered_from;
-                    entry.covered_from = entry.covered_from.min(fetch_range.from());
-                    entry.covered_to = entry.covered_to.max(fetch_range.to());
-                    if reaches_left && hit_start {
-                        entry.exhausted = true;
-                    }
-                    if let Some(mark) = fetched_today {
-                        entry.today_fetched = Some(mark);
-                    }
-                }
-                None => {
-                    let mut days = BTreeMap::new();
-                    for day in history.days {
-                        days.insert(day.day.0, day);
-                    }
-                    store.entries.insert(
-                        stock,
-                        CachedDailyProgram {
-                            days,
-                            covered_from: fetch_range.from(),
-                            covered_to: fetch_range.to(),
-                            exhausted: hit_start,
-                            today_fetched: fetched_today,
-                        },
-                    );
-                }
-            }
-        });
+        self.record_fetch(FetchRecord { started, stock, fetch_range, days: history.days, hit_start, today, now });
     }
 
     pub fn mark_exhausted(
@@ -183,47 +234,39 @@ impl DailyProgramCache {
         today: KstDate,
         now: KstTime,
     ) {
-        let fetched_today = fetch_range.contains(today).then_some((today, now));
+        self.record_fetch(FetchRecord { started, stock, fetch_range, days: Vec::new(), hit_start: true, today, now });
+    }
+
+    fn record_fetch(&self, record: FetchRecord) {
+        let FetchRecord { started, stock, fetch_range, days, hit_start, today, now } = record;
+        let yesterday = today.add_days(-1);
+        let confirmed_span = DayRange::new(fetch_range.from(), fetch_range.to().min(yesterday));
+        let includes_today = fetch_range.contains(today);
+        let exhausted_floor = hit_start.then(|| fetch_range.from().min(today));
         self.store.keep(started.generation, |store| {
             if self.epoch.load(Ordering::SeqCst) != started.epoch {
                 return;
             }
             store.touch(stock);
-            match store.entries.get_mut(&stock) {
-                Some(entry) => {
-                    let reaches_left = fetch_range.from() <= entry.covered_from;
-                    entry.covered_from = entry.covered_from.min(fetch_range.from());
-                    entry.covered_to = entry.covered_to.max(fetch_range.to());
-                    if reaches_left {
-                        entry.exhausted = true;
-                    }
-                    if let Some(mark) = fetched_today {
-                        entry.today_fetched = Some(mark);
-                    }
-                }
-                None => {
-                    store.entries.insert(
-                        stock,
-                        CachedDailyProgram {
-                            days: BTreeMap::new(),
-                            covered_from: fetch_range.from(),
-                            covered_to: fetch_range.to(),
-                            exhausted: true,
-                            today_fetched: fetched_today,
-                        },
-                    );
+            let entry = store.entries.entry(stock).or_default();
+            let mut today_row = None;
+            for day in days {
+                if day.day.0 < today {
+                    entry.confirmed_days.insert(day.day.0, day);
+                } else if day.day.0 == today {
+                    today_row = Some(day);
                 }
             }
+            if let Some(span) = confirmed_span {
+                entry.add_confirmed_range(span);
+            }
+            if let Some(floor) = exhausted_floor {
+                entry.exhausted_before = Some(entry.exhausted_before.map_or(floor, |prev| prev.max(floor)));
+            }
+            if includes_today {
+                entry.today = Some(TodaySnapshot { date: today, fetched_at: now, row: today_row });
+            }
         });
-    }
-
-    pub fn rows_in_range(&self, stock: StockCode, range: DayRange) -> Vec<api::StockProgramDailyDay> {
-        self.store.read(|store| {
-            let Some(entry) = store.entries.get(&stock) else {
-                return Vec::new();
-            };
-            entry.days.range(range.from()..=range.to()).map(|(_, day)| *day).collect()
-        })
     }
 }
 
@@ -278,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_fetch_ranges_handles_initial_clamping_pan_left_exhausted_and_ttl() {
+    fn missing_fetch_ranges_handles_initial_clamping_pan_left_exhausted_ttl_and_midnight() {
         let today = day(2026, 11, 24);
         let t0 = kst(today, 10, 0, 0);
 
@@ -289,11 +332,10 @@ mod tests {
         assert!(missing_fetch_ranges(None, range(day(2026, 11, 25), day(2026, 11, 30)), today, t0).is_empty());
 
         let cached = CachedDailyProgram {
-            days: BTreeMap::new(),
-            covered_from: day(2026, 11, 18),
-            covered_to: today,
-            exhausted: false,
-            today_fetched: Some((today, t0)),
+            confirmed_days: BTreeMap::new(),
+            confirmed_ranges: vec![range(day(2026, 11, 18), day(2026, 11, 23))],
+            exhausted_before: None,
+            today: Some(TodaySnapshot { date: today, fetched_at: t0, row: Some(sample_day(today, 20)) }),
         };
 
         assert!(missing_fetch_ranges(Some(&cached), range(day(2026, 11, 18), day(2026, 11, 30)), today, kst(today, 10, 0, 14)).is_empty());
@@ -306,8 +348,36 @@ mod tests {
             vec![range(day(2026, 11, 1), day(2026, 11, 17))]
         );
 
-        let exhausted = CachedDailyProgram { exhausted: true, ..cached };
+        let next_day = day(2026, 11, 25);
+        assert_eq!(
+            missing_fetch_ranges(Some(&cached), range(day(2026, 11, 18), next_day), next_day, kst(next_day, 0, 30, 0)),
+            vec![range(today, next_day)]
+        );
+        assert_eq!(
+            missing_fetch_ranges(Some(&cached), range(day(2026, 11, 18), today), next_day, kst(next_day, 0, 30, 0)),
+            vec![range(today, today)]
+        );
+
+        let exhausted = CachedDailyProgram { exhausted_before: Some(day(2026, 11, 18)), ..cached };
         assert!(missing_fetch_ranges(Some(&exhausted), range(day(2025, 1, 1), today), today, kst(today, 10, 0, 5)).is_empty());
+    }
+
+    #[test]
+    fn disjoint_inserts_do_not_bridge_unfetched_middle_gap() {
+        let generation = SourceGeneration::default();
+        let cache = DailyProgramCache::with_generation(generation);
+        let code = stock("005930");
+        let today = day(2026, 11, 24);
+        let t0 = kst(today, 10, 0, 0);
+
+        let left = range(day(2026, 11, 1), day(2026, 11, 10));
+        let right = range(day(2026, 11, 20), today);
+        let ticket = cache.ticket();
+        cache.insert_history(ticket, code, left, history(code, left, api::RangeCoverage::WholeRange, vec![sample_day(day(2026, 11, 5), 10)]), today, t0);
+        cache.insert_history(ticket, code, right, history(code, right, api::RangeCoverage::WholeRange, vec![sample_day(day(2026, 11, 20), 20)]), today, t0);
+
+        let middle = range(day(2026, 11, 12), day(2026, 11, 18));
+        assert_eq!(cache.snapshot(code, middle, today, t0).missing, vec![middle]);
     }
 
     #[test]
@@ -319,24 +389,27 @@ mod tests {
         let t0 = kst(today, 10, 0, 0);
 
         let initial = range(day(2026, 11, 18), today);
-        let ticket = cache.ticket();
-        assert_eq!(cache.missing_ranges(code, initial, today, t0), vec![initial]);
+        let snap = cache.snapshot(code, initial, today, t0);
+        assert_eq!(snap.missing, vec![initial]);
         cache.insert_history(
-            ticket,
+            snap.ticket,
             code,
             initial,
             history(code, initial, api::RangeCoverage::WholeRange, vec![sample_day(day(2026, 11, 18), 50), sample_day(today, 100)]),
             today,
             t0,
         );
-        assert_eq!(cache.rows_in_range(code, initial).len(), 2);
-        assert!(cache.missing_ranges(code, range(day(2026, 11, 18), day(2026, 11, 30)), today, kst(today, 10, 0, 10)).is_empty());
+        let hit = cache.snapshot(code, range(day(2026, 11, 18), day(2026, 11, 30)), today, kst(today, 10, 0, 10));
+        assert!(hit.missing.is_empty());
+        assert_eq!(hit.rows.len(), 2);
 
         let pan_left = range(day(2026, 11, 1), today);
         let older = range(day(2026, 11, 1), day(2026, 11, 17));
-        assert_eq!(cache.missing_ranges(code, pan_left, today, kst(today, 10, 0, 10)), vec![older]);
+        let left_snap = cache.snapshot(code, pan_left, today, kst(today, 10, 0, 10));
+        assert_eq!(left_snap.missing, vec![older]);
+        assert_eq!(left_snap.rows.len(), 2);
         cache.insert_history(
-            cache.ticket(),
+            left_snap.ticket,
             code,
             older,
             history(
@@ -348,12 +421,13 @@ mod tests {
             today,
             kst(today, 10, 0, 10),
         );
-        assert!(cache.missing_ranges(code, range(day(2025, 1, 1), today), today, kst(today, 10, 0, 10)).is_empty());
-        assert_eq!(cache.rows_in_range(code, pan_left).len(), 3);
+        let after_left = cache.snapshot(code, range(day(2025, 1, 1), today), today, kst(today, 10, 0, 10));
+        assert!(after_left.missing.is_empty());
+        assert_eq!(after_left.rows.len(), 3);
 
         let stale_ticket = cache.ticket();
         cache.clear();
-        assert!(cache.rows_in_range(code, initial).is_empty());
+        assert!(cache.snapshot(code, initial, today, kst(today, 10, 0, 10)).rows.is_empty());
         cache.insert_history(
             stale_ticket,
             code,
@@ -362,7 +436,7 @@ mod tests {
             today,
             kst(today, 10, 0, 11),
         );
-        assert!(cache.rows_in_range(code, initial).is_empty());
+        assert!(cache.snapshot(code, initial, today, kst(today, 10, 0, 11)).rows.is_empty());
 
         let before_switch = cache.ticket();
         cache.insert_history(
@@ -373,9 +447,9 @@ mod tests {
             today,
             kst(today, 10, 0, 12),
         );
-        assert_eq!(cache.rows_in_range(code, initial).len(), 1);
+        assert_eq!(cache.snapshot(code, initial, today, kst(today, 10, 0, 12)).rows.len(), 1);
         generation.advance();
-        assert!(cache.rows_in_range(code, initial).is_empty());
+        assert!(cache.snapshot(code, initial, today, kst(today, 10, 0, 12)).rows.is_empty());
         cache.insert_history(
             before_switch,
             code,
@@ -384,6 +458,6 @@ mod tests {
             today,
             kst(today, 10, 0, 13),
         );
-        assert!(cache.rows_in_range(code, initial).is_empty());
+        assert!(cache.snapshot(code, initial, today, kst(today, 10, 0, 13)).rows.is_empty());
     }
 }
