@@ -383,3 +383,86 @@ test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 �
   await page.keyboard.press("Escape");
   await pollSaved(saved).toEqual([["#E91E63"], ["ind-1"]]);
 });
+
+test("일목균형표 설정에서 표시 요소 토글·보기 프리셋·구름대 불투명도를 바꾸면 차트 시리즈에 즉시 반영되고 새로고침 후에도 유지된다", async ({ page, scenario }) => {
+  await seedLayout(
+    scenario,
+    "D",
+    [{ id: "i1", spec: { kind: "ichimoku", conversion: 9, base: 26, spanB: 52, displacement: 26 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }],
+    [],
+  );
+  await page.addInitScript(installFrameProbe);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  const ichimokuState = async () => {
+    const custom = (await series(page)).filter((s) => s.type === "Custom" && s.data.length > 0);
+    const cloud = custom.find((s) => "spanA" in (s.data.at(-1) ?? {}));
+    const lines = custom.filter((s) => !("spanA" in (s.data.at(-1) ?? {})));
+    return {
+      cloudVisible: cloud?.visible ?? null,
+      cloudOpacity: cloud?.style.opacity ?? null,
+      lineVisibility: lines.map((s) => s.visible),
+    };
+  };
+  const savedStyle = async () =>
+    parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings)
+      .indicators.find((i) => i.id === "i1")?.style.ichimoku;
+
+  await expect.poll(ichimokuState).toEqual({
+    cloudVisible: true,
+    cloudOpacity: 0.18,
+    lineVisibility: [true, true, true, true, true],
+  });
+
+  await page.locator('[data-indicator-row="i1"] [data-indicator-command="edit"]').click();
+  const editor = page.getByRole("group", { name: "일목균형표 9 26 52 26 설정", exact: true });
+  await expect(editor).toBeVisible();
+
+  await editor.getByRole("switch", { name: "구름대", exact: true }).click();
+  await expect.poll(ichimokuState).toEqual({
+    cloudVisible: false,
+    cloudOpacity: 0.18,
+    lineVisibility: [true, true, true, true, true],
+  });
+
+  await editor.getByRole("switch", { name: "전환선", exact: true }).click();
+  await editor.getByRole("switch", { name: "후행스팬", exact: true }).click();
+  await expect.poll(ichimokuState).toEqual({
+    cloudVisible: false,
+    cloudOpacity: 0.18,
+    lineVisibility: [false, true, true, true, false],
+  });
+
+  await editor.getByRole("button", { name: "구름대만 보기", exact: true }).click();
+  await editor.getByLabel("구름대 불투명도", { exact: true }).fill("30");
+  await expect.poll(ichimokuState).toEqual({
+    cloudVisible: true,
+    cloudOpacity: 0.3,
+    lineVisibility: [false, false, true, true, false],
+  });
+
+  await pollSaved(savedStyle).toEqual({
+    showCloud: true,
+    showConversion: false,
+    showBase: false,
+    showSpanA: true,
+    showSpanB: true,
+    showLagging: false,
+    cloudOpacity: 0.3,
+  });
+
+  await page.reload();
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await expect.poll(ichimokuState).toEqual({
+    cloudVisible: true,
+    cloudOpacity: 0.3,
+    lineVisibility: [false, false, true, true, false],
+  });
+
+  await page.locator('[data-indicator-row="i1"] [data-indicator-command="edit"]').click();
+  await expect(editor.getByRole("switch", { name: "구름대", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(editor.getByRole("switch", { name: "전환선", exact: true })).toHaveAttribute("aria-checked", "false");
+  await expect(editor.getByRole("switch", { name: "기준선", exact: true })).toHaveAttribute("aria-checked", "false");
+  await expect(editor.getByRole("switch", { name: "후행스팬", exact: true })).toHaveAttribute("aria-checked", "false");
+});

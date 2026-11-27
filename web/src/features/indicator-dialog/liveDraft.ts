@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { colorsFrom, specLines } from "../../chart/indicators/kinds";
-import { type IndicatorConfig, barOpacityOf, DEFAULT_PANEL_STRETCH, placementOfConfig } from "../../chart/settings";
+import { type IndicatorConfig, barOpacityOf, DEFAULT_PANEL_STRETCH, ichimokuStyleOf, placementOfConfig, sameIchimokuStyle } from "../../chart/settings";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { checkForm, draftStyle, startDraft } from "./indicatorForm";
 import { useValidator } from "./IndicatorSettingsForm";
@@ -33,7 +33,12 @@ export function useLiveIndicatorDraft(cellId: WindowId, initial: IndicatorConfig
       ? initial.style.colors
       : colorsFrom(spec, color);
     const next = draftStyle(draft, colors);
-    const style = current.style.width === next.width && JSON.stringify(current.style.colors) === JSON.stringify(colors) && barOpacityOf(current.style, current.spec.kind) === barOpacityOf(next, spec.kind) ? current.style : next;
+    const style = current.style.width === next.width
+      && JSON.stringify(current.style.colors) === JSON.stringify(colors)
+      && barOpacityOf(current.style, current.spec.kind) === barOpacityOf(next, spec.kind)
+      && sameIchimokuStyle(ichimokuStyleOf(current.style), ichimokuStyleOf(next))
+      ? current.style
+      : next;
     if (spec !== current.spec || style !== current.style) store.updateIndicator(cellId, initial.id, { spec, style });
   }, [draft, validator, cellId, initial]);
 

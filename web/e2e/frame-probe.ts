@@ -6,7 +6,14 @@ type Update = Parameters<Series["update"]>[0];
 declare global {
   interface Window {
     frameProbe: {
-      snapshot(): { type: SeriesType; data: ReturnType<Series["data"]>; updates: Update[]; scaleMode: PriceScaleMode; style: { color: string | null; width: number | null } }[];
+      snapshot(): {
+        type: SeriesType;
+        visible: boolean;
+        data: ReturnType<Series["data"]>;
+        updates: Update[];
+        scaleMode: PriceScaleMode;
+        style: { color: string | null; width: number | null; opacity: number | null };
+      }[];
       candleY(price: number): number | null;
       hold(): void;
       release(): void;
@@ -47,7 +54,18 @@ export function installFrameProbe(): void {
   window.frameProbe = {
     snapshot: () => [...series].map(([api, updates]) => {
       const options = api.options();
-      return { type: api.seriesType(), data: api.data(), updates, scaleMode: api.priceScale().options().mode, style: { color: "color" in options && typeof options.color === "string" ? options.color : null, width: "lineWidth" in options && typeof options.lineWidth === "number" ? options.lineWidth : null } };
+      return {
+        type: api.seriesType(),
+        visible: options.visible,
+        data: api.data(),
+        updates,
+        scaleMode: api.priceScale().options().mode,
+        style: {
+          color: "color" in options && typeof options.color === "string" ? options.color : null,
+          width: "lineWidth" in options && typeof options.lineWidth === "number" ? options.lineWidth : null,
+          opacity: "opacity" in options && typeof options.opacity === "number" ? options.opacity : null,
+        },
+      };
     }),
     candleY: (price) => [...series.keys()].find((api) => api.seriesType() === "Candlestick")?.priceToCoordinate(price) ?? null,
     hold() {
