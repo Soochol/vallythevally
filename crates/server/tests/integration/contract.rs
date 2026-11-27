@@ -16,7 +16,7 @@ use server::etf::*;
 use server::heatmap_board::{HeatmapBoard, HeatmapBoardMember, HeatmapBoardTheme, HeatmapSource, HeatmapThemeOrder, HeatmapThemeSummary, KiwoomCatalogInfo, KiwoomCatalogState};
 use server::heatmap_flow::{HeatmapFlowPoint, HeatmapFlowSeries};
 use server::kiwoom_themes::{KiwoomLimitMove, KiwoomTheme, KiwoomThemeList, KiwoomThemeMember, KiwoomThemeMembers};
-use server::micro_series::{MicroSeriesState, ProgramSeriesPage, ProgramSeriesPoint, TickCvdPage, TickCvdPoint, WatchMicroPage, WatchMicroRow};
+use server::micro_series::{MicroSeriesState, ProgramSeriesPage, ProgramSeriesPoint, TapeVelocityPage, TapeVelocityPoint, TickCvdPage, TickCvdPoint, VolumeProfileBin, VolumeProfilePage, WatchMicroPage, WatchMicroRow};
 use server::premarket::{PreMarketCompare, PreMarketDaySeries, PreMarketDays, PreMarketPoint, PreMarketSignal, PreMarketSnapshot, PreMarketSnapshotRow};
 use server::quote_minutes::{QuoteDayInfo, QuoteDayState, QuoteDepthPage, QuoteDepthPoint, QuoteDepthSource, QuoteTotalPoint, QuoteTotalsPage};
 use server::vi_playbook::{ViPlaybook, ViPlaybookHorizon, ViPlaybookKind, ViPlaybookMatch};
@@ -317,6 +317,10 @@ fn generated_typescript_matches_the_committed_files() {
         generated::<FeedProgramRow>(),
         generated::<FeedBroker>(),
         generated::<FeedBrokers>(),
+        generated::<TapeVelocityPage>(),
+        generated::<TapeVelocityPoint>(),
+        generated::<VolumeProfileBin>(),
+        generated::<VolumeProfilePage>(),
         generated::<BrokerDaySource>(),
         generated::<BrokerDay>(),
         generated::<BrokerDays>(),

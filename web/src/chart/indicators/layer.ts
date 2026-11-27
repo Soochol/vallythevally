@@ -31,7 +31,9 @@ import type { IndicatorPort, OpenPort } from "./client";
 import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
 import { FinancialIndicatorStore } from "./financialFamily";
 import { addIchimokuCloud, buildIchimokuCloudPoints, ichimokuPalette, type IchimokuCloudSeries } from "./ichimokuCloud";
-import { isFinancial, isFinancialBar, isFlow, isInvestorFlow, isMicro, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName } from "./kinds";
+import { computeAnchoredVwap, resolveQuickAnchor } from "./anchoredVwap";
+import { isAnchoredVwap, isFinancial, isFinancialBar, isFlow, isInvestorFlow, isMicro, isProIndicator, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, isVolumeProfile, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName } from "./kinds";
+import { computeBarVolumeProfile } from "./volumeProfile";
 import { InvestorFlowController, type InvestorFamilyDeps, type InvestorTarget } from "./investorFamily";
 import { type MicroFamilyDeps, MicroIndicatorController, type MicroTarget, tickCvdLineValue } from "./microFamily";
 import { addOverlayLine, type OverlayPoint, type OverlaySeries } from "./overlayLine";
@@ -467,6 +469,8 @@ export class IndicatorLayer {
       } else if (isInvestorFlow(s.config.spec)) {
         this.updateInvestorStatus(s);
         if (s.config.visible) this.syncInvestorFlow(s);
+      } else if (isProIndicator(s.config.spec)) {
+        this.syncProIndicator(s);
       }
     }
   }
@@ -568,6 +572,47 @@ export class IndicatorLayer {
       } else if (isInvestorFlow(s.config.spec) && !keepQuotes) {
         this.updateInvestorStatus(s);
         if (s.config.visible) this.syncInvestorFlow(s);
+      } else if (isProIndicator(s.config.spec)) {
+        this.syncProIndicator(s);
+      }
+    }
+  }
+
+  private syncProIndicator(s: Shown): void {
+    const spec = s.config.spec;
+    s.status = s.config.visible ? { kind: "ready" } : { kind: "hidden" };
+    if (!s.config.visible || this.display.length === 0) return;
+    if (isAnchoredVwap(spec)) {
+      const anchorTime = spec.anchorPreset === "custom" && spec.anchorTime !== null
+        ? spec.anchorTime
+        : resolveQuickAnchor(this.display, spec.anchorPreset === "custom" ? "open" : spec.anchorPreset);
+      if (anchorTime === null) return;
+      const computed = computeAnchoredVwap(this.display, anchorTime, spec.priceSource);
+      for (const line of s.lines) {
+        const pts: Point[] = computed.map((pt) => ({
+          t: pt.t,
+          v: line.id === "avwapUpper1"
+            ? pt.upper1
+            : line.id === "avwapLower1"
+              ? pt.lower1
+              : line.id === "avwapUpper2"
+                ? pt.upper2
+                : line.id === "avwapLower2"
+                  ? pt.lower2
+                  : pt.vwap,
+        }));
+        line.points = pts;
+        if (pts.length) this.draw(line, pts);
+      }
+      return;
+    }
+    if (isVolumeProfile(spec)) {
+      const vp = computeBarVolumeProfile(this.display, spec.bins, spec.valueAreaPct);
+      if (vp.pocPrice === null) return;
+      for (const line of s.lines) {
+        const pts: Point[] = this.display.map((b) => ({ t: b.t, v: vp.pocPrice! }));
+        line.points = pts;
+        if (pts.length) this.draw(line, pts);
       }
     }
   }
@@ -1081,6 +1126,8 @@ export class IndicatorLayer {
             if (line.points.length) this.draw(line, line.points);
           }
         }
+      } else if (isProIndicator(s.config.spec)) {
+        this.syncProIndicator(s);
       } else {
         for (const line of s.lines) if (line.points.length) this.draw(line, line.points);
         if (s.cloud) this.drawCloud(s);

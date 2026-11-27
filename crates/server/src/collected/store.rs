@@ -42,12 +42,17 @@ pub(super) fn read_day<K: CollectedKind>(
     let mut skipped: u64 = 0;
     for (symbol, path) in &targets {
         let path_text = path_str(path)?;
+        let active_fids: Vec<u32> = fids
+            .iter()
+            .copied()
+            .filter(|fid| parquet_has_column(&conn, path_text, &format!("f{fid}")))
+            .collect();
         let active_plus: Vec<u32> = plus_fids
             .iter()
             .copied()
-            .filter(|fid| parquet_has_column(&conn, path_text, &format!("f{fid}_plus")))
+            .filter(|fid| active_fids.contains(fid) && parquet_has_column(&conn, path_text, &format!("f{fid}_plus")))
             .collect();
-        let sql = build_query(fids, &active_plus);
+        let sql = build_query(fids, &active_fids, &active_plus);
         let mut stmt = conn.prepare(&sql).map_err(|e| format!("수집 저장소 조회 준비 실패: {e}"))?;
         let mut raw_rows = stmt
             .query(params![path_text, symbol, day_start_ms, day_end_ms])
@@ -84,10 +89,12 @@ fn parquet_has_column(conn: &duckdb::Connection, path_text: &str, column: &str) 
         .unwrap_or(false)
 }
 
-fn build_query(fids: &[u32], plus_sign_fids: &[u32]) -> String {
+fn build_query(fids: &[u32], active_fids: &[u32], plus_sign_fids: &[u32]) -> String {
     let mut cols = String::from("recv_ms, file_row_number");
     for fid in fids {
-        if plus_sign_fids.contains(fid) {
+        if !active_fids.contains(fid) {
+            cols.push_str(", CAST(NULL AS VARCHAR)");
+        } else if plus_sign_fids.contains(fid) {
             cols.push_str(&format!(
                 ", CASE WHEN f{fid}_plus AND f{fid} IS NOT NULL THEN '+' || CAST(f{fid} AS VARCHAR) ELSE CAST(f{fid} AS VARCHAR) END"
             ));

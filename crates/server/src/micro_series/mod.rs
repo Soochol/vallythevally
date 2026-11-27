@@ -123,6 +123,64 @@ pub struct WatchMicroPage {
     pub rows: Vec<WatchMicroRow>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VolumeProfileBin {
+    #[ts(type = "number")]
+    pub price: u64,
+    #[ts(type = "number")]
+    pub buy_vol: u64,
+    #[ts(type = "number")]
+    pub sell_vol: u64,
+    #[ts(type = "number")]
+    pub total_vol: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct VolumeProfilePage {
+    pub symbol: SymbolCode,
+    pub state: MicroSeriesState,
+    pub bins: Vec<VolumeProfileBin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "number")]
+    pub poc_price: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "number")]
+    pub vah_price: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "number")]
+    pub val_price: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TapeVelocityPoint {
+    pub t: UnixSeconds,
+    pub tps: f64,
+    pub turnover_million_won: f64,
+    pub buy_ratio_pct: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub strength: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TapeVelocityPage {
+    pub symbol: SymbolCode,
+    pub period: api::Period,
+    pub state: MicroSeriesState,
+    pub points: Vec<TapeVelocityPoint>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TickMinuteBucket {
     pub minute_unix: i64,
@@ -131,6 +189,9 @@ pub struct TickMinuteBucket {
     pub mid_won: i128,
     pub retail_won: i128,
     pub total_traded_won: u128,
+    pub tick_count: u64,
+    pub buy_vol: u64,
+    pub sell_vol: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,15 +211,25 @@ struct TickMinuteSlot {
     mid_won: i128,
     retail_won: i128,
     total_traded_won: u128,
+    tick_count: u64,
+    buy_vol: u64,
+    sell_vol: u64,
 }
 
 impl TickMinuteSlot {
     fn add_tick(&mut self, tick: &CollectedTradeTick) {
         let value_won = tick.value_won();
+        let abs_qty = tick.signed_qty.unsigned_abs();
         if let Some(side) = tick.side() {
             let signed_won = match side {
-                TradeSide::Buy => i128::from(value_won),
-                TradeSide::Sell => -i128::from(value_won),
+                TradeSide::Buy => {
+                    self.buy_vol = self.buy_vol.saturating_add(abs_qty);
+                    i128::from(value_won)
+                }
+                TradeSide::Sell => {
+                    self.sell_vol = self.sell_vol.saturating_add(abs_qty);
+                    -i128::from(value_won)
+                }
             };
             match classify_tick_tier(value_won) {
                 TickTier::Whale => self.whale_won += signed_won,
@@ -168,6 +239,7 @@ impl TickMinuteSlot {
             }
         }
         self.total_traded_won += u128::from(value_won);
+        self.tick_count = self.tick_count.saturating_add(1);
         self.has_ticks = true;
     }
 }
@@ -200,6 +272,9 @@ pub fn bucket_ticks_by_minute(date: KstDate, ticks: &[CollectedTradeTick]) -> Ve
             mid_won: slot.mid_won,
             retail_won: slot.retail_won,
             total_traded_won: slot.total_traded_won,
+            tick_count: slot.tick_count,
+            buy_vol: slot.buy_vol,
+            sell_vol: slot.sell_vol,
         });
     }
     out
@@ -222,6 +297,9 @@ fn merge_tick_minutes(date: KstDate, existing: &[TickMinuteBucket], added: &[Col
                 mid_won: bucket.mid_won,
                 retail_won: bucket.retail_won,
                 total_traded_won: bucket.total_traded_won,
+                tick_count: bucket.tick_count,
+                buy_vol: bucket.buy_vol,
+                sell_vol: bucket.sell_vol,
             };
         }
     }
@@ -241,6 +319,9 @@ fn merge_tick_minutes(date: KstDate, existing: &[TickMinuteBucket], added: &[Col
             mid_won: slot.mid_won,
             retail_won: slot.retail_won,
             total_traded_won: slot.total_traded_won,
+            tick_count: slot.tick_count,
+            buy_vol: slot.buy_vol,
+            sell_vol: slot.sell_vol,
         });
     }
     out
@@ -648,6 +729,8 @@ pub fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/symbols/{code}/tick-cvd", get(tick_cvd))
         .route("/api/symbols/{code}/program-series", get(program_series))
+        .route("/api/symbols/{code}/volume-profile", get(volume_profile))
+        .route("/api/symbols/{code}/tape-velocity", get(tape_velocity))
         .route("/api/watch/micro", get(watch_micro))
         .layer(Extension(cache))
 }
@@ -847,6 +930,321 @@ async fn tick_cvd(
         period: query.period.into(),
         state: MicroSeriesState::Ready,
         points,
+    }))
+}
+
+pub fn rollup_tape_velocity_day(
+    minutes: &[TickMinuteBucket],
+    period_secs: i64,
+    from: Option<i64>,
+    to: Option<i64>,
+) -> Vec<TapeVelocityPoint> {
+    if minutes.is_empty() || period_secs <= 0 {
+        return Vec::new();
+    }
+    let mut grouped: BTreeMap<i64, (u64, u128, u64, u64)> = BTreeMap::new();
+    for m in minutes {
+        let bucket = (m.minute_unix / period_secs) * period_secs;
+        let entry = grouped.entry(bucket).or_insert((0, 0, 0, 0));
+        entry.0 = entry.0.saturating_add(m.tick_count);
+        entry.1 = entry.1.saturating_add(m.total_traded_won);
+        entry.2 = entry.2.saturating_add(m.buy_vol);
+        entry.3 = entry.3.saturating_add(m.sell_vol);
+    }
+    let mut cum_buy: u64 = 0;
+    let mut cum_sell: u64 = 0;
+    let mut out = Vec::new();
+    for (bucket_t, (ticks, traded_won, buy_vol, sell_vol)) in grouped {
+        cum_buy = cum_buy.saturating_add(buy_vol);
+        cum_sell = cum_sell.saturating_add(sell_vol);
+        if from.is_some_and(|start| bucket_t < start) || to.is_some_and(|end| bucket_t > end) {
+            continue;
+        }
+        let total_vol = buy_vol.saturating_add(sell_vol);
+        let buy_ratio_pct = if total_vol > 0 {
+            (buy_vol as f64 / total_vol as f64) * 100.0
+        } else {
+            50.0
+        };
+        let strength = if cum_sell > 0 {
+            Some(((cum_buy as f64 / cum_sell as f64) * 100.0).min(500.0))
+        } else if cum_buy > 0 {
+            Some(500.0)
+        } else {
+            None
+        };
+        out.push(TapeVelocityPoint {
+            t: UnixSeconds(bucket_t),
+            tps: ticks as f64 / period_secs as f64,
+            turnover_million_won: traded_won as f64 / WON_PER_MILLION,
+            buy_ratio_pct,
+            strength,
+        });
+    }
+    out
+}
+
+pub fn build_volume_profile(
+    ticks: &[(u64, u64, u64)],
+    bins_count: usize,
+) -> (Vec<VolumeProfileBin>, Option<u64>, Option<u64>, Option<u64>) {
+    if ticks.is_empty() || bins_count == 0 {
+        return (Vec::new(), None, None, None);
+    }
+    let mut min_p = u64::MAX;
+    let mut max_p = 0u64;
+    for &(price, _, _) in ticks {
+        if price == 0 {
+            continue;
+        }
+        if price < min_p {
+            min_p = price;
+        }
+        if price > max_p {
+            max_p = price;
+        }
+    }
+    if min_p == u64::MAX {
+        return (Vec::new(), None, None, None);
+    }
+    let span = max_p.saturating_sub(min_p);
+    let step = ((span as f64) / (bins_count as f64)).ceil().max(1.0) as u64;
+    let actual_bins = ((span / step) as usize + 1).min(bins_count);
+    let mut bins: Vec<VolumeProfileBin> = (0..actual_bins)
+        .map(|i| VolumeProfileBin {
+            price: min_p.saturating_add((i as u64).saturating_mul(step)),
+            buy_vol: 0,
+            sell_vol: 0,
+            total_vol: 0,
+        })
+        .collect();
+    for &(price, buy_vol, sell_vol) in ticks {
+        if price == 0 {
+            continue;
+        }
+        let idx = ((price.saturating_sub(min_p)) / step) as usize;
+        let idx = idx.min(actual_bins - 1);
+        bins[idx].buy_vol = bins[idx].buy_vol.saturating_add(buy_vol);
+        bins[idx].sell_vol = bins[idx].sell_vol.saturating_add(sell_vol);
+        bins[idx].total_vol = bins[idx].buy_vol.saturating_add(bins[idx].sell_vol);
+    }
+    let total_vol: u64 = bins.iter().map(|b| b.total_vol).sum();
+    if total_vol == 0 {
+        return (bins, None, None, None);
+    }
+    let poc_idx = bins
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, b)| b.total_vol)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    let target = (total_vol as f64 * 0.70).ceil() as u64;
+    let mut va_vol = bins[poc_idx].total_vol;
+    let mut va_lo = poc_idx;
+    let mut va_hi = poc_idx;
+    while va_vol < target && (va_lo > 0 || va_hi + 1 < actual_bins) {
+        let down = if va_lo > 0 { bins[va_lo - 1].total_vol } else { 0 };
+        let up = if va_hi + 1 < actual_bins { bins[va_hi + 1].total_vol } else { 0 };
+        if up >= down && va_hi + 1 < actual_bins {
+            va_hi += 1;
+            va_vol = va_vol.saturating_add(bins[va_hi].total_vol);
+        } else if va_lo > 0 {
+            va_lo -= 1;
+            va_vol = va_vol.saturating_add(bins[va_lo].total_vol);
+        } else {
+            break;
+        }
+    }
+    let poc_price = Some(bins[poc_idx].price);
+    let vah_price = Some(bins[va_hi].price);
+    let val_price = Some(bins[va_lo].price);
+    (bins, poc_price, vah_price, val_price)
+}
+
+async fn tape_velocity(
+    State(st): State<Arc<AppState>>,
+    Extension(cache): Extension<Arc<MicroSeriesCache>>,
+    Path(code): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<TapeVelocityPage>, ApiFailure> {
+    let query = parse_query(&code, &q)?;
+    let paths = st.collector_paths.snapshot();
+    if !paths_enabled(&paths) {
+        return Ok(Json(TapeVelocityPage {
+            symbol: symbol_code(query.stock),
+            period: query.period.into(),
+            state: MicroSeriesState::Disabled,
+            points: Vec::new(),
+        }));
+    }
+    let now = st.clock.now();
+    let dates = match explicit_dates(query.from, query.to, now)? {
+        Some(dates) => dates,
+        None => {
+            let available = st
+                .collected
+                .ticks_days(paths.clone(), query.stock, now)
+                .await
+                .map_err(|e| internal_error("체결 수집 날짜 목록을 읽지 못했습니다", e))?;
+            let Some(latest_str) = available.last() else {
+                return Ok(Json(TapeVelocityPage {
+                    symbol: symbol_code(query.stock),
+                    period: query.period.into(),
+                    state: MicroSeriesState::NotCollected,
+                    points: Vec::new(),
+                }));
+            };
+            let Some(latest) = KstDate::parse_yyyymmdd(latest_str) else {
+                return Err(internal_error("체결 수집 날짜 형식이 잘못되었습니다", latest_str));
+            };
+            vec![latest]
+        }
+    };
+    let mut any_collected = false;
+    let mut points = Vec::new();
+    for date in dates {
+        let date_str = format_yyyymmdd(date);
+        let (collected, minutes) = cache
+            .load_tick_minutes(&st, paths.clone(), query.stock, date, &date_str, now)
+            .await
+            .map_err(|e| internal_error("수집 체결 자료를 읽지 못했습니다", e))?;
+        if collected {
+            any_collected = true;
+            points.extend(rollup_tape_velocity_day(&minutes, query.period_secs, query.from, query.to));
+        }
+    }
+    if !any_collected {
+        let available = st
+            .collected
+            .ticks_days(paths, query.stock, now)
+            .await
+            .map_err(|e| internal_error("체결 수집 날짜 목록을 읽지 못했습니다", e))?;
+        let state = if available.is_empty() { MicroSeriesState::NotCollected } else { MicroSeriesState::Ready };
+        return Ok(Json(TapeVelocityPage {
+            symbol: symbol_code(query.stock),
+            period: query.period.into(),
+            state,
+            points: Vec::new(),
+        }));
+    }
+    Ok(Json(TapeVelocityPage {
+        symbol: symbol_code(query.stock),
+        period: query.period.into(),
+        state: MicroSeriesState::Ready,
+        points,
+    }))
+}
+
+async fn volume_profile(
+    State(st): State<Arc<AppState>>,
+    Path(code): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Result<Json<VolumeProfilePage>, ApiFailure> {
+    let symbol = Symbol::parse(&code).map_err(|e| ApiFailure::bad_request(format!("{e}: {code}")))?;
+    let Symbol::Stock(stock) = symbol else {
+        return Err(ApiFailure::bad_request(format!("지수는 매물대 지표를 지원하지 않습니다: {code}")));
+    };
+    let from = parse_optional_unix(&q, "from")?;
+    let to = parse_optional_unix(&q, "to")?;
+    if let (Some(start), Some(end)) = (from, to)
+        && start > end
+    {
+        return Err(ApiFailure::bad_request("from은 to보다 늦을 수 없습니다"));
+    }
+    validate_intraday_span(from, to)?;
+    let bins_count = q
+        .get("bins")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(32)
+        .clamp(8, 120);
+    let paths = st.collector_paths.snapshot();
+    if !paths_enabled(&paths) {
+        return Ok(Json(VolumeProfilePage {
+            symbol: symbol_code(stock),
+            state: MicroSeriesState::Disabled,
+            bins: Vec::new(),
+            poc_price: None,
+            vah_price: None,
+            val_price: None,
+        }));
+    }
+    let now = st.clock.now();
+    let dates = match explicit_dates(from, to, now)? {
+        Some(dates) => dates,
+        None => {
+            let available = st
+                .collected
+                .ticks_days(paths.clone(), stock, now)
+                .await
+                .map_err(|e| internal_error("체결 수집 날짜 목록을 읽지 못했습니다", e))?;
+            let Some(latest_str) = available.last() else {
+                return Ok(Json(VolumeProfilePage {
+                    symbol: symbol_code(stock),
+                    state: MicroSeriesState::NotCollected,
+                    bins: Vec::new(),
+                    poc_price: None,
+                    vah_price: None,
+                    val_price: None,
+                }));
+            };
+            let Some(latest) = KstDate::parse_yyyymmdd(latest_str) else {
+                return Err(internal_error("체결 수집 날짜 형식이 잘못되었습니다", latest_str));
+            };
+            vec![latest]
+        }
+    };
+    let mut any_collected = false;
+    let mut raw_ticks: Vec<(u64, u64, u64)> = Vec::new();
+    for date in dates {
+        let date_str = format_yyyymmdd(date);
+        let slice = st
+            .collected
+            .ticks_day(paths.clone(), stock, date, &date_str, None, now)
+            .await
+            .map_err(|e| internal_error("수집 체결 자료를 읽지 못했습니다", e))?;
+        if slice.source == BrokerDaySource::None {
+            continue;
+        }
+        any_collected = true;
+        let day_start = KstTime::from_kst_civil(date, TimeOfDay::MIDNIGHT).unix();
+        for tick in &slice.snapshots {
+            let tick_unix = day_start + i64::from(tick.hhmmss.secs());
+            if from.is_some_and(|start| tick_unix < start) || to.is_some_and(|end| tick_unix > end) {
+                continue;
+            }
+            let abs_qty = tick.signed_qty.unsigned_abs();
+            let (buy_vol, sell_vol) = match tick.side() {
+                Some(TradeSide::Buy) => (abs_qty, 0),
+                Some(TradeSide::Sell) => (0, abs_qty),
+                None => (abs_qty / 2, abs_qty - abs_qty / 2),
+            };
+            raw_ticks.push((tick.price_won, buy_vol, sell_vol));
+        }
+    }
+    if !any_collected {
+        let available = st
+            .collected
+            .ticks_days(paths, stock, now)
+            .await
+            .map_err(|e| internal_error("체결 수집 날짜 목록을 읽지 못했습니다", e))?;
+        let state = if available.is_empty() { MicroSeriesState::NotCollected } else { MicroSeriesState::Ready };
+        return Ok(Json(VolumeProfilePage {
+            symbol: symbol_code(stock),
+            state,
+            bins: Vec::new(),
+            poc_price: None,
+            vah_price: None,
+            val_price: None,
+        }));
+    }
+    let (bins, poc_price, vah_price, val_price) = build_volume_profile(&raw_ticks, bins_count);
+    Ok(Json(VolumeProfilePage {
+        symbol: symbol_code(stock),
+        state: MicroSeriesState::Ready,
+        bins,
+        poc_price,
+        vah_price,
+        val_price,
     }))
 }
 

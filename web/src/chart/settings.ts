@@ -313,6 +313,30 @@ export function readSpecShape(raw: unknown): IndicatorSpec | null {
         && typeof r.showRetail === "boolean"
         ? { kind: "tickCvd", showWhale: r.showWhale, showLarge: r.showLarge, showMid: r.showMid, showRetail: r.showRetail }
         : null;
+    case "anchoredVwap":
+      return (r.priceSource === "hlc3" || r.priceSource === "close")
+        && typeof r.showBands === "boolean"
+        && (r.anchorPreset === "open" || r.anchorPreset === "low" || r.anchorPreset === "high" || r.anchorPreset === "vi" || r.anchorPreset === "custom")
+        && (r.anchorTime === null || isNum(r.anchorTime))
+        ? { kind: "anchoredVwap", priceSource: r.priceSource, showBands: r.showBands, anchorPreset: r.anchorPreset, anchorTime: r.anchorTime }
+        : null;
+    case "volumeProfile":
+      return (r.mode === "vrvp" || r.mode === "session")
+        && isNum(r.bins)
+        && typeof r.showDelta === "boolean"
+        && isNum(r.valueAreaPct)
+        ? { kind: "volumeProfile", mode: r.mode, bins: r.bins, showDelta: r.showDelta, valueAreaPct: r.valueAreaPct }
+        : null;
+    case "tapeVelocity":
+      return (r.metric === "tps" || r.metric === "turnover" || r.metric === "buyRatio")
+        && typeof r.showStrength === "boolean"
+        ? { kind: "tapeVelocity", metric: r.metric, showStrength: r.showStrength }
+        : null;
+    case "foreignBrokerFlow":
+      return (r.source === "auto" || r.source === "fid261" || r.source === "top5")
+        && isOneOf(FLOW_DISPLAY_MODES, r.displayMode)
+        ? { kind: "foreignBrokerFlow", source: r.source, displayMode: r.displayMode }
+        : null;
     case "foreignFlow":
     case "institutionFlow":
       return isOneOf(FLOW_DISPLAY_MODES, r.displayMode)

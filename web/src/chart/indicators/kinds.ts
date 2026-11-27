@@ -50,10 +50,35 @@ export type ProgramFlowSpec = {
   unit: FlowUnit;
   showShare: boolean;
 };
+export type AnchoredVwapSpec = {
+  kind: "anchoredVwap";
+  priceSource: "hlc3" | "close";
+  showBands: boolean;
+  anchorPreset: "open" | "low" | "high" | "vi" | "custom";
+  anchorTime: number | null;
+};
+export type VolumeProfileSpec = {
+  kind: "volumeProfile";
+  mode: "vrvp" | "session";
+  bins: number;
+  showDelta: boolean;
+  valueAreaPct: number;
+};
+export type TapeVelocitySpec = {
+  kind: "tapeVelocity";
+  metric: "tps" | "turnover" | "buyRatio";
+  showStrength: boolean;
+};
+export type ForeignBrokerFlowSpec = {
+  kind: "foreignBrokerFlow";
+  source: "auto" | "fid261" | "top5";
+  displayMode: FlowDisplayMode;
+};
+export type ProIndicatorSpec = AnchoredVwapSpec | VolumeProfileSpec | TapeVelocitySpec | ForeignBrokerFlowSpec;
 export type InvestorFlowSpec = ForeignFlowSpec | InstitutionFlowSpec;
 export type FlowSpec = InvestorFlowSpec | ProgramFlowSpec;
 export type MicroSpec = TickCvdSpec | ProgramFlowSpec;
-export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec | MicroSpec | InvestorFlowSpec;
+export type IndicatorSpec = TechnicalSpec | { [K in FinancialMetric]: { kind: K } }[FinancialMetric] | QuoteSpec | MicroSpec | InvestorFlowSpec | ProIndicatorSpec;
 export type FinancialSpec = Extract<IndicatorSpec, { kind: FinancialMetric }>;
 export const FINANCIAL_LABEL: Record<FinancialMetric, string> = { revenue: "매출액", operating_income: "영업이익", owner_roe: "지배주주 ROE", investing_cash_flow: "투자활동 현금흐름", dps: "DPS", debt_ratio: "부채비율" };
 export const isFinancial = (spec: IndicatorSpec): spec is FinancialSpec => spec.kind in FINANCIAL_LABEL;
@@ -67,7 +92,12 @@ export const isInstitutionFlow = (spec: IndicatorSpec): spec is InstitutionFlowS
 export const isInvestorFlow = (spec: IndicatorSpec): spec is InvestorFlowSpec => isForeignFlow(spec) || isInstitutionFlow(spec);
 export const isFlow = (spec: IndicatorSpec): spec is FlowSpec => isInvestorFlow(spec) || isProgramFlow(spec);
 export const isMicro = (spec: IndicatorSpec): spec is MicroSpec => isTickCvd(spec) || isProgramFlow(spec);
-export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec) && !isMicro(spec) && !isInvestorFlow(spec);
+export const isAnchoredVwap = (spec: IndicatorSpec): spec is AnchoredVwapSpec => spec.kind === "anchoredVwap";
+export const isVolumeProfile = (spec: IndicatorSpec): spec is VolumeProfileSpec => spec.kind === "volumeProfile";
+export const isTapeVelocity = (spec: IndicatorSpec): spec is TapeVelocitySpec => spec.kind === "tapeVelocity";
+export const isForeignBrokerFlow = (spec: IndicatorSpec): spec is ForeignBrokerFlowSpec => spec.kind === "foreignBrokerFlow";
+export const isProIndicator = (spec: IndicatorSpec): spec is ProIndicatorSpec => isAnchoredVwap(spec) || isVolumeProfile(spec) || isTapeVelocity(spec) || isForeignBrokerFlow(spec);
+export const isTechnical = (spec: IndicatorSpec): spec is TechnicalSpec => !isFinancial(spec) && !isQuote(spec) && !isMicro(spec) && !isInvestorFlow(spec) && !isProIndicator(spec);
 export const isFinancialBar = (kind: FinancialMetric) => kind !== "owner_roe" && kind !== "debt_ratio";
 export type PlotLineId =
   | LineId
@@ -81,7 +111,17 @@ export type PlotLineId =
   | "flowBar"
   | "flowLine"
   | "flowCum"
-  | "programShare";
+  | "programShare"
+  | "avwap"
+  | "avwapUpper1"
+  | "avwapLower1"
+  | "avwapUpper2"
+  | "avwapLower2"
+  | "vpPoc"
+  | "tapeBar"
+  | "tapeStrength"
+  | "foreignBrokerBar"
+  | "foreignBrokerCum";
 
 export type IndicatorKind = IndicatorSpec["kind"];
 export type SpecOf<K extends IndicatorKind> = Extract<IndicatorSpec, { kind: K }>;
@@ -270,9 +310,56 @@ export const KINDS: Registry = {
     name: () => "호가 잔량 히트맵",
     lines: () => [],
   },
+  anchoredVwap: {
+    label: "기준점 VWAP",
+    place: "price",
+    defaults: { kind: "anchoredVwap", priceSource: "hlc3", showBands: true, anchorPreset: "open", anchorTime: null },
+    fields: [
+      { key: "anchorPreset", label: "기준점", type: "choice", options: [["open", "시가"], ["low", "장중 저점"], ["high", "장중 고점"], ["vi", "VI 발동"], ["custom", "직접 클릭"]] },
+      { key: "priceSource", label: "가격 기준", type: "choice", options: [["hlc3", "HLC3"], ["close", "종가"]] },
+      { key: "showBands", label: "±1σ / ±2σ 밴드", type: "flag" },
+    ],
+    name: (s) => `기준점 VWAP (${s.anchorPreset === "open" ? "시가" : s.anchorPreset === "low" ? "저점" : s.anchorPreset === "high" ? "고점" : s.anchorPreset === "vi" ? "VI" : "지정"})`,
+    lines: (s) => (s.showBands ? ["avwap", "avwapUpper1", "avwapLower1", "avwapUpper2", "avwapLower2"] : ["avwap"]),
+  },
+  volumeProfile: {
+    label: "매물대 (Volume Profile)",
+    place: "price",
+    defaults: { kind: "volumeProfile", mode: "vrvp", bins: 32, showDelta: true, valueAreaPct: 70 },
+    fields: [
+      { key: "mode", label: "구간 모드", type: "choice", options: [["vrvp", "가시 구간 (VRVP)"], ["session", "당일 세션"]] },
+      int("bins", "가격대 수", "단"),
+      { key: "showDelta", label: "매수/매도 Delta 분리", type: "flag" },
+      int("valueAreaPct", "가치영역(VA)", "%"),
+    ],
+    name: (s) => `매물대 (${s.mode === "vrvp" ? "VRVP" : "세션"} ${s.bins}단)`,
+    lines: () => ["vpPoc"],
+  },
+  tapeVelocity: {
+    label: "체결강도 & 체결속도",
+    place: "panel",
+    defaults: { kind: "tapeVelocity", metric: "tps", showStrength: true },
+    fields: [
+      { key: "metric", label: "속도 지표", type: "choice", options: [["tps", "초당 체결건수(TPS)"], ["turnover", "체결대금(백만)"], ["buyRatio", "매수 우위(%)"]] },
+      { key: "showStrength", label: "체결강도(%) 함께 표시", type: "flag" },
+    ],
+    name: () => "체결강도 & 체결속도",
+    lines: (s) => (s.showStrength ? ["tapeBar", "tapeStrength"] : ["tapeBar"]),
+  },
+  foreignBrokerFlow: {
+    label: "외국계 추정 순매수",
+    place: "panel",
+    defaults: { kind: "foreignBrokerFlow", source: "auto", displayMode: "both" },
+    fields: [
+      { key: "source", label: "집계 기준", type: "choice", options: [["auto", "자동 (FID267 우선)"], ["fid261", "FID 261..268 전체"], ["top5", "0F 상위 5개 창구"]] },
+      { key: "displayMode", label: "표시 형태", type: "choice", options: [["histogram", "세로 바"], ["line", "라인"], ["both", "바+누적선"]] },
+    ],
+    name: () => "외국계 추정 순매수",
+    lines: (s) => (s.displayMode === "both" ? ["foreignBrokerBar", "foreignBrokerCum"] : s.displayMode === "line" ? ["foreignBrokerCum"] : ["foreignBrokerBar"]),
+  },
 };
 
-export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "volume", "rsi", "macd", "stochSlow", "tickCvd", "programFlow", "foreignFlow", "institutionFlow", "quoteTotals", "quoteDepth", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
+export const KIND_ORDER: IndicatorKind[] = ["ma", "bollinger", "ichimoku", "anchoredVwap", "volumeProfile", "volume", "rsi", "macd", "stochSlow", "tickCvd", "tapeVelocity", "foreignBrokerFlow", "programFlow", "foreignFlow", "institutionFlow", "quoteTotals", "quoteDepth", "revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"];
 
 const kindInfo = <K extends IndicatorKind>(kind: K): KindInfo<K> => KINDS[kind];
 
@@ -290,7 +377,7 @@ export function placementOf(spec: IndicatorSpec): Placement {
 
 export const placementsOf = (kind: IndicatorKind): readonly Placement[] => KINDS[kind].overPrice ? ["panel", "price"] : [KINDS[kind].place];
 
-export const isBarLine = (line: PlotLineId): boolean => line === "volume" || line === "histogram" || line === "flowBar";
+export const isBarLine = (line: PlotLineId): boolean => line === "volume" || line === "histogram" || line === "flowBar" || line === "tapeBar" || line === "foreignBrokerBar";
 
 export const LINE_LABEL: Record<PlotLineId, string> = {
   financial: "재무지표",
@@ -320,6 +407,16 @@ export const LINE_LABEL: Record<PlotLineId, string> = {
   flowLine: "순매수",
   flowCum: "누적",
   programShare: "비중",
+  avwap: "AVWAP",
+  avwapUpper1: "+1σ",
+  avwapLower1: "-1σ",
+  avwapUpper2: "+2σ",
+  avwapLower2: "-2σ",
+  vpPoc: "POC",
+  tapeBar: "체결속도",
+  tapeStrength: "체결강도",
+  foreignBrokerBar: "분당 증감",
+  foreignBrokerCum: "누적 순매수",
 };
 
 export function colorLine(spec: IndicatorSpec): number | null {

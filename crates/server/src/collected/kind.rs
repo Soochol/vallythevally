@@ -42,9 +42,10 @@ pub trait CollectedKind: 'static {
 
 pub struct Brokers;
 
-const BROKER_FIDS: [u32; 40] = [
+const BROKER_FIDS: [u32; 46] = [
     141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160,
     161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180,
+    261, 262, 263, 264, 267, 268,
 ];
 
 impl CollectedKind for Brokers {
@@ -68,10 +69,14 @@ impl CollectedKind for Brokers {
                 })
                 .collect()
         };
+        let foreign_est_net_qty = values.get(267).and_then(|s| parse_optional_signed(Some(s)));
+        let foreign_est_net_change = values.get(268).and_then(|s| parse_optional_signed(Some(s)));
         Some(api::FeedBrokers {
             t: api::UnixSeconds(recv_ms.div_euclid(1000)),
             sells: map_side(sells),
             buys: map_side(buys),
+            foreign_est_net_qty,
+            foreign_est_net_change,
         })
     }
 }
