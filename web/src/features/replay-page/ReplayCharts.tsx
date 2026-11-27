@@ -51,7 +51,7 @@ const PAD_L = 8;
 const PAD_R = 58;
 const DRAG_THRESHOLD_PX = 5;
 
-function prepareCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
+function prepareCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number; dpr: number } | null {
   const rect = canvas.getBoundingClientRect();
   const w = Math.max(1, Math.round(rect.width));
   const h = Math.max(1, Math.round(rect.height));
@@ -65,7 +65,30 @@ function prepareCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { ctx, w, h };
+  return { ctx, w, h, dpr };
+}
+
+function snapPx(value: number, dpr: number): number {
+  return (Math.floor(value * dpr) + 0.5) / dpr;
+}
+
+function computeVolumeScale(
+  bars: readonly AggregatedReplayBar[],
+  startIdx: number,
+  endIdx: number,
+  blindMode: boolean,
+  curBarIdx: number,
+): number {
+  const positive: number[] = [];
+  for (let i = startIdx; i <= endIdx; i++) {
+    if (blindMode && i > curBarIdx) continue;
+    const v = bars[i]!.volume;
+    if (v > 0) positive.push(v);
+  }
+  if (positive.length === 0) return 1;
+  positive.sort((a, b) => a - b);
+  const idx = Math.min(positive.length - 1, Math.floor(positive.length * 0.95));
+  return Math.max(1, positive[idx]!);
 }
 
 function formatCompactCount(value: number): string {
@@ -92,7 +115,7 @@ function defaultViewportFor(
 
 export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, palette, onScrub }: Props) {
   const [timeframe, setTimeframe] = useState<ReplayChartTimeframe>(1);
-  const [range, setRange] = useState<ChartRangeMode>("all");
+  const [range, setRange] = useState<ChartRangeMode>("focus");
   const [panning, setPanning] = useState(false);
   const [renderTick, setRenderTick] = useState(0);
 
@@ -261,25 +284,24 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
       if (mainCanvas && totalBars > 0) {
         const prep = prepareCanvas(mainCanvas);
         if (prep) {
-          const { ctx, w, h } = prep;
+          const { ctx, w, h, dpr } = prep;
           ctx.clearRect(0, 0, w, h);
           const padT = 26;
-          const padB = 18;
+          const padB = 22;
           const plotW = Math.max(10, w - PAD_L - PAD_R);
           const plotH = Math.max(10, h - padT - padB);
-          const volH = Math.round(plotH * 0.2);
-          const priceH = Math.max(10, plotH - volH - 4);
+          const volH = Math.round(plotH * 0.22);
+          const priceH = Math.max(10, plotH - volH - 6);
 
           let minP = session.previousClose ?? Infinity;
           let maxP = session.previousClose ?? -Infinity;
-          let maxV = 1;
           for (let i = startIdx; i <= endIdx; i++) {
             if (blindMode && i > curBarIdx) continue;
             const b = bars[i]!;
             if (b.low !== null && b.low < minP) minP = b.low;
             if (b.high !== null && b.high > maxP) maxP = b.high;
-            if (b.volume > maxV) maxV = b.volume;
           }
+          const volScale = computeVolumeScale(bars, startIdx, endIdx, blindMode, curBarIdx);
           const paperHolding = paper?.getHolding() ?? null;
           if (paperHolding && paperHolding.quantity > 0 && paperHolding.avgPrice > 0) {
             if (paperHolding.avgPrice < minP) minP = paperHolding.avgPrice;
@@ -345,32 +367,42 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
             }
           }
 
-          const barW = Math.max(1.5, Math.min(28, (plotW / viewSpan) * 0.66));
+          const barW = Math.max(2, Math.min(20, Math.floor((plotW / viewSpan) * 0.7)));
           for (let i = startIdx; i <= endIdx; i++) {
             const b = bars[i]!;
             const isFuture = i > curBarIdx;
             if (blindMode && isFuture) continue;
             if (b.open === null || b.high === null || b.low === null || b.close === null) continue;
-            const x = xOf(i + 0.5);
+            const x = snapPx(xOf(i + 0.5), dpr);
+            const left = Math.round(x - barW / 2);
             const isUp = b.close >= b.open;
             const col = isUp ? palette.up : palette.down;
-            ctx.globalAlpha = isFuture ? 0.25 : 0.95;
+            ctx.globalAlpha = isFuture ? 0.25 : 0.98;
 
-            const vh = (b.volume / maxV) * volH;
-            ctx.fillStyle = isUp ? palette.upVol : palette.downVol;
-            ctx.fillRect(x - barW / 2, padT + plotH - vh, barW, vh);
+            if (b.volume > 0) {
+              const clipped = b.volume > volScale;
+              const vh = Math.max(1.5, Math.min(volH, (b.volume / volScale) * volH));
+              ctx.fillStyle = isUp ? palette.upVol : palette.downVol;
+              ctx.fillRect(left, Math.round(padT + plotH - vh), barW, Math.round(vh));
+              if (clipped) {
+                ctx.fillStyle = palette.ind1;
+                ctx.fillRect(left, Math.round(padT + plotH - volH), barW, 2);
+              }
+            }
 
             ctx.strokeStyle = col;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(x, yOf(b.high));
-            ctx.lineTo(x, yOf(b.low));
+            ctx.moveTo(x, snapPx(yOf(b.high), dpr));
+            ctx.lineTo(x, snapPx(yOf(b.low), dpr));
             ctx.stroke();
 
             const yO = yOf(b.open);
             const yC = yOf(b.close);
+            const topY = Math.round(Math.min(yO, yC));
+            const bodyH = Math.max(1.5, Math.round(Math.abs(yC - yO)));
             ctx.fillStyle = col;
-            ctx.fillRect(x - barW / 2, Math.min(yO, yC), barW, Math.max(1.2, Math.abs(yC - yO)));
+            ctx.fillRect(left, topY, barW, bodyH);
           }
           ctx.globalAlpha = 1;
 
@@ -494,7 +526,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           for (let i = startIdx; i <= endIdx; i += labelEvery) {
             const lx = xOf(i + 0.5);
             if (lx < PAD_L + 22 || lx > PAD_L + plotW - 22) continue;
-            ctx.fillText(formatReplayHM(bars[i]!.sec), lx, h - 4);
+            ctx.fillText(formatReplayHM(bars[i]!.sec), lx, h - 6);
           }
 
           if (hover !== null && hoverBarIdx !== null) {

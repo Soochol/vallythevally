@@ -82,34 +82,171 @@
   line-height: 1;
 }
 
-.rp-date-pills {
+.rp-cal-control {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--size-2);
   padding: var(--size-2);
-  border: var(--size-1) solid var(--line);
+  border: var(--size-1) solid var(--line-strong);
   border-radius: var(--r-m);
   background: var(--bg);
 }
 
-.rp-date-pill {
+.rp-cal-nav {
+  display: grid;
+  place-items: center;
+  width: var(--ctl-xs);
   height: var(--ctl-xs);
-  padding: 0 var(--size-8);
   border-radius: var(--r-s);
   color: var(--text-2);
   font-size: var(--fs-xs);
+  font-weight: 600;
 }
 
-.rp-date-pill:hover {
+.rp-cal-nav:hover:not(:disabled) {
   background: var(--hover);
   color: var(--text);
 }
 
-.rp-date-pill[aria-pressed="true"] {
-  background: var(--raised);
+.rp-cal-nav:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.rp-cal-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-6);
+  height: var(--ctl-xs);
+  padding: 0 var(--size-8);
+  border-radius: var(--r-s);
   color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rp-cal-trigger:hover {
+  background: var(--hover);
+}
+
+.rp-cal-dot {
+  display: inline-block;
+  width: var(--size-6);
+  height: var(--size-6);
+  border-radius: var(--r-pill);
+  background: var(--accent);
+  flex: none;
+}
+
+.rp-cal-popover {
+  position: absolute;
+  top: calc(100% + var(--size-6));
+  left: 0;
+  z-index: 60;
+  width: 264px;
+  padding: var(--size-12);
+  border: var(--size-1) solid var(--line-strong);
+  border-radius: var(--r-l);
+  background: var(--overlay);
+  box-shadow: var(--shadow);
+}
+
+.rp-cal-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--size-8);
+}
+
+.rp-cal-month {
+  font-size: var(--fs-s);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.rp-cal-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin-bottom: var(--size-4);
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.rp-cal-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--size-2);
+}
+
+.rp-cal-empty {
+  height: var(--size-28);
+}
+
+.rp-cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: var(--size-28);
+  border-radius: var(--r-s);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  opacity: 0.35;
+  cursor: default;
+}
+
+.rp-cal-day[data-available="true"] {
+  color: var(--text);
+  opacity: 1;
   font-weight: 600;
-  box-shadow: inset 0 0 0 var(--size-1) var(--line-strong);
+  cursor: pointer;
+}
+
+.rp-cal-day[data-available="true"]:hover {
+  background: var(--hover);
+}
+
+.rp-cal-day[data-available="true"]::after {
+  content: "";
+  width: var(--size-4);
+  height: var(--size-4);
+  margin-top: var(--size-2);
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+
+.rp-cal-day[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.rp-cal-day[aria-pressed="true"]:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.rp-cal-day[aria-pressed="true"]::after {
+  background: var(--accent-ink);
+}
+
+.rp-cal-pop-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--size-8);
+  padding-top: var(--size-8);
+  border-top: var(--size-1) solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.rp-cal-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4);
 }
 
 .rp-head-quote {
@@ -232,11 +369,12 @@
 
 .rp-pane-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--size-6);
-  height: var(--size-30);
-  padding: 0 var(--size-10);
+  gap: var(--size-4) var(--size-6);
+  min-height: var(--size-30);
+  padding: var(--size-4) var(--size-10);
   border-bottom: var(--size-1) solid var(--line);
   background: var(--surface);
   flex: none;
