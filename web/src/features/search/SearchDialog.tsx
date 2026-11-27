@@ -1,12 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router";
+import type { LinkColor } from "../../api/generated/LinkColor";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import { useSymbolInfos, useSymbolSearch } from "../../api/queries";
 import { compareRefusal } from "../../chart/settings";
+import type { WindowId } from "../../layout/kinds";
 import { KIND_LABEL, MARKET_LABEL } from "../../lib/symbol";
-import { chartWindows, useLayoutStore } from "../../stores/layout";
+import { activeWindowId } from "../../stores/activeWindow";
+import { chartWindows, DEFAULT_LINK_COLOR, isFollowsWindow, isWindowLocked, linkLabel, useLayoutStore, windowName, type WindowState } from "../../stores/layout";
 import { type SearchPurpose, useSelectionStore } from "../../stores/selection";
 import { useActionKeys, useUiStore } from "../../stores/ui";
 import { useActiveWatchlist, useWatchlistStore } from "../../stores/watchlist";
@@ -32,6 +35,22 @@ import { useSearchQuotes } from "./useSearchQuotes";
 
 type CommandRowGroup = "frequent" | CommandGroup;
 type ResultRow = { kind: "symbol"; info: SymbolInfo; group: SearchGroup } | { kind: "command"; command: SearchCommand; group: CommandRowGroup };
+type SearchTarget = { kind: "link"; link: LinkColor } | { kind: "window"; windowId: WindowId };
+
+const LINK_COLORS: readonly LinkColor[] = ["a", "b", "c"];
+
+function resolveInitialSearchTarget(activeWin: WindowState | undefined, lastUsedLink: LinkColor | null): SearchTarget {
+  if (activeWin && isFollowsWindow(activeWin)) {
+    return activeWin.link !== null ? { kind: "link", link: activeWin.link } : { kind: "window", windowId: activeWin.id };
+  }
+  if (activeWin && activeWin.link !== null) return { kind: "link", link: activeWin.link };
+  return { kind: "link", link: lastUsedLink ?? DEFAULT_LINK_COLOR };
+}
+
+function isSameSearchTarget(a: SearchTarget, b: SearchTarget): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind === "link" && b.kind === "link" ? a.link === b.link : a.kind === "window" && b.kind === "window" && a.windowId === b.windowId;
+}
 
 const COMMAND_ROW_LABEL: Record<CommandRowGroup, string> = { frequent: "자주 쓰는 명령", ...COMMAND_GROUP_LABEL };
 
@@ -69,6 +88,17 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const [input, setInput] = useState("");
   const [market, setMarket] = useState<MarketFilter>("all");
   const [active, setActive] = useState(0);
+  const layoutWindows = useLayoutStore((s) => s.layout.windows);
+  const lastUsedLink = useLayoutStore((s) => s.lastUsedLink);
+  const lockedWindows = useLayoutStore((s) => s.lockedWindows);
+  const activeWin = layoutWindows.find((w) => w.id === activeWindowId());
+  const [searchTarget, setSearchTarget] = useState<SearchTarget>(() => resolveInitialSearchTarget(activeWin, lastUsedLink));
+  const [unlockOnApply, setUnlockOnApply] = useState(false);
+  const targetOptions: readonly { label: string; target: SearchTarget }[] = [
+    ...LINK_COLORS.map((link) => ({ label: `${linkLabel(link)}그룹`, target: { kind: "link", link } as const })),
+    ...(activeWin && isFollowsWindow(activeWin) ? [{ label: `현재 창만 (${windowName(layoutWindows, activeWin)})`, target: { kind: "window", windowId: activeWin.id } as const }] : []),
+  ];
+  const activeWinLocked = activeWin !== undefined && isWindowLocked(activeWin, lockedWindows) && !unlockOnApply;
   const inputRef = useRef<HTMLInputElement>(null);
   const pillRef = useRef<HTMLButtonElement>(null);
   const putGroup = purpose === "watch" && putTarget?.listId === watchlist.id ? watchlist.groups.find((g) => g.id === putTarget.groupId) ?? null : null;
@@ -131,7 +161,10 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
     } else if (purpose === "page") {
       sendToLinkedChart(info);
     } else {
-      const { notice } = useLayoutStore.getState().setSymbol(cellId, info);
+      const store = useLayoutStore.getState();
+      const { notice } = searchTarget.kind === "link"
+        ? store.sendSymbolToLink(searchTarget.link, cellId, info)
+        : store.setWindowSymbol(searchTarget.windowId, info, { unlock: unlockOnApply });
       if (notice) selection.showToast(notice);
       selection.setPhoneTab("chart");
     }
@@ -159,6 +192,12 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
       e.preventDefault();
       e.stopPropagation();
       pillRef.current?.focus();
+    } else if (e.key === "Tab" && !e.shiftKey && purpose === "open" && mode.kind === "symbols") {
+      e.preventDefault();
+      e.stopPropagation();
+      const idx = targetOptions.findIndex((o) => isSameSearchTarget(o.target, searchTarget));
+      const next = targetOptions[(idx + 1) % targetOptions.length];
+      if (next) setSearchTarget(next.target);
     }
   };
   const resetInput = () => { setInput(""); inputRef.current?.focus(); };
@@ -179,6 +218,42 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   return <CommandFrame solid labelledBy={`${ids}-title`} onClose={close} width="h-[min(640px,80dvh)] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
       <h2 id={`${ids}-title`} className="sr-only">{purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}</h2>
+      {purpose === "open" && mode.kind === "symbols" && (
+        <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2 text-xs" data-testid="search-target-bar">
+          <span className="text-text-3">변경 대상</span>
+          <div role="group" aria-label="변경 대상" className="ui-seg" data-size="sm">
+            {targetOptions.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                tabIndex={-1}
+                aria-pressed={isSameSearchTarget(option.target, searchTarget)}
+                onClick={() => { setSearchTarget(option.target); inputRef.current?.focus(); }}
+                className="ui-seg-item text-xs"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <span className="ml-auto text-text-3"><Kbd>Tab</Kbd> 전환</span>
+        </div>
+      )}
+      {purpose === "open" && mode.kind === "symbols" && activeWinLocked && activeWin && (
+        <div role="status" className="flex flex-none items-center justify-between gap-2 border-b border-line bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-4 py-1.5 text-xs text-warning" data-testid="search-lock-warning">
+          <span>🔒 활성 창({windowName(layoutWindows, activeWin)})은 종목 고정 상태입니다.</span>
+          <button
+            type="button"
+            className="btn text-xs"
+            onClick={() => {
+              setUnlockOnApply(true);
+              setSearchTarget({ kind: "window", windowId: activeWin.id });
+              inputRef.current?.focus();
+            }}
+          >
+            고정 해제 후 변경
+          </button>
+        </div>
+      )}
       <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-3">
         <label className="flex min-w-[180px] flex-1 items-center gap-2 text-l text-text-3">
           <SearchIcon size={20} />

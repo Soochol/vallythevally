@@ -4,6 +4,7 @@ import { useKiwoomThemeMembers, useKiwoomThemes } from "../../api/kiwoomThemes";
 import type { WindowId } from "../../layout/kinds";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { dropPendingOpen, openResult } from "../screener/resultActions";
+import { symbolDragProps } from "../../stores/symbolDrag";
 import "./themes.css";
 
 type SortKey = "rate" | "breadth" | "count";
@@ -36,6 +37,7 @@ function ThemeMembersPanel({ code, windowId }: { code: string; windowId: WindowI
           type="button"
           className="thm-member"
           data-testid={`theme-member-${member.symbol}`}
+          {...symbolDragProps({ code: member.symbol, name: member.name, sourceWindow: windowId })}
           onClick={() => void openResult(queryClient, member.symbol, windowId)}
         >
           <span className="thm-role" data-rank={index}>{roleLabel(index)}</span>

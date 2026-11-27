@@ -42,13 +42,12 @@ export function useHotkeys(enabled: boolean) {
       if (!action) return;
       e.preventDefault();
       if (action.kind === "systemSettings") return openSystemSettings();
+      if (action.kind === "search") return sel.openSearch();
       const layout = useLayoutStore.getState();
       const cellId = sel.activeCell;
       const cell = chartWindows(layout.layout).find((c) => c.id === cellId);
       if (!cell) return;
       switch (action.kind) {
-        case "search":
-          return sel.openSearch();
         case "indicators":
           return openIndicatorCommand(cellId);
         case "showWatchlist":

@@ -8,6 +8,7 @@ import { type Column, RANK_WIDTH, columnsFor, fitRankingColumns, placesOf } from
 import { RANKING_NAME } from "./rankingKinds";
 import { nextCode } from "./rankingRows";
 import { RankingRowMenu, type RankingMenuState } from "./RankingRowMenu";
+import { symbolDragProps } from "../../stores/symbolDrag";
 
 interface Props {
   ranking: Ranking;
@@ -107,6 +108,7 @@ export function RankingTable({ ranking, rows, cursor, watched, onChoose, onCurso
                 aria-selected={row.code === cursor}
                 aria-current={row.code === watched ? "true" : undefined}
                 className={`rk-line ${listRowFill(row.code === watched)} ${row.listed ? "" : "rk-unlisted"} ${row.code === cursor ? "rk-cursor" : ""}`}
+                {...symbolDragProps({ code: row.code, name: row.name, sourceWindow: null })}
                 onClick={() => onChoose(row)}
                 onContextMenu={(e) => { e.preventDefault(); openMenu(row.code, e.clientX, e.clientY); }}
               >

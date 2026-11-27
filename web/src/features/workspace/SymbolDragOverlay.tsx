@@ -13,8 +13,13 @@ export function SymbolDragOverlay() {
     if (payload === null) return;
     const onDragOver = (event: DragEvent) => {
       const target = event.target;
-      const insideWatch = target instanceof Element && target.closest("[data-kind='watchlist']") !== null;
-      useSymbolDragStore.getState().move({ x: event.clientX, y: event.clientY }, !insideWatch);
+      const source = payload.sourceWindow;
+      const insideSource = target instanceof Element && (
+        source !== null
+          ? target.closest(`[data-window-id="${source}"], [data-canvas-window="${source}"]`) !== null
+          : target.closest("[data-kind='watchlist']") !== null
+      );
+      useSymbolDragStore.getState().move({ x: event.clientX, y: event.clientY }, !insideSource);
     };
     const onFinish = () => useSymbolDragStore.getState().end();
     window.addEventListener("dragover", onDragOver, true);

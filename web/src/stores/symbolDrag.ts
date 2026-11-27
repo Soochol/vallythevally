@@ -87,6 +87,26 @@ export function symbolDropBadgeText(kind: WindowKind, payload: SymbolDragPayload
   return `${payload.name}(${payload.code})로 전환`;
 }
 
+export function symbolDragProps(payload: SymbolDragPayload) {
+  return {
+    draggable: true,
+    onDragStart: (e: { dataTransfer: DataTransfer | null; stopPropagation(): void }) => {
+      e.stopPropagation();
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.setData(SYMBOL_DRAG_MIME, JSON.stringify(payload));
+        if (typeof e.dataTransfer.setDragImage === "function") {
+          e.dataTransfer.setDragImage(emptyDragImage(), 0, 0);
+        }
+      }
+      useSymbolDragStore.getState().start(payload);
+    },
+    onDragEnd: () => {
+      useSymbolDragStore.getState().end();
+    },
+  };
+}
+
 export function applySymbolDrop(
   windowId: WindowId,
   kind: WindowKind,
