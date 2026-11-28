@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Bar } from "../../api/generated/Bar";
 import type { FeedBrokers } from "../../api/generated/FeedBrokers";
 import { boardAxis } from "./board";
-import { priceAt } from "./history";
+import { gapContaining, priceAt } from "./history";
 import { EMPTY_BROKER_STATE, appendSnapshots, reduceBrokers } from "./model";
 
 const entry = (code: string, qty: number) => ({ code, name: `사${code}`, qty, qtyChange: 0 });
@@ -39,5 +39,14 @@ describe("거래원 수집 자료", () => {
   it("커서 시각의 가격은 그 시각이 든 분봉의 종가다", () => {
     const bars = [bar(60, 100), bar(120, 110), bar(180, 120)];
     expect([59, 60, 150, 500].map((t) => priceAt(bars, t))).toEqual([null, 100, 110, 120]);
+  });
+
+  it("끊긴 구간 안에 있는 시각을 찾는다", () => {
+    const gaps: readonly (readonly [number, number])[] = [[100, 200], [400, 500]];
+    expect(gapContaining(gaps, null)).toBeNull();
+    expect(gapContaining(gaps, 99)).toBeNull();
+    expect(gapContaining(gaps, 100)).toEqual([100, 200]);
+    expect(gapContaining(gaps, 150)).toEqual([100, 200]);
+    expect(gapContaining(gaps, 201)).toBeNull();
   });
 });

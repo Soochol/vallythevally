@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import { TODAY_REFETCH_MS, useBookReplayProgramDay } from "../../api/bookReplay";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
-import { gapContaining } from "../brokers/chartSync";
+import { gapContaining } from "../brokers/history";
 import type { ProgramLine, ProgramRow } from "../program/program";
 import { sliceProgramReplayAt } from "./programReplay";
 import { REPLAY_REASON } from "./replay";

@@ -164,6 +164,7 @@ test("호가 복기를 켜고 봉을 가리키면 10호가창이 그 봉의 수�
   await frames(page);
 
   await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
+  expect(await bookWindow(page).evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
   await expect(bookWindow(page).getByTestId("replay-strip")).toContainText("수집 호가 · 11/23 09:04:59");
   await expect(bookWindow(page).getByTestId("replay-venue")).toHaveCount(0);
   await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,200");

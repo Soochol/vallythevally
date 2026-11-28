@@ -298,7 +298,7 @@ async function switchSymbol(page: Page, code: string) {
   await expect(dialog).toBeHidden();
 }
 
-test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새로고침 뒤에도 유지된다", async ({ page, scenario }) => {
+test("이동 하위 옵션은 탭 전환·종목 변경·새로고침 뒤에도 유지되고 동기화 버튼은 없다", async ({ page, scenario }) => {
   scenario.on((url) => /^\/api\/symbols\/(005930|000660)\/brokers$/.test(url.pathname), (request) => {
     const url = new URL(request.url());
     const symbol = url.pathname.split("/")[3]!;
@@ -324,6 +324,7 @@ test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새
 
   await openBrokersWindow(page, scenario);
   const win = window_(page);
+  await expect(win.getByTestId("brokers-chart-sync")).toHaveCount(0);
   const viewGroup = win.getByRole("group", { name: "보기" });
   await viewGroup.getByRole("button", { name: "이동", exact: true }).click();
   await expect(win.getByTestId("broker-transfer-sankey")).toBeVisible();
@@ -332,13 +333,11 @@ test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새
   const modeGroup = win.getByRole("group", { name: "계산 모드" });
   const toggleOther = win.getByTestId("broker-transfer-toggle-other");
   const detailsToggle = win.getByTestId("broker-transfer-details-toggle");
-  const syncButton = win.getByTestId("brokers-chart-sync");
 
   await modeGroup.getByRole("button", { name: "총량", exact: true }).click();
   await toggleOther.click();
   await win.getByTestId("broker-transfer-preset-last10").click();
   await detailsToggle.click();
-  await syncButton.click();
 
   const assertOptions = async (presetTestId: string) => {
     await expect(win.getByRole("group", { name: "집계 단위" })).toHaveCount(0);
@@ -347,7 +346,7 @@ test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새
     await expect(win.getByTestId(presetTestId)).toHaveAttribute("aria-pressed", "true");
     await expect(detailsToggle).toHaveAttribute("aria-expanded", "true");
     await expect(win.getByTestId("broker-transfer-pairs")).toBeVisible();
-    await expect(syncButton).toHaveAttribute("aria-pressed", "true");
+    await expect(win.getByTestId("brokers-chart-sync")).toHaveCount(0);
   };
 
   await assertOptions("broker-transfer-preset-last10");
@@ -376,9 +375,9 @@ test("이동 하위 옵션과 동기화 설정은 탭 전환·종목 변경·새
     transferShowOther: false,
     transferRangePreset: "peak",
     transferDetailsOpen: true,
-    chartSync: true,
   });
   expect(scenario.documents.uiPrefs().brokers).not.toHaveProperty("transferLevel");
+  expect(scenario.documents.uiPrefs().brokers).not.toHaveProperty("chartSync");
 
   await page.reload();
   await expect(win).toHaveAttribute("data-symbol", "000660");

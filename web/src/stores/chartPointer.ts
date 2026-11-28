@@ -34,12 +34,9 @@ export interface ChartPointerSnap {
 interface ChartPointerStore {
   readonly pointed: ChartPointer | null;
   readonly snap: ChartPointerSnap | null;
-  readonly brokerSyncSymbols: Readonly<Record<string, number>>;
   point(symbol: SymbolCode, bar: PointedBar, close: number | null): void;
   snapTo(symbol: SymbolCode, at: UnixSeconds, close: number | null, target?: SnapTarget | null): void;
   clear(): void;
-  addBrokerSync(symbol: SymbolCode): void;
-  removeBrokerSync(symbol: SymbolCode): void;
 }
 
 function samePointer(a: ChartPointer, b: ChartPointer): boolean {
@@ -68,7 +65,6 @@ export function createChartPointerScheduler(
 export const useChartPointerStore = create<ChartPointerStore>()((set) => ({
   pointed: null,
   snap: null,
-  brokerSyncSymbols: {},
   point: (symbol, bar, close) => {
     if (bar === null) return;
     const next: ChartPointer = { symbol, bar, close };
@@ -89,27 +85,6 @@ export const useChartPointerStore = create<ChartPointerStore>()((set) => ({
     chartPointerScheduler.cancel();
     set((state) => (state.pointed === null && state.snap === null ? state : { pointed: null, snap: null }));
   },
-  addBrokerSync: (symbol) =>
-    set((state) => ({
-      brokerSyncSymbols: {
-        ...state.brokerSyncSymbols,
-        [symbol]: (state.brokerSyncSymbols[symbol] ?? 0) + 1,
-      },
-    })),
-  removeBrokerSync: (symbol) =>
-    set((state) => {
-      const count = state.brokerSyncSymbols[symbol] ?? 0;
-      if (count <= 0) return state;
-      const nextSymbols = { ...state.brokerSyncSymbols };
-      if (count === 1) delete nextSymbols[symbol];
-      else nextSymbols[symbol] = count - 1;
-      const noneActive = Object.keys(nextSymbols).length === 0;
-      if (noneActive) chartPointerScheduler.cancel();
-      return {
-        brokerSyncSymbols: nextSymbols,
-        pointed: noneActive ? null : state.pointed,
-      };
-    }),
 }));
 
 export const chartPointerScheduler = createChartPointerScheduler(

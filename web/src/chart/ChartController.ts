@@ -43,7 +43,6 @@ import { CompareLegend } from "./compareLegend";
 import { CrosshairMarker } from "./crosshairMarker";
 import { type BarInterval, barInterval, crosshairVisible, matchingBarTime, type PointedBar } from "./crosshairSync";
 import { DaySeparators } from "./daySeparators";
-import { ReplayDays } from "./replayDays";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
 import { FineBars } from "./fineBars";
 import { JumpBadge } from "./jumpBadge";
@@ -186,8 +185,6 @@ export class ChartController {
   private readonly legend: Legend;
   private readonly extremeTags: ExtremeTags;
   private readonly daySeparators: DaySeparators;
-  private readonly replayDays: ReplayDays;
-  private replayDaysSet: ReadonlySet<string> | null = null;
   private readonly crosshairMarker: CrosshairMarker;
   private readonly pointedListeners = new Set<(bar: PointedBar, close: number | null) => void>();
   private pointerOwnsCrosshair = false;
@@ -290,12 +287,6 @@ export class ChartController {
       shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
       bars: () => this.bars,
       color: () => this.tokens.daySeparator,
-    });
-    this.replayDays = new ReplayDays(this.chart, {
-      shown: () => this.view !== null && (isIntraday(this.view.period) || this.view.period === "D") && this.replayDaysSet !== null && this.replayDaysSet.size > 0,
-      bars: () => this.bars,
-      days: () => this.replayDaysSet,
-      color: () => this.tokens.accent,
     });
     this.indicators = new IndicatorLayer(
       {
@@ -502,7 +493,6 @@ export class ChartController {
     this.syncCompare();
     this.renderBadge();
     this.daySeparators.sync();
-    this.replayDays.sync();
     this.legend.setDisplay(next.settings);
     this.requestLegendSources("base", "indicators", "compare");
     this.renderLegend();
@@ -545,11 +535,6 @@ export class ChartController {
     this.crosshairMarker.show(bar);
     this.scheduleFrame();
     return true;
-  }
-
-  setReplayDays(days: ReadonlySet<string> | null): void {
-    this.replayDaysSet = days;
-    this.replayDays.sync();
   }
 
   private emitPointedBar(bar: PointedBar, close: number | null): void {
@@ -635,7 +620,6 @@ export class ChartController {
     this.indicators.setTheme();
     this.compare.setTheme();
     this.daySeparators.sync();
-    this.replayDays.sync();
     this.requestLegendSources("indicators", "compare");
     this.renderLegend();
   }

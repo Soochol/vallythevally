@@ -86,15 +86,15 @@ test("다른 페이지에 가 있으면 이어 받기를 멈춘다", async ({ pa
 
 test("과거일을 보고 돌아온 실시간 궤적은 끊긴다", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
-  const dailyBars: Bar[] = [
-    { t: at("00:00:00", "2026-11-06"), o: 69_800, h: 71_000, l: 69_700, c: 70_700, v: 600 },
-    { t: at("00:00:00", "2026-11-09"), o: 71_000, h: 71_500, l: 70_900, c: 71_400, v: 700 },
+  const bars5m: Bar[] = [
+    { t: at("09:30:00", "2026-11-06"), o: 69_800, h: 71_000, l: 69_700, c: 70_700, v: 600 },
+    { t: at("09:25:00", "2026-11-09"), o: 71_000, h: 71_500, l: 70_900, c: 71_400, v: 700 },
   ];
   const past = day({ date: PAST, source: "store", live: false, cursor: "s:1:1", snapshots: [kiwoom(at("09:30:00", "2026-11-06"), 500)] });
-  scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("period") === "D", {
-    body: { symbol: "005930", venue: "combined", period: "D", bars: dailyBars, current: null, nextBefore: null, seq: null },
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
+  scenario.reply((url) => url.pathname === "/api/bars" && url.searchParams.get("period") === "5m", {
+    body: { symbol: "005930", venue: "combined", period: "5m", bars: bars5m, current: null, nextBefore: null, seq: null },
   });
-  scenario.on((url) => url.pathname === "/api/symbols/005930/brokers/days", () => ({ body: { symbol: "005930", days: [PAST] } }));
   scenario.on((url) => url.pathname === "/api/symbols/005930/brokers", (request) => {
     const date = new URL(request.url()).searchParams.get("date");
     return { body: date === PAST ? past : day({ date: TODAY, source: "none", live: false }) };
@@ -102,7 +102,7 @@ test("과거일을 보고 돌아온 실시간 궤적은 끊긴다", async ({ pag
 
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
-    { id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "D", chartSettings: SETTINGS },
+    { id: "cell-0", link: "a", kind: "chart", symbol: "005930", venue: "combined", period: "5m", chartSettings: SETTINGS },
     { id: "brokers", link: "a", kind: "brokers" },
   ];
   const root = {
@@ -128,7 +128,8 @@ test("과거일을 보고 돌아온 실시간 궤적은 끊긴다", async ({ pag
   scenario.live.emit({ type: "feed_brokers", sub: firstSub.sub, brokers: kiwoom(at("09:31:00"), 250) });
   await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+250");
 
-  await window_(page).getByTestId("brokers-chart-sync").click();
+  const replayToggle = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "호가 복기", exact: true });
+  await replayToggle.click();
   const pastPos = await page.evaluate(
     (chartTime) => {
       const probe = window.chartProbe;
@@ -138,12 +139,12 @@ test("과거일을 보고 돌아온 실시간 궤적은 끊긴다", async ({ pag
       if (x === null) throw new Error("과거 봉 좌표가 없습니다");
       return { x: box.x + x, y: box.y + box.height * 0.55 };
     },
-    toChartTime(at("00:00:00", "2026-11-06")),
+    toChartTime(at("09:30:00", "2026-11-06")),
   );
   await page.mouse.move(pastPos.x, pastPos.y);
   await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+500");
 
-  await window_(page).getByTestId("brokers-chart-sync").click();
+  await replayToggle.click();
   await pollSaved(() => scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "brokers").length).toBe(2);
   const secondSub = scenario.live.messages.findLast((m) => m.type === "subscribe_feed" && m.kind === "brokers");
   if (secondSub?.type !== "subscribe_feed") throw new Error("재구독이 없습니다");

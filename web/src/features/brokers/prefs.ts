@@ -14,7 +14,6 @@ export interface BrokerPrefs {
   readonly transferShowOther: boolean;
   readonly transferRangePreset: TransferRangePreset;
   readonly transferDetailsOpen: boolean;
-  readonly chartSync: boolean;
   readonly replayView: BrokerView;
   readonly replayCards: BrokerCards;
 }
@@ -24,7 +23,6 @@ export const DEFAULT_BROKER_PREFS: BrokerPrefs = {
   transferShowOther: true,
   transferRangePreset: "all",
   transferDetailsOpen: false,
-  chartSync: false,
   replayView: "transfer",
   replayCards: "numbers",
 };
@@ -52,7 +50,6 @@ export function parseBrokerPrefs(raw: unknown): BrokerPrefs {
     transferShowOther: flag(raw.transferShowOther, DEFAULT_BROKER_PREFS.transferShowOther),
     transferRangePreset: isTransferRangePreset(raw.transferRangePreset) ? raw.transferRangePreset : DEFAULT_BROKER_PREFS.transferRangePreset,
     transferDetailsOpen: flag(raw.transferDetailsOpen, DEFAULT_BROKER_PREFS.transferDetailsOpen),
-    chartSync: flag(raw.chartSync, DEFAULT_BROKER_PREFS.chartSync),
     replayView: isBrokerView(raw.replayView) ? raw.replayView : DEFAULT_BROKER_PREFS.replayView,
     replayCards: isBrokerCards(raw.replayCards) ? raw.replayCards : DEFAULT_BROKER_PREFS.replayCards,
   };
@@ -64,7 +61,6 @@ export function mergeBrokerPrefs(current: BrokerPrefs, patch: Partial<BrokerPref
     transferShowOther: patch.transferShowOther ?? current.transferShowOther,
     transferRangePreset: patch.transferRangePreset ?? current.transferRangePreset,
     transferDetailsOpen: patch.transferDetailsOpen ?? current.transferDetailsOpen,
-    chartSync: patch.chartSync ?? current.chartSync,
     replayView: patch.replayView ?? current.replayView,
     replayCards: patch.replayCards ?? current.replayCards,
   };
@@ -73,7 +69,6 @@ export function mergeBrokerPrefs(current: BrokerPrefs, patch: Partial<BrokerPref
     next.transferShowOther === current.transferShowOther &&
     next.transferRangePreset === current.transferRangePreset &&
     next.transferDetailsOpen === current.transferDetailsOpen &&
-    next.chartSync === current.chartSync &&
     next.replayView === current.replayView &&
     next.replayCards === current.replayCards
   ) {

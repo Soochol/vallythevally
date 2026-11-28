@@ -2,11 +2,12 @@ import { memo, type ReactNode, type RefObject, useCallback, useLayoutEffect, use
 import type { OrderSide } from "../../api/generated/OrderSide";
 import { formatPrice } from "../../lib/format";
 import { useStoreValue, type ValueStore } from "../../lib/valueStore";
+import { ClockIcon } from "../icons";
 import type { LadderRow } from "../market-window/ladder";
 import { type DayPrices, ladderColumns, type LadderRowSlots, PriceLadder } from "../market-window/PriceLadder";
 import { formatShares } from "../market-window/format";
 import { type BuyingPower, buyPreview, type BuyRatioPercent, groupKey, orderQuantityForPrice, type PriceGroup, type PriceKey, previewText, SIDE_LABEL } from "./orderRules";
-import { PENDING_CHIP_TEXT, PENDING_TEXT, REPLAY_LOCKED_TEXT } from "./statusText";
+import { PENDING_CHIP_TEXT, PENDING_TEXT, REPLAY_LOCKED_TEXT, REPLAY_UNLOCK_LABEL } from "./statusText";
 import { LADDER_ROW_HEIGHT_PX, type RowRange, scrollTopToCenter, visibleRowRange } from "./priceRange";
 import { OrderList, type OrderListItem } from "./OrderList";
 import { resolveOrderCellAt } from "./nearestCell";
@@ -31,6 +32,7 @@ interface Props {
   readonly writable: boolean;
   readonly replayLocked?: boolean;
   readonly onReplayBlocked?: () => void;
+  readonly onReplayUnlock?: () => void;
   readonly previewQuantity: number;
   readonly buyRatio?: BuyRatioPercent | null;
   readonly buying: BuyingPower | null;
@@ -99,6 +101,18 @@ interface HeadProps {
   readonly explorerUnavailable: boolean;
   readonly explorerTitle: string | undefined;
   readonly onToggleExplorer: () => void;
+}
+
+export function OrderReplayBanner({ onUnlock }: { readonly onUnlock: () => void }) {
+  return (
+    <div className="od-colhead od-replay-banner" role="status" data-testid="order-replay-banner">
+      <span className="od-replay-banner-icon" aria-hidden="true"><ClockIcon size={14} /></span>
+      <span className="od-replay-banner-text">호가 복기 중 · 주문 잠금</span>
+      <button type="button" className="od-replay-unlock" data-testid="order-replay-unlock" onClick={onUnlock}>
+        {REPLAY_UNLOCK_LABEL}
+      </button>
+    </div>
+  );
 }
 
 const LadderHead = memo(function LadderHead({ explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer }: HeadProps) {
@@ -172,7 +186,7 @@ const OrderCell = memo(function OrderCell({ rowKey, side, price, group, writable
   );
 });
 
-export function OrderLadder({ rows, previousClose, groups, writable, replayLocked = false, onReplayBlocked, previewQuantity, buyRatio = null, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice, headerOverlay }: Props) {
+export function OrderLadder({ rows, previousClose, groups, writable, replayLocked = false, onReplayBlocked, onReplayUnlock, previewQuantity, buyRatio = null, buying, hover, actions, averagePrice, dayPrices = null, divider, rateShown, rowHeightPx = LADDER_ROW_HEIGHT_PX, explorerOn, explorerUnavailable, explorerTitle, onToggleExplorer, explorerCenterPrice, ladder, drag, rowSlots, expectedPrice, headerOverlay }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const dragging = useStoreValue(drag.views, (view) => view !== null);
   const canEdit = writable && !replayLocked;
@@ -287,7 +301,11 @@ export function OrderLadder({ rows, previousClose, groups, writable, replayLocke
       }}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, group: null }); }}>
       {headerOverlay}
-      <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />
+      {replayLocked && onReplayUnlock ? (
+        <OrderReplayBanner onUnlock={onReplayUnlock} />
+      ) : (
+        <LadderHead explorerOn={explorerOn} explorerUnavailable={explorerUnavailable} explorerTitle={explorerTitle} onToggleExplorer={onToggleExplorer} />
+      )}
       {exploring
         ? <div className="od-explorer-rows" data-testid="order-explorer-rows" style={{ paddingTop: range.start * rowHeightPx, paddingBottom: (rowCount - range.end) * rowHeightPx }}>{ladderView}</div>
         : ladderView}

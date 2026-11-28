@@ -10,7 +10,7 @@ import { ListView } from "../brokers/ListView";
 import { TableView } from "../brokers/TableView";
 import { TransferView } from "../brokers/TransferView";
 import { boardAxis, brokerTracks, trackRuns, type TrackRun } from "../brokers/board";
-import { gapContaining } from "../brokers/chartSync";
+import { gapContaining } from "../brokers/history";
 import type { BrokerDayResult } from "../brokers/useBrokerDay";
 import "../brokers/brokers.css";
 import { formatClock } from "../market-window/format";

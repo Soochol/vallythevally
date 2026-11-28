@@ -24,7 +24,7 @@ const FLOW = day({ source: "flow", snapshots: [kiwoom(at("08:10:00"), 10), kiwoo
 
 const window_ = (page: Page) => page.getByTestId("brokers-window");
 const card = (page: Page, name: string) => window_(page).getByTestId("broker-card").and(page.locator(`[data-broker="${name}"]`));
-const syncButton = (page: Page) => window_(page).getByTestId("brokers-chart-sync");
+const replayToggle = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "호가 복기", exact: true });
 const brokerFeeds = (scenario: Scenario) => scenario.live.messages.filter((m) => m.type === "subscribe_feed" && m.kind === "brokers");
 
 async function barCoordinate(page: Page, time: number): Promise<{ x: number; y: number }> {
@@ -127,7 +127,7 @@ test("수집 자료가 없으면 실시간을 구독한다", async ({ page, scen
   await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+300");
 });
 
-test("날짜 이동 버튼이 없고 차트 동기화로 분봉의 날짜와 시각을 연동하며 차트를 벗어나도 유지한다", async ({ page, scenario }) => {
+test("날짜 이동과 동기화 버튼이 없고 상단 호가 복기로 분봉 날짜·시각을 연동하며 차트를 벗어나도 유지한다", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
   const bars5m: Bar[] = [
     { t: at("09:25:00", "2026-11-06"), o: 70_000, h: 70_300, l: 69_900, c: 70_200, v: 100 },
@@ -144,6 +144,7 @@ test("날짜 이동 버튼이 없고 차트 동기화로 분봉의 날짜와 시
     snapshots: [kiwoom(at("09:30:00", "2026-11-06"), 5_000), kiwoom(at("15:20:00", "2026-11-06"), 8_000)],
   });
   const counts = { past: 0, jump: 0 };
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
   scenario.on((url) => url.pathname === "/api/symbols/005930/brokers", (request) => {
     const query = new URL(request.url()).searchParams;
     if (query.get("date") === PAST) {
@@ -152,7 +153,6 @@ test("날짜 이동 버튼이 없고 차트 동기화로 분봉의 날짜와 시
     }
     return { body: query.get("after") === null ? FLOW : day({ source: "flow", cursor: "f:1:2", reset: false }) };
   });
-  scenario.on((url) => url.pathname === "/api/symbols/005930/brokers/days", () => ({ body: { symbol: "005930", days: [PAST] } }));
   scenario.on((url) => url.pathname === "/api/bars/jump", () => {
     counts.jump += 1;
     return { body: { symbol: "005930", venue: "combined", period: "1m", date: "2026-11-06", bars: [], nextBefore: null } };
@@ -164,16 +164,14 @@ test("날짜 이동 버튼이 없고 차트 동기화로 분봉의 날짜와 시
   await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+100");
   await expect(window_(page).getByRole("button", { name: "이전 관측일" })).toHaveCount(0);
   await expect(window_(page).getByRole("button", { name: "다음 관측일" })).toHaveCount(0);
-  await expect(syncButton(page)).toHaveAttribute("aria-pressed", "false");
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
+  await expect(window_(page).getByTestId("brokers-chart-sync")).toHaveCount(0);
+  await expect(replayToggle(page)).toHaveAttribute("aria-pressed", "false");
 
-  await syncButton(page).click();
-  await expect(syncButton(page)).toHaveAttribute("aria-pressed", "true");
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
+  await replayToggle(page).click();
+  await expect(replayToggle(page)).toHaveAttribute("aria-pressed", "true");
 
   const earlyPos = await barCoordinate(page, at("09:30:00", "2026-11-06"));
   await page.mouse.move(earlyPos.x, earlyPos.y);
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
   await expect(window_(page).getByTestId("brokers-sync-date")).toHaveText("11-06");
   await expect(window_(page).getByTestId("brokers-time")).toHaveText("09:34");
   await expect(window_(page).getByTestId("brokers-price")).toHaveText("70,500");
@@ -198,18 +196,17 @@ test("날짜 이동 버튼이 없고 차트 동기화로 분봉의 날짜와 시
   await expect(window_(page).getByTestId("broker-detail-row")).toHaveCount(1);
   await expect(window_(page).getByTestId("broker-detail-row").first()).toContainText("09:30:00");
 
-  await syncButton(page).click();
-  await expect(syncButton(page)).toHaveAttribute("aria-pressed", "false");
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
+  await replayToggle(page).click();
+  await expect(replayToggle(page)).toHaveAttribute("aria-pressed", "false");
   await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+100");
 });
 
-test("일봉 호버는 해당 일자 장마감 전체를 보이고 미수집 날은 빈 상태를 보이며 캐시를 재사용한다", async ({ page, scenario }) => {
+test("호가 복기에서 미수집 과거일은 안내를 보이고 수집일 캐시를 재사용한다", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
-  const dailyBars: Bar[] = [
-    { t: at("00:00:00", "2026-11-05"), o: 68_500, h: 69_000, l: 68_200, c: 68_900, v: 500 },
-    { t: at("00:00:00", "2026-11-06"), o: 69_800, h: 71_000, l: 69_700, c: 70_700, v: 600 },
-    { t: at("00:00:00", "2026-11-09"), o: 71_000, h: 71_500, l: 70_900, c: 71_400, v: 700 },
+  const bars5m: Bar[] = [
+    { t: at("09:30:00", "2026-11-05"), o: 68_500, h: 69_000, l: 68_200, c: 68_900, v: 500 },
+    { t: at("15:20:00", "2026-11-06"), o: 69_800, h: 71_000, l: 69_700, c: 70_700, v: 600 },
+    { t: at("09:25:00", "2026-11-09"), o: 71_000, h: 71_500, l: 70_900, c: 71_400, v: 700 },
   ];
   const past = day({
     date: PAST,
@@ -219,6 +216,7 @@ test("일봉 호버는 해당 일자 장마감 전체를 보이고 미수집 날
     snapshots: [kiwoom(at("09:30:00", "2026-11-06"), 5_000), kiwoom(at("15:20:00", "2026-11-06"), 8_000)],
   });
   const counts = { past: 0, uncollected: 0 };
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
   scenario.on((url) => url.pathname === "/api/symbols/005930/brokers", (request) => {
     const query = new URL(request.url()).searchParams;
     const requested = query.get("date");
@@ -228,30 +226,26 @@ test("일봉 호버는 해당 일자 장마감 전체를 보이고 미수집 날
     }
     if (requested === UNCOLLECTED) {
       counts.uncollected += 1;
-      return { body: day({ date: UNCOLLECTED, source: "none", live: false }) };
+      return { body: day({ date: UNCOLLECTED, source: "none", coverage: "day_not_collected", live: false }) };
     }
     return { body: query.get("after") === null ? FLOW : day({ source: "flow", cursor: "f:1:2", reset: false }) };
   });
-  scenario.on((url) => url.pathname === "/api/symbols/005930/brokers/days", () => ({ body: { symbol: "005930", days: [PAST] } }));
-  seedSplitWithChart(scenario, "D", dailyBars);
+  seedSplitWithChart(scenario, "5m", bars5m);
 
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await syncButton(page).click();
+  await replayToggle(page).click();
 
-  const pastPos = await barCoordinate(page, at("00:00:00", "2026-11-06"));
+  const pastPos = await barCoordinate(page, at("15:20:00", "2026-11-06"));
   await page.mouse.move(pastPos.x, pastPos.y);
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
   await expect(window_(page).getByTestId("brokers-sync-date")).toHaveText("11-06");
   await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+8,000");
-  await expect(window_(page).getByTestId("broker-future-shade")).toHaveCount(0);
   expect(counts.past).toBe(1);
 
-  const emptyPos = await barCoordinate(page, at("00:00:00", "2026-11-05"));
+  const emptyPos = await barCoordinate(page, at("09:30:00", "2026-11-05"));
   await page.mouse.move(emptyPos.x, emptyPos.y);
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
   await expect(window_(page).getByTestId("brokers-sync-date")).toHaveText("11-05");
-  await expect(window_(page)).toContainText("이 날의 거래원 자료가 없습니다");
+  await expect(window_(page)).toContainText("이 날은 수집하지 않았습니다");
   expect(counts.uncollected).toBe(1);
 
   await page.mouse.move(pastPos.x, pastPos.y);
@@ -300,7 +294,6 @@ test("당일 자료가 없으면 직전 마감일을 배지와 함께 바로 보
   await openBrokers(page, scenario);
   await expect(card(page, "키움").getByTestId("broker-cumulative")).toHaveText("+8,000");
   await expect(window_(page).getByTestId("brokers-fallback-date")).toHaveText("11-06 마감");
-  await expect(window_(page).getByTestId("brokers-sync-strip")).toHaveCount(0);
   await expect(window_(page).getByTestId("brokers-price")).toHaveText("70,900");
   expect(jumpedDate).toBe("2026-11-06");
 
