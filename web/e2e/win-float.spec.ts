@@ -63,7 +63,7 @@ test("메뉴로 띄운 스크리너는 불투명한 창으로 탭 위에 남고 
   await pollSaved(() => saved(scenario).dock?.floats.length).toBe(1);
   const persisted = saved(scenario).dock!.floats[0]!.rect;
   expect(persisted.w).toBeCloseTo(before.width / (await boxOf(area(page))).width, 4);
-  expect(await frame(page).locator(".window-panel").evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
+  expect(await frame(page).evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
   await page.reload();
   await expect(frame(page)).toBeVisible();
   expect(await boxOf(frame(page))).toEqual(before);
