@@ -14,6 +14,7 @@ import {
   formatReplayClock,
   formatReplayHM,
   formatShortDay,
+  PREMARKET_START_MIN,
   REGULAR_END_MIN,
   REGULAR_START_MIN,
 } from "../replay-page/replayModel";
@@ -32,6 +33,7 @@ interface DockPos {
 }
 
 const EDGE_MARGIN = 8;
+const INTERACTIVE_DOCK_CONTROL = "button:not([data-drag-handle]), [role='slider'], input, select, textarea, a";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -39,6 +41,18 @@ function clamp(value: number, min: number, max: number): number {
 
 function setText(el: HTMLElement | null, text: string): void {
   if (el && el.textContent !== text) el.textContent = text;
+}
+
+function isInteractiveDockControl(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(INTERACTIVE_DOCK_CONTROL) !== null;
+}
+
+function sessionPillFor(inGap: boolean, singlePrice: boolean, cursorSec: number): { readonly kind: string; readonly label: string } {
+  if (inGap) return { kind: "gap", label: "수집 끊김" };
+  if (singlePrice) return { kind: "vi", label: "단일가" };
+  if (cursorSec < REGULAR_START_MIN * 60) return { kind: "extended", label: "장전" };
+  if (cursorSec >= REGULAR_END_MIN * 60) return { kind: "extended", label: "장후" };
+  return { kind: "open", label: "정규장" };
 }
 
 export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Props) {
@@ -51,7 +65,9 @@ export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Pro
   const scrubberRef = useRef<HTMLDivElement>(null);
 
   const [pos, setPos] = useState<DockPos | null>(null);
+  const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{
+    readonly pointerId: number;
     readonly originX: number;
     readonly originY: number;
     readonly startX: number;
@@ -61,7 +77,7 @@ export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Pro
   } | null>(null);
   const scrubbingRef = useRef(false);
 
-  const startSec = session?.sessionStartSec ?? REGULAR_START_MIN * 60;
+  const startSec = session?.sessionStartSec ?? PREMARKET_START_MIN * 60;
   const endSec = session?.sessionEndSec ?? REGULAR_END_MIN * 60;
   const spanSec = Math.max(1, endSec - startSec);
 
@@ -70,10 +86,9 @@ export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Pro
       const cursorSec = frame.cursorMs / 1_000;
       setText(clockRef.current, formatReplayClock(cursorSec, true));
       if (sessionPillRef.current) {
-        const kind = frame.inGap ? "gap" : frame.singlePrice ? "vi" : "open";
-        const label = frame.inGap ? "수집 끊김" : frame.singlePrice ? "단일가" : "정규장";
-        sessionPillRef.current.dataset.kind = kind;
-        setText(sessionPillRef.current, label);
+        const pill = sessionPillFor(frame.inGap, frame.singlePrice, cursorSec);
+        sessionPillRef.current.dataset.kind = pill.kind;
+        setText(sessionPillRef.current, pill.label);
       }
       const ratio = clamp((cursorSec - startSec) / spanSec, 0, 1);
       const pct = `${(ratio * 100).toFixed(3)}%`;
@@ -84,6 +99,11 @@ export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Pro
 
     if (!engine) {
       setText(clockRef.current, formatReplayClock(control.activeSecond, true));
+      if (sessionPillRef.current) {
+        const pill = sessionPillFor(false, false, control.activeSecond);
+        sessionPillRef.current.dataset.kind = pill.kind;
+        setText(sessionPillRef.current, pill.label);
+      }
       const ratio = clamp((control.activeSecond - startSec) / spanSec, 0, 1);
       const pct = `${(ratio * 100).toFixed(3)}%`;
       if (fillRef.current) fillRef.current.style.width = pct;
@@ -94,7 +114,30 @@ export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Pro
     return engine.subscribeFrame(paint);
   }, [engine, startSec, spanSec]);
 
-  const onDragStart = (event: PointerEvent<HTMLButtonElement>) => {
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    const dock = dockRef.current;
+    if (!workspace || !dock || typeof ResizeObserver === "undefined") return;
+    const clampToWorkspace = () => {
+      setPos((prev) => {
+        if (prev === null) return null;
+        const dockRect = dock.getBoundingClientRect();
+        const maxX = Math.max(EDGE_MARGIN, workspace.clientWidth - dockRect.width - EDGE_MARGIN);
+        const maxY = Math.max(EDGE_MARGIN, workspace.clientHeight - dockRect.height - EDGE_MARGIN);
+        const nextX = clamp(prev.x, EDGE_MARGIN, maxX);
+        const nextY = clamp(prev.y, EDGE_MARGIN, maxY);
+        return nextX === prev.x && nextY === prev.y ? prev : { x: nextX, y: nextY };
+      });
+    };
+    const observer = new ResizeObserver(clampToWorkspace);
+    observer.observe(workspace);
+    observer.observe(dock);
+    return () => observer.disconnect();
+  }, [workspaceRef]);
+
+  const onDockPointerDown = (event: PointerEvent<HTMLElement>) => {
+    event.stopPropagation();
+    if (event.button !== 0 || isInteractiveDockControl(event.target)) return;
     const dock = dockRef.current;
     const workspace = workspaceRef.current;
     if (!dock || !workspace) return;
@@ -103,26 +146,34 @@ export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Pro
     const dockRect = dock.getBoundingClientRect();
     const wsRect = workspace.getBoundingClientRect();
     dragRef.current = {
+      pointerId: event.pointerId,
       originX: event.clientX,
       originY: event.clientY,
-      startX: dockRect.left - wsRect.left,
-      startY: dockRect.top - wsRect.top,
-      maxX: Math.max(EDGE_MARGIN, wsRect.width - dockRect.width - EDGE_MARGIN),
-      maxY: Math.max(EDGE_MARGIN, wsRect.height - dockRect.height - EDGE_MARGIN),
+      startX: dockRect.left - wsRect.left - workspace.clientLeft,
+      startY: dockRect.top - wsRect.top - workspace.clientTop,
+      maxX: Math.max(EDGE_MARGIN, workspace.clientWidth - dockRect.width - EDGE_MARGIN),
+      maxY: Math.max(EDGE_MARGIN, workspace.clientHeight - dockRect.height - EDGE_MARGIN),
     };
+    setDragging(true);
   };
 
-  const onDragMove = (event: PointerEvent<HTMLButtonElement>) => {
+  const onDockPointerMove = (event: PointerEvent<HTMLElement>) => {
     const drag = dragRef.current;
-    if (!drag) return;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     setPos({
       x: clamp(drag.startX + event.clientX - drag.originX, EDGE_MARGIN, drag.maxX),
       y: clamp(drag.startY + event.clientY - drag.originY, EDGE_MARGIN, drag.maxY),
     });
   };
 
-  const onDragEnd = () => {
+  const onDockPointerEnd = (event: PointerEvent<HTMLElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = null;
+    setDragging(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const scrubFromClientX = (clientX: number, targetEl: HTMLDivElement) => {
@@ -185,20 +236,22 @@ export function TickReplayDock({ active, symbolName, workspaceRef, onExit }: Pro
       aria-label="틱 복기 재생 리모콘"
       data-testid="tick-replay-dock"
       data-playing={control.playing ? "true" : "false"}
+      data-dragging={dragging ? "true" : "false"}
       style={posStyle}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={onDockPointerDown}
+      onPointerMove={onDockPointerMove}
+      onPointerUp={onDockPointerEnd}
+      onPointerCancel={onDockPointerEnd}
+      onLostPointerCapture={onDockPointerEnd}
     >
       <div className="trd-row">
         <button
           type="button"
           className="trd-grip"
+          data-drag-handle=""
           data-testid="tick-replay-drag-handle"
           aria-label="리모콘 옮기기"
           title="끌어서 리모콘 옮기기"
-          onPointerDown={onDragStart}
-          onPointerMove={onDragMove}
-          onPointerUp={onDragEnd}
-          onPointerCancel={onDragEnd}
         >
           <GripIcon size={14} />
         </button>

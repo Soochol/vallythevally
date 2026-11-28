@@ -17,6 +17,12 @@
   color: var(--text);
   font-size: var(--fs-s);
   user-select: none;
+  cursor: grab;
+  touch-action: none;
+}
+
+.trd-dock[data-dragging="true"] {
+  cursor: grabbing;
 }
 
 .trd-row {
@@ -162,6 +168,7 @@
   font-weight: 500;
   color: var(--text-2);
   white-space: nowrap;
+  cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
@@ -206,6 +213,7 @@
   font-size: var(--fs-xs);
   font-weight: 500;
   white-space: nowrap;
+  cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 
