@@ -110,7 +110,8 @@ function readable(charts: Awaited<ReturnType<typeof geometry>>) {
     expect(chart.rows.head.text).toContain("일");
     expect(chart.rows.price.text).toMatch(/\d[\d,]+/);
     expect(chart.rows.price.text).toMatch(/2026/);
-    expect(chart.rows.ohlc.text).toMatch(/시.+고.+저.+종.+량/);
+    expect(chart.rows.ohlc.text).toMatch(/시.+고.+저.+종/);
+    expect(chart.rows.ohlc.text).not.toContain("량");
     expect(chart.volume.text).toContain("거래량");
     for (const row of Object.values(chart.rows)) for (const box of row.texts) expect.soft(contained(box, pane), `chart ${index + 1} text ${box.text} is inside its price pane`).toBe(true);
     for (const [i, row] of Object.values(chart.rows).entries()) for (const later of Object.values(chart.rows).slice(i + 1)) {
@@ -288,9 +289,9 @@ test("tall normal charts and repeated resize restore geometry and saved presenta
   await writeFile(testInfo.outputPath("tall-normal-rectangles.json"), JSON.stringify(normal, null, 2));
   readable(normal);
   const legend = cell(page).locator(".chart-legend");
-  await expect(legend.locator("[data-price-row]>span").first()).toHaveCSS("font-size", "28px");
-  await expect(legend.getByRole("heading")).toHaveCSS("font-size", "17px");
-  await expect(legend).toHaveCSS("gap", "8px");
+  await expect(legend.locator("[data-price-row]>span").first()).toHaveCSS("font-size", "14px");
+  await expect(legend.getByRole("heading")).toHaveCSS("font-size", "12px");
+  await expect(legend).toHaveCSS("gap", "2px");
   const saved = storedPresentation(scenario);
   const documents = storedDocuments(scenario);
   for (let n = 0; n < 2; n++) {

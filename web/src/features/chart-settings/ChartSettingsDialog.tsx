@@ -161,7 +161,7 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
     if (activeSection === "display") {
       return (
         <div className="cs-group">
-          <SettingSwitch label="범례" detail="종목·현재가·지표·비교 종목 범례를 표시. 봉 값(시·고·저·종·량)은 항상 보임" checked={settings.showLegend} onChange={(on) => setShowLegend(cellId, on)} />
+          <SettingSwitch label="범례" detail="종목·현재가·지표·비교 종목 범례를 표시. 봉 값(시·고·저·종)은 항상 보임" checked={settings.showLegend} onChange={(on) => setShowLegend(cellId, on)} />
           <SettingSwitch label="봉 값 등락률" detail="시·고·저·종 옆에 직전 봉 종가 대비 %" checked={settings.showOhlcChange} onChange={(on) => setShowOhlcChange(cellId, on)} />
           <div className="cs-divider" />
           <SettingSwitch label="화면 내 최고·최저" detail="지금 보이는 봉 안에서 찾아 표시" checked={settings.showExtremes} onChange={(on) => setShowExtremes(cellId, on)} />

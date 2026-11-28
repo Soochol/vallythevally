@@ -484,10 +484,8 @@ async function reload(page: Page) {
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 }
 
-const ohlcCells = (bar: Bar, prev: Bar | null) => [
-  ...([["시", bar.o], ["고", bar.h], ["저", bar.l], ["종", bar.c]] as const).map(([k, v]) => `${k}${won(v)}${prev ? ` (${pct(prev.c, v)})` : ""}`),
-  expect.stringMatching(/^량[^(]+$/),
-];
+const ohlcCells = (bar: Bar, prev: Bar | null) =>
+  ([["시", bar.o], ["고", bar.h], ["저", bar.l], ["종", bar.c]] as const).map(([k, v]) => `${k}${won(v)}${prev ? ` (${pct(prev.c, v)})` : ""}`);
 
 const PRICE_MA: IndicatorConfig = { id: "ma-price", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } };
 const VOLUME_ID = DEFAULT_CHART_SETTINGS.indicators[0]!.id;
@@ -634,7 +632,7 @@ test("봉 값이 그대로면 크기가 바뀌어 다시 그려도 봉 값 줄�
   scenario.live.emit({ type: "sub_error", sub: scenario.live.subscriptions().find((s) => s.symbol === "005930")!.sub, code: "realtime_limit" });
   await expect(cell(page).getByText("실시간 한도 초과: 조회 값만 보입니다", { exact: true })).toBeVisible();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await expect(ohlc(page).locator(":scope > span")).toHaveCount(5);
+  await expect(ohlc(page).locator(":scope > span")).toHaveCount(4);
   await ohlc(page).evaluate((line) => {
     const rebuilt: string[] = [];
     let shown = line.textContent;

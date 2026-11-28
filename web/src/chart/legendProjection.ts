@@ -1,6 +1,6 @@
 import { shapeSetOf, trackedValuesOf } from "./legendShapes";
 
-export type LegendTier = "full" | "compact" | "minimal";
+export type LegendTier = "compact" | "minimal";
 
 export interface LegendTierInput {
   readonly chartWidth: number;
@@ -8,21 +8,19 @@ export interface LegendTierInput {
   readonly phone: boolean;
 }
 
-export const COMPACT_BELOW_WIDTH = 480;
 export const MINIMAL_BELOW_WIDTH = 320;
-export const COMPACT_BELOW_PANE_HEIGHT = 300;
 export const FOLD_ABOVE_ROWS = 3;
 export const MIN_TOP_MARGIN = 0.08;
 export const MAX_TOP_MARGIN = 0.6;
 export const LEGEND_GAP_PX = 6;
 
-export function legendTier({ chartWidth, paneHeight, phone }: LegendTierInput): LegendTier {
+export function legendTier({ chartWidth, phone }: LegendTierInput): LegendTier {
   if (phone || chartWidth < MINIMAL_BELOW_WIDTH) return "minimal";
-  return chartWidth < COMPACT_BELOW_WIDTH || paneHeight < COMPACT_BELOW_PANE_HEIGHT ? "compact" : "full";
+  return "compact";
 }
 
 export function denserTier(tier: LegendTier): LegendTier | null {
-  return tier === "full" ? "compact" : tier === "compact" ? "minimal" : null;
+  return tier === "compact" ? "minimal" : null;
 }
 
 export function indicatorRowsFolded(tier: LegendTier, rowCount: number, pinnedOpen: boolean): boolean {

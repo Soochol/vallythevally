@@ -7,19 +7,18 @@ const parts = (prev: Bar | null) => legendParts({ bar: bar({}), prev, isCurrent:
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
-test("시·고·저·종마다 직전 봉 종가 대비 등락률과 방향을 붙이고 거래량에는 붙이지 않는다", () => {
+test("시·고·저·종마다 직전 봉 종가 대비 등락률과 방향을 붙이고 거래량은 포함하지 않는다", () => {
   expect(parts(bar({ c: 70_600 })).cells).toEqual([
     ["시", "71,200", { text: "+0.85%", dir: "up" }],
     ["고", "72,000", { text: "+1.98%", dir: "up" }],
     ["저", "70,000", { text: "−0.85%", dir: "down" }],
     ["종", "70,600", { text: "0.00%", dir: "flat" }],
-    ["량", "123만", null],
   ]);
 });
 
 test("직전 봉이 없거나 직전 봉 종가가 0이면 등락률을 붙이지 않는다", () => {
   for (const prev of [null, bar({ c: 0 })]) {
-    expect(parts(prev).cells.map(([, , change]) => change)).toEqual([null, null, null, null, null]);
+    expect(parts(prev).cells.map(([, , change]) => change)).toEqual([null, null, null, null]);
   }
 });
 
@@ -98,15 +97,15 @@ test("범례 OHLC 갱신은 셀 DOM을 다시 만들지 않고 텍스트와 등�
 
   const prev = bar({ c: 70_000 });
   legend.show({ bar: bar({ o: 71_000, h: 72_000, l: 69_000, c: 70_700, v: 500_000 }), prev, isCurrent: false, isIndex: false, period: "D", stalledAt: null }, true);
-  const ohlc = legend.body.children[1]!.children[0]!.children[0] as unknown as FakeEl;
+  const ohlc = legend.body.children[0]!.children[0]!.children[0] as unknown as FakeEl;
   const firstCells = [...ohlc.children];
-  expect(firstCells).toHaveLength(5);
+  expect(firstCells).toHaveLength(4);
   expect(firstCells[0]!.textContent).toBe("시71,000 (+1.43%)");
 
   legend.show({ bar: bar({ o: 68_600, h: 70_000, l: 68_000, c: 69_300, v: 900_000 }), prev, isCurrent: false, isIndex: false, period: "D", stalledAt: null }, true);
   expect(ohlc.children).toEqual(firstCells);
   expect(firstCells[0]!.textContent).toBe("시68,600 (−2.00%)");
-  expect(firstCells[4]!.textContent).toBe("량90만");
+  expect(firstCells[3]!.textContent).toBe("종69,300 (−1.00%)");
 
   legend.show({ bar: bar({ o: 68_600, h: 70_000, l: 68_000, c: 69_300, v: 900_000 }), prev: null, isCurrent: false, isIndex: false, period: "D", stalledAt: null }, true);
   expect(ohlc.children).toEqual(firstCells);
