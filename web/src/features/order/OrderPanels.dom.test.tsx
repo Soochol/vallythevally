@@ -185,6 +185,9 @@ test("10호가창과 호가주문창 설정에서 호가 간격 밀도를 바꾸
 
   fireEvent.click(screen.getByTestId("book-settings-button"));
   const bookPop = await screen.findByTestId("book-settings");
+  fireEvent.click(within(bookPop).getByRole("button", { name: "초촘촘" }));
+  expect(screen.getByTestId("book-window").getAttribute("data-ladder-density")).toBe("ultra");
+  expect(screen.getByTestId("order-window").getAttribute("data-ladder-density")).toBe("ultra");
   fireEvent.click(within(bookPop).getByRole("button", { name: "촘촘" }));
   expect(screen.getByTestId("book-window").getAttribute("data-ladder-density")).toBe("compact");
   expect(screen.getByTestId("order-window").getAttribute("data-ladder-density")).toBe("compact");

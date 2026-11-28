@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test } from "vitest";
 import type { BookReplayDay } from "../../api/generated/BookReplayDay";
 import type { BookReplayMeta } from "../../api/generated/BookReplayMeta";
@@ -99,5 +99,14 @@ test("minute_only 해상도 폴백, 종목 전환 대화상자, 블라인드·�
 
   expect(screen.queryByRole("group", { name: "차트 범위" })).toBeNull();
   expect(screen.getByRole("button", { name: "±5분 정밀" })).toBeTruthy();
+
+  expect(screen.getByTestId("replay-ladder").getAttribute("data-ladder-density")).toBe("normal");
+  act(() => {
+    useUiStore.setState((s) => ({
+      ...s,
+      prefs: { ...s.prefs, orderSettings: { ...s.prefs.orderSettings, ladderDensity: "ultra" } },
+    }));
+  });
+  expect(screen.getByTestId("replay-ladder").getAttribute("data-ladder-density")).toBe("ultra");
   client.clear();
 });

@@ -9,11 +9,12 @@ export const routeLabel = (venue: Venue): string => ORDER_ROUTES.find((route) =>
 export const PRESET_MODES = [{ value: "amount", label: "금액" }, { value: "buy", label: "매수" }, { value: "sell", label: "매도" }] as const;
 export type PresetMode = (typeof PRESET_MODES)[number]["value"];
 const isPresetMode = (value: unknown): value is PresetMode => value === "amount" || value === "buy" || value === "sell";
-export const LADDER_DENSITIES = [{ value: "compact", label: "촘촘" }, { value: "normal", label: "보통" }, { value: "spacious", label: "여유" }] as const;
+export const LADDER_DENSITIES = [{ value: "ultra", label: "초촘촘" }, { value: "compact", label: "촘촘" }, { value: "normal", label: "보통" }, { value: "spacious", label: "여유" }] as const;
 export type LadderDensity = (typeof LADDER_DENSITIES)[number]["value"];
-const isLadderDensity = (value: unknown): value is LadderDensity => value === "compact" || value === "normal" || value === "spacious";
+const LADDER_DENSITY_VALUES: ReadonlySet<string> = new Set(LADDER_DENSITIES.map((option) => option.value));
+const isLadderDensity = (value: unknown): value is LadderDensity => typeof value === "string" && LADDER_DENSITY_VALUES.has(value);
 export const LADDER_DENSITY_LABEL = "호가 간격";
-export const LADDER_ROW_HEIGHT_BY_DENSITY: Readonly<Record<LadderDensity, number>> = { compact: 20, normal: 24, spacious: 30 };
+export const LADDER_ROW_HEIGHT_BY_DENSITY: Readonly<Record<LadderDensity, number>> = { ultra: 16, compact: 20, normal: 24, spacious: 30 };
 export const ladderRowHeightPx = (density: LadderDensity): number => LADDER_ROW_HEIGHT_BY_DENSITY[density];
 export const KEEP_LAST_ENTRY_LABEL = "마지막 주문 수량 유지";
 export const ORDER_SOUND_LABEL = "주문 소리";

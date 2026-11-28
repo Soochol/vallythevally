@@ -42,4 +42,12 @@ describe("보이는 행 범위", () => {
     expect(scrollTopToCenter(100, 240)).toBe(2_400 + 12 - 120);
     expect(scrollTopToCenter(1, 240)).toBe(0);
   });
+
+  it("초촘촘 16px 행 높이에서도 보이는 행 범위와 가운데 스크롤 위치를 계산한다", () => {
+    expect(visibleRowRange(0, 160, 400, 16, 5)).toEqual({ start: 0, end: 15 });
+    expect(visibleRowRange(1_600, 160, 400, 16, 5)).toEqual({ start: 95, end: 115 });
+    expect(visibleRowRange(400 * 16 - 160, 160, 400, 16, 5)).toEqual({ start: 385, end: 400 });
+    expect(scrollTopToCenter(100, 240, 16)).toBe(1_600 + 8 - 120);
+    expect(scrollTopToCenter(1, 240, 16)).toBe(0);
+  });
 });
