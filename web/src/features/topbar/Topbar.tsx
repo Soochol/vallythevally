@@ -41,7 +41,7 @@ export function Topbar() {
     dialog?.kind === "indicatorCommand" && dialog.cellId === cellId
       ? dialog.mode
       : chartDock?.cellId === cellId
-        ? chartDock.mode
+        ? (chartDock.mode === "drawings" ? "current" : chartDock.mode)
         : null;
   const activeSection = activeMode ? sectionOf(activeMode) : null;
   const indicatorCount = cell.chartSettings.indicators.length;

@@ -28,18 +28,18 @@ function periodSummary(d: DrawingBody): string {
   return `${d.periods.length}개 주기`;
 }
 
-export function ObjectTree({ cellId }: { cellId: WindowId }) {
+export function ObjectTreeBody({ cellId }: { cellId: WindowId }) {
   const cell = useDrawingSession((s) => cellDrawing(s, cellId));
   const layoutId = useLayoutStore((s) => s.layout.id);
   const prefs = useUiStore((s) => s.prefs.drawing);
   const [query, setQuery] = useState("");
-  if (!cell.objectTreeOpen) return null;
   const surface = surfaceFor(cellId);
   const view = surface?.host.view();
-  if (!surface || !view) return null;
 
-  const isIndex = isIndexCode(view.symbol);
-  const all = surface.sync.drawings(view.symbol).filter((d) => inScope(d.scope, layoutId, cellId) && (d.periods === null || d.periods.includes(view.period)));
+  const isIndex = view ? isIndexCode(view.symbol) : false;
+  const all = surface && view
+    ? surface.sync.drawings(view.symbol).filter((d) => inScope(d.scope, layoutId, cellId) && (d.periods === null || d.periods.includes(view.period)))
+    : [];
   const ordered = [...all].sort((a, b) => b.z - a.z);
   const normalized = query.trim().toLowerCase();
   const filtered = normalized
@@ -64,16 +64,7 @@ export function ObjectTree({ cellId }: { cellId: WindowId }) {
   const unlocked = all.filter((d) => !d.locked && !prefs.lockAll);
 
   return (
-    <aside data-chart-control aria-label="드로잉 개체 트리" className="draw-tree" onPointerDown={(e) => e.stopPropagation()}>
-      <div className="draw-tree-head">
-        <h3>
-          <span>개체 트리</span>
-          <span className="draw-tree-count">{all.length}</span>
-        </h3>
-        <button type="button" className="icon-btn" aria-label="개체 트리 닫기" onClick={() => setCell({ objectTreeOpen: false, hoveredId: null })}>
-          <CloseIcon size={14} />
-        </button>
-      </div>
+    <>
       <input
         type="text"
         aria-label="개체 검색"
@@ -104,7 +95,7 @@ export function ObjectTree({ cellId }: { cellId: WindowId }) {
                 onClick={() => {
                   useDrawingSession.getState().setTool(cellId, null);
                   useDrawingSession.getState().select(cellId, [d.id]);
-                  surface.focus();
+                  surface?.focus();
                 }}
               >
                 <span className="draw-tree-swatch" style={{ background: drawingSwatchColor(d) }} />
@@ -114,22 +105,22 @@ export function ObjectTree({ cellId }: { cellId: WindowId }) {
                   <span className="draw-tree-meta">{meta}</span>
                 </span>
                 <span className="draw-tree-acts" onClick={(e) => e.stopPropagation()}>
-                  <button type="button" className="draw-tree-act" aria-label="앞으로 이동" title="앞으로 이동" onClick={() => surface.reorder(d.id, "forward")}>
+                  <button type="button" className="draw-tree-act" aria-label="앞으로 이동" title="앞으로 이동" onClick={() => surface?.reorder(d.id, "forward")}>
                     <ArrowIcon size={12} dir="up" />
                   </button>
-                  <button type="button" className="draw-tree-act" aria-label="뒤로 이동" title="뒤로 이동" onClick={() => surface.reorder(d.id, "backward")}>
+                  <button type="button" className="draw-tree-act" aria-label="뒤로 이동" title="뒤로 이동" onClick={() => surface?.reorder(d.id, "backward")}>
                     <ArrowIcon size={12} dir="down" />
                   </button>
                   <button type="button" className="draw-tree-act" data-on={isHidden || undefined} aria-label={isHidden ? "보이기" : "숨기기"} title={isHidden ? "보이기" : "숨기기"} onClick={() => toggleHidden(d.id)}>
                     <Icon path={isHidden ? DRAWING_ICONS.eyeOff : DRAWING_ICONS.eye} size={13} />
                   </button>
                   <button type="button" className="draw-tree-act" data-on={d.locked || undefined} aria-label={d.locked ? "잠금 풀기" : "잠금"} title={d.locked ? "잠금 풀기" : "잠금"} onClick={() => {
-                    surface.sync.commit(cellId, [{ kind: "update", before: d, after: { ...d, locked: !d.locked } }]);
+                    surface?.sync.commit(cellId, [{ kind: "update", before: d, after: { ...d, locked: !d.locked } }]);
                   }}>
                     <Icon path={d.locked ? DRAWING_ICONS.lockAll : DRAWING_ICONS.unlocked} size={13} />
                   </button>
                   <button type="button" className="draw-tree-act" aria-label="지우기" title="지우기" onClick={() => {
-                    surface.sync.commitWithUndo(cellId, [{ kind: "delete", before: d }], "드로잉을 지웠습니다");
+                    surface?.sync.commitWithUndo(cellId, [{ kind: "delete", before: d }], "드로잉을 지웠습니다");
                     if (selected) useDrawingSession.getState().select(cellId, cell.selected.filter((x) => x !== d.id));
                   }}>
                     <Icon path={DRAWING_ICONS.trash} size={13} />
@@ -147,10 +138,35 @@ export function ObjectTree({ cellId }: { cellId: WindowId }) {
         }}>모두 보이기</button>
         <button type="button" className="btn btn-sm text-danger" disabled={unlocked.length === 0} onClick={() => {
           if (unlocked.length === 0) return;
-          surface.sync.commitWithUndo(cellId, unlocked.map((before) => ({ kind: "delete", before })), `드로잉 ${unlocked.length}개를 지웠습니다`);
+          surface?.sync.commitWithUndo(cellId, unlocked.map((before) => ({ kind: "delete", before })), `드로잉 ${unlocked.length}개를 지웠습니다`);
           useDrawingSession.getState().select(cellId, []);
         }}>잠금 외 삭제</button>
       </div>
+    </>
+  );
+}
+
+export function ObjectTree({ cellId }: { cellId: WindowId }) {
+  const cell = useDrawingSession((s) => cellDrawing(s, cellId));
+  const layoutId = useLayoutStore((s) => s.layout.id);
+  if (!cell.objectTreeOpen) return null;
+  const surface = surfaceFor(cellId);
+  const view = surface?.host.view();
+  if (!surface || !view) return null;
+  const count = surface.sync.drawings(view.symbol).filter((d) => inScope(d.scope, layoutId, cellId) && (d.periods === null || d.periods.includes(view.period))).length;
+
+  return (
+    <aside data-chart-control aria-label="드로잉 개체 트리" className="draw-tree" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="draw-tree-head">
+        <h3>
+          <span>개체 트리</span>
+          <span className="draw-tree-count">{count}</span>
+        </h3>
+        <button type="button" className="icon-btn" aria-label="개체 트리 닫기" onClick={() => useDrawingSession.getState().patchCell(cellId, { objectTreeOpen: false, hoveredId: null })}>
+          <CloseIcon size={14} />
+        </button>
+      </div>
+      <ObjectTreeBody cellId={cellId} />
     </aside>
   );
 }

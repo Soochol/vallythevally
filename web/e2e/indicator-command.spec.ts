@@ -230,7 +230,7 @@ test("통합 지표 트리에서 탭 전환 없이 적용된 지표와 새 지�
   await expect(dialog.getByRole("option", { name: "RSI 14 추가 후보", exact: true })).toBeVisible();
 });
 
-test("우측 도킹 통합 트리에서 자식 편집과 부모 클릭 새 인스턴스 추가가 React 오류 없이 동작한다", async ({ page, scenario }) => {
+test("우측 도킹 Master-Detail은 레이어 목록을 유지한 채 좌측 상세 전환과 퀵 추가를 지원한다", async ({ page, scenario }) => {
   useCenterIndicatorWindow(scenario);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -247,17 +247,59 @@ test("우측 도킹 통합 트리에서 자식 편집과 부모 클릭 새 인�
 
   await dialog.getByRole("button", { name: "차트 오른쪽에 도킹", exact: true }).click();
   const dock = page.getByRole("complementary", { name: "차트 우측 설정 패널" });
+  const detail = page.getByRole("region", { name: "지표 상세 설정" });
   await expect(dock).toBeVisible();
-  await expect(dock.getByRole("tab")).toHaveCount(0);
-  await expect(dock.getByRole("heading", { name: "이동평균", exact: true })).toBeVisible();
-  await dock.getByRole("button", { name: "← 지표 목록", exact: true }).click();
-  await dock.getByRole("button", { name: "이동평균 단순 20 추가 후보", exact: true }).click();
-  await expect(dock).toContainText("새 인스턴스 #2");
-  await dock.getByRole("textbox", { name: "기간", exact: true }).fill("60");
-  await dock.getByRole("button", { name: "이동평균 단순 60 추가", exact: true }).click();
+  await expect(detail).toBeVisible();
+  await expect(detail.getByRole("heading", { name: "이동평균", exact: true })).toBeVisible();
+
+  await dock.getByRole("button", { name: "거래량 설정", exact: true }).click();
+  await expect(detail.getByRole("heading", { name: "거래량", exact: true })).toBeVisible();
+
+  const quickAdd = dock.getByRole("combobox", { name: "지표 빠른 추가" });
+  await quickAdd.click();
+  await dock.getByRole("button", { name: "60", exact: true }).click();
+  await expect(detail.getByRole("heading", { name: "이동평균선", exact: true })).toBeVisible();
+
   await pollSaved(async () => (await settings(scenario)).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.spec)).toEqual([
     { kind: "ma", method: "sma", period: 20 },
     { kind: "ma", method: "sma", period: 60 },
   ]);
+
+  await detail.getByRole("button", { name: "상세 설정 닫기", exact: true }).click();
+  await expect(detail).toBeHidden();
+  await expect(dock).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("차트 우측 알약 탭에서 글래스 피크·스냅 도킹 전환과 삭제 되돌리기가 동작한다", async ({ page, scenario }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?symbol=005930");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  await page.getByRole("button", { name: "지표 레이어 열기", exact: true }).click();
+  const dock = page.getByRole("complementary", { name: "차트 우측 설정 패널" });
+  await expect(dock).toBeVisible();
+  await expect(dock.getByRole("button", { name: "우측 고정 도킹", exact: true })).toHaveAttribute("aria-pressed", "false");
+
+  await dock.getByRole("button", { name: "우측 고정 도킹", exact: true }).click();
+  await expect(dock.getByRole("button", { name: "글래스 피크로 전환", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  const quickAdd = dock.getByRole("combobox", { name: "지표 빠른 추가" });
+  await quickAdd.fill("rsi 14");
+  await quickAdd.press("Enter");
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "rsi"]);
+
+  const detail = page.getByRole("region", { name: "지표 상세 설정" });
+  await expect(detail.getByRole("heading", { name: "RSI", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(detail).toBeHidden();
+  await expect(dock).toBeVisible();
+
+  await dock.getByRole("button", { name: "RSI 14 지우기", exact: true }).click();
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume"]);
+  await page.getByRole("button", { name: "되돌리기", exact: true }).click();
+  await pollSaved(async () => (await settings(scenario)).indicators.map((i) => i.spec.kind)).toEqual(["volume", "rsi"]);
   expect(errors).toEqual([]);
 });
