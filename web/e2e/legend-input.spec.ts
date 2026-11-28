@@ -128,8 +128,11 @@ test("수평선 도구가 켜져도 지표 범례 버튼은 조작하고 드로�
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const current = firstChart(layout);
   if (!current) throw new Error("칸이 없습니다");
-  const settings = parseChartSettings(current.chartSettings);
-  settings.indicators.push({ id: "control-ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } });
+  const parsed = parseChartSettings(current.chartSettings);
+  const settings = {
+    ...parsed,
+    indicators: [...parsed.indicators, { id: "control-ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } }],
+  };
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D", chartSettings: settings }) });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");

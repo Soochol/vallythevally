@@ -1,7 +1,7 @@
 import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
-import { type Direction, direction, formatChange, formatPercent, formatPrice, formatVolume } from "../lib/format";
+import { type Direction, direction, formatChange, formatPercent, formatPrice } from "../lib/format";
 import type { PaneBounds } from "./indicators/legendRows";
 import { denserTier, legendTier, reserveLegendFields, type LegendField, type LegendProjection, type LegendTier } from "./legendProjection";
 import { OptionalTrackedValues, TrackedValues, valueShape } from "./legendShapes";
@@ -69,7 +69,6 @@ export function legendParts({ bar, prev, isIndex, period }: LegendBar): LegendPa
       ["고", formatPrice(bar.h, isIndex), prevCloseChange(bar.h, prev)],
       ["저", formatPrice(bar.l, isIndex), prevCloseChange(bar.l, prev)],
       ["종", formatPrice(bar.c, isIndex), prevCloseChange(bar.c, prev)],
-      ["량", formatVolume(bar.v), null],
     ],
   };
 }
@@ -276,7 +275,7 @@ export class Legend {
   private phone: boolean;
   private presentation: PresentationState = { kind: "invalidated" };
   private presentationFrame: number | null = null;
-  private tier: LegendTier = "full";
+  private tier: LegendTier = "compact";
   private avoidBox: LegendBox | null = null;
   private pointed = false;
   private disposed = false;
@@ -299,7 +298,7 @@ export class Legend {
     this.regularBadge.hidden = true;
     this.statusAnchor.dataset.statusAnchor = "";
     this.ohlcLine.dataset.ohlcLine = "";
-    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.regularBadge, this.notice, this.statusAnchor);
+    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.regularBadge, this.price.row, this.notice, this.statusAnchor);
     this.name.setAttribute("role", "heading");
     this.name.setAttribute("aria-level", "2");
     this.notice.hidden = true;
@@ -309,7 +308,7 @@ export class Legend {
     this.price.fields.stalled.title = "실시간 시세가 멈췄습니다. 마지막으로 받은 값입니다.";
     this.venueAndOhlc.append(this.ohlc);
     this.ohlcLine.append(this.venueAndOhlc);
-    this.body.append(this.price.row, this.ohlcLine);
+    this.body.append(this.ohlcLine);
     this.root.append(this.head, this.body);
     parent.append(this.root);
     this.presentationResize = new ResizeObserver(() => this.fit("geometry"));
@@ -373,13 +372,8 @@ export class Legend {
 
   private mountPriceRow(): void {
     if (!this.display.showLegend) return;
-    if (this.tier === "full") {
-      this.body.prepend(this.price.row);
-      this.price.row.after(this.ohlcLine);
-    } else {
-      this.notice.before(this.price.row);
-      this.body.prepend(this.ohlcLine);
-    }
+    this.notice.before(this.price.row);
+    this.body.prepend(this.ohlcLine);
   }
 
   show(v: LegendBar | null, pointed = false): void {
@@ -669,9 +663,10 @@ export class Legend {
     group.append(ohlc);
     line.append(group);
     if (!this.display.showLegend) line.append(this.notice.cloneNode(true));
-    if (this.tier === "full") body.append(price.row);
-    else if (this.display.showLegend) head.append(price.row);
-    if (this.display.showLegend) body.append(line);
+    if (this.display.showLegend) {
+      head.append(price.row);
+      body.append(line);
+    }
     for (const projected of this.presentationHost.projectRows()) {
       body.append(projected.root);
       fields.push(...projected.fields);
@@ -685,7 +680,7 @@ export class Legend {
   private applyTier(tier: LegendTier, desktop: boolean): void {
     this.tier = tier;
     if (this.host.dataset.legendTier !== tier) this.host.dataset.legendTier = tier;
-    if (desktop && tier !== "full") {
+    if (desktop) {
       if (this.host.dataset.legendDensity !== "compact") this.host.dataset.legendDensity = "compact";
     } else delete this.host.dataset.legendDensity;
     this.presentationHost.applyTier(tier);
@@ -715,13 +710,7 @@ export class Legend {
     this.applyTier(legendTier({ chartWidth: chartBox.width, paneHeight: viewport.pricePane.height, phone: !inputs.desktop }), inputs.desktop);
     let measured = measureProjection();
     try {
-      const nextFromFull = this.tier === "full" && measured.content.bottom > paneBottom + 0.5 ? denserTier(this.tier) : null;
-      if (nextFromFull) {
-        measured.root.remove();
-        this.applyTier(nextFromFull, inputs.desktop);
-        measured = measureProjection();
-      }
-      const nextFromCompact = this.tier === "compact" && measured.content.right > plotRight + 0.5 ? denserTier(this.tier) : null;
+      const nextFromCompact = this.tier === "compact" && (measured.content.right > plotRight + 0.5 || measured.content.bottom > paneBottom + 0.5) ? denserTier(this.tier) : null;
       if (nextFromCompact) {
         measured.root.remove();
         this.applyTier(nextFromCompact, inputs.desktop);

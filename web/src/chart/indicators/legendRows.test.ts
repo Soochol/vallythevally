@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { indicatorsPinnedOpen, setIndicatorsPinnedOpen } from "../legendFold";
 import { TrackedValues } from "../legendShapes";
 import type { IndicatorRow } from "./layer";
-import { IndicatorLegend } from "./legendRows";
+import { HOVER_CLOSE_DELAY_MS, IndicatorLegend } from "./legendRows";
 
 class FakeElement {
   className = "";
@@ -18,6 +19,7 @@ class FakeElement {
   readonly children: FakeElement[] = [];
   parentElement: FakeElement | null = null;
   private readonly attributes = new Map<string, string>();
+  private readonly listeners = new Map<string, ((event: Record<string, unknown>) => void)[]>();
 
   constructor(readonly tagName: string) {}
 
@@ -37,7 +39,24 @@ class FakeElement {
   removeAttribute(name: string) { this.attributes.delete(name); }
   hasAttribute(name: string) { return this.attributes.has(name); }
   toggleAttribute(name: string, force: boolean) { if (force) this.attributes.set(name, ""); else this.attributes.delete(name); return force; }
-  addEventListener() {}
+  addEventListener(type: string, listener: (event: Record<string, unknown>) => void) {
+    const list = this.listeners.get(type) ?? [];
+    list.push(listener);
+    this.listeners.set(type, list);
+  }
+  removeEventListener(type: string, listener: (event: Record<string, unknown>) => void) {
+    const list = this.listeners.get(type);
+    if (!list) return;
+    const index = list.indexOf(listener);
+    if (index >= 0) list.splice(index, 1);
+  }
+  dispatch(type: string, event: Record<string, unknown> = {}) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+  contains(node: unknown): boolean {
+    if (node === this) return true;
+    return this.children.some((child) => child.contains(node));
+  }
   querySelectorAll() { return []; }
   getBoundingClientRect() { return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }; }
   closest() { return null; }
@@ -49,9 +68,14 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", FakeElement);
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   vi.stubGlobal("getComputedStyle", () => ({ marginTop: "0px" }));
+  setIndicatorsPinnedOpen(false);
 });
 
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.useRealTimers();
+  setIndicatorsPinnedOpen(false);
+  vi.unstubAllGlobals();
+});
 
 const movingAverage = (period: number): IndicatorRow => ({ id: `ma${period}`, name: `이동평균 ${period}`, color: "#000", values: [], state: "ok", panel: null });
 const volume = (panel: IndicatorRow["panel"]): IndicatorRow => ({ id: "volume", name: "거래량", color: "#000", values: [], state: "ok", panel });
@@ -139,4 +163,68 @@ test("비활성 패널 이동 화살표는 호버 없이 드러나지 않고, �
   expect("fade" in buttonOf("collapse").dataset).toBe(false);
   expect("fade" in buttonOf("up").dataset).toBe(true);
   expect("fade" in buttonOf("down").dataset).toBe(true);
+});
+
+test("접힌 지표 드롭다운은 이탈 유예 시간 동안 유지되고 목록에 다시 들어오면 닫힘을 취소한다", () => {
+  vi.useFakeTimers();
+  const legend = newLegend();
+  legend.render(MOVING_AVERAGES.slice(0, 4), []);
+  const box = legend.priceBox as unknown as FakeElement;
+  const fold = box.children[0]!;
+  const rowsBox = box.children[1]!;
+
+  expect(box.hasAttribute("data-folded")).toBe(true);
+  expect(box.hasAttribute("data-hover-open")).toBe(false);
+  expect("chartControl" in rowsBox.dataset).toBe(true);
+
+  fold.dispatch("pointerenter", { pointerType: "touch" });
+  expect(box.hasAttribute("data-hover-open")).toBe(false);
+
+  fold.dispatch("pointerenter", { pointerType: "mouse" });
+  expect(box.hasAttribute("data-hover-open")).toBe(true);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+
+  box.dispatch("pointerleave", { pointerType: "mouse" });
+  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS - 40);
+  expect(box.hasAttribute("data-hover-open")).toBe(true);
+
+  rowsBox.dispatch("pointerenter", { pointerType: "mouse" });
+  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS * 2);
+  expect(box.hasAttribute("data-hover-open")).toBe(true);
+
+  box.dispatch("pointerleave", { pointerType: "mouse" });
+  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS);
+  expect(box.hasAttribute("data-hover-open")).toBe(false);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  legend.dispose();
+});
+
+test("접힌 지표 버튼 클릭은 드롭다운만 고정하고 하단 항상 펼치기 버튼이 전역 펼침을 켠다", () => {
+  vi.useFakeTimers();
+  const legend = newLegend();
+  legend.render(MOVING_AVERAGES.slice(0, 4), []);
+  const box = legend.priceBox as unknown as FakeElement;
+  const fold = box.children[0]!;
+  const rowsBox = box.children[1]!;
+  const pinBar = rowsBox.children.at(-1)!;
+  const pinButton = pinBar.children[0]!;
+
+  expect(pinBar.hidden).toBe(false);
+  fold.dispatch("click");
+  expect(box.hasAttribute("data-open")).toBe(true);
+  expect(indicatorsPinnedOpen()).toBe(false);
+
+  box.dispatch("pointerleave", { pointerType: "mouse" });
+  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS * 2);
+  expect(box.hasAttribute("data-open")).toBe(true);
+
+  pinButton.dispatch("click");
+  expect(indicatorsPinnedOpen()).toBe(true);
+  expect(box.hasAttribute("data-folded")).toBe(false);
+  expect(pinBar.hidden).toBe(true);
+
+  fold.dispatch("click");
+  expect(indicatorsPinnedOpen()).toBe(false);
+  expect(box.hasAttribute("data-folded")).toBe(true);
+  legend.dispose();
 });

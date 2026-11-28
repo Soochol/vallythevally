@@ -57,7 +57,7 @@ async function frames(page: Page, count = 12) {
 async function ready(page: Page, n = 1) {
   await expect(cell(page, n)).toHaveAttribute("aria-busy", "false");
   await expect(chartOf(cell(page, n))).toHaveAttribute("data-bar-count", /^[1-9]\d*$/);
-  await expect(page.locator("[data-legend-tier]").nth(n - 1)).toHaveAttribute("data-legend-tier", /^(full|compact|minimal)$/);
+  await expect(page.locator("[data-legend-tier]").nth(n - 1)).toHaveAttribute("data-legend-tier", /^(compact|minimal)$/);
   await frames(page, 24);
 }
 
@@ -139,10 +139,10 @@ test("1440px 한 칸에 지표 일곱 개를 띄워도 봉이 범례 아래 끝 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await ready(page);
-  await expect(page.locator("[data-legend-tier]").first()).toHaveAttribute("data-legend-tier", "full");
+  await expect(page.locator("[data-legend-tier]").first()).toHaveAttribute("data-legend-tier", "compact");
   await expect(cell(page).getByRole("button", { name: /^지표 7/ })).toBeVisible();
   const measured = await stable(page);
-  expect(measured.tier).toBe("full");
+  expect(measured.tier).toBe("compact");
   const legendBottom = measured.legend.bottom - measured.chart.y;
   expect(measured.topMargin * measured.paneHeight).toBeGreaterThanOrEqual(legendBottom);
   expect(measured.topBarY).not.toBeNull();
@@ -293,4 +293,65 @@ test("390px 휴대폰에서 지표 넷을 띄워도 봉이 보이는 가격 패�
   const visible = measured.paneHeight * (1 - measured.topMargin - measured.bottomMargin);
   expect(visible).toBeGreaterThanOrEqual(measured.legend.height * 2);
   await expect(cell(page).getByRole("button", { name: /^지표 4/ })).toBeVisible();
+});
+
+test("일봉과 분봉 차트 범례가 동일한 1줄 헤더로 통일되고 시고저종이 항상 보이며 량은 표시되지 않는다", async ({ page, scenario }) => {
+  await page.addInitScript(installChartProbe);
+  seedCharts(scenario, [chartWindow("cell-0", { indicators: movingAverages(2) }, "D"), chartWindow("cell-1", { indicators: movingAverages(2) }, "5m")], { rows: [["cell-0", "cell-1"]] });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await ready(page, 1);
+  await ready(page, 2);
+  for (const n of [1, 2]) {
+    const current = cell(page, n);
+    await expect(page.locator("[data-legend-tier]").nth(n - 1)).toHaveAttribute("data-legend-tier", "compact");
+    await expect(current.locator("[data-legend-head] [data-price-row]")).toBeVisible();
+    const ohlc = current.locator("[data-ohlc]");
+    await expect(ohlc).toBeVisible();
+    await expect(ohlc.locator(":scope > span")).toHaveCount(4);
+    await expect(ohlc).toContainText(/시.+고.+저.+종/);
+    await expect(ohlc).not.toContainText("량");
+    await expect(current.locator('[data-indicator-row="ma5"] > [data-indicator-edit]')).toBeVisible();
+  }
+});
+
+test("접힌 지표 4개에서 대각선·행간 이동해도 닫히지 않고 클릭 고정과 항상 펼치기가 동작한다", async ({ page, scenario }) => {
+  await page.addInitScript(installChartProbe);
+  seedCharts(scenario, [chartWindow("cell-0", { indicators: movingAverages(4) }, "D")]);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await ready(page);
+  const current = cell(page);
+  const foldBox = current.locator("[data-indicator-fold-box]");
+  const pill = current.getByRole("button", { name: /^지표 4/ });
+  await expect(foldBox).toHaveAttribute("data-folded", "");
+  await pill.hover();
+  await expect(foldBox).toHaveAttribute("data-hover-open", "");
+  const thirdRow = current.locator('[data-indicator-row="ma20"]');
+  await expect(thirdRow).toBeVisible();
+  const pillBox = await pill.boundingBox();
+  const hideBtn = thirdRow.getByRole("button", { name: /숨기기/ });
+  const hideBox = await hideBtn.boundingBox();
+  if (!pillBox || !hideBox) throw new Error("지표 드롭다운 좌표가 없습니다");
+  await page.mouse.move(pillBox.x + pillBox.width / 2, pillBox.y + pillBox.height / 2);
+  await page.mouse.move(hideBox.x + hideBox.width / 2, hideBox.y + hideBox.height / 2, { steps: 6 });
+  await expect(thirdRow).toBeVisible();
+  await hideBtn.click();
+  await expect(thirdRow.getByRole("button", { name: /보이기/ })).toHaveCount(1);
+
+  await page.mouse.move(0, 0);
+  await expect(foldBox).not.toHaveAttribute("data-hover-open", "");
+
+  await pill.click();
+  await page.mouse.move(0, 0);
+  await expect(foldBox).toHaveAttribute("data-open", "");
+  await expect(thirdRow).toBeVisible();
+  const pinBtn = current.getByRole("button", { name: "항상 펼치기", exact: true });
+  await expect(pinBtn).toBeVisible();
+  await pinBtn.click();
+  await expect(foldBox).not.toHaveAttribute("data-folded", "");
+  await expect(thirdRow).toBeVisible();
+
+  await pill.click();
+  await expect(foldBox).toHaveAttribute("data-folded", "");
 });
