@@ -99,6 +99,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const windowVisible = useWindowVisible();
   const sectionEl = useRef<HTMLElement>(null);
   const chartEl = useRef<HTMLDivElement>(null);
+  const badgeHostEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
   const [cellWidth, setCellWidth] = useState(0);
   const [editing, setEditing] = useState<{ initial: IndicatorConfig; anchor: HTMLElement } | null>(null);
@@ -120,17 +121,20 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, []);
 
   const dockLayout = cellDock !== null ? chartDockLayoutFor(cellWidth) : null;
-  const chartBoxClass = dockLayout === "wide"
-    ? "isolate absolute inset-y-0 left-0 right-[var(--size-320)]"
+  const chartInsetClass = dockLayout === "wide"
+    ? "absolute inset-y-0 left-0 right-[var(--size-320)]"
     : dockLayout === "compact"
-      ? "isolate absolute inset-y-0 left-0 right-[var(--size-268)]"
-      : "isolate absolute inset-0";
+      ? "absolute inset-y-0 left-0 right-[var(--size-268)]"
+      : "absolute inset-0";
+  const chartBoxClass = `isolate ${chartInsetClass}`;
+  const badgeHostClass = `pointer-events-none ${chartInsetClass} ${status.kind === "ready" ? "z-[6]" : "z-[15]"}`;
 
   useEffect(() => {
     const c = new ChartController(chartEl.current!, {
       tokens: readThemeTokens(),
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
+      badgeHost: badgeHostEl.current!,
       onIndicatorCommand: (id, command, anchor) => {
         if (command !== "edit") return runIndicatorCommand(cellIdRef.current, id, command);
         const selection = useSelectionStore.getState();
@@ -269,12 +273,13 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
           </button>
         </div>
       )}
-      {notice && <BeforeConnectCard notice={notice} />}
       {error && (
         <div className="absolute inset-0 z-[15] grid place-items-center bg-chart-bg p-6">
           <CellState view={error} onAction={runCellAction} />
         </div>
       )}
+      <div ref={badgeHostEl} className={badgeHostClass} />
+      {notice && <BeforeConnectCard notice={notice} />}
       <ChartRightDock cellId={cellId} hostRef={sectionEl} />
     </section>
   );
