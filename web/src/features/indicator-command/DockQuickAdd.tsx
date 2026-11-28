@@ -7,11 +7,19 @@ import { CloseIcon, PlusIcon, SearchIcon } from "../icons";
 import { checkForm, draftStyle, nextColor, startDraft } from "../indicator-dialog/indicatorForm";
 import { useValidator } from "../indicator-dialog/IndicatorSettingsForm";
 import { addIndicatorCommand } from "./execute";
-import { ADD_CATEGORIES, candidateGroup, indicatorPeriodBadge, matchesCategory, type AddCategory } from "./model";
+import { ADD_CATEGORIES, BELOW_GROUP, candidateGroup, FINANCIAL_GROUP, indicatorPeriodBadge, matchesCategory, PRICE_GROUP, QUOTE_GROUP, type AddCategory } from "./model";
 import { parseIndicatorInput, type IndicatorCandidate } from "./parseInput";
 import { useIndicatorPreview } from "./preview";
 
 const QUICK_MA_PERIODS = [5, 10, 20, 60, 120, 240] as const;
+
+function zoneTagLabel(group: string): string {
+  if (group === PRICE_GROUP) return "가격";
+  if (group === BELOW_GROUP) return "아래";
+  if (group === QUOTE_GROUP) return "호가";
+  if (group === FINANCIAL_GROUP) return "재무";
+  return "";
+}
 
 export interface DockQuickAddProps {
   cellId: WindowId;
@@ -20,7 +28,7 @@ export interface DockQuickAddProps {
   category: AddCategory;
   onOpenChange(open: boolean): void;
   onCategoryChange(category: AddCategory): void;
-  onAdded(createdId: string, kind: IndicatorKind): void;
+  onAdded(createdId: string, kind: IndicatorKind, keepOpen: boolean): void;
   onSelectMaGroup(): void;
   inputRef: React.RefObject<HTMLInputElement | null>;
 }
@@ -90,17 +98,6 @@ export function DockQuickAdd({
 
   useEffect(() => () => useIndicatorPreview.getState().set(cellId, null), [cellId]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && event.target instanceof Node && !rootRef.current.contains(event.target)) {
-        onOpenChange(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open, onOpenChange]);
-
   const countByKind = useMemo(() => {
     const map = new Map<IndicatorKind, number>();
     for (const item of indicators) map.set(item.spec.kind, (map.get(item.spec.kind) ?? 0) + 1);
@@ -124,17 +121,15 @@ export function DockQuickAdd({
     const createdId = addIndicatorCommand(cellId, spec, style, baseDraft.placement);
     if (!createdId) return;
     useIndicatorPreview.getState().set(cellId, null);
-    onAdded(createdId, candidate.kind);
     setQuery("");
     if (!keepOpen) {
-      onOpenChange(false);
       inputRef.current?.blur();
     }
+    onAdded(createdId, candidate.kind, keepOpen);
   };
 
   const quickToggleMaPeriod = (period: number) => {
     if (activeMaPeriods.has(period)) {
-      onOpenChange(false);
       onSelectMaGroup();
       return;
     }
@@ -142,78 +137,81 @@ export function DockQuickAdd({
     const color = nextColor(indicators);
     const createdId = useLayoutStore.getState().addIndicator(cellId, spec, { colors: colorsFrom(spec, color), width: 1 }, "price");
     if (createdId) {
-      onAdded(createdId, "ma");
+      onAdded(createdId, "ma", false);
     }
+  };
+
+  const closeQuickAdd = () => {
+    setQuery("");
+    onOpenChange(false);
+    inputRef.current?.blur();
   };
 
   return (
     <div ref={rootRef} className="b3-quick-add" data-open={open || undefined}>
-      <label className="b3-search-box">
-        <SearchIcon size={13} />
-        <input
-          ref={inputRef}
-          type="search"
-          role="combobox"
-          aria-label="지표 빠른 추가"
-          aria-expanded={open}
-          aria-controls={listId}
-          value={query}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="지표 추가 · 예: 이평 120, rsi 14"
-          onFocus={() => onOpenChange(true)}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            if (!open) onOpenChange(true);
-          }}
-          onKeyDown={(e) => {
-            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-            if (e.key === "Escape") {
-              e.stopPropagation();
-              if (query !== "") setQuery("");
-              else {
-                onOpenChange(false);
-                inputRef.current?.blur();
-              }
-              return;
-            }
-            if (e.key === "ArrowDown" && candidates.length > 0) {
-              e.preventDefault();
-              setActiveIndex((prev) => (prev + 1) % candidates.length);
-              return;
-            }
-            if (e.key === "ArrowUp" && candidates.length > 0) {
-              e.preventDefault();
-              setActiveIndex((prev) => (prev - 1 + candidates.length) % candidates.length);
-              return;
-            }
-            if (e.key === "Enter" && activeCandidate) {
-              e.preventDefault();
-              commitCandidate(activeCandidate, e.shiftKey);
-            }
-          }}
-        />
-        {query !== "" ? (
-          <button
-            type="button"
-            className="ic-search-clear"
-            aria-label="입력 지우기"
-            onClick={() => {
-              setQuery("");
-              inputRef.current?.focus();
+      <div className="b3-quick-search-wrap">
+        <label className="b3-search-box">
+          <SearchIcon size={13} />
+          <input
+            ref={inputRef}
+            type="search"
+            role="combobox"
+            aria-label="지표 빠른 추가"
+            aria-expanded={open}
+            aria-controls={listId}
+            value={query}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="지표 추가 · 예: 이평 120, rsi 14"
+            onFocus={() => onOpenChange(true)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (!open) onOpenChange(true);
             }}
-          >
-            <CloseIcon size={11} />
-          </button>
-        ) : (
-          <span aria-hidden="true" className="b3-kbd-hint">+</span>
-        )}
-      </label>
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                if (query !== "") setQuery("");
+                else closeQuickAdd();
+                return;
+              }
+              if (e.key === "ArrowDown" && candidates.length > 0) {
+                e.preventDefault();
+                setActiveIndex((prev) => (prev + 1) % candidates.length);
+                return;
+              }
+              if (e.key === "ArrowUp" && candidates.length > 0) {
+                e.preventDefault();
+                setActiveIndex((prev) => (prev - 1 + candidates.length) % candidates.length);
+                return;
+              }
+              if (e.key === "Enter" && activeCandidate) {
+                e.preventDefault();
+                commitCandidate(activeCandidate, e.shiftKey);
+              }
+            }}
+          />
+          {query !== "" && (
+            <button
+              type="button"
+              className="ic-search-clear"
+              aria-label="입력 지우기"
+              onClick={() => {
+                setQuery("");
+                inputRef.current?.focus();
+              }}
+            >
+              <CloseIcon size={11} />
+            </button>
+          )}
+        </label>
+      </div>
 
       {open && (
         <div className="b3-quick-tray" role="region" aria-label="지표 빠른 추가 목록">
           {!hasQuery && (
-            <>
+            <div className="b3-quick-filters">
               <div className="b3-quick-ma">
                 <span className="b3-quick-ma-label">이평선</span>
                 <div className="b3-quick-ma-chips" role="group" aria-label="이동평균 기간 빠른 추가">
@@ -248,7 +246,7 @@ export function DockQuickAdd({
                   </button>
                 ))}
               </div>
-            </>
+            </div>
           )}
 
           <ul id={listId} role="listbox" aria-label="추가할 지표" className="b3-quick-list">
@@ -258,6 +256,7 @@ export function DockQuickAdd({
               candidates.map((candidate, index) => {
                 const count = countByKind.get(candidate.kind) ?? 0;
                 const badge = indicatorPeriodBadge(candidate.kind);
+                const zone = zoneTagLabel(candidateGroup(candidate));
                 const invalid = candidate.errors.length > 0;
                 const selected = index === Math.min(activeIndex, candidates.length - 1);
                 return (
@@ -274,6 +273,7 @@ export function DockQuickAdd({
                       <span className="b3-quick-item-name">
                         {hasQuery ? candidate.label : KINDS[candidate.kind].label}
                       </span>
+                      {zone && <span className="b3-quick-zone">{zone}</span>}
                       {badge && <span className="ui-badge" data-tone="warning">{badge}</span>}
                       {count > 0 && <span className="b3-quick-count">{count}개</span>}
                       <span className="b3-quick-plus" aria-hidden="true"><PlusIcon size={12} /></span>
@@ -284,12 +284,16 @@ export function DockQuickAdd({
             )}
           </ul>
 
-          {hasQuery && activeCandidate && (
-            <div className="b3-quick-foot">
-              <span>{activeCandidate.errors[0]?.message ?? "차트 미리보기 적용 중"}</span>
-              <span className="b3-quick-hint">Enter 추가 · Shift+Enter 연속</span>
-            </div>
-          )}
+          <div className="b3-quick-foot">
+            <span>
+              {hasQuery && activeCandidate
+                ? (activeCandidate.errors[0]?.message ?? "차트 미리보기 · Enter 추가")
+                : "Enter 추가 · Shift+Enter 연속"}
+            </span>
+            <button type="button" className="b3-quick-done" onClick={closeQuickAdd}>
+              완료
+            </button>
+          </div>
         </div>
       )}
     </div>

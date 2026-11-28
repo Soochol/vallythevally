@@ -358,3 +358,6 @@ export const LockIcon = ({ size = 14 }: P) => (
     <path d="M8 11V8a4 4 0 0 1 8 0v3" />
   </Icon>
 );
+export const TrashIcon = ({ size = 14 }: P) => <Icon size={size} path={DRAWING_ICONS.trash} />;
+export const ArrowLeftIcon = ({ size = 14 }: P) => <Icon size={size} path="M19 12H5M11 6l-6 6 6 6" />;
+export const ChevronRightIcon = ({ size = 12 }: P) => <Icon size={size} path="m9 6 6 6-6 6" />;

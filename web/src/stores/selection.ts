@@ -31,7 +31,7 @@ export type Dialog =
   | { kind: "hotkey-sheet" }
   | { kind: "system-settings"; menu: SystemMenuId | null };
 export type InspectorRequest = { cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null };
-export type ChartDockState = { cellId: WindowId; mode: ChartDockMode; indicatorId: string | null; snapped: boolean };
+export type ChartDockState = { cellId: WindowId; mode: ChartDockMode; indicatorId: string | null };
 export type PhoneTab = "chart" | "watch" | "screener";
 
 /** 저장하지 않는 화면 상태(frontend.md §5.3). */
@@ -50,8 +50,8 @@ interface SelectionState {
   openIndicatorDialog(cellId: WindowId, mode: ChartPanelMode, indicatorId: string | null): void;
   setIndicatorDialogMode(mode: ChartPanelMode): void;
   openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
-  openChartDock(cellId: WindowId, mode: ChartDockMode, indicatorId: string | null, snapped?: boolean): void;
-  setChartDockSnapped(snapped: boolean): void;
+  openChartDock(cellId: WindowId, mode: ChartDockMode, indicatorId: string | null): void;
+  toggleChartDock(cellId: WindowId): void;
   selectChartDockIndicator(indicatorId: string | null): void;
   closeChartDock(): void;
   takeInspectorRequest(): InspectorRequest | null;
@@ -91,17 +91,16 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     useLayoutStore.getState().showWindow("indicators");
     if (!useLayoutStore.getState().layout.windows.some((w) => w.kind === "indicators")) set({ inspector: null, dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } });
   },
-  openChartDock: (cellId, mode, indicatorId, snapped) => set((s) => ({
+  openChartDock: (cellId, mode, indicatorId) => set({
     dialog: null,
     activeCell: cellId,
-    chartDock: {
-      cellId,
-      mode,
-      indicatorId,
-      snapped: snapped ?? (s.chartDock?.cellId === cellId ? s.chartDock.snapped : true),
-    },
-  })),
-  setChartDockSnapped: (snapped) => set((s) => (s.chartDock ? { chartDock: { ...s.chartDock, snapped } } : s)),
+    chartDock: { cellId, mode, indicatorId },
+  }),
+  toggleChartDock: (cellId) => set((s) => (
+    s.chartDock?.cellId === cellId
+      ? { chartDock: null }
+      : { dialog: null, activeCell: cellId, chartDock: { cellId, mode: defaultIndicatorMode(cellId), indicatorId: null } }
+  )),
   selectChartDockIndicator: (indicatorId) => set((s) => (s.chartDock ? { chartDock: { ...s.chartDock, indicatorId } } : s)),
   closeChartDock: () => set({ chartDock: null }),
   takeInspectorRequest: () => {

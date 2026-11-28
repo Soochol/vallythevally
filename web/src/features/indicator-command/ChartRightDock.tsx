@@ -1,13 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { IndicatorKind } from "../../chart/indicators/kinds";
 import type { WindowId } from "../../layout/kinds";
 import { symbolSub } from "../../lib/symbol";
 import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
-import { useCell } from "../../stores/layout";
-import { defaultIndicatorMode, useSelectionStore, type ChartDockMode, type ChartPanelMode } from "../../stores/selection";
+import { useCell, useLayoutStore } from "../../stores/layout";
+import { defaultIndicatorMode, useSelectionStore, type ChartDockMode } from "../../stores/selection";
 import { ChartSettingsSections } from "../chart-settings/ChartSettingsDialog";
 import { ObjectTreeBody } from "../drawings/ObjectTree";
-import { CloseIcon, Icon, SearchIcon } from "../icons";
+import { CloseIcon, MoreIcon, SearchIcon } from "../icons";
+import { isMaConfig } from "../indicator-dialog/MaGroupEditor";
+import { removeIndicatorsWithUndo } from "../indicator-inspector/removalUndo";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { CompareSection } from "./CompareSection";
 import { DockLayerList, type DockSelectionTarget } from "./DockLayerList";
@@ -16,25 +18,24 @@ import { DockQuickAdd } from "./DockQuickAdd";
 import type { AddCategory } from "./model";
 import { useIndicatorCommand } from "./useIndicatorCommand";
 
-export const CHART_DOCK_MIN_WIDTH = 640;
-const DETAIL_NARROW_WIDTH = 660;
+export const CHART_DOCK_WIDE_MIN = 600;
+export const CHART_DOCK_COMPACT_MIN = 480;
+export type ChartDockLayout = "wide" | "compact" | "overlay";
+
 const MA_GROUP_SENTINEL = "__ma_group__";
 
 type DockTab = "layers" | "drawings" | "chart";
+
+export function chartDockLayoutFor(cellWidth: number): ChartDockLayout {
+  if (cellWidth === 0 || cellWidth >= CHART_DOCK_WIDE_MIN) return "wide";
+  if (cellWidth >= CHART_DOCK_COMPACT_MIN) return "compact";
+  return "overlay";
+}
 
 function tabOfMode(mode: ChartDockMode): DockTab {
   if (mode === "drawings") return "drawings";
   if (mode === "settings" || mode === "compare") return "chart";
   return "layers";
-}
-
-function DockRightPinIcon({ size = 13 }: { size?: number }) {
-  return (
-    <Icon size={size}>
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M14 4v16" />
-    </Icon>
-  );
 }
 
 function DockCompareBody({ cellId }: { cellId: WindowId }) {
@@ -45,7 +46,7 @@ function DockCompareBody({ cellId }: { cellId: WindowId }) {
 
   return (
     <div className="b3-compare-tab">
-      <label className="ic-search cd-search">
+      <label className="b3-search-box b3-compare-search">
         <SearchIcon size={14} />
         <input
           ref={inputRef}
@@ -57,6 +58,19 @@ function DockCompareBody({ cellId }: { cellId: WindowId }) {
           placeholder="비교할 종목 이름·코드"
           onChange={(e) => command.type(e.target.value)}
         />
+        {input !== "" && (
+          <button
+            type="button"
+            className="ic-search-clear"
+            aria-label="입력 지우기"
+            onClick={() => {
+              command.type("");
+              inputRef.current?.focus();
+            }}
+          >
+            <CloseIcon size={11} />
+          </button>
+        )}
       </label>
       <CompareSection cellId={cellId} button={compareButton} className="cd-compare-top" />
       <ul className="cd-list">
@@ -123,39 +137,26 @@ export function ChartRightDock({ cellId, hostRef }: { cellId: WindowId; hostRef:
 
   if (!active) return null;
 
-  const canSnap = cellWidth === 0 || cellWidth >= CHART_DOCK_MIN_WIDTH;
-  const isSnapped = active.snapped && canSnap;
-  const narrow = cellWidth > 0 && cellWidth < DETAIL_NARROW_WIDTH;
-
   return (
     <ChartRightDockBody
       cellId={cellId}
-      hostRef={hostRef}
       mode={active.mode}
       indicatorId={active.indicatorId}
-      isSnapped={isSnapped}
-      canSnap={canSnap}
-      narrow={narrow}
+      layout={chartDockLayoutFor(cellWidth)}
     />
   );
 }
 
 function ChartRightDockBody({
   cellId,
-  hostRef,
   mode,
   indicatorId,
-  isSnapped,
-  canSnap,
-  narrow,
+  layout,
 }: {
   cellId: WindowId;
-  hostRef: React.RefObject<HTMLElement | null>;
   mode: ChartDockMode;
   indicatorId: string | null;
-  isSnapped: boolean;
-  canSnap: boolean;
-  narrow: boolean;
+  layout: ChartDockLayout;
 }) {
   const cell = useCell(cellId);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -163,6 +164,7 @@ function ChartRightDockBody({
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [chartSubTab, setChartSubTab] = useState<"settings" | "compare">(() => (mode === "compare" ? "compare" : "settings"));
   const quickInputRef = useRef<HTMLInputElement>(null);
+  const cleanupRef = useRef<HTMLDivElement>(null);
 
   const tab = tabOfMode(mode);
 
@@ -171,10 +173,38 @@ function ChartRightDockBody({
     else if (mode === "settings") setChartSubTab("settings");
   }, [mode]);
 
+  useEffect(() => {
+    if (!cleanupOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (cleanupRef.current && event.target instanceof Node && !cleanupRef.current.contains(event.target)) {
+        setCleanupOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [cleanupOpen]);
+
+  const maLines = useMemo(() => cell.chartSettings.indicators.filter(isMaConfig), [cell.chartSettings.indicators]);
+  const hiddenIndicators = useMemo(
+    () => cell.chartSettings.indicators.filter((item) => !item.visible),
+    [cell.chartSettings.indicators],
+  );
+  const subPanels = useMemo(
+    () =>
+      cell.chartSettings.panels
+        .map((panel) => ({
+          panel,
+          members: cell.chartSettings.indicators.filter((item) => item.panel === panel.id),
+        }))
+        .filter((entry) => entry.members.length > 0),
+    [cell.chartSettings.panels, cell.chartSettings.indicators],
+  );
+  const allSubPanelsCollapsed = subPanels.length > 0 && subPanels.every((entry) => entry.panel.collapsed);
+
   const selectedTarget: DockSelectionTarget = (() => {
     if (tab !== "layers" || !indicatorId) return null;
     if (indicatorId === MA_GROUP_SENTINEL) {
-      return cell.chartSettings.indicators.some((item) => item.spec.kind === "ma") ? { kind: "maGroup" } : null;
+      return maLines.length > 0 ? { kind: "maGroup" } : null;
     }
     const found = cell.chartSettings.indicators.find((item) => item.id === indicatorId);
     if (!found) return null;
@@ -185,19 +215,6 @@ function ChartRightDockBody({
     const nextId = target === null ? null : target.kind === "maGroup" ? MA_GROUP_SENTINEL : target.id;
     useSelectionStore.getState().selectChartDockIndicator(nextId);
   };
-
-  useEffect(() => {
-    if (!selectedTarget) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      if (!hostRef.current?.contains(target)) return;
-      if (target.closest("[data-chart-control], .ui-popover, [role='dialog']")) return;
-      setSelectedTarget(null);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [selectedTarget, hostRef]);
 
   const switchTab = (next: DockTab) => {
     setQuickAddOpen(false);
@@ -212,12 +229,16 @@ function ChartRightDockBody({
   };
 
   const openQuickAdd = (category: AddCategory) => {
+    setSelectedTarget(null);
+    setCleanupOpen(false);
     setQuickAddCategory(category);
     setQuickAddOpen(true);
-    quickInputRef.current?.focus();
+    requestAnimationFrame(() => quickInputRef.current?.focus());
   };
 
-  const handleAdded = (createdId: string, kind: IndicatorKind) => {
+  const handleAdded = (createdId: string, kind: IndicatorKind, keepOpen: boolean) => {
+    if (keepOpen) return;
+    setQuickAddOpen(false);
     if (kind === "ma") {
       setSelectedTarget({ kind: "maGroup" });
       return;
@@ -225,8 +246,32 @@ function ChartRightDockBody({
     setSelectedTarget({ kind: "indicator", id: createdId });
   };
 
-  const modalMode: ChartPanelMode = mode === "drawings" ? defaultIndicatorMode(cellId) : mode;
-  const modalIndicatorId = selectedTarget?.kind === "indicator" ? selectedTarget.id : null;
+  const toggleAllSubPanels = () => {
+    const store = useLayoutStore.getState();
+    for (const entry of subPanels) {
+      if (entry.panel.collapsed !== !allSubPanelsCollapsed) {
+        store.togglePanel(cellId, entry.panel.id);
+      }
+    }
+    setCleanupOpen(false);
+  };
+
+  const showAllHidden = () => {
+    const store = useLayoutStore.getState();
+    for (const item of hiddenIndicators) store.updateIndicator(cellId, item.id, { visible: true });
+    setCleanupOpen(false);
+  };
+
+  const removeAllHidden = () => {
+    if (selectedTarget?.kind === "indicator" && hiddenIndicators.some((item) => item.id === selectedTarget.id)) {
+      setSelectedTarget(null);
+    }
+    if (selectedTarget?.kind === "maGroup" && maLines.length > 0 && maLines.every((item) => !item.visible)) {
+      setSelectedTarget(null);
+    }
+    removeIndicatorsWithUndo(cellId, hiddenIndicators, `숨긴 지표 ${hiddenIndicators.length}개를 지웠습니다`);
+    setCleanupOpen(false);
+  };
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -247,76 +292,77 @@ function ChartRightDockBody({
       if (selectedTarget) {
         event.preventDefault();
         setSelectedTarget(null);
-        return;
-      }
-      if (!isSnapped) {
-        event.preventDefault();
-        useSelectionStore.getState().closeChartDock();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [quickAddOpen, cleanupOpen, selectedTarget, isSnapped]);
+  }, [quickAddOpen, cleanupOpen, selectedTarget]);
+
+  const showCleanupButton = tab === "layers" && !selectedTarget && !quickAddOpen;
 
   return (
-    <div
-      className="b3-dock-cluster"
-      data-snapped={isSnapped ? "true" : "false"}
-      data-detail-open={selectedTarget ? "true" : "false"}
-      data-narrow={narrow ? "true" : "false"}
+    <aside
+      data-chart-control=""
+      data-layout={layout}
+      aria-label="차트 우측 설정 패널"
+      className="b3-master"
     >
-      {selectedTarget && (
-        <DockLeftDetail
-          cellId={cellId}
-          target={selectedTarget}
-          indicators={cell.chartSettings.indicators}
-          narrow={narrow}
-          onClose={() => setSelectedTarget(null)}
-        />
-      )}
+      <header className="b3-head">
+        <div role="group" aria-label="차트 설정 영역" className="ic-section-seg b3-seg">
+          <button type="button" aria-pressed={tab === "layers"} onClick={() => switchTab("layers")}>레이어</button>
+          <button type="button" aria-pressed={tab === "drawings"} onClick={() => switchTab("drawings")}>드로잉</button>
+          <button type="button" aria-label="차트 설정" aria-pressed={tab === "chart"} onClick={() => switchTab("chart")}>차트</button>
+        </div>
+        <div className="b3-head-actions">
+          {showCleanupButton && (
+            <div ref={cleanupRef} className="b3-cleanup-wrap">
+              <button
+                type="button"
+                className="icon-btn size-6"
+                aria-label="레이어 정리 메뉴"
+                aria-expanded={cleanupOpen}
+                title="레이어 정리"
+                onClick={() => setCleanupOpen((open) => !open)}
+              >
+                <MoreIcon size={14} />
+              </button>
+              {cleanupOpen && (
+                <div className="b3-cleanup-menu" role="menu" aria-label="레이어 정리">
+                  <button type="button" role="menuitem" disabled={subPanels.length === 0} onClick={toggleAllSubPanels}>
+                    {allSubPanelsCollapsed ? "아래 패널 모두 펼치기" : "아래 패널 모두 접기"}
+                  </button>
+                  <button type="button" role="menuitem" disabled={hiddenIndicators.length === 0} onClick={showAllHidden}>
+                    숨긴 지표 모두 보이기 ({hiddenIndicators.length})
+                  </button>
+                  <button type="button" role="menuitem" className="b3-cleanup-danger" disabled={hiddenIndicators.length === 0} onClick={removeAllHidden}>
+                    숨긴 지표 모두 삭제 ({hiddenIndicators.length})
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            type="button"
+            className="icon-btn size-6"
+            aria-label="닫기"
+            title="닫기"
+            onClick={() => useSelectionStore.getState().closeChartDock()}
+          >
+            <CloseIcon size={14} />
+          </button>
+        </div>
+      </header>
 
-      <aside data-chart-control="" aria-label="차트 우측 설정 패널" className="b3-master">
-        <header className="b3-head">
-          <div role="group" aria-label="차트 설정 영역" className="ic-section-seg b3-seg">
-            <button type="button" aria-pressed={tab === "layers"} onClick={() => switchTab("layers")}>레이어</button>
-            <button type="button" aria-pressed={tab === "drawings"} onClick={() => switchTab("drawings")}>드로잉</button>
-            <button type="button" aria-label="차트 설정" aria-pressed={tab === "chart"} onClick={() => switchTab("chart")}>차트</button>
-          </div>
-          <div className="b3-head-actions">
-            <button
-              type="button"
-              className="b3-snap-btn"
-              disabled={!canSnap}
-              aria-pressed={isSnapped}
-              aria-label={isSnapped ? "글래스 피크로 전환" : "우측 고정 도킹"}
-              title={!canSnap ? "좁은 차트에서는 글래스 피크로 표시됩니다" : isSnapped ? "글래스 피크로 전환 (차트 폭 유지)" : "우측에 고정 도킹"}
-              onClick={() => useSelectionStore.getState().setChartDockSnapped(!isSnapped)}
-            >
-              <DockRightPinIcon size={12} />
-              <span>{isSnapped ? "고정" : "피크"}</span>
-            </button>
-            <button
-              type="button"
-              className="cd-mode-btn"
-              aria-label="가운데 모달로 전환"
-              title="가운데 모달로 전환"
-              onClick={() => useSelectionStore.getState().openIndicatorDialog(cellId, modalMode, modalIndicatorId)}
-            >
-              모달
-            </button>
-            <button
-              type="button"
-              className="icon-btn size-6"
-              aria-label="닫기"
-              title="닫기"
-              onClick={() => useSelectionStore.getState().closeChartDock()}
-            >
-              <CloseIcon size={14} />
-            </button>
-          </div>
-        </header>
-
-        {tab === "layers" && (
+      {tab === "layers" && (
+        selectedTarget ? (
+          <DockLeftDetail
+            cellId={cellId}
+            target={selectedTarget}
+            indicators={cell.chartSettings.indicators}
+            onSelectTarget={setSelectedTarget}
+            onClose={() => setSelectedTarget(null)}
+          />
+        ) : (
           <div className="b3-layers-tab">
             <DockQuickAdd
               cellId={cellId}
@@ -326,62 +372,64 @@ function ChartRightDockBody({
               onOpenChange={setQuickAddOpen}
               onCategoryChange={setQuickAddCategory}
               onAdded={handleAdded}
-              onSelectMaGroup={() => setSelectedTarget({ kind: "maGroup" })}
+              onSelectMaGroup={() => {
+                setQuickAddOpen(false);
+                setSelectedTarget({ kind: "maGroup" });
+              }}
               inputRef={quickInputRef}
             />
-            <DockLayerList
-              cellId={cellId}
-              settings={cell.chartSettings}
-              selectedTarget={selectedTarget}
-              isSnapped={isSnapped}
-              onSelectTarget={setSelectedTarget}
-              onOpenQuickAdd={openQuickAdd}
-              cleanupOpen={cleanupOpen}
-              onCleanupOpenChange={setCleanupOpen}
-            />
-          </div>
-        )}
-
-        {tab === "drawings" && (
-          <div className="b3-drawings-body">
-            <ObjectTreeBody cellId={cellId} />
-          </div>
-        )}
-
-        {tab === "chart" && (
-          <div className="b3-chart-tab">
-            <div className="b3-sub-seg" role="group" aria-label="차트 설정 하위 영역">
-              <button
-                type="button"
-                aria-pressed={chartSubTab === "settings"}
-                onClick={() => {
-                  setChartSubTab("settings");
-                  useSelectionStore.getState().openChartDock(cellId, "settings", null);
-                }}
-              >
-                차트 설정
-              </button>
-              <button
-                type="button"
-                aria-pressed={chartSubTab === "compare"}
-                onClick={() => {
-                  setChartSubTab("compare");
-                  useSelectionStore.getState().openChartDock(cellId, "compare", null);
-                }}
-              >
-                비교 종목{cell.chartSettings.compare.length > 0 ? ` (${cell.chartSettings.compare.length})` : ""}
-              </button>
-            </div>
-            {chartSubTab === "settings" ? (
-              <div className="cd-settings-body">
-                <ChartSettingsSections cellId={cellId} compact />
-              </div>
-            ) : (
-              <DockCompareBody cellId={cellId} />
+            {!quickAddOpen && (
+              <DockLayerList
+                cellId={cellId}
+                settings={cell.chartSettings}
+                selectedTarget={selectedTarget}
+                onSelectTarget={setSelectedTarget}
+                onOpenQuickAdd={openQuickAdd}
+              />
             )}
           </div>
-        )}
-      </aside>
-    </div>
+        )
+      )}
+
+      {tab === "drawings" && (
+        <div className="b3-drawings-body">
+          <ObjectTreeBody cellId={cellId} />
+        </div>
+      )}
+
+      {tab === "chart" && (
+        <div className="b3-chart-tab">
+          <div className="b3-sub-seg" role="group" aria-label="차트 설정 하위 영역">
+            <button
+              type="button"
+              aria-pressed={chartSubTab === "settings"}
+              onClick={() => {
+                setChartSubTab("settings");
+                useSelectionStore.getState().openChartDock(cellId, "settings", null);
+              }}
+            >
+              차트 설정
+            </button>
+            <button
+              type="button"
+              aria-pressed={chartSubTab === "compare"}
+              onClick={() => {
+                setChartSubTab("compare");
+                useSelectionStore.getState().openChartDock(cellId, "compare", null);
+              }}
+            >
+              비교 종목{cell.chartSettings.compare.length > 0 ? ` (${cell.chartSettings.compare.length})` : ""}
+            </button>
+          </div>
+          {chartSubTab === "settings" ? (
+            <div className="cd-settings-body">
+              <ChartSettingsSections cellId={cellId} compact />
+            </div>
+          ) : (
+            <DockCompareBody cellId={cellId} />
+          )}
+        </div>
+      )}
+    </aside>
   );
 }
