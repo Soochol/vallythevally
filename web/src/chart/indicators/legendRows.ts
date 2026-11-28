@@ -17,8 +17,6 @@ const BTN = "grid size-[18px] place-items-center rounded-s text-xs text-text-2 h
 const FOLD_BUTTON = "pointer-events-auto flex min-h-6 w-max items-center gap-1 rounded-s px-1.5 text-xs text-text-2 hover:text-text bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
 const ROWS_BOX = "flex flex-col gap-px";
 const TOKEN = "indicator-token";
-const ADD_BUTTON = "legend-add pointer-events-auto max-md:hidden";
-const ADD_LABEL = "지표";
 
 interface ValueSpan {
   span: HTMLSpanElement;
@@ -117,21 +115,6 @@ export interface PaneBounds { readonly top: number; readonly height: number }
 
 type RowKey = "panel" | "price";
 
-function addButton(): HTMLButtonElement {
-  const button = el("button", ADD_BUTTON);
-  button.type = "button";
-  button.dataset.chartControl = "";
-  button.dataset.indicatorAdd = "";
-  button.title = "지표·비교 종목 더하기";
-  button.setAttribute("aria-label", "지표 더하기");
-  button.setAttribute("aria-haspopup", "dialog");
-  const icon = el("span", "legend-add-icon");
-  icon.innerHTML = iconMarkup("plus", 12);
-  icon.setAttribute("aria-hidden", "true");
-  button.append(icon, el("span", "", ADD_LABEL));
-  return button;
-}
-
 function foldButton(): HTMLButtonElement {
   const button = el("button", FOLD_BUTTON);
   button.type = "button";
@@ -144,7 +127,6 @@ function foldButton(): HTMLButtonElement {
 
 export class IndicatorLegend {
   readonly priceBox = el("div", "relative flex flex-col gap-px");
-  readonly addBox = addButton();
   private readonly rowsBox = el("div", ROWS_BOX);
   private readonly fold = foldButton();
   private readonly rows = new Map<string, RowEls>();
@@ -182,9 +164,7 @@ export class IndicatorLegend {
     private readonly overlay: HTMLElement,
     private readonly onCommand: (id: string, command: IndicatorCommand, anchor: HTMLElement, field?: string) => void,
     private readonly onFoldChange: () => void = () => {},
-    onAdd: (anchor: HTMLElement) => void = () => {},
   ) {
-    this.addBox.addEventListener("click", () => onAdd(this.addBox));
     this.priceBox.dataset.indicatorFoldBox = "";
     this.rowsBox.dataset.indicatorFoldPanel = "";
     this.priceBox.append(this.fold, this.rowsBox);
@@ -398,10 +378,6 @@ export class IndicatorLegend {
     return { root, fields };
   }
 
-  addProjection(): LegendProjection {
-    return { root: addButton(), fields: [] };
-  }
-
   invalidatePanelLayout(): void {
     for (const r of this.rows.values()) r.lastPaneTop = null;
   }
@@ -413,7 +389,6 @@ export class IndicatorLegend {
     this.rows.clear();
     this.unsubscribePinned();
     this.priceBox.remove();
-    this.addBox.remove();
   }
 
   private place(r: RowEls, key: RowKey): void {

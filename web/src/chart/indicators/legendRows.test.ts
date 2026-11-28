@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { indicatorsPinnedOpen, setIndicatorsPinnedOpen } from "../legendFold";
+import { indicatorsPinnedOpen, resetIndicatorsPinnedCache } from "../legendFold";
 import { TrackedValues } from "../legendShapes";
 import type { IndicatorRow } from "./layer";
 import { IndicatorLegend } from "./legendRows";
@@ -68,12 +68,12 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", FakeElement);
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   vi.stubGlobal("getComputedStyle", () => ({ marginTop: "0px" }));
-  setIndicatorsPinnedOpen(false);
+  resetIndicatorsPinnedCache();
 });
 
 afterEach(() => {
   vi.useRealTimers();
-  setIndicatorsPinnedOpen(false);
+  resetIndicatorsPinnedCache();
   vi.unstubAllGlobals();
 });
 
@@ -177,7 +177,7 @@ test("이름 끝의 숫자 설정값은 눌러서 바꾸는 토큰으로 나누�
   expect(tokens.children.map((child) => [child.dataset.indicatorToken, child.textContent])).toEqual([["period", "20"]]);
 });
 
-test("접힌 지표 버튼은 호버로 열리지 않고 1클릭으로 즉시 인라인 펼침과 접힘을 전환한다", () => {
+test("지표 4개는 저장값이 없으면 기본 펼침으로 시작하고, 1클릭으로 접힘·펼침을 전환하며 호버로 열리지 않는다", () => {
   const onFoldChange = vi.fn();
   const legend = new IndicatorLegend(document.createElement("div"), () => {}, onFoldChange);
   legend.render(MOVING_AVERAGES.slice(0, 4), []);
@@ -185,12 +185,22 @@ test("접힌 지표 버튼은 호버로 열리지 않고 1클릭으로 즉시 �
   const fold = box.children[0]!;
   const rowsBox = box.children[1]!;
 
+  expect(indicatorsPinnedOpen()).toBe(true);
+  expect(box.hasAttribute("data-folded")).toBe(false);
+  expect(box.hasAttribute("data-open")).toBe(false);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(fold.lastElementChild?.textContent).toBe("▴");
+  expect(rowsBox.children).toHaveLength(4);
+  expect("chartControl" in rowsBox.dataset).toBe(false);
+
+  fold.dispatch("click");
+  expect(indicatorsPinnedOpen()).toBe(false);
   expect(box.hasAttribute("data-folded")).toBe(true);
   expect(box.hasAttribute("data-open")).toBe(false);
   expect(fold.getAttribute("aria-expanded")).toBe("false");
   expect(fold.lastElementChild?.textContent).toBe("▾");
-  expect(rowsBox.children).toHaveLength(4);
   expect("chartControl" in rowsBox.dataset).toBe(true);
+  expect(onFoldChange).toHaveBeenCalledTimes(1);
 
   fold.dispatch("pointerenter", { pointerType: "mouse" });
   expect(box.hasAttribute("data-folded")).toBe(true);
@@ -205,13 +215,6 @@ test("접힌 지표 버튼은 호버로 열리지 않고 1클릭으로 즉시 �
   expect(fold.getAttribute("aria-expanded")).toBe("true");
   expect(fold.lastElementChild?.textContent).toBe("▴");
   expect("chartControl" in rowsBox.dataset).toBe(false);
-  expect(onFoldChange).toHaveBeenCalledTimes(1);
-
-  fold.dispatch("click");
-  expect(indicatorsPinnedOpen()).toBe(false);
-  expect(box.hasAttribute("data-folded")).toBe(true);
-  expect(fold.getAttribute("aria-expanded")).toBe("false");
-  expect(fold.lastElementChild?.textContent).toBe("▾");
   expect(onFoldChange).toHaveBeenCalledTimes(2);
   legend.dispose();
 });
@@ -233,7 +236,7 @@ test("최소 단계의 지표 버튼은 1클릭으로 플로팅 목록을 열고
   expect(box.hasAttribute("data-open")).toBe(true);
   expect(fold.getAttribute("aria-expanded")).toBe("true");
   expect(fold.lastElementChild?.textContent).toBe("▴");
-  expect(indicatorsPinnedOpen()).toBe(false);
+  expect(indicatorsPinnedOpen()).toBe(true);
 
   fold.dispatch("click");
   expect(box.hasAttribute("data-folded")).toBe(true);

@@ -14,7 +14,7 @@ import { shownVenue, venueLabel } from "../../lib/venue";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
-import { openIndicatorBubble, toggleIndicatorAdd } from "../indicator-command/open";
+import { openIndicatorBubble } from "../indicator-command/open";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { appliedThemeKey, DEFAULT_THEME_KEY, subscribeTheme } from "../../persist/theme";
 import { useVenue } from "../../stores/ui";
@@ -110,7 +110,6 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
         if (command !== "edit") return runIndicatorCommand(cellIdRef.current, id, command);
         openIndicatorBubble(cellIdRef.current, id, anchor, field ?? null);
       },
-      onIndicatorAdd: (anchor) => toggleIndicatorAdd(cellIdRef.current, anchor),
       onIndicatorMerge: (indicatorId, targetPanelId) => useLayoutStore.getState().mergeIndicatorIntoPanel(cellIdRef.current, indicatorId, targetPanelId),
       onIndicatorSplit: (indicatorId, insertAt) => useLayoutStore.getState().splitIndicatorToNewPanel(cellIdRef.current, indicatorId, insertAt),
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(cellIdRef.current, stretches),

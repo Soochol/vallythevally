@@ -162,10 +162,11 @@ test("범례 1줄 조작 말풍선과 우측 패널이 공존하고 Esc는 말�
   expect(settings(scenario).indicators[0]?.spec).toEqual({ kind: "ma", method: "sma", period: 60 });
 });
 
-test("우측 패널이 열려 있으면 위 막대 지표·차트와 범례 +지표가 패널 탭을 전환하고, 좁은 칸에서는 --raised 오버레이로 열린다", async ({ page, scenario }) => {
+test("우측 패널이 열려 있으면 위 막대 지표·차트 단추가 패널 탭을 전환하고, 범례 ＋지표는 없으며, 좁은 칸에서는 --raised 오버레이로 열린다", async ({ page, scenario }) => {
   seed(scenario, [{ id: "m20", spec: { kind: "ma", method: "sma", period: 20 }, panel: "price", visible: true, style: { colors: ["ind-2"], width: 1 } }]);
   await open(page);
 
+  await expect(cell(page).locator("[data-indicator-add]")).toHaveCount(0);
   await groups(page).first().getByRole("button", { name: "차트 설정 패널", exact: true }).click();
   await expect(rightPanel(page)).toBeVisible();
 
@@ -173,7 +174,7 @@ test("우측 패널이 열려 있으면 위 막대 지표·차트와 범례 +지
   await expect(page.getByRole("dialog", { name: "차트 설정", exact: true })).toHaveCount(0);
   await expect(rightPanel(page).getByRole("tab", { name: "차트 설정", exact: true })).toHaveAttribute("aria-selected", "true");
 
-  await cell(page).locator("[data-indicator-add]").click();
+  await toolbar(page).getByRole("button", { name: "지표", exact: true }).click();
   await expect(page.getByRole("dialog", { name: "지표 더하기", exact: true })).toHaveCount(0);
   await expect(rightPanel(page).getByRole("tab", { name: /^지표/ })).toHaveAttribute("aria-selected", "true");
 

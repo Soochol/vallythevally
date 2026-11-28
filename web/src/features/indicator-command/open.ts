@@ -1,15 +1,13 @@
 import type { WindowId } from "../../layout/kinds";
 import { useSelectionStore, type AddSection } from "../../stores/selection";
 
-export const CHART_POP_TRIGGERS = "[data-indicator-edit],[data-indicator-token],[data-indicator-add],[data-chart-pop-opener]";
+export const CHART_POP_TRIGGERS = "[data-indicator-edit],[data-indicator-token],[data-chart-pop-opener]";
 
 const shown = (element: HTMLElement | null): element is HTMLElement => element !== null && element.getClientRects().length > 0;
 
 export const cellSelector = (cellId: WindowId): string => `[data-cell="${CSS.escape(cellId)}"]`;
 
 export function addAnchorOf(cellId: WindowId): HTMLElement | null {
-  const inLegend = document.querySelector<HTMLElement>(`${cellSelector(cellId)} [data-indicator-add]`);
-  if (shown(inLegend)) return inLegend;
   for (const opener of document.querySelectorAll<HTMLElement>('[data-chart-pop-opener="add"]')) if (shown(opener)) return opener;
   return document.querySelector<HTMLElement>(cellSelector(cellId));
 }

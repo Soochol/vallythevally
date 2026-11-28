@@ -178,7 +178,6 @@ export interface ControllerDeps {
   socket?: MarketSocketLike;
   indicators?: OpenPort;
   onIndicatorCommand?: (id: string, command: IndicatorCommand, anchor: HTMLElement, field?: string) => void;
-  onIndicatorAdd?: (anchor: HTMLElement) => void;
   onIndicatorMerge?: (indicatorId: string, targetPanelId: "price" | Panel["id"]) => void;
   onIndicatorSplit?: (indicatorId: string, insertAt: number) => void;
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
@@ -294,7 +293,7 @@ export class ChartController {
     this.crosshairMarker = new CrosshairMarker({ element: el, chart: this.chart, bars: () => this.bars, period: () => this.period() });
     el.addEventListener("pointerleave", this.clearPointedBar);
     this.legend = new Legend(el, {
-      projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection(), this.indicatorLegend.addProjection()],
+      projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection()],
       readViewport: () => ({
         pricePane: this.paneBounds()[0] ?? null,
         axisWidth: this.chart.priceScale("right").width() + this.leftAxisWidth(),
@@ -332,9 +331,9 @@ export class ChartController {
       { fetchInvestorNetShares: deps.fetchInvestorNetShares },
     );
     this.indicators.attachMainSeries(this.main.api);
-    this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor, field) => deps.onIndicatorCommand?.(id, command, anchor, field), () => this.legend.fit("content"), (anchor) => deps.onIndicatorAdd?.(anchor));
+    this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor, field) => deps.onIndicatorCommand?.(id, command, anchor, field), () => this.legend.fit("content"));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
-    this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box, this.indicatorLegend.addBox);
+    this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
     this.resize = new ResizeObserver(() => {
       this.paneLayoutDirty = true;
       this.elVisible = crosshairVisible(el);

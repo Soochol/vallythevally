@@ -79,7 +79,8 @@ test("Ctrl+Z는 말풍선에서 바꾼 지표 설정을 되돌리고 알린다",
 test("더하기 창의 스위치로 넣고 빼며, 다시 켜면 마지막 설정으로 돌아온다", async ({ page, scenario }) => {
   seed(scenario, [MA20]);
   await open(page);
-  await cell(page).locator("[data-indicator-add]").click();
+  await expect(cell(page).locator("[data-indicator-add]")).toHaveCount(0);
+  await toolbar(page).getByRole("button", { name: "지표", exact: true }).click();
   await expect(addInput(page)).toBeFocused();
   await expect(kindOption(page, "RSI")).toHaveAttribute("aria-selected", "false");
   await kindOption(page, "RSI").click();
@@ -91,7 +92,7 @@ test("더하기 창의 스위치로 넣고 빼며, 다시 켜면 마지막 설�
   await rsiRow.locator("[data-indicator-token]").click();
   await page.getByRole("dialog", { name: "RSI 14 설정", exact: true }).locator('input[data-field="period"]').fill("7");
   await page.keyboard.press("Escape");
-  await cell(page).locator("[data-indicator-add]").click();
+  await toolbar(page).getByRole("button", { name: "지표", exact: true }).click();
   await kindOption(page, "RSI").click();
   await expect(kindOption(page, "RSI")).toHaveAttribute("aria-selected", "false");
   await pollSaved(() => specs(scenario)).toEqual([{ kind: "ma", method: "sma", period: 20 }]);
@@ -123,7 +124,7 @@ test("입력으로 숫자까지 적으면 Enter가 그 지표를 더하고 창�
 test("이동평균 기간 칩은 켜고 끄는 스위치이고, 하나 더는 같은 지표를 또 넣는다", async ({ page, scenario }) => {
   seed(scenario, [MA20]);
   await open(page);
-  await cell(page).locator("[data-indicator-add]").click();
+  await toolbar(page).getByRole("button", { name: "지표", exact: true }).click();
   const chips = addDialog(page).getByRole("group", { name: "이동평균 기간" });
   await expect(chips.getByRole("button", { name: "이동평균 20", exact: true })).toHaveAttribute("aria-pressed", "true");
   await chips.getByRole("button", { name: "이동평균 60", exact: true }).click();
@@ -135,9 +136,10 @@ test("이동평균 기간 칩은 켜고 끄는 스위치이고, 하나 더는 �
   await pollSaved(() => specs(scenario).map((spec) => spec.kind)).toEqual(["ma", "ma"]);
 });
 
-test("위 막대의 지표 단추는 범례의 ＋지표와 같은 창을 열고, 다시 누르면 닫는다", async ({ page, scenario }) => {
+test("위 막대의 지표 단추로 지표 더하기 창을 열고 닫으며, 범례에는 ＋지표 단추가 없다", async ({ page, scenario }) => {
   seed(scenario, [MA20]);
   await open(page);
+  await expect(cell(page).locator("[data-indicator-add]")).toHaveCount(0);
   const button = toolbar(page).getByRole("button", { name: "지표", exact: true });
   await expect(button).toContainText("1");
   await button.click();
@@ -146,7 +148,7 @@ test("위 막대의 지표 단추는 범례의 ＋지표와 같은 창을 열고
   await expect(kindOption(page, "이동평균")).toHaveAttribute("aria-selected", "true");
   await button.click();
   await expect(addDialog(page)).toBeHidden();
-  await cell(page).locator("[data-indicator-add]").click();
+  await button.click();
   await expect(kindOption(page, "이동평균")).toHaveAttribute("aria-selected", "true");
   await row(page, "m20").locator("[data-indicator-edit]").click();
   await expect(addDialog(page)).toBeHidden();
@@ -211,7 +213,7 @@ test("차트 설정·지표·우측 상단 메뉴·단축키·시스템 설정 �
   expect(await bg(cs.locator(".cs-content"))).toBe("rgba(0, 0, 0, 0)");
   expect(await bg(cs.locator(".cs-foot-bar"))).toBe("rgba(0, 0, 0, 0)");
 
-  await cell(page).locator("[data-indicator-add]").click();
+  await toolbar(page).getByRole("button", { name: "지표", exact: true }).click();
   const ia = addDialog(page);
   await expect(ia).toBeVisible();
   expect(await bg(ia)).toBe(raised);
