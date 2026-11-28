@@ -290,3 +290,62 @@ async fn rows_in_the_same_second_are_all_sent_without_a_reset() {
     assert_eq!(next["reset"], json!(false));
     assert_eq!((times(&next), buys(&next)), (vec![second], vec![260]));
 }
+
+fn write_archive_brokers(root: &Path, date: &str, symbol: &str, qty: i64) {
+    let dir = root.join(date).join(symbol).join("hogaplay");
+    std::fs::create_dir_all(&dir).unwrap();
+    let conn = Connection::open_in_memory().unwrap();
+    let sql = format!(
+        "SELECT 90500100::BIGINT AS ts_ms, 1::INTEGER AS seq, 'buy' AS side, 1::TINYINT AS rank, '키움증권' AS broker, {qty}::INTEGER AS qty_today, 12::INTEGER AS qty_delta \
+         UNION ALL \
+         SELECT 90500100::BIGINT AS ts_ms, 1::INTEGER AS seq, 'sell' AS side, 1::TINYINT AS rank, '한  화' AS broker, 88::INTEGER AS qty_today, -4::INTEGER AS qty_delta"
+    );
+    conn.execute_batch(&format!(
+        "SET threads = 1; COPY ({sql}) TO '{}' (FORMAT parquet)",
+        dir.join("brokers.parquet").display()
+    ))
+    .unwrap();
+}
+
+#[tokio::test]
+async fn hogaplay_archive_serves_broker_days_and_snapshots_with_native_priority() {
+    let clock = Clock::fake(kst(KstDate::new(2026, 11, 24).unwrap(), 10, 0, 0));
+    let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
+    let rest = KiwoomRest::new(ScriptedTransport::new().transport(), auth, clock.clone());
+    let tmp = tempfile::tempdir().unwrap();
+    let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
+    let (stream, _desired) = KiwoomStream::detached();
+    let (_events, events) = tokio::sync::mpsc::channel(1);
+    let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
+    let symbols = Arc::new(SymbolDirectory::default());
+    let state = application(ApplicationInputs {
+        rest,
+        clock: clock.clone(),
+        symbols,
+        db,
+        screener_store: store,
+        stream: (stream, events),
+        static_dir: tmp.path().to_owned(),
+        screener_update_on_connect: false,
+    });
+    let hoga = tmp.path().join("hoga");
+    let archive = tmp.path().join("parquet");
+    write_store(&hoga, CLOSED, &[store_sql("005930_AL", at(23, 9, 0, 10), 100)], json!([]));
+    write_archive_brokers(&archive, CLOSED, "005930", 999);
+    write_archive_brokers(&archive, "20240827", "005930", 420);
+    state.collector_paths.configure(server::shared_data::CollectorPaths::hoga_only(hoga).with_archive(Some(archive)));
+    let h = Harness { app: router(state), clock, data: tmp.path().join("hoga"), _tmp: tmp };
+
+    let (status, days) = h.get("/api/symbols/005930/brokers/days").await;
+    assert_eq!(status, 200, "{days}");
+    assert_eq!(days, json!({"symbol": "005930", "days": ["20240827", CLOSED], "archiveDays": ["20240827"]}));
+
+    let native = h.day(CLOSED, None).await;
+    assert_eq!(buys(&native), [100]);
+    assert!(native.get("venueScope").is_none());
+
+    let archived = h.day("20240827", None).await;
+    assert_eq!((archived["source"].as_str(), archived["venueScope"].as_str()), (Some("store"), Some("krx_archive")));
+    assert_eq!(archived["snapshots"][0]["buys"], json!([{"code": "050", "name": "키움증권", "qty": 420, "qtyChange": 12}]));
+    assert_eq!(archived["snapshots"][0]["sells"], json!([{"code": "021", "name": "한  화", "qty": 88, "qtyChange": -4}]));
+}

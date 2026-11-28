@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { TODAY_REFETCH_MS, useBookReplayProgramDay } from "../../api/bookReplay";
+import type { ReplayVenueScope } from "../../api/generated/ReplayVenueScope";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { gapContaining } from "../brokers/history";
@@ -15,6 +16,7 @@ export type ProgramReplayView =
       readonly kind: "past";
       readonly at: UnixSeconds;
       readonly previousClose: number | null;
+      readonly venueScope?: ReplayVenueScope;
       readonly latest: ProgramRow | undefined;
       readonly lines: readonly ProgramLine[];
       readonly trend: readonly number[];
@@ -73,6 +75,7 @@ export function useProgramReplay(code: SymbolCode, cursor: WorkspaceReplayCursor
       kind: "past",
       at: cursor.at,
       previousClose: data.previousClose ?? null,
+      venueScope: data.venueScope,
       ...slice,
     };
   }, [cursor, query.data, query.isPending, query.isError]);

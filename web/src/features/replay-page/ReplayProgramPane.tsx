@@ -8,6 +8,7 @@ import type { EngineProgramRow, ReplayEngine, ReplayEngineFrame } from "./replay
 interface Props {
   readonly engine: ReplayEngine;
   readonly previousClose: number | null;
+  readonly isArchive?: boolean;
   readonly onJumpMs: (ms: number) => void;
 }
 
@@ -58,7 +59,7 @@ function extractView(frame: ReplayEngineFrame): ProgramViewSnapshot {
   };
 }
 
-export function ReplayProgramPane({ engine, previousClose, onJumpMs }: Props) {
+export function ReplayProgramPane({ engine, previousClose, isArchive = false, onJumpMs }: Props) {
   const [snap, setSnap] = useState<ProgramViewSnapshot>(() => extractView(engine.getFrame()));
 
   useEffect(() => {
@@ -123,7 +124,11 @@ export function ReplayProgramPane({ engine, previousClose, onJumpMs }: Props) {
           <div className="pg-body">
             {snap.rows.length === 0 ? (
               <p className="tr-empty">
-                {snap.netQty === null ? "프로그램 매매 자료가 없습니다" : "이 시점까지 프로그램 체결 변동이 없습니다"}
+                {isArchive
+                  ? "KRX 아카이브에는 프로그램 매매 데이터가 없습니다"
+                  : snap.netQty === null
+                    ? "프로그램 매매 자료가 없습니다"
+                    : "이 시점까지 프로그램 체결 변동이 없습니다"}
               </p>
             ) : (
               <div className="pg-rows">

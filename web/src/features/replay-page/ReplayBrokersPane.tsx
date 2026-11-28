@@ -28,6 +28,7 @@ interface Props {
   readonly dayStartUnix: UnixSeconds;
   readonly activeSecond: number;
   readonly blindMode: boolean;
+  readonly isArchive?: boolean;
   readonly onJumpMs: (ms: number) => void;
   readonly brokerDay: BrokerDayResult;
   readonly bars1m: readonly Bar[];
@@ -45,6 +46,7 @@ export function ReplayBrokersPane({
   dayStartUnix,
   activeSecond,
   blindMode,
+  isArchive = false,
   onJumpMs,
   brokerDay,
   bars1m,
@@ -181,6 +183,16 @@ export function ReplayBrokersPane({
                 <button type="button" aria-pressed={brokerCards === "both"} onClick={() => setBrokerCards("both")}>복합</button>
                 <button type="button" aria-pressed={brokerCards === "numbers"} onClick={() => setBrokerCards("numbers")}>숫자</button>
               </div>
+            )}
+            {(isArchive || brokerDay.venueScope === "krx_archive") && (
+              <span
+                className="rp-badge-mini"
+                data-venue-scope="krx_archive"
+                data-testid="replay-brokers-archive-badge"
+                title="KRX 단독 아카이브 거래원 자료입니다"
+              >
+                KRX 단독
+              </span>
             )}
             <span className="br-now rp-mono">
               <span className="br-time">{formatClock(effectiveCursor).slice(0, 5)}</span>

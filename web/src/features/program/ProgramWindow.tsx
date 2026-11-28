@@ -236,7 +236,13 @@ function ProgramBody({ code }: { code: SymbolCode }) {
         <div className="mw-frame pg" data-testid="program-window" data-symbol={code} data-replay="past">
           <div className="mw-head"><MarketSymbolName code={code} /></div>
           {replayEnabled && <ReplayStrip view={replay} subject="프로그램" showVenueBadge={false} />}
-          <EmptyState title="이 시각까지 프로그램 매매 자료가 없습니다" />
+          <EmptyState
+            title={
+              replay.venueScope === "krx_archive"
+                ? "KRX 아카이브에는 프로그램 매매 데이터가 없습니다"
+                : "이 시각까지 프로그램 매매 자료가 없습니다"
+            }
+          />
         </div>
       );
     }

@@ -1,7 +1,7 @@
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import type { SearchResult, SymbolSearchFilters } from "../../api/queries";
 
-export type SearchGroup = "watch" | "recent" | "result";
+export type SearchGroup = "watch" | "recent" | "collected" | "result";
 
 export interface SearchRow {
   info: SymbolInfo;
@@ -15,7 +15,7 @@ export interface SearchList {
   empty: boolean;
 }
 
-export const GROUP_LABEL: Record<SearchGroup, string> = { watch: "관심종목", recent: "최근 본 종목", result: "검색 결과" };
+export const GROUP_LABEL: Record<SearchGroup, string> = { watch: "관심종목", recent: "최근 본 종목", collected: "수집 종목", result: "검색 결과" };
 
 export function searchList(
   query: string,

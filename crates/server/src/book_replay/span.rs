@@ -304,12 +304,21 @@ pub(super) fn read_day_meta(
         }
     }
 
+    let previous_close = if has_books || has_trades || has_program {
+        let conn = open_connection()?;
+        super::reference::read_store_previous_close(&conn, day_dir, date, stock.as_str(), buckets)?
+    } else {
+        None
+    };
+
     Ok(api::BookReplayMeta {
         symbol: symbol_code(stock),
         date: date_str.to_owned(),
         coverage: api::BookReplayCoverage::Collected,
         resolution: api::BookReplayResolution::Tick,
         span_minutes: u32::from(SPAN_MINUTES),
+        previous_close,
+        venue_scope: None,
         covered,
         gaps_ms,
         spans,

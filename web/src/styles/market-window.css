@@ -154,6 +154,8 @@ button.mw-card-row:focus-visible { outline:var(--size-1) solid var(--accent); ou
 .mw-replay-strip[data-kind=none] { background:var(--warning-soft); color:var(--warning); }
 .mw-replay-strip[data-kind=live] { background:var(--raised); color:var(--text-2); font-weight:500; }
 .mw-replay-venue { margin-left:auto; }
+.mw-replay-archive { flex:none; margin-left:auto; padding:0 var(--size-5); border:var(--size-1) solid color-mix(in srgb, var(--warning) 45%, transparent); border-radius:var(--r-pill); background:var(--warning-soft); color:var(--warning); font-size:var(--fs-xs); font-weight:600; line-height:var(--size-16); white-space:nowrap; }
+.mw-status .mw-replay-archive, .br-now .mw-replay-archive { margin-left:0; }
 .mw-head { box-sizing:border-box; flex:none; display:flex; align-items:center; gap:var(--size-5); height:var(--size-32); padding:0 var(--s3); border-bottom:var(--size-1) solid var(--line); background:var(--strip-bg, var(--surface)); font-size:var(--fs-xs); font-variant-numeric:tabular-nums; min-width:0; }
 .mw-head-name { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font-size:var(--fs-b); font-weight:700; }
 .mw-head-div { flex:none; width:var(--size-1); height:var(--size-12); background:var(--line); }

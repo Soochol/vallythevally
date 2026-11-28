@@ -801,3 +801,139 @@ test("체결창 수동 스크롤 고정·새 체결 배지·과거 대량 체결
   await expect(page.getByTestId("replay-tape-row")).toHaveCount(1);
   await expect(page.getByTestId("replay-tape-row").first().locator(".tr-time")).toHaveText("09:00:15");
 });
+
+test("KRX 단독 아카이브 날짜는 배지·전일종가·연월 점프·프로그램 안내·카탈로그 검색 필터를 표시한다", async ({ page, scenario }) => {
+  const archiveDate = "20240827";
+  const archiveMidnight = Date.parse("2024-08-27T00:00:00+09:00") / 1000;
+  const archiveSpan = new Uint8Array(
+    encodeHogaSpan({
+      date: 20240827,
+      startMinute: 540,
+      lengthMinutes: 5,
+      symbol: `${CODE}_AL`,
+      streams: [
+        {
+          kind: "book",
+          columns: {
+            recv_ms: [M540 + 5_000],
+            t_s: [32_405],
+            ask_px1: [76_100],
+            bid_px1: [76_000],
+            ask_qty1: [400],
+            bid_qty1: [600],
+            ask_total: [400],
+            bid_total: [600],
+          },
+        },
+        {
+          kind: "trades",
+          columns: {
+            recv_ms: [M540 + 10_000],
+            t_s: [32_410],
+            price: [76_000],
+            qty: [120],
+            venue: [1],
+          },
+        },
+      ],
+    }),
+  );
+  const archiveMeta: BookReplayMeta = {
+    symbol: CODE,
+    date: archiveDate,
+    coverage: "collected",
+    resolution: "tick",
+    spanMinutes: 5,
+    previousClose: 75_000,
+    venueScope: "krx_archive",
+    covered: [[540, 544]],
+    gapsMs: [],
+    spans: [{ startMinute: 540, bookRows: 1, tradeRows: 1, programRows: 0 }],
+    minutes: [
+      {
+        minute: 540,
+        open: 76_000,
+        high: 76_000,
+        low: 76_000,
+        close: 76_000,
+        volume: 120,
+        cumVol: 0,
+        cumVal: 0,
+        cumBuyQty: 0,
+        cumSellQty: 0,
+        dayOpen: null,
+        dayHigh: null,
+        dayLow: null,
+        totalAsk: 400,
+        totalBid: 600,
+        programNetQty: null,
+        programNetAmtMillion: null,
+        singlePrice: false,
+      },
+    ],
+  };
+
+  seedTickReplay(scenario);
+  scenario.reply("/api/book-replay/catalog", {
+    body: {
+      items: [
+        { symbol: CODE, name: "삼성전자", market: "kospi", kind: "common", nativeDays: 1, archiveDays: 1, totalDays: 2, latestDate: DATE },
+        { symbol: "009540", name: "HD한국조선해양", market: "kospi", kind: "common", nativeDays: 0, archiveDays: 142, totalDays: 142, latestDate: archiveDate },
+      ],
+    },
+  });
+  scenario.reply(`/api/symbols/${CODE}/book-replay/days`, {
+    body: { symbol: CODE, days: [archiveDate, DATE], archiveDays: [archiveDate] },
+  });
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay/meta` && url.searchParams.get("date") === archiveDate,
+    { body: archiveMeta },
+  );
+  scenario.reply(
+    (url) =>
+      url.pathname === `/api/symbols/${CODE}/book-replay/span` &&
+      url.searchParams.get("date") === archiveDate &&
+      url.searchParams.get("startMinute") === "540",
+    { body: archiveSpan },
+  );
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/brokers` && url.searchParams.get("date") === archiveDate,
+    {
+      body: {
+        ...BROKER_DAY,
+        date: archiveDate,
+        venueScope: "krx_archive",
+        snapshots: [
+          {
+            t: archiveMidnight + 540 * 60 + 30,
+            sells: [{ code: "012", name: "한  화", qty: 500, qtyChange: 500 }],
+            buys: [{ code: "050", name: "키움증권", qty: 900, qtyChange: 900 }],
+          },
+        ],
+      },
+    },
+  );
+
+  await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
+  await expect(page.getByTestId("replay-resolution-badge")).toHaveAttribute("data-venue-scope", "combined");
+
+  await page.getByTestId("replay-date-trigger").click();
+  const popover = page.getByTestId("replay-date-popover");
+  await expect(popover).toBeVisible();
+  await popover.getByTestId("replay-date-year").selectOption("2024");
+  await expect(popover.getByTestId("replay-date-month")).toHaveValue("8");
+  const archiveCell = popover.locator('[data-date="20240827"]');
+  await expect(archiveCell).toHaveAttribute("data-source", "archive");
+  await archiveCell.click();
+
+  await expect(page.getByTestId("replay-resolution-badge")).toHaveAttribute("data-venue-scope", "krx_archive");
+  await expect(page.getByTestId("replay-resolution-badge")).toHaveText("KRX 단독 · 아카이브");
+  await expect(page.getByTestId("replay-prev-close")).toHaveText("75,000");
+  await expect(page.getByTestId("replay-program-pane")).toContainText("KRX 아카이브에는 프로그램 매매 데이터가 없습니다");
+  await expect(page.getByTestId("replay-brokers-archive-badge")).toHaveText("KRX 단독");
+
+  await page.getByTestId("replay-symbol-picker").click();
+  const dialog = page.getByRole("dialog", { name: "종목 검색" });
+  await expect(dialog.getByTestId("search-replay-filter-bar")).toBeVisible();
+  await expect(dialog.getByRole("option").filter({ hasText: "009540" })).toContainText("KRX 142일");
+});

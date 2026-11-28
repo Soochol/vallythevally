@@ -29,12 +29,16 @@ fn symbol_code(stock: StockCode) -> api::SymbolCode {
 
 async fn broker_days(State(st): State<Arc<AppState>>, Path(code): Path<String>) -> Result<Json<api::BrokerDays>, ApiFailure> {
     let stock = parse_stock(&code)?;
-    let days = st
+    let result = st
         .collected
         .broker_days(st.collector_paths.snapshot(), stock, st.clock.now())
         .await
         .map_err(|e| internal_error("수집 거래원 날짜 목록을 읽지 못했습니다", e))?;
-    Ok(Json(api::BrokerDays { symbol: symbol_code(stock), days }))
+    Ok(Json(api::BrokerDays {
+        symbol: symbol_code(stock),
+        days: result.days,
+        archive_days: (!result.archive_days.is_empty()).then_some(result.archive_days),
+    }))
 }
 
 async fn broker_day(
@@ -73,6 +77,7 @@ async fn broker_day(
         date: resolved_date,
         source: slice.source,
         coverage: slice.coverage,
+        venue_scope: slice.venue_scope,
         snapshots: slice.snapshots,
         gaps: slice.gaps,
         live: slice.live,

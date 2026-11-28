@@ -63,12 +63,13 @@ pub fn daily_micro_path(shared_dir: &Path, date: u32) -> PathBuf {
 pub struct CollectorPaths {
     hoga_dir: Option<PathBuf>,
     shared_dir: Option<PathBuf>,
+    archive_dir: Option<PathBuf>,
 }
 
 impl CollectorPaths {
     pub fn new(hoga_dir: Option<PathBuf>, shared_dir: Option<PathBuf>) -> Self {
         let shared_dir = shared_dir.or_else(|| hoga_dir.as_ref().map(|dir| dir.join(SHARED_FOLDER)));
-        Self { hoga_dir, shared_dir }
+        Self { hoga_dir, shared_dir, archive_dir: None }
     }
 
     pub fn hoga_only(hoga_dir: PathBuf) -> Self {
@@ -79,11 +80,21 @@ impl CollectorPaths {
         Self::new(None, Some(shared_dir))
     }
 
+    pub fn archive_only(archive_dir: PathBuf) -> Self {
+        Self { hoga_dir: None, shared_dir: None, archive_dir: Some(archive_dir) }
+    }
+
+    pub fn with_archive(mut self, archive_dir: Option<PathBuf>) -> Self {
+        self.archive_dir = archive_dir;
+        self
+    }
+
     pub fn from_config(config: &crate::config::Config) -> Self {
         Self::new(
             config.hoga_data_dir.clone(),
             config.shared_data.as_ref().map(|settings| settings.dir.clone()),
         )
+        .with_archive(config.hoga_archive_dir.clone())
     }
 
     pub fn hoga_dir(&self) -> Option<&Path> {
@@ -92,6 +103,10 @@ impl CollectorPaths {
 
     pub fn shared_dir(&self) -> Option<&Path> {
         self.shared_dir.as_deref()
+    }
+
+    pub fn archive_dir(&self) -> Option<&Path> {
+        self.archive_dir.as_deref()
     }
 }
 
@@ -119,6 +134,10 @@ impl CollectorPathsSlot {
 
     pub fn shared_dir(&self) -> Option<&Path> {
         self.paths.get().and_then(CollectorPaths::shared_dir)
+    }
+
+    pub fn archive_dir(&self) -> Option<&Path> {
+        self.paths.get().and_then(CollectorPaths::archive_dir)
     }
 }
 

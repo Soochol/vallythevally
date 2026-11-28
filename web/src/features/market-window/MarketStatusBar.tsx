@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { SubErrorCode } from "../../api/generated/SubErrorCode";
 import { useVenue } from "../../stores/ui";
 import type { ReplayView } from "../book-replay/replay";
-import { formatReplayAt, REPLAY_LIVE_TEXT, REPLAY_VENUE_TITLE } from "../book-replay/ReplayStrip";
+import { formatReplayAt, REPLAY_ARCHIVE_TITLE, REPLAY_LIVE_TEXT, REPLAY_VENUE_TITLE } from "../book-replay/ReplayStrip";
 import { CheckCircleIcon, ClockIcon, CloseIcon, InfoIcon, WarningIcon } from "../icons";
 import { feedDownText, feedRejectionText } from "./FeedStrip";
 
@@ -67,13 +67,18 @@ export function FeedStatusLine({ feed }: { readonly feed: LadderFeedStatus }) {
 export function ReplayStatusLine({ view, trailing }: { readonly view: ReplayView; readonly trailing?: ReactNode }) {
   const appVenue = useVenue();
   if (view.kind === "past") {
+    const isArchive = view.venueScope === "krx_archive";
     return (
       <MarketStatusLine testId="replay-strip" kind="past" tone="replay" text={`수집 호가 · ${formatReplayAt(view.at)}`}>
-        {appVenue !== "combined" && (
+        {isArchive ? (
+          <span className="mw-replay-archive" data-testid="replay-archive-badge" title={REPLAY_ARCHIVE_TITLE}>
+            KRX 단독
+          </span>
+        ) : appVenue !== "combined" ? (
           <span className="mw-integrated mw-replay-venue" data-testid="replay-venue" title={REPLAY_VENUE_TITLE}>
             통합
           </span>
-        )}
+        ) : null}
         {trailing}
       </MarketStatusLine>
     );

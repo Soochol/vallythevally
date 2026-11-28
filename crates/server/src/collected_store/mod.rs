@@ -8,6 +8,8 @@ use std::sync::Arc;
 use duckdb::{Config, Connection};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+use crate::hoga_archive::HogaArchive;
+
 pub(crate) use cache::StampLru;
 pub(crate) use day_index::{DayIndexCache, DayIndexState, FileStamp, StockCoverage, read_path_stamp, read_stamp};
 
@@ -18,6 +20,7 @@ const MAX_CONCURRENT_QUERIES: usize = 2;
 
 pub struct CollectedStore {
     day_index: DayIndexCache,
+    archive: Arc<HogaArchive>,
     permits: Arc<Semaphore>,
 }
 
@@ -25,8 +28,13 @@ impl CollectedStore {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             day_index: DayIndexCache::new(),
+            archive: Arc::new(HogaArchive::new()),
             permits: Arc::new(Semaphore::new(MAX_CONCURRENT_QUERIES)),
         })
+    }
+
+    pub(crate) fn archive(&self) -> &Arc<HogaArchive> {
+        &self.archive
     }
 
     pub(crate) fn available_dates(&self, data_dir: &Path) -> Result<Vec<String>, String> {
