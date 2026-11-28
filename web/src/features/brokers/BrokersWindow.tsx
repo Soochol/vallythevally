@@ -9,6 +9,7 @@ import { serverNow, useServerClock } from "../../stores/serverClock";
 import { REPLAY_ARCHIVE_TITLE, ReplayStrip, type ReplayStripView } from "../book-replay/ReplayStrip";
 import { REPLAY_REASON } from "../book-replay/replay";
 import { useBookReplayEnabled, useWorkspaceReplayCursor } from "../book-replay/useWorkspaceReplayCursor";
+import { useTickReplayMatch } from "../tick-replay/scope";
 import { MarketSymbolName } from "../market-window/MarketHead";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
 import { formatClock } from "../market-window/format";
@@ -47,8 +48,9 @@ export function BrokersWindow({ id }: { id: WindowId }) {
 }
 
 function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
-  const replayEnabled = useBookReplayEnabled();
-  const replayCursor = useWorkspaceReplayCursor(code);
+  const tickMatch = useTickReplayMatch(id, code);
+  const replayEnabled = useBookReplayEnabled(code, id);
+  const replayCursor = useWorkspaceReplayCursor(code, id);
   const replayPointed = replayCursor.kind === "pointed";
   const replayInProgress = replayCursor.kind === "in_progress";
   const replayAt = replayPointed ? replayCursor.at : null;
@@ -153,13 +155,17 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
 
   const brokerReplayStrip: ReplayStripView | null = (() => {
     if (!replayEnabled) return null;
+    if (tickMatch !== null) {
+      if (tickMatch.load.kind === "empty") return { kind: "none", reason: tickMatch.load.reason };
+      if (tickMatch.load.kind === "error") return { kind: "none", reason: tickMatch.load.message };
+    }
     if (replayCursor.kind === "live") return { kind: "live" };
     if (replayCursor.kind === "in_progress") return { kind: "none", reason: REPLAY_REASON.inProgress };
     if (replayLoading) return { kind: "none", reason: REPLAY_REASON.loading };
     if (day.failed) return { kind: "none", reason: REPLAY_REASON.failed };
     if (day.source === "none") return { kind: "none", reason: uncollectedReason };
     if (activeGap !== null) return { kind: "none", reason: REPLAY_REASON.gap };
-    return { kind: "past", at: replayCursor.at, venueScope: day.venueScope };
+    return { kind: "past", at: replayCursor.at, venueScope: day.venueScope ?? (tickMatch?.isArchive ? "krx_archive" : undefined) };
   })();
 
   const dataReplay =
@@ -220,7 +226,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
           </>
         )}
         <span className="br-now">
-          {day.venueScope === "krx_archive" && (
+          {(day.venueScope === "krx_archive" || tickMatch?.isArchive === true) && (
             <span className="mw-replay-archive" data-testid="brokers-archive-badge" title={REPLAY_ARCHIVE_TITLE}>
               KRX 단독
             </span>

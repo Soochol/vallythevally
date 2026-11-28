@@ -20,13 +20,13 @@ import { EmptyState, ErrorState } from "../overlay/State";
 import { BookSettingsPopover } from "./BookSettingsPopover";
 import { useRowsPerSide, visibleLadderRows } from "./useRowsPerSide";
 
-function BookBody({ code, pager }: { code: SymbolCode; pager: InfoPager }) {
+function BookBody({ id, code, pager }: { id: WindowId; code: SymbolCode; pager: InfoPager }) {
   const ladderBox = useRef<HTMLDivElement>(null);
   const settings = useOrderSettings();
   const setSettings = useUiStore((s) => s.setOrderSettings);
   const { divider, skipSpreadGap, rate, ladderDensity } = settings;
   const rowsPerSide = useRowsPerSide(ladderBox, ladderRowHeightPx(ladderDensity));
-  const market = useLadderMarket(code, pager, skipSpreadGap);
+  const market = useLadderMarket(code, pager, skipSpreadGap, id);
   const { feed, replay, totals, view, liveView, trades } = market;
   const afterHours = totals.source === "afterHours";
   const shownLadder = replay.kind === "past" || (replay.kind === "live" && liveView !== null && market.liveQuotes !== null);
@@ -106,5 +106,5 @@ function BookColumnHead() {
 
 export function BookWindow({ id }: { id: WindowId }) {
   const pager = useInfoPager();
-  return <MarketWindowGate id={id}>{(code) => <BookBody key={code} code={code} pager={pager} />}</MarketWindowGate>;
+  return <MarketWindowGate id={id}>{(code) => <BookBody key={code} id={id} code={code} pager={pager} />}</MarketWindowGate>;
 }

@@ -3,8 +3,11 @@ import { TODAY_REFETCH_MS, useBookReplayProgramDay } from "../../api/bookReplay"
 import type { ReplayVenueScope } from "../../api/generated/ReplayVenueScope";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { WindowId } from "../../layout/kinds";
 import { gapContaining } from "../brokers/history";
 import type { ProgramLine, ProgramRow } from "../program/program";
+import { projectTickReplayProgram } from "../tick-replay/projections";
+import { useTickReplayFrame, useTickReplayMatch } from "../tick-replay/scope";
 import { sliceProgramReplayAt } from "./programReplay";
 import { REPLAY_REASON } from "./replay";
 import type { WorkspaceReplayCursor } from "./useWorkspaceReplayCursor";
@@ -25,8 +28,10 @@ export type ProgramReplayView =
 
 const LIVE_PROGRAM_VIEW: ProgramReplayView = { kind: "live" };
 
-export function useProgramReplay(code: SymbolCode, cursor: WorkspaceReplayCursor): ProgramReplayView {
-  const pointed = cursor.kind === "pointed" ? cursor : null;
+export function useProgramReplay(code: SymbolCode, cursor: WorkspaceReplayCursor, windowId?: WindowId): ProgramReplayView {
+  const tickMatch = useTickReplayMatch(windowId, code);
+  const tickFrame = useTickReplayFrame(tickMatch?.engine ?? null);
+  const pointed = tickMatch === null && cursor.kind === "pointed" ? cursor : null;
   const query = useBookReplayProgramDay(code, pointed?.date ?? null, {
     enabled: pointed !== null,
     isToday: pointed?.isToday,
@@ -58,6 +63,7 @@ export function useProgramReplay(code: SymbolCode, cursor: WorkspaceReplayCursor
   }, [retryDelay, query.refetch, query.dataUpdatedAt, query.errorUpdatedAt, pointed]);
 
   return useMemo<ProgramReplayView>(() => {
+    if (tickMatch !== null) return projectTickReplayProgram(tickMatch, tickFrame);
     if (cursor.kind === "live") return LIVE_PROGRAM_VIEW;
     if (cursor.kind === "in_progress") return { kind: "none", reason: REPLAY_REASON.inProgress };
 
@@ -78,5 +84,5 @@ export function useProgramReplay(code: SymbolCode, cursor: WorkspaceReplayCursor
       venueScope: data.venueScope,
       ...slice,
     };
-  }, [cursor, query.data, query.isPending, query.isError]);
+  }, [tickMatch, tickFrame, cursor, query.data, query.isPending, query.isError]);
 }

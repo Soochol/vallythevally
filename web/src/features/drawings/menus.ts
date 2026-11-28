@@ -1,28 +1,84 @@
 import { createElement } from "react";
+import type { Period } from "../../api/generated/Period";
+import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { DrawingSurface } from "../../chart/drawings/DrawingSurface";
-import type { ScreenPoint } from "../../chart/drawings/types";
-import { formatBarTime } from "../../chart/time";
-import { formatPrice } from "../../lib/format";
-import { isIndexCode, isMinutePeriod } from "../../lib/symbol";
-import { useSelectionStore } from "../../stores/selection";
-import { activeWatchlist, useWatchlistStore } from "../../stores/watchlist";
-import { CameraIcon, CopyIcon, DRAWING_ICONS, ExpandIcon, Icon, PlusIcon } from "../icons";
-import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
-import { controllerFor } from "../grid/controllers";
-import { jumpToBar } from "../jump/jumpToBar";
-import { defaultObjectStyle } from "../../chart/drawings/objects";
 import { inScope } from "../../chart/drawings/frame";
+import { defaultObjectStyle } from "../../chart/drawings/objects";
 import { periodGroup } from "../../chart/drawings/periodGroup";
 import { toolOf } from "../../chart/drawings/tools";
-import { useLayoutStore } from "../../stores/layout";
-import type { Period } from "../../api/generated/Period";
+import type { ScreenPoint } from "../../chart/drawings/types";
+import { formatBarTime, formatKstClock } from "../../chart/time";
+import type { WindowId } from "../../layout/kinds";
+import { formatPrice } from "../../lib/format";
+import { shortcutOf, shortcutPreferringAlt, toolActionId } from "../../lib/hotkeys";
+import { isIndexCode, isMinutePeriod } from "../../lib/symbol";
 import { useDrawingSession } from "../../stores/drawingSession";
-import { shortcutPreferringAlt, shortcutOf, toolActionId } from "../../lib/hotkeys";
+import { useLayoutStore } from "../../stores/layout";
+import { useSelectionStore } from "../../stores/selection";
+import { useTickReplayStore } from "../../stores/tickReplay";
 import { currentActionKeys, useUiStore } from "../../stores/ui";
+import { activeWatchlist, useWatchlistStore } from "../../stores/watchlist";
+import { kstDateOf } from "../book-replay/replay";
+import { controllerFor } from "../grid/controllers";
+import { CameraIcon, ClockIcon, CopyIcon, DRAWING_ICONS, ExpandIcon, Icon, PlusIcon } from "../icons";
+import { jumpToBar } from "../jump/jumpToBar";
 import type { MenuItem } from "../menu/Menu";
+import { formatShortDay, REGULAR_START_MIN } from "../replay-page/replayModel";
+import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
+import { secondOfDay } from "../trades/tape";
+
+export interface TickReplayMenuContext {
+  readonly days: ReadonlySet<string>;
+  readonly pending: boolean;
+}
 
 const action = (label: string, onSelect: () => void): MenuItem => ({ kind: "action", label, onSelect });
 const glyph = (path: string) => createElement(Icon, { path, size: 14 });
+
+function startTickReplayAt(cellId: WindowId, symbol: SymbolCode, date: string, initialSec: number): void {
+  const link = useLayoutStore.getState().layout.windows.find((w) => w.id === cellId)?.link ?? null;
+  useTickReplayStore.getState().start({
+    cellId,
+    symbol,
+    link,
+    date,
+    initialSec,
+    autoPlay: true,
+  });
+}
+
+function tickReplayItems(
+  surface: DrawingSurface,
+  symbol: SymbolCode,
+  pointT: number | null,
+  tickReplay: TickReplayMenuContext | null,
+): MenuItem[] {
+  if (tickReplay === null || pointT === null) return [];
+  const date = kstDateOf(pointT);
+  const hasData = tickReplay.days.has(date);
+  const disabledReason = !hasData ? (tickReplay.pending ? "수집 여부 확인 중" : "수집 데이터 없음") : undefined;
+  return [
+    {
+      kind: "action",
+      label: "이 날 처음부터 틱 복기",
+      icon: createElement(ClockIcon, { size: 14 }),
+      hint: formatShortDay(date),
+      disabled: !hasData,
+      disabledReason,
+      onSelect: () => startTickReplayAt(surface.cellId, symbol, date, REGULAR_START_MIN * 60),
+    },
+    {
+      kind: "action",
+      label: "이 시각부터 틱 복기",
+      icon: createElement(ClockIcon, { size: 14 }),
+      hint: formatKstClock(pointT),
+      disabled: !hasData,
+      disabledReason,
+      onSelect: () => startTickReplayAt(surface.cellId, symbol, date, secondOfDay(pointT)),
+    },
+    { kind: "separator" },
+  ];
+}
 
 function jumpItems(surface: DrawingSurface): MenuItem[] {
   const keys = currentActionKeys();
@@ -30,7 +86,7 @@ function jumpItems(surface: DrawingSurface): MenuItem[] {
   return anchor ? [{ kind: "action", label: anchor.label, icon: glyph("M4 12h13M12 6l6 6-6 6M21 5v14"), hint: shortcutOf(keys, "jump"), onSelect: () => void jumpToBar(surface.cellId) }] : [];
 }
 
-function chartItems(surface: DrawingSurface, at: ScreenPoint): MenuItem[] {
+function chartItems(surface: DrawingSurface, at: ScreenPoint, tickReplay: TickReplayMenuContext | null): MenuItem[] {
   const view = surface.host.view(); const point = surface.pointAt(at);
   if (!view || !point) return [];
   const keys = currentActionKeys();
@@ -38,6 +94,7 @@ function chartItems(surface: DrawingSurface, at: ScreenPoint): MenuItem[] {
   const watchlist = activeWatchlist(useWatchlistStore.getState().lists, useUiStore.getState().prefs.activeWatchlistId);
   return [
     { kind: "heading", label: [formatPrice(point.price, isIndexCode(view.symbol)), ...(point.t === null ? [] : [formatBarTime(point.t, view.period)])].join(" · ") },
+    ...tickReplayItems(surface, view.symbol, surface.barTimeAt(at), tickReplay),
     { kind: "action", label: "이 가격에 수평선", icon: glyph(DRAWING_ICONS.hline), hint: shortcutPreferringAlt(keys, toolActionId("hline")), onSelect: () => surface.placeHorizontalLine(at) },
     { kind: "action", label: "관심종목에 넣기", icon: createElement(PlusIcon), disabled: watchlist.symbols.includes(view.symbol), onSelect: () => { useWatchlistStore.getState().add(watchlist.id, view.symbol); toast(`${watchlist.name}에 넣었습니다`); } },
     { kind: "action", label: "축 자동 맞춤", icon: createElement(ExpandIcon, { size: 14 }), onSelect: () => surface.fitPriceScale() },
@@ -49,7 +106,14 @@ function chartItems(surface: DrawingSurface, at: ScreenPoint): MenuItem[] {
   ];
 }
 
-export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPoint | null = null, more = false, toggleMore: () => void = () => {}): MenuItem[] {
+export function drawingMenu(
+  surface: DrawingSurface,
+  empty = false,
+  at: ScreenPoint | null = null,
+  more = false,
+  toggleMore: () => void = () => {},
+  tickReplay: TickReplayMenuContext | null = null,
+): MenuItem[] {
   const session = useDrawingSession.getState(); const prefs = useUiStore.getState().prefs.drawing;
   const selected = surface.selected();
   if (empty) {
@@ -60,7 +124,7 @@ export function drawingMenu(surface: DrawingSurface, empty = false, at: ScreenPo
     const removable = here.filter((d) => !d.locked && !prefs.lockAll);
     const group = view && isMinutePeriod(view.period) ? "분봉" : "일 이상";
     return [
-      ...(at ? chartItems(surface, at) : []),
+      ...(at ? chartItems(surface, at, tickReplay) : []),
       { kind: "heading", label: here.length === all.length ? `드로잉 ${here.length}개` : `드로잉 ${here.length}개 · 모든 봉 주기 ${all.length}개` },
       ...(session.clip ? [action("붙여넣기", () => surface.paste())] : []),
       { kind: "check", label: "모든 드로잉 숨기기", checked: prefs.hideAll, onSelect: () => useUiStore.getState().setDrawingPrefs({ hideAll: !useUiStore.getState().prefs.drawing.hideAll }) },

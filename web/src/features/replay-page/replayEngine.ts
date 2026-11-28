@@ -30,7 +30,9 @@ import {
 import { HogaSpanLoader, type SpanBufferFetcher } from "./spanLoader";
 
 export const TIME_REPLAY_SPEEDS = [0.25, 0.5, 1, 2, 5, 10, 20] as const;
-export type TimeReplaySpeed = (typeof TIME_REPLAY_SPEEDS)[number];
+export const WORKSPACE_TIME_SPEEDS = [1, 2, 5, 10, 30] as const;
+export type WorkspaceTimeSpeed = (typeof WORKSPACE_TIME_SPEEDS)[number];
+export type TimeReplaySpeed = (typeof TIME_REPLAY_SPEEDS)[number] | WorkspaceTimeSpeed;
 
 export const TICK_REPLAY_RATES = [1, 2, 5, 15, 30, 60] as const;
 export type TickReplayRate = (typeof TICK_REPLAY_RATES)[number];
