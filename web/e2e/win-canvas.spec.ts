@@ -138,7 +138,7 @@ test("포털 안의 차트와 관심종목 내용을 실제로 누르면 그 창
   const chart = chartOf(cell(page));
   await chart.evaluate((element) => element.setAttribute("data-retained-probe", "body-activation"));
   const body = await boxOf(chart);
-  await page.mouse.click(body.x + 35, body.y + 60);
+  await page.mouse.click(body.x + 35, body.y + 140);
   await expect(frame(page, "cell-0")).toHaveCSS("z-index", "3");
   await expect(frame(page, "cell-0")).toHaveAttribute("data-active-cell", "");
   await expect(chart).toHaveAttribute("data-retained-probe", "body-activation");
