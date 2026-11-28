@@ -127,8 +127,10 @@ export interface ReplayTradeSummary {
   readonly whaleSell: number;
 }
 
+export const PREMARKET_START_MIN = 8 * 60;
 export const REGULAR_START_MIN = 9 * 60;
 export const REGULAR_END_MIN = 15 * 60 + 30;
+export const AFTERMARKET_END_MIN = 20 * 60;
 export const WHALE_VALUE_WON = 50_000_000;
 export const REPLAY_SPEEDS = [0.5, 1, 2, 5, 10, 20] as const;
 
@@ -243,10 +245,20 @@ export function buildReplaySession(input: BuildSessionInput): ReplaySession {
   const { day, bars1m, quoteTotals, programPoints, previousClose, symbolKind } = input;
   const dayStartUnix = kstMidnightUnix(day.date);
 
-  const firstCovered = day.covered.length > 0 ? day.covered[0]![0] : REGULAR_START_MIN;
-  const lastCovered = day.covered.length > 0 ? day.covered[day.covered.length - 1]![1] : REGULAR_END_MIN - 1;
-  const startMin = Math.min(REGULAR_START_MIN, firstCovered);
-  const endMin = Math.max(REGULAR_END_MIN - 1, lastCovered);
+  let firstDataMin: number | null = null;
+  let lastDataMin: number | null = null;
+  const includeRange = (lo: number, hi: number) => {
+    if (firstDataMin === null || lo < firstDataMin) firstDataMin = lo;
+    if (lastDataMin === null || hi > lastDataMin) lastDataMin = hi;
+  };
+  for (const [lo, hi] of day.covered) includeRange(lo, hi);
+  for (const book of day.books) includeRange(book.minute, book.minute);
+  for (const tuple of day.trades) includeRange(tuple[0], tuple[0]);
+
+  const firstCovered = day.covered.length > 0 ? day.covered[0]![0] : (firstDataMin ?? PREMARKET_START_MIN);
+  const lastCovered = day.covered.length > 0 ? day.covered[day.covered.length - 1]![1] : (lastDataMin ?? REGULAR_END_MIN - 1);
+  const startMin = firstDataMin !== null ? Math.min(REGULAR_START_MIN, firstDataMin) : PREMARKET_START_MIN;
+  const endMin = Math.max(REGULAR_END_MIN - 1, lastDataMin ?? REGULAR_END_MIN - 1);
   const sessionStartSec = startMin * 60;
   const sessionEndSec = (endMin + 1) * 60;
 
@@ -547,12 +559,24 @@ export function buildReplaySessionFromMeta(input: BuildSessionFromMetaInput): Re
   const { meta, bars1m, quoteTotals, programPoints, previousClose, symbolKind } = input;
   const dayStartUnix = kstMidnightUnix(meta.date);
 
-  const firstCovered = meta.covered.length > 0 ? meta.covered[0]![0] : (meta.spans[0]?.startMinute ?? REGULAR_START_MIN);
-  const lastCovered = meta.covered.length > 0
-    ? meta.covered[meta.covered.length - 1]![1]
-    : (meta.spans.length > 0 ? meta.spans[meta.spans.length - 1]!.startMinute + meta.spanMinutes - 1 : REGULAR_END_MIN - 1);
-  const startMin = Math.min(REGULAR_START_MIN, firstCovered);
-  const endMin = Math.max(REGULAR_END_MIN - 1, lastCovered);
+  let firstDataMin: number | null = null;
+  let lastDataMin: number | null = null;
+  const includeRange = (lo: number, hi: number) => {
+    if (firstDataMin === null || lo < firstDataMin) firstDataMin = lo;
+    if (lastDataMin === null || hi > lastDataMin) lastDataMin = hi;
+  };
+  for (const [lo, hi] of meta.covered) includeRange(lo, hi);
+  for (const ck of meta.minutes) includeRange(ck.minute, ck.minute);
+  for (const span of meta.spans) {
+    if (span.bookRows > 0 || span.tradeRows > 0 || span.programRows > 0) {
+      includeRange(span.startMinute, span.startMinute + meta.spanMinutes - 1);
+    }
+  }
+
+  const firstCovered = meta.covered.length > 0 ? meta.covered[0]![0] : (firstDataMin ?? PREMARKET_START_MIN);
+  const lastCovered = meta.covered.length > 0 ? meta.covered[meta.covered.length - 1]![1] : (lastDataMin ?? REGULAR_END_MIN - 1);
+  const startMin = firstDataMin !== null ? Math.min(REGULAR_START_MIN, firstDataMin) : PREMARKET_START_MIN;
+  const endMin = Math.max(REGULAR_END_MIN - 1, lastDataMin ?? REGULAR_END_MIN - 1);
   const sessionStartSec = startMin * 60;
   const sessionEndSec = (endMin + 1) * 60;
 

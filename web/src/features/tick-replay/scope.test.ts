@@ -33,7 +33,7 @@ describe("tick-replay scope", () => {
       symbol: SAMSUNG,
       link: "a",
       date: "20261125",
-      initialSec: 9 * 3600,
+      start: { kind: "dayStart" },
       autoPlay: true,
     };
 
@@ -52,7 +52,7 @@ describe("tick-replay scope", () => {
       symbol: SAMSUNG,
       link: null,
       date: "20261125",
-      initialSec: 9 * 3600,
+      start: { kind: "dayStart" },
       autoPlay: true,
     };
 
@@ -69,7 +69,7 @@ describe("tick-replay scope", () => {
       symbol: SAMSUNG,
       link: "a",
       date: "20261125",
-      initialSec: 9 * 3600,
+      start: { kind: "dayStart" },
       autoPlay: true,
     };
     const sameGroup: GroupSymbols = { a: SAMSUNG };
@@ -97,7 +97,7 @@ describe("tick-replay scope", () => {
       symbol: SAMSUNG,
       link: null,
       date: "20261125",
-      initialSec: 9 * 3600,
+      start: { kind: "dayStart" },
       autoPlay: true,
     };
     expect(shouldStopTickReplayOnLayout(layout, { a: HYNIX }, target)).toBe(false);

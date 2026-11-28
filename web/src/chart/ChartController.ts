@@ -44,7 +44,7 @@ import { barAtRightEdge, type JumpAnchor, jumpAnchor, jumpHeld, type JumpOutcome
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
 import { CompareLegend } from "./compareLegend";
 import { CrosshairMarker } from "./crosshairMarker";
-import { type BarInterval, barInterval, crosshairVisible, matchingBarTime, type PointedBar } from "./crosshairSync";
+import { type BarInterval, barInterval, crosshairVisible, matchingBarTime, PERIOD_ORDER, type PointedBar } from "./crosshairSync";
 import { DaySeparators } from "./daySeparators";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
 import { FineBars } from "./fineBars";
@@ -424,7 +424,7 @@ export class ChartController {
       if (this.settingData) return;
       const left = this.leftT();
       const before = left === null ? -1 : barIndexAtOrAfter(this.bars, left);
-      if (r && before >= 0 && before < LOAD_OLDER_WITHIN && this.tickReplay === null) this.feed.needOlder();
+      if (r && before >= 0 && before < LOAD_OLDER_WITHIN && (this.tickReplay === null || this.tickReplayCanLoadPrior())) this.feed.needOlder();
       this.updateIntradayEnd();
       this.compare.coverFrom(this.leftT());
       if (this.view?.settings.compare.length) this.renderLegend();
@@ -760,7 +760,20 @@ export class ChartController {
     delete this.el.dataset.tickReplay;
   }
 
-  private applyTickReplayFrame(frame: ReplayEngineFrame, refit: boolean): void {
+  private tickReplayCanLoadPrior(): boolean {
+    const tr = this.tickReplay;
+    const view = this.view;
+    if (!tr || !view || tr.isArchive || !isMinutePeriod(view.period)) return false;
+    const sourceMins = tr.priorPeriod !== null ? PERIOD_ORDER[tr.priorPeriod] : PERIOD_ORDER[view.period];
+    const targetMins = PERIOD_ORDER[view.period];
+    return targetMins >= sourceMins && targetMins % sourceMins === 0;
+  }
+
+  private tickReplayNextBefore(): UnixSeconds | null {
+    return this.tickReplayCanLoadPrior() ? (this.rawHistory?.nextBefore ?? null) : null;
+  }
+
+  private applyTickReplayFrame(frame: ReplayEngineFrame, refit: boolean, preserveRange = false): void {
     const view = this.view;
     const tr = this.tickReplay;
     if (this.disposed || !view || !tr || !isMinutePeriod(view.period)) return;
@@ -774,7 +787,7 @@ export class ChartController {
       regularHoursOnly: this.regularFilterActive(),
       isArchive: tr.isArchive,
     });
-    const h: History = { bars, current, nextBefore: null };
+    const h: History = { bars, current, nextBefore: this.tickReplayNextBefore() };
     const prev = this.bars;
     const next = displayBars(h);
     this.history = h;
@@ -787,6 +800,7 @@ export class ChartController {
       a !== undefined && b !== undefined && a.t === b.t && a.o === b.o && a.h === b.h && a.l === b.l && a.c === b.c && a.v === b.v;
     const sameCountTail =
       !refit
+      && !preserveRange
       && prev.length > 0
       && next.length === prev.length
       && lastNext !== undefined
@@ -794,6 +808,7 @@ export class ChartController {
       && (next.length < 2 || sameBar(prevSecondLast, nextSecondLast));
     const appendedTail =
       !refit
+      && !preserveRange
       && prev.length > 0
       && next.length === prev.length + 1
       && lastNext !== undefined
@@ -810,6 +825,13 @@ export class ChartController {
       this.exposeBarsToE2e();
       this.indicators.advance(h, lastNext!, current !== null && lastNext!.t === current.t ? "live" : "confirmed");
       this.requestTailLegendSources(next.length - 1);
+    } else if (preserveRange && prev.length > 0) {
+      this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
+        this.setBars(next);
+        this.indicators.reset(h);
+      }));
+      if (this.financialHoverTime !== null) this.hoverIndex = barIndexAt(this.bars, this.financialHoverTime);
+      this.renderLegend();
     } else {
       this.hoverIndex = null;
       this.financialHoverTime = null;
@@ -829,13 +851,14 @@ export class ChartController {
         latest: lastNext,
         prev: next[next.length - 2] ?? null,
         isCurrent: current !== null && lastNext.t === current.t,
-        olderError: null,
-        olderLoading: false,
-        intradayEnd: false,
+        olderError: this.ready?.olderError ?? null,
+        olderLoading: this.ready?.olderLoading ?? false,
+        intradayEnd: this.ready?.intradayEnd ?? false,
       };
       if (wasNull) this.emitReady();
       else this.refreshReady();
     }
+    this.updateIntradayEnd();
   }
 
   dispose(): void {
@@ -1358,7 +1381,19 @@ export class ChartController {
 
   private onReset(raw: History): void {
     this.rawHistory = raw;
-    if (this.tickReplay !== null) return;
+    if (this.tickReplay !== null) {
+      if (this.tickReplay.priorBars.length === 0 && this.view !== null && isMinutePeriod(this.view.period)) {
+        this.tickReplay = {
+          ...this.tickReplay,
+          priorBars: displayBars(raw),
+          priorPeriod: this.tickReplay.priorPeriod ?? this.view.period,
+        };
+        this.applyTickReplayFrame(this.tickReplay.engine.getFrame(), false, true);
+      } else {
+        this.updateIntradayEnd();
+      }
+      return;
+    }
     this.pendingEnd = null;
     const h = this.deriveHistory(raw);
     this.history = h;
@@ -1460,7 +1495,20 @@ export class ChartController {
 
   private onJumpEntered(raw: History): void {
     this.rawHistory = raw;
-    if (this.tickReplay !== null) return;
+    if (this.tickReplay !== null) {
+      if (this.enteringJump !== null && this.enteringJump.date === this.feed.activeDate && this.feed.mode?.entering !== true) {
+        this.jumpInterval = this.enteringJump.interval;
+        this.enteringJump = null;
+      }
+      this.pendingEnd = null;
+      this.tickReplay = { ...this.tickReplay, priorBars: displayBars(raw) };
+      this.applyTickReplayFrame(this.tickReplay.engine.getFrame(), false);
+      const end = this.jumpInterval ? lastBarBefore(this.bars, this.jumpInterval) : null;
+      if (end) this.fitEndingAt(this.bars[end.index]!.t);
+      this.compare.coverFrom(this.leftT());
+      this.updateIntradayEnd();
+      return;
+    }
     if (this.enteringJump !== null && this.enteringJump.date === this.feed.activeDate && this.feed.mode?.entering !== true) {
       this.jumpInterval = this.enteringJump.interval;
       this.enteringJump = null;
@@ -1642,7 +1690,22 @@ export class ChartController {
 
   private onPrepended(raw: History, added: number): void {
     this.rawHistory = raw;
-    if (this.tickReplay !== null) return;
+    if (this.tickReplay !== null) {
+      this.patchReady({ olderLoading: false });
+      if (added === 0) {
+        this.applyTickReplayFrame(this.tickReplay.engine.getFrame(), false, true);
+        return;
+      }
+      this.tickReplay = { ...this.tickReplay, priorBars: displayBars(raw) };
+      this.applyTickReplayFrame(this.tickReplay.engine.getFrame(), false, true);
+      this.compare.coverFrom(this.leftT());
+      if (this.tickReplayNextBefore() !== null) {
+        const left = this.leftT();
+        const before = left === null ? -1 : barIndexAtOrAfter(this.bars, left);
+        if (before >= 0 && before < LOAD_OLDER_WITHIN) this.feed.needOlder();
+      }
+      return;
+    }
     const wasLoadingEmpty = this.ready === null && this.bars.length === 0;
     const prevLen = this.bars.length;
     const h = this.deriveHistory(raw);
@@ -1711,7 +1774,8 @@ export class ChartController {
   private updateIntradayEnd(): void {
     if (!this.ready || !this.view) return;
     const r = this.chart.timeScale().getVisibleLogicalRange();
-    const end = isIntraday(this.view.period) && this.history?.nextBefore === null && r !== null && r.from < 0.5;
+    const canHitIntradayLimit = this.tickReplay === null || this.tickReplayCanLoadPrior();
+    const end = canHitIntradayLimit && isIntraday(this.view.period) && this.history?.nextBefore === null && r !== null && r.from < 0.5;
     if (end !== this.ready.intradayEnd) this.patchReady({ intradayEnd: end });
   }
 

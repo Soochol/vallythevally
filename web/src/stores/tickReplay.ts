@@ -4,16 +4,20 @@ import type { SymbolCode } from "../api/generated/SymbolCode";
 import type { WindowId } from "../layout/kinds";
 import { replayPointScheduler } from "../features/book-replay/pointScheduler";
 import type { ReplayEngine, ReplayEngineControlState } from "../features/replay-page/replayEngine";
-import type { ReplaySession } from "../features/replay-page/replayModel";
+import { PREMARKET_START_MIN, type ReplaySession } from "../features/replay-page/replayModel";
 import { useBookReplayStore } from "./bookReplay";
 import { useUiStore } from "./ui";
+
+export type TickReplayStart =
+  | { readonly kind: "dayStart" }
+  | { readonly kind: "atSec"; readonly sec: number };
 
 export interface TickReplayTarget {
   readonly cellId: WindowId;
   readonly symbol: SymbolCode;
   readonly link: LinkColor | null;
   readonly date: string;
-  readonly initialSec: number;
+  readonly start: TickReplayStart;
   readonly autoPlay: boolean;
 }
 
@@ -58,12 +62,13 @@ const IDLE_STATE: TickReplayState = { kind: "idle" };
 
 let nextRunId = 0;
 
-function initialControl(initialSec: number): ReplayEngineControlState {
+function initialControl(start: TickReplayStart): ReplayEngineControlState {
+  const activeSecond = start.kind === "atSec" ? Math.max(0, Math.floor(start.sec)) : PREMARKET_START_MIN * 60;
   return {
     playing: false,
     buffering: true,
     mode: { kind: "time", speed: 1, skipIdleMs: null },
-    activeSecond: Math.max(0, Math.floor(initialSec)),
+    activeSecond,
     loadedSpanCount: 0,
   };
 }
@@ -111,7 +116,7 @@ export const useTickReplayStore = create<TickReplayStore>()((set, get) => ({
         session: null,
         engine: null,
         isArchive: false,
-        control: initialControl(target.initialSec),
+        control: initialControl(target.start),
       },
     });
     return runId;

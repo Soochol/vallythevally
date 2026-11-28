@@ -74,8 +74,9 @@ function ActiveTickReplayHost({
       code: target.symbol,
       session: data.session,
       meta: data.replayMeta,
+      initialSec: target.start.kind === "atSec" ? target.start.sec : undefined,
+      snapToFirstTick: target.start.kind === "dayStart",
     });
-    engine.seekSec(target.initialSec);
     const sessionEndLimitMs = Math.max(data.session.sessionStartSec * 1_000, data.session.sessionEndSec * 1_000 - 100);
     if (target.autoPlay && engine.getFrame().cursorMs < sessionEndLimitMs) {
       engine.setPlaying(true);
@@ -93,7 +94,7 @@ function ActiveTickReplayHost({
     runId,
     target.symbol,
     target.date,
-    target.initialSec,
+    target.start,
     target.autoPlay,
     data.replayFailed,
     data.daysPending,

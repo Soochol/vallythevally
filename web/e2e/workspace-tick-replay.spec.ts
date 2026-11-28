@@ -379,7 +379,22 @@ function seedSixWindowLayout(scenario: Scenario) {
   });
 }
 
-function seedTickReplayMarket(scenario: Scenario) {
+interface TickReplayMarketOverrides {
+  readonly meta?: BookReplayMeta;
+  readonly spanStart?: number;
+  readonly spanBytes?: Uint8Array;
+  readonly bars1m?: readonly Bar[];
+  readonly nextBefore?: number | null;
+  readonly olderPage?: { readonly bars: readonly Bar[]; readonly nextBefore: number | null };
+  readonly jumpPage?: { readonly date: string; readonly bars: readonly Bar[]; readonly nextBefore: number | null };
+}
+
+function seedTickReplayMarket(scenario: Scenario, overrides: TickReplayMarketOverrides = {}) {
+  const dayMeta = overrides.meta ?? REPLAY_META_TICK;
+  const daySpanStart = overrides.spanStart ?? 540;
+  const daySpanBytes = overrides.spanBytes ?? SPAN_540_BYTES;
+  const initialBars = overrides.bars1m ?? BARS_1M;
+  const initialNextBefore = overrides.nextBefore !== undefined ? overrides.nextBefore : at(UNCOLLECTED_MIDNIGHT, 8, 55);
   ordersOn(scenario);
   const api = tradingApi(scenario, [openOrder("0000001", "buy", 71_000, 10)]);
   scenario.reply("/api/book-replay/access", { body: { available: true } });
@@ -395,7 +410,7 @@ function seedTickReplayMarket(scenario: Scenario) {
       date: DATE,
       coverage: "collected",
       previousClose: 70_000,
-      covered: [[540, 545]],
+      covered: dayMeta.covered,
       books: [],
       trades: [],
     },
@@ -427,7 +442,7 @@ function seedTickReplayMarket(scenario: Scenario) {
   });
   scenario.reply(
     (url) => url.pathname === `/api/symbols/${CODE}/book-replay/meta` && url.searchParams.get("date") === DATE,
-    { body: REPLAY_META_TICK },
+    { body: dayMeta },
   );
   scenario.reply(
     (url) => url.pathname === `/api/symbols/${CODE}/book-replay/meta` && url.searchParams.get("date") === ARCHIVE_DATE,
@@ -437,8 +452,8 @@ function seedTickReplayMarket(scenario: Scenario) {
     (url) =>
       url.pathname === `/api/symbols/${CODE}/book-replay/span`
       && url.searchParams.get("date") === DATE
-      && url.searchParams.get("startMinute") === "540",
-    { body: SPAN_540_BYTES },
+      && url.searchParams.get("startMinute") === String(daySpanStart),
+    { body: daySpanBytes },
   );
   scenario.reply(
     (url) =>
@@ -451,8 +466,30 @@ function seedTickReplayMarket(scenario: Scenario) {
     body: { symbol: CODE, venue: "combined", period: "D", bars: DAILY_BARS, current: null, nextBefore: null, seq: null },
   });
   scenario.reply(
-    (url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === CODE && url.searchParams.get("period") !== "D",
-    { body: { symbol: CODE, venue: "combined", period: "1m", bars: BARS_1M, current: null, nextBefore: at(UNCOLLECTED_MIDNIGHT, 8, 55), seq: null } },
+    (url) =>
+      url.pathname === "/api/bars"
+      && url.searchParams.get("symbol") === CODE
+      && url.searchParams.get("period") !== "D"
+      && !url.searchParams.has("before"),
+    { body: { symbol: CODE, venue: "combined", period: "1m", bars: initialBars, current: null, nextBefore: initialNextBefore, seq: null } },
+  );
+  scenario.reply(
+    (url) =>
+      url.pathname === "/api/bars"
+      && url.searchParams.get("symbol") === CODE
+      && url.searchParams.get("period") !== "D"
+      && url.searchParams.has("before"),
+    {
+      body: {
+        symbol: CODE,
+        venue: "combined",
+        period: "1m",
+        bars: overrides.olderPage?.bars ?? [],
+        current: null,
+        nextBefore: overrides.olderPage ? overrides.olderPage.nextBefore : initialNextBefore,
+        seq: null,
+      },
+    },
   );
   scenario.reply(
     (url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === ALT_CODE,
@@ -468,8 +505,24 @@ function seedTickReplayMarket(scenario: Scenario) {
       },
     },
   );
-  scenario.reply((url) => url.pathname === "/api/bars/jump", {
-    body: { symbol: CODE, venue: "combined", period: "1m", date: "2026-11-25", bars: BARS_1M.slice(3), nextBefore: null, unadjustedDays: 0 },
+  scenario.on((url) => url.pathname === "/api/bars/jump", (request) => {
+    const reqDate = new URL(request.url()).searchParams.get("date");
+    if (overrides.jumpPage && reqDate === overrides.jumpPage.date) {
+      return {
+        body: {
+          symbol: CODE,
+          venue: "combined",
+          period: "1m",
+          date: overrides.jumpPage.date,
+          bars: overrides.jumpPage.bars,
+          nextBefore: overrides.jumpPage.nextBefore,
+          unadjustedDays: 0,
+        },
+      };
+    }
+    return {
+      body: { symbol: CODE, venue: "combined", period: "1m", date: "2026-11-25", bars: BARS_1M.slice(3), nextBefore: null, unadjustedDays: 0 },
+    };
   });
   scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/quote-totals`, {
     body: { symbol: CODE, period: "1m", venue: "combined", state: "ready", points: [] },
@@ -727,6 +780,7 @@ test("호갑플레이 아카이브 날짜에서 틱 복기를 시작하면 KRX �
   await expect(chartHost(page)).toHaveAttribute("data-bar-count", "1");
   await expect(chartHost(page)).toHaveAttribute("data-last-close", "70200");
   await expect(tradesWin(page).getByTestId("trade-row")).toHaveCount(1);
+  await expect(cell(page).getByText("분봉은 최근 1년까지 볼 수 있습니다")).toHaveCount(0);
 });
 
 test("실시간 복귀 버튼, Esc 키, 연동 그룹 종목 변경으로 틱 복기가 즉시 종료되고 실시간으로 돌아온다", async ({ page, scenario }) => {
@@ -775,4 +829,201 @@ test("실시간 복귀 버튼, Esc 키, 연동 그룹 종목 변경으로 틱 �
   await expect(chartHost(page)).not.toHaveAttribute("data-tick-replay");
   await expect(bookWin(page)).toHaveAttribute("data-symbol", ALT_CODE);
   await expect(bookWin(page)).not.toHaveAttribute("data-replay");
+});
+
+test("이 날 처음부터 틱 복기는 장전 첫 수집 틱(08:00~)에서 시작하고 리모콘 빈 영역 드래그와 경계 클램프가 동작한다", async ({ page, scenario }) => {
+  const m480 = 480 * 60_000;
+  const nxtMeta: BookReplayMeta = {
+    ...REPLAY_META_TICK,
+    covered: [[480, 1199]],
+    spans: [{ startMinute: 480, bookRows: 2, tradeRows: 1, programRows: 0 }],
+    minutes: [
+      {
+        minute: 480,
+        open: 70_500,
+        high: 70_600,
+        low: 70_500,
+        close: 70_600,
+        volume: 150,
+        cumVol: 0,
+        cumVal: 0,
+        cumBuyQty: 0,
+        cumSellQty: 0,
+        dayOpen: null,
+        dayHigh: null,
+        dayLow: null,
+        totalAsk: 3_400,
+        totalBid: 2_900,
+        programNetQty: null,
+        programNetAmtMillion: null,
+        singlePrice: false,
+      },
+    ],
+  };
+  const nxtSpanBytes = new Uint8Array(
+    encodeHogaSpan({
+      date: 20261125,
+      startMinute: 480,
+      lengthMinutes: 5,
+      symbol: `${CODE}_AL`,
+      streams: [
+        {
+          kind: "book",
+          columns: {
+            recv_ms: [m480 + 5_000, m480 + 25_000],
+            t_s: [28_805, 28_825],
+            ask_px1: [70_600, 70_700],
+            ask_px2: [70_700, 70_800],
+            ask_px3: [70_800, 70_900],
+            ask_px4: [70_900, 71_000],
+            bid_px1: [70_500, 70_600],
+            bid_px2: [70_400, 70_500],
+            bid_px3: [70_300, 70_400],
+            bid_px4: [70_200, 70_300],
+            ask_qty1: [800, 900],
+            ask_qty2: [800, 800],
+            ask_qty3: [900, 900],
+            ask_qty4: [900, 900],
+            bid_qty1: [700, 800],
+            bid_qty2: [700, 700],
+            bid_qty3: [700, 700],
+            bid_qty4: [800, 800],
+            ask_total: [3_400, 3_500],
+            bid_total: [2_900, 3_000],
+          },
+        },
+        {
+          kind: "trades",
+          columns: {
+            recv_ms: [m480 + 18_000],
+            t_s: [28_818],
+            price: [70_600],
+            qty: [150],
+            venue: [2],
+          },
+        },
+      ],
+    }),
+  );
+
+  seedSixWindowLayout(scenario);
+  seedTickReplayMarket(scenario, { meta: nxtMeta, spanStart: 480, spanBytes: nxtSpanBytes });
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  const menu = await rightClickBar(page, at(MIDNIGHT, 9, 2));
+  await menu.getByRole("menuitem", { name: /이 날 처음부터 틱 복기/ }).click();
+
+  await expect(dock(page)).toBeVisible();
+  await expect(dock(page).getByTestId("tick-replay-buffering")).toHaveCount(0);
+  await page.keyboard.press("Space");
+  await expect(dock(page).getByTestId("tick-replay-play")).toHaveAttribute("data-playing", "false");
+
+  await expect(dock(page).getByTestId("tick-replay-clock")).toHaveText(/^08:00:0[5-9]\./);
+  await expect(dock(page).getByTestId("tick-replay-session")).toHaveText("장전");
+  await expect(dock(page).locator(".trd-scrub-edge").nth(0)).toHaveText("08:00");
+  await expect(dock(page).locator(".trd-scrub-edge").nth(1)).toHaveText("20:00");
+  await expect(bookWin(page).getByTestId("book-total-ask")).toHaveText("3,400");
+
+  await dock(page).getByTestId("tick-replay-step-next").click();
+  await expect(dock(page).getByTestId("tick-replay-clock")).toHaveText("08:00:18.000");
+
+  const workspaceBox = (await page.locator("main.workspace").boundingBox())!;
+  const beforeDrag = (await dock(page).boundingBox())!;
+  const symbolBox = (await dock(page).getByTestId("tick-replay-symbol").boundingBox())!;
+
+  await page.mouse.move(symbolBox.x + symbolBox.width / 2, symbolBox.y + symbolBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(symbolBox.x + symbolBox.width / 2 - 140, symbolBox.y + symbolBox.height / 2 - 120, { steps: 5 });
+  await page.mouse.up();
+
+  const afterHeaderDrag = (await dock(page).boundingBox())!;
+  expect(afterHeaderDrag.x).toBeLessThan(beforeDrag.x - 80);
+  expect(afterHeaderDrag.y).toBeLessThan(beforeDrag.y - 80);
+
+  const emptySpot = { x: afterHeaderDrag.x + afterHeaderDrag.width - 140, y: afterHeaderDrag.y + 14 };
+  await page.mouse.move(emptySpot.x, emptySpot.y);
+  await page.mouse.down();
+  await page.mouse.move(workspaceBox.x - 500, workspaceBox.y - 500, { steps: 5 });
+  await page.mouse.up();
+
+  const clampedTopLeft = (await dock(page).boundingBox())!;
+  expect(clampedTopLeft.x).toBeGreaterThanOrEqual(workspaceBox.x + 7);
+  expect(clampedTopLeft.y).toBeGreaterThanOrEqual(workspaceBox.y + 7);
+  expect(clampedTopLeft.x).toBeLessThanOrEqual(workspaceBox.x + 12);
+  expect(clampedTopLeft.y).toBeLessThanOrEqual(workspaceBox.y + 12);
+
+  await page.mouse.move(clampedTopLeft.x + clampedTopLeft.width - 140, clampedTopLeft.y + 14);
+  await page.mouse.down();
+  await page.mouse.move(workspaceBox.x + workspaceBox.width + 500, workspaceBox.y + workspaceBox.height + 500, { steps: 5 });
+  await page.mouse.up();
+
+  const clampedBottomRight = (await dock(page).boundingBox())!;
+  expect(clampedBottomRight.x + clampedBottomRight.width).toBeLessThanOrEqual(workspaceBox.x + workspaceBox.width - 7);
+  expect(clampedBottomRight.y + clampedBottomRight.height).toBeLessThanOrEqual(workspaceBox.y + workspaceBox.height - 7);
+
+  await dock(page).getByTestId("tick-replay-step-next").click();
+  await expect(dock(page).getByTestId("tick-replay-clock")).toHaveText("08:00:25.000");
+  await expect(bookWin(page).getByTestId("book-total-ask")).toHaveText("3,500");
+});
+
+test("틱 복기 재생 중에 과거로 스크롤해도 1년 이내 과거 분봉을 정상 불러오고 가짜 1년 안내를 띄우지 않는다", async ({ page, scenario }) => {
+  const olderDayMidnight = Date.parse("2026-11-20T00:00:00+09:00") / 1000;
+  const recentPriorBars: Bar[] = Array.from({ length: 70 }, (_, idx) => ({
+    t: at(ARCHIVE_MIDNIGHT, 9, idx),
+    o: 70_000 + idx * 10,
+    h: 70_100 + idx * 10,
+    l: 69_900 + idx * 10,
+    c: 70_050 + idx * 10,
+    v: 200,
+  }));
+  const olderBars: Bar[] = Array.from({ length: 15 }, (_, idx) => ({
+    t: at(olderDayMidnight, 14, idx),
+    o: 68_000 + idx * 10,
+    h: 68_100 + idx * 10,
+    l: 67_900 + idx * 10,
+    c: 68_050 + idx * 10,
+    v: 150,
+  }));
+  const initialBars = [...recentPriorBars, ...BARS_1M.slice(3)];
+  let olderRequests = 0;
+
+  seedSixWindowLayout(scenario);
+  seedTickReplayMarket(scenario, {
+    bars1m: initialBars,
+    nextBefore: at(ARCHIVE_MIDNIGHT, 9, 0),
+    olderPage: {
+      bars: olderBars,
+      nextBefore: at(olderDayMidnight, 13, 59),
+    },
+  });
+  page.on("request", (req) => {
+    const url = new URL(req.url());
+    if (url.pathname === "/api/bars" && url.searchParams.get("symbol") === CODE && url.searchParams.has("before")) {
+      olderRequests += 1;
+    }
+  });
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  const menu = await rightClickBar(page, at(MIDNIGHT, 9, 2));
+  await menu.getByRole("menuitem", { name: /이 날 처음부터 틱 복기/ }).click();
+
+  await expect(dock(page)).toBeVisible();
+  await expect(dock(page).getByTestId("tick-replay-buffering")).toHaveCount(0);
+  await page.keyboard.press("Space");
+  await expect(dock(page).getByTestId("tick-replay-play")).toHaveAttribute("data-playing", "false");
+  await expect(chartHost(page)).toHaveAttribute("data-bar-count", "70");
+  expect(olderRequests).toBe(0);
+
+  await page.evaluate(() => {
+    const probe = window.chartProbes.find((p) => p.chart.chartElement().closest("section")?.getAttribute("aria-label")?.startsWith("칸 1: "));
+    if (!probe) throw new Error("차트 프로브가 없습니다");
+    probe.chart.timeScale().setVisibleLogicalRange({ from: -1, to: 18 });
+  });
+
+  await expect.poll(() => olderRequests).toBeGreaterThanOrEqual(1);
+  await expect(chartHost(page)).toHaveAttribute("data-bar-count", "85");
+  await expect(cell(page).getByText("분봉은 최근 1년까지 볼 수 있습니다")).toHaveCount(0);
 });

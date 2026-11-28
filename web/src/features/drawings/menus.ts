@@ -15,7 +15,7 @@ import { isIndexCode, isMinutePeriod } from "../../lib/symbol";
 import { useDrawingSession } from "../../stores/drawingSession";
 import { useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
-import { useTickReplayStore } from "../../stores/tickReplay";
+import { type TickReplayStart, useTickReplayStore } from "../../stores/tickReplay";
 import { currentActionKeys, useUiStore } from "../../stores/ui";
 import { activeWatchlist, useWatchlistStore } from "../../stores/watchlist";
 import { kstDateOf } from "../book-replay/replay";
@@ -23,7 +23,7 @@ import { controllerFor } from "../grid/controllers";
 import { CameraIcon, ClockIcon, CopyIcon, DRAWING_ICONS, ExpandIcon, Icon, PlusIcon } from "../icons";
 import { jumpToBar } from "../jump/jumpToBar";
 import type { MenuItem } from "../menu/Menu";
-import { formatShortDay, REGULAR_START_MIN } from "../replay-page/replayModel";
+import { formatShortDay } from "../replay-page/replayModel";
 import { canCopyImage, saveSnapshot } from "../snapshot/saveSnapshot";
 import { secondOfDay } from "../trades/tape";
 
@@ -35,14 +35,14 @@ export interface TickReplayMenuContext {
 const action = (label: string, onSelect: () => void): MenuItem => ({ kind: "action", label, onSelect });
 const glyph = (path: string) => createElement(Icon, { path, size: 14 });
 
-function startTickReplayAt(cellId: WindowId, symbol: SymbolCode, date: string, initialSec: number): void {
+function startTickReplay(cellId: WindowId, symbol: SymbolCode, date: string, start: TickReplayStart): void {
   const link = useLayoutStore.getState().layout.windows.find((w) => w.id === cellId)?.link ?? null;
   useTickReplayStore.getState().start({
     cellId,
     symbol,
     link,
     date,
-    initialSec,
+    start,
     autoPlay: true,
   });
 }
@@ -65,7 +65,7 @@ function tickReplayItems(
       hint: formatShortDay(date),
       disabled: !hasData,
       disabledReason,
-      onSelect: () => startTickReplayAt(surface.cellId, symbol, date, REGULAR_START_MIN * 60),
+      onSelect: () => startTickReplay(surface.cellId, symbol, date, { kind: "dayStart" }),
     },
     {
       kind: "action",
@@ -74,7 +74,7 @@ function tickReplayItems(
       hint: formatKstClock(pointT),
       disabled: !hasData,
       disabledReason,
-      onSelect: () => startTickReplayAt(surface.cellId, symbol, date, secondOfDay(pointT)),
+      onSelect: () => startTickReplay(surface.cellId, symbol, date, { kind: "atSec", sec: secondOfDay(pointT) }),
     },
     { kind: "separator" },
   ];

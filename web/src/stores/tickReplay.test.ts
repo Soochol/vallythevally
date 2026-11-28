@@ -29,7 +29,7 @@ describe("useTickReplayStore", () => {
       symbol: CODE,
       link: "a",
       date: "20261125",
-      initialSec: 9 * 3600,
+      start: { kind: "dayStart" },
       autoPlay: true,
     });
 
@@ -54,7 +54,7 @@ describe("useTickReplayStore", () => {
       symbol: CODE,
       link: "a",
       date: "20261125",
-      initialSec: 9 * 3600,
+      start: { kind: "atSec", sec: 9 * 3600 },
       autoPlay: false,
     });
     expect(useTickReplayStore.getState().state.kind).toBe("active");
@@ -75,7 +75,7 @@ describe("useTickReplayStore", () => {
       symbol: CODE,
       link: "a",
       date: "20261125",
-      initialSec: 9 * 3600,
+      start: { kind: "dayStart" },
       autoPlay: false,
     });
     const baseDay = {
