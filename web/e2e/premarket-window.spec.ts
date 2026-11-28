@@ -24,24 +24,28 @@ const TEN_DATES = [
 function buildSamsungSeries(): Readonly<Record<string, PreMarketDaySeries>> {
   const table: Record<string, PreMarketDaySeries> = {};
   TEN_DATES.forEach((date, idx) => {
-    const basePct = idx === 9 ? 1.3 : Number(((idx - 3) * 0.45).toFixed(2));
-    const peakPct = idx === 9 ? 6.2 : Number((basePct + 0.8).toFixed(2));
-    const midQty = idx === 9 ? 32000 : 28000 + idx * 4000;
-    const endQty = idx === 9 ? 16000 : 42000 + idx * 5000;
+    const isToday = idx === 9;
+    const startPct = isToday ? 1.8 : Number(((idx - 4) * 0.25).toFixed(2));
+    const midPct = isToday ? 4.6 : Number((startPct + 0.5).toFixed(2));
+    const endPct = isToday ? 5.4 : Number((startPct + 0.7).toFixed(2));
+    const startQty = isToday ? 28000 : 10000 + idx * 1000;
+    const midQty = isToday ? 96000 : 24000 + idx * 3000;
+    const endQty = isToday ? 168000 : 36000 + idx * 4000;
+    const price = isToday ? 76200 : 71000 + idx * 200;
     table[date] = {
       date,
       source: "store",
       points: [
-        { secOfDay: 31800, expectedPriceWon: 70000 + idx * 200, expectedReturnPct: 0.4, expectedQty: 12000 + idx * 1000, expectedTurnoverMillionWon: 840 + idx * 80 },
-        { secOfDay: 32100, expectedPriceWon: 72000 + idx * 300, expectedReturnPct: peakPct, expectedQty: midQty, expectedTurnoverMillionWon: Number(((midQty * 72000) / 1_000_000).toFixed(1)) },
-        { secOfDay: 32390, expectedPriceWon: 71000 + idx * 250, expectedReturnPct: basePct, expectedQty: endQty, expectedTurnoverMillionWon: Number(((endQty * 71000) / 1_000_000).toFixed(1)) },
+        { secOfDay: 31800, expectedPriceWon: price - 1500, expectedReturnPct: startPct, expectedQty: startQty, expectedTurnoverMillionWon: Number(((startQty * (price - 1500)) / 1_000_000).toFixed(1)) },
+        { secOfDay: 32100, expectedPriceWon: price - 500, expectedReturnPct: midPct, expectedQty: midQty, expectedTurnoverMillionWon: Number(((midQty * (price - 500)) / 1_000_000).toFixed(1)) },
+        { secOfDay: 32390, expectedPriceWon: price, expectedReturnPct: endPct, expectedQty: endQty, expectedTurnoverMillionWon: Number(((endQty * price) / 1_000_000).toFixed(1)) },
       ],
-      lateDropPct: idx === 9 ? -4.9 : 0.2,
-      classification: idx === 9 ? "spoofWarning" : idx === 7 ? "genuineGap" : "flat",
-      openPriceWon: 71000 + idx * 250,
-      return0900Pct: basePct,
-      return0905Pct: basePct,
-      return0910Pct: basePct,
+      lateDropPct: isToday ? 0.0 : 0.2,
+      classification: isToday ? "genuineGap" : "flat",
+      openPriceWon: price,
+      return0900Pct: endPct,
+      return0905Pct: endPct,
+      return0910Pct: endPct,
     };
   });
   return table;
@@ -97,7 +101,7 @@ function setupPreMarketMocks(scenario: Scenario) {
   );
 }
 
-test("장전 동시호가 창에서 2주 이중 Y축 차트, 좌측 세로 날짜 리스트, 스포트라이트·핀·기준일 전환 및 새로고침 복원을 확인한다", async ({ page, scenario }) => {
+test("장전 동시호가 창이 과거 2중 범위 밴드, 오늘 돌파 강조, 호버 툴바 제거, 기간·단위·도움말 전환 및 새로고침 복원을 보인다", async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   setupPreMarketMocks(scenario);
 
@@ -111,59 +115,44 @@ test("장전 동시호가 창에서 2주 이중 Y축 차트, 좌측 세로 날�
   const win = page.getByTestId("premarket-window");
   await expect(win).toBeVisible();
   await expect(win).toHaveAttribute("data-symbol", "005930");
-  await expect(page.getByTestId("premarket-snapshot-pane")).toHaveCount(0);
-  await expect(page.getByTestId("premarket-outcomes")).toHaveCount(0);
-
-  const dateList = page.getByTestId("premarket-date-list");
-  await expect(dateList).toBeVisible();
-  await expect(dateList).toContainText("이번주");
-  await expect(dateList).toContainText("지난주");
-  await expect(page.getByTestId("premarket-day-chip-20261127")).toHaveAttribute("data-role", "focus");
-  await expect(page.getByTestId("premarket-day-chip-20261116")).toBeVisible();
-
+  await expect(page.getByTestId("premarket-date-list")).toHaveCount(0);
+  await expect(page.locator(".pm-chart-legend")).toHaveCount(0);
   await expect(page.locator(".pm-bg-line")).toHaveCount(0);
-  await expect(page.locator(".pm-band-area")).toBeVisible();
-  await expect(page.locator(".pm-band-median")).toBeVisible();
 
-  await page.getByTestId("premarket-day-chip-20261120").hover();
-  await expect(page.locator('.pm-spot-line[data-date="20261120"]')).toBeVisible();
-  await expect(page.locator('.pm-vol-spot-line[data-date="20261120"]')).toBeVisible();
-
-  await page.getByTestId("premarket-day-chip-20261125").click();
-  await expect(page.getByTestId("premarket-day-chip-20261125")).toHaveAttribute("data-role", "pin-0");
-  await expect(page.locator('.pm-pin-line[data-date="20261125"]')).toBeVisible();
-  await expect(page.locator('.pm-vol-pin-line[data-date="20261125"]')).toBeVisible();
-  await page.getByTestId("premarket-day-chip-20261124").click();
-  await expect(page.getByTestId("premarket-day-chip-20261124")).toHaveAttribute("data-role", "pin-1");
-  await page.getByTestId("premarket-day-chip-20261120").click();
-  await expect(page.getByTestId("premarket-day-chip-20261125")).toHaveAttribute("data-role", "bg");
-  await expect(page.getByTestId("premarket-day-chip-20261124")).toHaveAttribute("data-role", "pin-0");
-  await expect(page.getByTestId("premarket-day-chip-20261120")).toHaveAttribute("data-role", "pin-1");
+  await expect(page.getByTestId("premarket-head-metrics")).toContainText("+5.40%");
+  await expect(page.getByTestId("premarket-head-metrics")).toContainText("76,200원");
+  await expect(page.getByTestId("premarket-head-metrics")).toContainText("16.8만주");
 
   const svg = page.getByTestId("premarket-overlay-chart");
   await expect(svg).toContainText("08:50");
-  await expect(svg).toContainText("08:52");
   await expect(svg).toContainText("09:00");
-  await expect(page.getByTestId("premarket-vol-area")).toBeVisible();
+  await expect(page.getByTestId("premarket-price-band")).toBeVisible();
+  await expect(page.getByTestId("premarket-vol-band")).toBeVisible();
+  await expect(page.getByTestId("premarket-price-series")).toBeVisible();
+  await expect(page.getByTestId("premarket-vol-series")).toBeVisible();
+  await expect(page.getByTestId("premarket-price-breakout").first()).toBeVisible();
+  await expect(page.getByTestId("premarket-vol-breakout").first()).toBeVisible();
+
   const box = await svg.boundingBox();
   expect(box).not.toBeNull();
-  await page.mouse.move(box!.x + box!.width * 0.78, box!.y + box!.height * 0.5);
-  const tooltip = page.getByTestId("premarket-tooltip");
-  await expect(tooltip).toBeVisible();
-  await expect(tooltip).toContainText("11/27");
-  await expect(tooltip).toContainText("11/24");
-  await expect(tooltip).toContainText("11/20");
-  await expect(tooltip).toContainText("직전 대비 물량 Δ");
+  await page.mouse.move(box!.x + box!.width * 0.72, box!.y + box!.height * 0.38);
+  await expect(page.getByTestId("premarket-tooltip")).toHaveCount(0);
 
-  await page.getByTestId("premarket-focus-btn-20261125").click();
-  await expect(page.getByTestId("premarket-day-chip-20261125")).toHaveAttribute("data-role", "focus");
-  await expect(page.getByTestId("premarket-head-metrics")).toContainText("11/25 예상가");
+  await page.getByTestId("premarket-help-btn").click();
+  const help = page.getByTestId("premarket-help-popover");
+  await expect(help).toBeVisible();
+  await expect(help).toContainText("과거 9일 범위 대비 오늘");
+  await page.keyboard.press("Escape");
+  await expect(help).toHaveCount(0);
 
   await page.getByTestId("premarket-range-5").click();
-  await expect(page.getByTestId("premarket-day-chip-20261116")).toHaveCount(0);
-  await expect(page.getByTestId("premarket-day-chip-20261123")).toBeVisible();
+  await expect(page.getByTestId("premarket-range-5")).toHaveAttribute("aria-pressed", "true");
+  await page.getByTestId("premarket-help-btn").click();
+  await expect(page.getByTestId("premarket-help-popover")).toContainText("과거 4일 범위 대비 오늘");
+  await page.keyboard.press("Escape");
+
   await page.getByTestId("premarket-range-10").click();
-  await expect(page.getByTestId("premarket-day-chip-20261116")).toBeVisible();
+  await expect(page.getByTestId("premarket-range-10")).toHaveAttribute("aria-pressed", "true");
 
   await page.getByTestId("premarket-unit-turnover").click();
   await expect(page.getByTestId("premarket-head-metrics")).toContainText("억");
@@ -359,7 +348,7 @@ test("단일 포인트 날짜 시리즈는 호버 없이도 SVG 원 마커로 �
   expect(box!.height).toBeGreaterThan(0);
 });
 
-test("08:00 대기 상태에서 당일이 기준일로 표시되고 08:30 틱이 들어오면 실시간 곡선과 물량 면으로 자동 전환된다", async ({ page, scenario }) => {
+test("08:00 대기 상태에서 과거 범위 밴드가 보이고 틱이 들어오면 오늘 선과 물량으로 자동 전환된다", async ({ page, scenario }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
@@ -373,7 +362,7 @@ test("08:00 대기 상태에서 당일이 기준일로 표시되고 08:30 틱이
 
   scenario.on(
     (url) => /^\/api\/symbols\/005930\/premarket\/days$/.test(url.pathname),
-    () => ({ body: { symbol: "005930", days: ["20261126", "20261127"] } }),
+    () => ({ body: { symbol: "005930", days: ["20261125", "20261126", "20261127"] } }),
   );
   scenario.on(
     (url) => /^\/api\/symbols\/005930\/premarket\/compare$/.test(url.pathname),
@@ -396,8 +385,8 @@ test("08:00 대기 상태에서 당일이 기준일로 표시되고 08:30 틱이
               date: "20261127",
               source: "flow",
               points: [
-                { secOfDay: 31800, expectedPriceWon: 71400, expectedReturnPct: 2.0, expectedQty: 14000, expectedTurnoverMillionWon: 999.6 },
-                { secOfDay: 32040, expectedPriceWon: 72450, expectedReturnPct: 3.5, expectedQty: 26000, expectedTurnoverMillionWon: 1883.7 },
+                { secOfDay: 31800, expectedPriceWon: 71400, expectedReturnPct: 2.0, expectedQty: 44000, expectedTurnoverMillionWon: 3141.6 },
+                { secOfDay: 32040, expectedPriceWon: 72450, expectedReturnPct: 3.5, expectedQty: 98000, expectedTurnoverMillionWon: 7100.1 },
               ],
               lateDropPct: 0,
               classification: "genuineGap",
@@ -406,7 +395,7 @@ test("08:00 대기 상태에서 당일이 기준일로 표시되고 08:30 틱이
               return0905Pct: null,
               return0910Pct: null,
             };
-      return { body: { symbol: "005930", series: [SAMSUNG_SERIES["20261126"]!, todaySeries] } };
+      return { body: { symbol: "005930", series: [SAMSUNG_SERIES["20261125"]!, SAMSUNG_SERIES["20261126"]!, todaySeries] } };
     },
   );
 
@@ -414,20 +403,17 @@ test("08:00 대기 상태에서 당일이 기준일로 표시되고 08:30 틱이
   await page.goto("/");
   await tabOf(page, "premarket").click();
 
-  const todayChip = page.getByTestId("premarket-day-chip-20261127");
-  await expect(todayChip).toHaveAttribute("data-role", "focus");
-  await expect(todayChip).toHaveAttribute("data-pending", "true");
-  await expect(todayChip).toContainText("대기");
   await expect(page.getByTestId("premarket-pending-badge")).toBeVisible();
-  await expect(page.getByTestId("premarket-waiting-pill")).toBeVisible();
-  await expect(page.getByTestId("premarket-vol-area")).toHaveCount(0);
-  await expect(page.locator('.pm-bg-line[data-date="20261126"]')).toBeVisible();
+  await expect(page.getByTestId("premarket-waiting-hint")).toContainText("과거 2일 범위");
+  await expect(page.getByTestId("premarket-price-band")).toBeVisible();
+  await expect(page.getByTestId("premarket-vol-band")).toBeVisible();
+  await expect(page.getByTestId("premarket-vol-series")).toHaveCount(0);
 
   await page.clock.runFor(5_500);
-  await expect(page.getByTestId("premarket-waiting-pill")).toHaveCount(0);
-  await expect(todayChip).toHaveAttribute("data-pending", "false");
-  await expect(todayChip).toContainText("실시간");
-  await expect(page.getByTestId("premarket-vol-area")).toBeVisible();
-  await expect(page.locator('.pm-focus-line[data-date="20261127"]')).toBeVisible();
+  await expect(page.getByTestId("premarket-pending-badge")).toHaveCount(0);
+  await expect(page.getByTestId("premarket-waiting-hint")).toHaveCount(0);
+  await expect(page.getByTestId("premarket-live-badge")).toBeVisible();
+  await expect(page.getByTestId("premarket-price-series")).toBeVisible();
+  await expect(page.getByTestId("premarket-vol-series")).toBeVisible();
   await expect(page.getByTestId("premarket-head-metrics")).toContainText("+3.50%");
 });
