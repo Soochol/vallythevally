@@ -1,8 +1,10 @@
 import { describe, expect, test } from "vitest";
 import type { Bar } from "../../api/generated/Bar";
+import { displayBars, type History } from "../../chart/barFeed";
+import { syncOp } from "../../chart/indicators/sync";
 import type { ReplayEngineFrame } from "../replay-page/replayEngine";
 import { kstMidnightUnix, type ReplayFrame, type ReplayMinutePoint, type ReplaySession } from "../replay-page/replayModel";
-import { projectTickReplayBars } from "./chartBars";
+import { planTickReplayTransition, projectTickReplayBars } from "./chartBars";
 
 const DATE = "20261125";
 const DAY_START = kstMidnightUnix(DATE);
@@ -334,5 +336,117 @@ describe("projectTickReplayBars", () => {
     });
     expect(res.bars.map((b) => b.t)).toEqual([DAY_START + 540 * 60]);
     expect(res.current).toEqual({ t: DAY_START + 542 * 60, o: 71_200, h: 71_300, l: 71_200, c: 71_300, v: 80 });
+  });
+});
+
+describe("planTickReplayTransition", () => {
+  const barAt = (min: number, close: number, volume = 100): Bar => ({
+    t: DAY_START + min * 60,
+    o: close,
+    h: close,
+    l: close,
+    c: close,
+    v: volume,
+  });
+
+  test("skips unchanged frames, preserves confirmed bar references, and emits confirm before preview across minute boundaries without create resets", () => {
+    const prior1: Bar = { t: PREV_DAY_START + 928 * 60, o: 70_000, h: 70_100, l: 69_900, c: 70_000, v: 400 };
+    const prior2: Bar = { t: PREV_DAY_START + 929 * 60, o: 70_000, h: 70_200, l: 70_000, c: 70_200, v: 500 };
+
+    let history: History | null = null;
+    let display: Bar[] = [];
+    let indicatorDisplay: Bar[] = [];
+    let committedT: number | null = null;
+    const ops: string[] = [];
+
+    const apply = (nextBars: Bar[], nextCurrent: Bar | null, refit = false) => {
+      const plan = planTickReplayTransition({
+        prevHistory: history,
+        prevBars: display,
+        nextBars,
+        nextCurrent,
+        nextBefore: null,
+        refit,
+        preserveRange: false,
+      });
+      history = plan.history;
+      if (plan.kind === "noop") return plan;
+      display = plan.bars;
+      if (plan.kind === "reset") {
+        indicatorDisplay = displayBars(plan.history);
+        committedT = plan.history.bars.at(-1)?.t ?? null;
+        ops.push("reset");
+        return plan;
+      }
+      for (const step of plan.steps) {
+        const nextIndDisplay = displayBars(step.history);
+        const op = syncOp(indicatorDisplay, nextIndDisplay, step.bar, step.kind, committedT);
+        ops.push(op);
+        expect(op).not.toBe("create");
+        indicatorDisplay = nextIndDisplay;
+        if (op === "confirm") committedT = step.bar.t;
+      }
+      return plan;
+    };
+
+    expect(apply([prior1, prior2], null, true).kind).toBe("reset");
+    expect(ops).toEqual(["reset"]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }], null).kind).toBe("noop");
+    expect(ops).toEqual(["reset"]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }], barAt(540, 71_000, 100)).kind).toBe("tail");
+    expect(ops).toEqual(["reset", "preview"]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }], barAt(540, 71_200, 300)).kind).toBe("tail");
+    expect(ops).toEqual(["reset", "preview", "preview"]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }], barAt(540, 71_200, 300)).kind).toBe("noop");
+    expect(ops).toEqual(["reset", "preview", "preview"]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }, barAt(540, 71_200, 300)], null).kind).toBe("tail");
+    expect(ops).toEqual(["reset", "preview", "preview", "confirm"]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }, barAt(540, 71_200, 300)], null).kind).toBe("noop");
+    expect(ops).toEqual(["reset", "preview", "preview", "confirm"]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }, barAt(540, 71_200, 300)], barAt(541, 71_300, 50)).kind).toBe("tail");
+    expect(ops).toEqual(["reset", "preview", "preview", "confirm", "preview"]);
+
+    expect(
+      apply(
+        [{ ...prior1 }, { ...prior2 }, barAt(540, 71_200, 300), barAt(541, 71_350, 200)],
+        barAt(542, 71_400, 80),
+      ).kind,
+    ).toBe("tail");
+    expect(ops).toEqual(["reset", "preview", "preview", "confirm", "preview", "confirm", "preview"]);
+
+    expect(
+      apply(
+        [
+          { ...prior1 },
+          { ...prior2 },
+          barAt(540, 71_200, 300),
+          barAt(541, 71_350, 200),
+          barAt(542, 71_450, 150),
+          barAt(543, 71_500, 120),
+        ],
+        barAt(544, 71_600, 90),
+      ).kind,
+    ).toBe("tail");
+    expect(ops).toEqual([
+      "reset",
+      "preview",
+      "preview",
+      "confirm",
+      "preview",
+      "confirm",
+      "preview",
+      "confirm",
+      "confirm",
+      "preview",
+    ]);
+
+    expect(apply([{ ...prior1 }, { ...prior2 }], barAt(540, 71_000, 100)).kind).toBe("reset");
   });
 });

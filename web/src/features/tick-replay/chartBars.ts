@@ -1,4 +1,6 @@
 import type { Bar } from "../../api/generated/Bar";
+import type { UnixSeconds } from "../../api/generated/UnixSeconds";
+import type { History } from "../../chart/barFeed";
 import { PERIOD_ORDER } from "../../chart/crosshairSync";
 import { isRegularHours, toChartTime } from "../../chart/time";
 import type { MinutePeriod } from "../../lib/symbol";
@@ -199,4 +201,195 @@ export function projectTickReplayBars(input: ProjectTickReplayBarsInput): Projec
   }
 
   return { bars, current };
+}
+
+export interface TickReplayTransitionInput {
+  readonly prevHistory: History | null;
+  readonly prevBars: readonly Bar[];
+  readonly nextBars: readonly Bar[];
+  readonly nextCurrent: Bar | null;
+  readonly nextBefore: UnixSeconds | null;
+  readonly refit: boolean;
+  readonly preserveRange: boolean;
+}
+
+export interface TickReplayIndicatorStep {
+  readonly history: History;
+  readonly bar: Bar;
+  readonly kind: "live" | "confirmed";
+}
+
+export type TickReplayTransition =
+  | { readonly kind: "noop"; readonly history: History }
+  | {
+      readonly kind: "tail";
+      readonly history: History;
+      readonly bars: Bar[];
+      readonly drawBars: readonly Bar[];
+      readonly steps: readonly TickReplayIndicatorStep[];
+    }
+  | {
+      readonly kind: "reset";
+      readonly history: History;
+      readonly bars: Bar[];
+      readonly preserveRange: boolean;
+    };
+
+const MAX_INCREMENTAL_APPEND = 10;
+
+function sameBar(a: Bar | undefined, b: Bar | undefined): boolean {
+  return (
+    a !== undefined
+    && b !== undefined
+    && a.t === b.t
+    && a.o === b.o
+    && a.h === b.h
+    && a.l === b.l
+    && a.c === b.c
+    && a.v === b.v
+  );
+}
+
+function prefixEquals(prev: readonly Bar[], next: readonly Bar[], count: number): boolean {
+  for (let i = 0; i < count; i++) {
+    if (!sameBar(prev[i], next[i])) return false;
+  }
+  return true;
+}
+
+export function planTickReplayTransition(input: TickReplayTransitionInput): TickReplayTransition {
+  const { prevHistory, prevBars, nextBars, nextCurrent, nextBefore, refit, preserveRange } = input;
+  const nextHasCurrent = nextCurrent !== null;
+  const nextDisplay = nextHasCurrent ? [...nextBars, nextCurrent] : [...nextBars];
+
+  if (!refit && !preserveRange && prevBars.length === 0 && nextDisplay.length === 0) {
+    return {
+      kind: "noop",
+      history: { bars: [], current: null, nextBefore },
+    };
+  }
+
+  if (refit || preserveRange || prevHistory === null || prevBars.length === 0 || nextDisplay.length === 0) {
+    return {
+      kind: "reset",
+      history: { bars: [...nextBars], current: nextCurrent, nextBefore },
+      bars: nextDisplay,
+      preserveRange: preserveRange && prevBars.length > 0,
+    };
+  }
+
+  const prevHadCurrent = prevHistory.current !== null;
+  const prevLast = prevBars[prevBars.length - 1]!;
+  const nextLast = nextDisplay[nextDisplay.length - 1]!;
+
+  if (
+    nextDisplay.length === prevBars.length
+    && prevLast.t === nextLast.t
+    && prefixEquals(prevBars, nextDisplay, prevBars.length - 1)
+  ) {
+    const reusedPrefix = prevBars.slice(0, prevBars.length - 1);
+    if (sameBar(prevLast, nextLast) && prevHadCurrent === nextHasCurrent) {
+      return {
+        kind: "noop",
+        history: {
+          bars: nextHasCurrent ? reusedPrefix : [...reusedPrefix, prevLast],
+          current: nextHasCurrent ? prevLast : null,
+          nextBefore,
+        },
+      };
+    }
+    if (prevHadCurrent && nextHasCurrent) {
+      const history: History = { bars: reusedPrefix, current: nextLast, nextBefore };
+      return {
+        kind: "tail",
+        history,
+        bars: [...reusedPrefix, nextLast],
+        drawBars: [nextLast],
+        steps: [{ history, bar: nextLast, kind: "live" }],
+      };
+    }
+    if (prevHadCurrent && !nextHasCurrent) {
+      const unchanged = sameBar(prevLast, nextLast);
+      const finalBar = unchanged ? prevLast : nextLast;
+      const bars = [...reusedPrefix, finalBar];
+      const history: History = { bars, current: null, nextBefore };
+      return {
+        kind: "tail",
+        history,
+        bars,
+        drawBars: unchanged ? [] : [finalBar],
+        steps: [{ history, bar: finalBar, kind: "confirmed" }],
+      };
+    }
+  }
+
+  const appended = nextDisplay.length - prevBars.length;
+  if (appended >= 1 && appended <= MAX_INCREMENTAL_APPEND) {
+    const alignIdx = prevBars.length - 1;
+    const alignedNext = nextDisplay[alignIdx]!;
+    let monotonic = alignedNext.t === prevLast.t;
+    for (let i = prevBars.length; monotonic && i < nextDisplay.length; i++) {
+      if (nextDisplay[i]!.t <= nextDisplay[i - 1]!.t) monotonic = false;
+    }
+    if (
+      monotonic
+      && prefixEquals(prevBars, nextDisplay, alignIdx)
+      && (prevHadCurrent || sameBar(prevLast, alignedNext))
+    ) {
+      const steps: TickReplayIndicatorStep[] = [];
+      const drawBars: Bar[] = [];
+      let runningConfirmed: Bar[];
+
+      if (prevHadCurrent) {
+        const unchanged = sameBar(prevLast, alignedNext);
+        const prevFinal = unchanged ? prevLast : alignedNext;
+        runningConfirmed = [...prevBars.slice(0, alignIdx), prevFinal];
+        steps.push({
+          history: { bars: runningConfirmed, current: null, nextBefore },
+          bar: prevFinal,
+          kind: "confirmed",
+        });
+        if (!unchanged) drawBars.push(prevFinal);
+      } else {
+        runningConfirmed = [...prevBars];
+      }
+
+      for (let i = prevBars.length; i < nextDisplay.length; i++) {
+        const bar = nextDisplay[i]!;
+        const isLive = i === nextDisplay.length - 1 && nextHasCurrent;
+        if (isLive) {
+          steps.push({
+            history: { bars: runningConfirmed, current: bar, nextBefore },
+            bar,
+            kind: "live",
+          });
+        } else {
+          runningConfirmed = [...runningConfirmed, bar];
+          steps.push({
+            history: { bars: runningConfirmed, current: null, nextBefore },
+            bar,
+            kind: "confirmed",
+          });
+        }
+        drawBars.push(bar);
+      }
+
+      const finalHistory = steps[steps.length - 1]!.history;
+      const finalBars = nextHasCurrent ? [...runningConfirmed, nextLast] : runningConfirmed;
+      return {
+        kind: "tail",
+        history: finalHistory,
+        bars: finalBars,
+        drawBars,
+        steps,
+      };
+    }
+  }
+
+  return {
+    kind: "reset",
+    history: { bars: [...nextBars], current: nextCurrent, nextBefore },
+    bars: nextDisplay,
+    preserveRange: false,
+  };
 }

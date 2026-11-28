@@ -8,6 +8,7 @@ import type { ProgramSeriesPage } from "../src/api/generated/ProgramSeriesPage";
 import { toChartTime } from "../src/chart/time";
 import { encodeHogaSpan } from "../src/features/replay-page/hogaDecode";
 import { installChartProbe } from "./chart-probe";
+import { installFrameProbe } from "./frame-probe";
 import { daySummaryOf } from "./fixtures/scenario";
 import { cell, DEFAULT_LAYOUT_ID, expect, type Scenario, test } from "./harness";
 import { cellAt, FUNDAMENTAL_FIGURES, openOrder, ordersOn, pinQuote, tradingApi } from "./order-window";
@@ -330,10 +331,10 @@ function liveOrderBook(code: string, ask1: number): OrderBook {
   };
 }
 
-function seedSixWindowLayout(scenario: Scenario) {
+function seedSixWindowLayout(scenario: Scenario, chartSettings: object = SETTINGS) {
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const windows: LayoutWindow[] = [
-    { id: "cell-0", link: "a", kind: "chart", symbol: CODE, venue: "combined", period: "1m", chartSettings: SETTINGS },
+    { id: "cell-0", link: "a", kind: "chart", symbol: CODE, venue: "combined", period: "1m", chartSettings },
     { id: "book-0", link: "a", kind: "book" },
     { id: "order-0", link: "a", kind: "order", venue: "krx" },
     { id: "trades-0", link: "a", kind: "trades" },
@@ -1026,4 +1027,84 @@ test("틱 복기 재생 중에 과거로 스크롤해도 1년 이내 과거 분�
   await expect.poll(() => olderRequests).toBeGreaterThanOrEqual(1);
   await expect(chartHost(page)).toHaveAttribute("data-bar-count", "85");
   await expect(cell(page).getByText("분봉은 최근 1년까지 볼 수 있습니다")).toHaveCount(0);
+});
+
+test("틱 복기 재생 중 이동평균선(MA)이 깜빡이거나 사라지지 않고 체결·분봉 경계마다 증분 갱신된다", async ({ page, scenario }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  const settingsWithMa = {
+    ...SETTINGS,
+    v: 2,
+    indicators: [
+      { id: "ma3", spec: { kind: "ma", method: "sma", period: 3 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },
+    ],
+  };
+
+  await page.addInitScript(installFrameProbe);
+  seedSixWindowLayout(scenario, settingsWithMa);
+  seedTickReplayMarket(scenario);
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+
+  const maRow = cell(page).locator('[data-indicator-row="ma3"]');
+  await expect(maRow).toBeVisible();
+  await expect.poll(async () => {
+    const snap = await page.evaluate(() => window.frameProbe.snapshot());
+    return snap.find((s) => s.type === "Custom")?.data.length ?? 0;
+  }).toBeGreaterThan(0);
+
+  const menu = await rightClickBar(page, at(MIDNIGHT, 9, 2));
+  await menu.getByRole("menuitem", { name: /이 날 처음부터 틱 복기/ }).click();
+
+  await expect(dock(page)).toBeVisible();
+  await expect(dock(page).getByTestId("tick-replay-buffering")).toHaveCount(0);
+  await expect(dock(page).getByTestId("tick-replay-play")).toHaveAttribute("data-playing", "true");
+
+  await expect.poll(async () => {
+    const snap = await page.evaluate(() => window.frameProbe.snapshot());
+    return snap.find((s) => s.type === "Custom")?.data.length ?? 0;
+  }).toBeGreaterThanOrEqual(1);
+
+  const stableDuringPlayback = await page.evaluate(
+    () =>
+      new Promise<boolean>((resolve) => {
+        let frames = 0;
+        let everEmpty = false;
+        const step = () => {
+          const ma = window.frameProbe.snapshot().find((s) => s.type === "Custom");
+          if (!ma || ma.data.length === 0) everEmpty = true;
+          if (++frames >= 12) resolve(!everEmpty);
+          else requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }),
+  );
+  expect(stableDuringPlayback).toBe(true);
+
+  await page.keyboard.press("Space");
+  await expect(dock(page).getByTestId("tick-replay-play")).toHaveAttribute("data-playing", "false");
+
+  await dock(page).getByTestId("tick-replay-step-next").click();
+  await expect(dock(page).getByTestId("tick-replay-clock")).toHaveText("09:00:15.000");
+  await expect(chartHost(page)).toHaveAttribute("data-bar-count", "4");
+
+  await dock(page).getByTestId("tick-replay-step-next").click();
+  await dock(page).getByTestId("tick-replay-step-next").click();
+  await expect(dock(page).getByTestId("tick-replay-clock")).toHaveText("09:00:45.000");
+
+  await dock(page).getByTestId("tick-replay-step-next").click();
+  await dock(page).getByTestId("tick-replay-step-next").click();
+  await expect(dock(page).getByTestId("tick-replay-clock")).toHaveText("09:01:25.000");
+  await expect(chartHost(page)).toHaveAttribute("data-bar-count", "5");
+
+  await expect.poll(async () => {
+    const snap = await page.evaluate(() => window.frameProbe.snapshot());
+    const ma = snap.find((s) => s.type === "Custom");
+    return ma ? { len: ma.data.length, updates: ma.updates.length } : { len: 0, updates: 0 };
+  }).toEqual(expect.objectContaining({ len: 5 }));
+
+  const maUpdates = await page.evaluate(() => window.frameProbe.snapshot().find((s) => s.type === "Custom")?.updates.length ?? 0);
+  expect(maUpdates).toBeGreaterThanOrEqual(4);
+  await expect(maRow).toContainText("70,933");
+  expect(errors).toEqual([]);
 });
