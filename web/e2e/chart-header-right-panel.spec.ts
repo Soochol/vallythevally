@@ -101,6 +101,17 @@ test("차트 설정 톱니 버튼은 300px 고정 도킹 패널을 지표 탭으
   expect(Math.round(panelBox.width)).toBe(300);
   expect(chartAfter.x + chartAfter.width).toBeLessThanOrEqual(panelBox.x + 1);
   expect(Math.round(chartBefore.width - chartAfter.width)).toBe(300);
+  const dockedColors = await rightPanel(page).evaluate((el) => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--raised)";
+    document.body.append(probe);
+    const raised = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    const ia = el.querySelector<HTMLElement>(".ia-panel");
+    return { panel: getComputedStyle(el).backgroundColor, raised, ia: ia ? getComputedStyle(ia).backgroundColor : null };
+  });
+  expect(dockedColors.panel).toBe(dockedColors.raised);
+  expect(dockedColors.ia).toBe("rgba(0, 0, 0, 0)");
 
   const search = rightPanel(page).getByRole("combobox", { name: "지표·비교 찾기" });
   await search.fill("이평 60");
