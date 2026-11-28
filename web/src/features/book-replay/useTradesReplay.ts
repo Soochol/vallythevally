@@ -4,7 +4,7 @@ import { bookReplayTradesQueryKey, TODAY_REFETCH_MS, useBookReplayTrades } from 
 import type { BookReplayTrades } from "../../api/generated/BookReplayTrades";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
-import { gapContaining } from "../brokers/chartSync";
+import { gapContaining } from "../brokers/history";
 import { projectTradesReplay, type TradesReplayView } from "./tradesReplay";
 import type { WorkspaceReplayCursor } from "./useWorkspaceReplayCursor";
 

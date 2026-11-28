@@ -7,7 +7,7 @@ const NINE = Date.parse("2026-11-06T09:00:00+09:00") / 1000;
 const DAY = Date.parse("2026-11-06T00:00:00+09:00") / 1000;
 
 beforeEach(() => {
-  useChartPointerStore.setState({ pointed: null, snap: null, brokerSyncSymbols: {} });
+  useChartPointerStore.setState({ pointed: null, snap: null });
 });
 
 describe("차트 포인터 스토어", () => {
@@ -32,21 +32,6 @@ describe("차트 포인터 스토어", () => {
 
     store.point("005930", barInterval(DAY, "W"), 71_000);
     expect(useChartPointerStore.getState().pointed?.bar.period).toBe("W");
-  });
-
-  it("동기화 창 참조 카운트가 0이 되면 마지막 포인터를 비운다", () => {
-    const store = useChartPointerStore.getState();
-    store.addBrokerSync("005930");
-    store.addBrokerSync("005930");
-    store.point("005930", barInterval(NINE, "5m"), 70_000);
-
-    store.removeBrokerSync("005930");
-    expect(useChartPointerStore.getState().brokerSyncSymbols["005930"]).toBe(1);
-    expect(useChartPointerStore.getState().pointed).not.toBeNull();
-
-    store.removeBrokerSync("005930");
-    expect(useChartPointerStore.getState().brokerSyncSymbols["005930"]).toBeUndefined();
-    expect(useChartPointerStore.getState().pointed).toBeNull();
   });
 
   it("snapTo는 시각을 1분 봉 시작에 맞추고 대상 범위와 seq를 기록한다", () => {

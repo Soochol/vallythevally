@@ -12,7 +12,6 @@ import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useCallAuctionSession } from "../../stores/callAuctionSession";
 import { useViSession } from "../../stores/viSession";
 import { disableBookReplay } from "../book-replay/useBookReplay";
-import { ClockIcon } from "../icons";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
@@ -28,7 +27,7 @@ import { atLivePrice, averageRowPrice, holdingOf, type ProfitUnit, remainingToSe
 import { HoldingSummary } from "./HoldingSummary";
 import { FALLBACK_NOTICE, type OrderAccountChoice } from "./orderAccount";
 import { orderEntryKey } from "./orderEntries";
-import { type HoverCell, type LadderActions, OrderLadder } from "./OrderLadder";
+import { type HoverCell, type LadderActions, OrderLadder, OrderReplayBanner } from "./OrderLadder";
 import { type BuyRatioPercent, type PriceGroup, type PriceKey, typedQuantity } from "./orderRules";
 import { ladderRowHeightPx, type PresetMode } from "./orderSettings";
 import { OrderSettingsPopover } from "./OrderSettingsPopover";
@@ -36,7 +35,7 @@ import { OrderStatusBar } from "./OrderStatusBar";
 import { OrderTotalCell } from "./OrderTotals";
 import { fullRangePrices } from "./priceRange";
 import { QuantityRow } from "./QuantityRow";
-import { REPLAY_LOCKED_TEXT, REPLAY_UNLOCK_LABEL, statusOfReplayLocked } from "./statusText";
+import { REPLAY_LOCKED_TEXT, statusOfReplayLocked } from "./statusText";
 import { useAccountBalance } from "./useAccountBalance";
 import { useOrderAccount } from "./useOrderAccount";
 import { useOrderCommands } from "./useOrderCommands";
@@ -256,15 +255,6 @@ function OrderBody({
           <button type="button" className="od-link" onClick={() => openSystemSettings("kiwoom")}>시스템 설정 열기</button>
         </div>
       )}
-      {replayLocked && (
-        <div className="od-replay-banner" role="status" data-testid="order-replay-banner">
-          <span className="od-replay-banner-icon" aria-hidden="true"><ClockIcon size={14} /></span>
-          <span className="od-replay-banner-text">호가 복기 중 · 주문 잠금 (해제해야 주문 가능)</span>
-          <button type="button" className="od-replay-unlock" data-testid="order-replay-unlock" onClick={disableBookReplay}>
-            {REPLAY_UNLOCK_LABEL}
-          </button>
-        </div>
-      )}
       <AccountBand
         windowId={id}
         symbolCode={code}
@@ -300,10 +290,11 @@ function OrderBody({
         onBuyRatio={setBuyRatio}
       />
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
+        {replayLocked && (replay.kind === "none" || !shownLadder) && <OrderReplayBanner onUnlock={disableBookReplay} />}
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable} replayLocked={replayLocked} onReplayBlocked={commands.notifyReplayLocked} previewQuantity={quantity} buyRatio={buyRatioActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayViewingPast || referencePrice === null || fullPrices === null} explorerTitle={replayViewingPast ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} headerOverlay={headerOverlay} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable} replayLocked={replayLocked} onReplayBlocked={commands.notifyReplayLocked} onReplayUnlock={disableBookReplay} previewQuantity={quantity} buyRatio={buyRatioActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayViewingPast || referencePrice === null || fullPrices === null} explorerTitle={replayViewingPast ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} headerOverlay={headerOverlay} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (

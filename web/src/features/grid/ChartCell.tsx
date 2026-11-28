@@ -1,8 +1,6 @@
 import { createPortal } from "react-dom";
 import { VenueFallbackBadge } from "../venue/VenuePicker";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useBookReplayDays } from "../../api/bookReplay";
-import { useBrokerDays } from "../../api/brokers";
 import { useFinancials } from "../../api/financials";
 import { financialRequest } from "../../chart/indicators/shown";
 import { useSymbolInfo, useSymbolInfos } from "../../api/queries";
@@ -11,7 +9,6 @@ import type { IndicatorCommand } from "../../chart/indicators/legendRows";
 import { nextIndicatorAxis, resolvePanelScales } from "../../chart/indicators/scales";
 import { crosshairGroupKey, crosshairSync } from "../../chart/crosshairSync";
 import { readThemeTokens } from "../../chart/theme";
-import { isIntraday } from "../../chart/time";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
@@ -20,7 +17,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { appliedThemeKey, DEFAULT_THEME_KEY, subscribeTheme } from "../../persist/theme";
 import { useVenue } from "../../stores/ui";
-import { chartPointerScheduler, matchesSnapTarget, useChartPointerStore } from "../../stores/chartPointer";
+import { matchesSnapTarget, useChartPointerStore } from "../../stores/chartPointer";
 import { replayPointScheduler } from "../book-replay/pointScheduler";
 import { useBookReplayEnabled } from "../book-replay/useBookReplay";
 import { type CellAction, cellErrorView, olderErrorView } from "./cellError";
@@ -94,21 +91,8 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const financial = useFinancials(cell.symbol, request.period, request.enabled);
   const theme = useSyncExternalStore(subscribeTheme, () => appliedThemeKey(), () => DEFAULT_THEME_KEY);
   const replayEnabled = useBookReplayEnabled();
-  const brokerSyncActive = useChartPointerStore((s) => (s.brokerSyncSymbols[cell.symbol] ?? 0) > 0);
   const pointerSnap = useChartPointerStore((s) => s.snap);
   const lastSnapSeq = useRef(0);
-  const replayDaysEnabled = replayEnabled && isIntraday(cell.period);
-  const brokerDaysEnabled = brokerSyncActive && (isIntraday(cell.period) || cell.period === "D");
-  const replayDaysQuery = useBookReplayDays(cell.symbol, replayDaysEnabled);
-  const brokerDaysQuery = useBrokerDays(cell.symbol, brokerDaysEnabled);
-  const replayDaysList = replayDaysEnabled ? replayDaysQuery.data?.days : undefined;
-  const brokerDaysList = brokerDaysEnabled ? brokerDaysQuery.data?.days : undefined;
-  const replayDays = useMemo(() => {
-    const merged = new Set<string>();
-    if (replayDaysList) for (const d of replayDaysList) merged.add(d);
-    if (brokerDaysList) for (const d of brokerDaysList) merged.add(d);
-    return merged.size > 0 ? merged : null;
-  }, [replayDaysList, brokerDaysList]);
   const openSearch = useSelectionStore((s) => s.openSearch);
   const dockedHere = useSelectionStore((s) => s.chartDock?.cellId === cellId);
   const windowVisible = useWindowVisible();
@@ -163,18 +147,13 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
 
   useEffect(() => {
     if (!replayEnabled) replayPointScheduler.cancel();
-    if ((!replayEnabled && !brokerSyncActive) || !ctl.current) return;
+    if (!replayEnabled || !ctl.current) return;
     const symbol = cell.symbol;
     return ctl.current.subscribePointedBar((bar, close) => {
       if (bar === null) return;
-      if (replayEnabled) replayPointScheduler.push(symbol, bar, close);
-      if (brokerSyncActive) chartPointerScheduler.push(symbol, bar, close);
+      replayPointScheduler.push(symbol, bar, close);
     });
-  }, [replayEnabled, brokerSyncActive, cell.symbol]);
-
-  useEffect(() => {
-    ctl.current?.setReplayDays(replayDays);
-  }, [replayDays]);
+  }, [replayEnabled, cell.symbol]);
 
   useEffect(() => {
     ctl.current?.apply({ symbol: cell.symbol, venue, period: cell.period, settings: chartSettings, info, previewIndicator: preview?.id ?? null, compareNames });

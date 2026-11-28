@@ -12,7 +12,6 @@ describe("거래원 분석 옵션 영속화", () => {
       transferShowOther: false,
       transferRangePreset: "last10",
       transferDetailsOpen: true,
-      chartSync: true,
       replayView: "board",
       replayCards: "both",
     };
@@ -23,7 +22,7 @@ describe("거래원 분석 옵션 영속화", () => {
     expect(parseUiState(toUiState(prefs, extra)).prefs.brokers).toEqual(custom);
   });
 
-  test("예전 저장 데이터에 남은 transferLevel 키는 경고 없이 무시하고 다시 저장하지 않는다", () => {
+  test("예전 저장 데이터에 남은 transferLevel과 chartSync 키는 경고 없이 무시하고 다시 저장하지 않는다", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const legacy = {
       transferLevel: "group",
@@ -40,7 +39,6 @@ describe("거래원 분석 옵션 영속화", () => {
       transferShowOther: false,
       transferRangePreset: "last10",
       transferDetailsOpen: true,
-      chartSync: true,
       replayView: "board",
       replayCards: "both",
     };
@@ -51,6 +49,7 @@ describe("거래원 분석 옵션 영속화", () => {
     const saved = toUiState(prefs, extra);
     expect(saved.brokers).toEqual(expected);
     expect(saved.brokers).not.toHaveProperty("transferLevel");
+    expect(saved.brokers).not.toHaveProperty("chartSync");
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -74,7 +73,6 @@ describe("거래원 분석 옵션 영속화", () => {
       transferShowOther: true,
       transferRangePreset: "peak",
       transferDetailsOpen: false,
-      chartSync: true,
       replayView: "transfer",
       replayCards: "bars",
     });
@@ -110,7 +108,6 @@ describe("거래원 분석 옵션 영속화", () => {
       transferShowOther: false,
       transferRangePreset: "peak",
       transferDetailsOpen: true,
-      chartSync: true,
       replayView: "list",
       replayCards: "bars",
     });
@@ -120,7 +117,6 @@ describe("거래원 분석 옵션 영속화", () => {
       transferShowOther: false,
       transferRangePreset: "peak",
       transferDetailsOpen: true,
-      chartSync: true,
       replayView: "list",
       replayCards: "bars",
     });

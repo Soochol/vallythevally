@@ -72,3 +72,14 @@ export function axisGapRanges(gaps: readonly (readonly [UnixSeconds, UnixSeconds
   }
   return ranges;
 }
+
+export function gapContaining(
+  gaps: readonly (readonly [UnixSeconds, UnixSeconds])[],
+  t: UnixSeconds | null,
+): readonly [UnixSeconds, UnixSeconds] | null {
+  if (t === null) return null;
+  for (const gap of gaps) {
+    if (t >= gap[0] && t <= gap[1]) return gap;
+  }
+  return null;
+}

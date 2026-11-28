@@ -61,23 +61,37 @@ async function pointAt(page: Page, time: number): Promise<void> {
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
-test("호가 복기 ON 직후와 과거 호가 동안 호가주문창은 주문 칸을 잠그고 안내 배너를 보인다", async ({ page, scenario }) => {
-  const api = await openReady(page, scenario);
+test("호가 복기 ON 직후와 과거 호가 동안 호가주문창은 세로 높이를 늘리지 않고 헤더 줄에 잠금을 보이며 외곽선 강조가 없다", async ({ page, scenario }) => {
+  const api = await openReady(page, scenario, { replayOn: false });
   const slot = win(page).getByTestId("order-status-slot");
   const banner = win(page).getByTestId("order-replay-banner");
   const ladderBefore = (await win(page).getByTestId("order-ladder").boundingBox())!;
+  const colheadBefore = (await win(page).getByTestId("order-colhead").boundingBox())!;
+
+  await replayToggle(page).click();
 
   await expect(win(page)).toHaveAttribute("data-replay-locked", "");
   await expect(win(page)).not.toHaveAttribute("data-writable", "");
   await expect(banner).toBeVisible();
+  await expect(win(page).getByTestId("order-colhead")).toHaveCount(0);
   await expect(banner).toContainText("호가 복기 중 · 주문 잠금");
   await expect(banner.getByTestId("order-replay-unlock")).toHaveText("호가 복기 해제");
+  const ladderAfterOn = (await win(page).getByTestId("order-ladder").boundingBox())!;
+  const bannerBox = (await banner.boundingBox())!;
+  expect(Math.abs(ladderAfterOn.y - ladderBefore.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(ladderAfterOn.height - ladderBefore.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bannerBox.y - colheadBefore.y)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bannerBox.height - colheadBefore.height)).toBeLessThanOrEqual(1);
+  expect(await win(page).evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+  expect(await win(page).locator(".od-ladder-wrap").evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
   await expect(slot.getByTestId("replay-strip")).toContainText("실시간 · 차트를 가리키면 그 시각 호가");
   await expect(slot.getByTestId("replay-strip")).toContainText("주문 잠금");
   await expect(cellAt(page, "buy", 70_000)).toHaveAttribute("data-disabled", "");
 
   await pointAt(page, at(9, 0));
   await expect(win(page)).toHaveAttribute("data-replay", "past");
+  expect(await win(page).evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
+  expect(await win(page).locator(".od-ladder-wrap").evaluate((el) => getComputedStyle(el).boxShadow)).toBe("none");
   await expect(slot.getByTestId("replay-strip")).toContainText("수집 호가 · 11/23 09:04:59");
   await expect(slot.getByTestId("replay-strip")).toContainText("주문 잠금");
   const ladderDuring = (await win(page).getByTestId("order-ladder").boundingBox())!;
@@ -200,10 +214,12 @@ test("과거 호가를 보는 동안 미체결 합계 목록의 정정 드래그
   expect(api.writes).toEqual([]);
 });
 
-test("수집 호가가 없는 봉이면 호가주문창 사다리를 비운다", async ({ page, scenario }) => {
+test("수집 호가가 없는 봉이면 호가주문창 사다리를 비우고 인라인 해제 배너를 유지한다", async ({ page, scenario }) => {
   const api = await openReady(page, scenario);
   await pointAt(page, at(9, 25));
   await expect(win(page)).toHaveAttribute("data-replay", "none");
+  await expect(win(page).getByTestId("order-replay-banner")).toBeVisible();
+  await expect(win(page).getByTestId("order-replay-unlock")).toBeVisible();
   await expect(win(page).getByTestId("replay-strip")).toHaveText("수집이 끊긴 시각입니다");
   await expect(win(page).getByTestId("price-ladder")).toHaveCount(0);
   await expect(win(page).getByTestId("order-total-ask")).toHaveText("-");
@@ -214,17 +230,19 @@ test("수집 호가가 없는 봉이면 호가주문창 사다리를 비운다",
 });
 
 test.describe("호가 복기 주문 추가", () => {
-  test("과거 호가 동안 전체호가는 꺼진 상태로 비활성이 되고 호가 복기를 끄면 전 상태로 돌아온다", async ({ page, scenario }) => {
-    await openReady(page, scenario);
+  test("과거 호가 동안 전체호가는 꺼지고 호가 복기를 끄면 전 상태로 돌아온다", async ({ page, scenario }) => {
+    await openReady(page, scenario, { replayOn: false });
     const explorer = win(page).getByTestId("order-explorer");
     await explorer.click();
     await expect(explorer).toHaveAttribute("aria-pressed", "true");
     await expect(win(page).getByTestId("order-ladder")).toHaveAttribute("data-explorer", "");
 
+    await replayToggle(page).click();
+    await expect(win(page).getByTestId("order-replay-banner")).toBeVisible();
+    await expect(explorer).toHaveCount(0);
+
     await pointAt(page, at(9, 0));
     await expect(win(page)).toHaveAttribute("data-replay", "past");
-    await expect(explorer).toBeDisabled();
-    await expect(explorer).toHaveAttribute("aria-pressed", "false");
     await expect(win(page).getByTestId("order-ladder")).not.toHaveAttribute("data-explorer");
 
     await replayToggle(page).click();

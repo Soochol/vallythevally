@@ -1,11 +1,9 @@
 .br { container:brokers / inline-size; display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; overflow:hidden; font-variant-numeric:tabular-nums; }
 .br-bar { flex-wrap:nowrap; gap:var(--size-5); }
 .br-cards-seg { display:inline-flex; flex:none; }
-.br-card-cycle { display:none; }
-.br-sync-btn { display:inline-flex; flex:none; align-items:center; justify-content:center; gap:var(--size-3); height:var(--ctl-xs); padding:0 var(--size-6); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); background:var(--chart-bg); color:var(--text-2); font-size:var(--fs-xs); font-weight:500; white-space:nowrap; }
-.br-sync-btn:hover { background:var(--hover); color:var(--text); }
-.br-sync-btn[aria-pressed=true] { border-color:color-mix(in srgb, var(--accent) 45%, transparent); background:var(--accent-soft); color:var(--accent); font-weight:600; }
-.br-sync-btn:focus-visible { outline:var(--size-2) solid var(--accent); outline-offset:var(--size-1); }
+.br-card-cycle { display:none; flex:none; align-items:center; justify-content:center; gap:var(--size-3); height:var(--ctl-xs); padding:0 var(--size-6); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); background:var(--chart-bg); color:var(--text-2); font-size:var(--fs-xs); font-weight:500; white-space:nowrap; }
+.br-card-cycle:hover { background:var(--hover); color:var(--text); }
+.br-card-cycle:focus-visible { outline:var(--size-2) solid var(--accent); outline-offset:var(--size-1); }
 .br-sync-date { flex:none; padding:0 var(--size-5); border-radius:var(--r-s); background:var(--accent-soft); color:var(--accent); font-size:var(--fs-xs); font-weight:600; }
 .br-now { display:inline-flex; flex:none; align-items:center; gap:var(--size-5); margin-left:auto; font-size:var(--fs-xs); white-space:nowrap; }
 .br-time { color:var(--text); font-weight:600; }
@@ -14,8 +12,6 @@
 .br-cards { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:0; background:var(--bg); }
 @container brokers (width < 480px) {
   .br-bar { gap:var(--size-4); }
-  .br-sync-label { display:none; }
-  .br-sync-btn:not(.br-card-cycle) { width:var(--ctl-xs); padding:0; }
 }
 @container brokers (width < 460px) {
   .br-cards { grid-template-columns:repeat(2, minmax(0, 1fr)); }
