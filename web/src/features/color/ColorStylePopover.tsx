@@ -32,7 +32,7 @@ export function ColorStyleTrigger<T extends string = never>({
   value: HexColor | T;
   theme?: readonly ThemeSwatch<T>[];
   width: LineWidth;
-  size?: "sm" | "lg";
+  size?: "xs" | "sm" | "lg";
   opacity?: OpacityControl;
   onColorChange(color: HexColor | T): void;
   onWidthChange(width: LineWidth): void;
@@ -60,13 +60,19 @@ export function ColorStyleTrigger<T extends string = never>({
         <span className="tv-style-swatch">
           <i style={{ background: css, opacity: opacity ? opacity.value : 1 }} />
         </span>
-        <span className="tv-style-line">
-          <i style={{ height: width, background: css, opacity: opacity ? opacity.value : 1 }} />
-        </span>
+        {size !== "xs" && (
+          <span className="tv-style-line">
+            <i style={{ height: width, background: css, opacity: opacity ? opacity.value : 1 }} />
+          </span>
+        )}
         <span className="tv-style-meta">
-          {size === "lg" ? `${shownName} · ${width}px${opacityPct !== null ? ` · ${opacityPct}%` : ""}` : `${width}px`}
+          {size === "lg"
+            ? `${shownName} · ${width}px${opacityPct !== null ? ` · ${opacityPct}%` : ""}`
+            : size === "xs"
+              ? `${width}`
+              : `${width}px`}
         </span>
-        <span className="tv-style-caret" aria-hidden="true"><ChevronIcon size={12} /></span>
+        {size !== "xs" && <span className="tv-style-caret" aria-hidden="true"><ChevronIcon size={12} /></span>}
       </button>
       {open && (
         <ColorStylePopover

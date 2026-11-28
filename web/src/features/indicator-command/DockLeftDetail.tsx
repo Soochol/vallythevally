@@ -3,23 +3,91 @@ import { colorLine, indicatorCssColor, KINDS, shownColor, specName } from "../..
 import { barOpacityOf, ichimokuStyleOf, placementOfConfig, sameIchimokuStyle, type IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { chartWindows, useCell, useLayoutStore } from "../../stores/layout";
-import { CloseIcon, EyeIcon, UndoIcon } from "../icons";
+import { ArrowLeftIcon, EyeIcon, TrashIcon, UndoIcon } from "../icons";
 import { IndicatorSettingsForm } from "../indicator-dialog/IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "../indicator-dialog/liveDraft";
 import { isMaConfig, MaGroupEditorView } from "../indicator-dialog/MaGroupEditor";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
+import type { DockSelectionTarget } from "./DockLayerList";
+
+interface SwitcherItem {
+  key: string;
+  label: string;
+  target: NonNullable<DockSelectionTarget>;
+}
+
+function buildSwitcherItems(indicators: readonly IndicatorConfig[]): SwitcherItem[] {
+  const items: SwitcherItem[] = [];
+  const maLines = indicators.filter(isMaConfig);
+  if (maLines.length > 0) {
+    items.push({ key: "maGroup", label: "이동평균", target: { kind: "maGroup" } });
+  }
+  const nonMa = indicators.filter((item) => !isMaConfig(item));
+  const counts = new Map<string, number>();
+  for (const item of nonMa) counts.set(item.spec.kind, (counts.get(item.spec.kind) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  for (const item of nonMa) {
+    const base = KINDS[item.spec.kind].label;
+    const total = counts.get(item.spec.kind) ?? 1;
+    const idx = (seen.get(item.spec.kind) ?? 0) + 1;
+    seen.set(item.spec.kind, idx);
+    const label = total > 1 ? `${base} #${idx}` : base;
+    items.push({ key: item.id, label, target: { kind: "indicator", id: item.id } });
+  }
+  return items;
+}
+
+function sameTarget(a: NonNullable<DockSelectionTarget>, b: NonNullable<DockSelectionTarget>): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "maGroup") return true;
+  return b.kind === "indicator" && a.id === b.id;
+}
+
+function DetailSwitcher({
+  indicators,
+  target,
+  onSelectTarget,
+}: {
+  indicators: readonly IndicatorConfig[];
+  target: NonNullable<DockSelectionTarget>;
+  onSelectTarget(target: DockSelectionTarget): void;
+}) {
+  const items = useMemo(() => buildSwitcherItems(indicators), [indicators]);
+  if (items.length <= 1) return null;
+
+  return (
+    <div className="b3-detail-switcher" role="group" aria-label="지표 빠른 전환">
+      {items.map((item) => {
+        const active = sameTarget(item.target, target);
+        return (
+          <button
+            key={item.key}
+            type="button"
+            className="b3-switch-pill"
+            aria-pressed={active}
+            onClick={() => onSelectTarget(item.target)}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function SingleIndicatorDetail({
   cellId,
   config,
   instanceCount,
   instanceIndex,
+  switcher,
   onClose,
 }: {
   cellId: WindowId;
   config: IndicatorConfig;
   instanceCount: number;
   instanceIndex: number;
+  switcher: React.ReactNode;
   onClose(): void;
 }) {
   const [opened] = useState(() => structuredClone(config));
@@ -48,6 +116,16 @@ function SingleIndicatorDetail({
   return (
     <>
       <header className="b3-detail-head">
+        <button
+          type="button"
+          className="b3-detail-back"
+          aria-label="상세 설정 닫기"
+          title="레이어 목록으로 (Esc)"
+          onClick={onClose}
+        >
+          <ArrowLeftIcon size={12} />
+          <span>레이어</span>
+        </button>
         <span aria-hidden="true" className="b3-detail-dot" style={{ background: swatchCss }} />
         <div className="b3-detail-title-wrap">
           <h3 className="b3-detail-title">{KINDS[live.spec.kind].label}</h3>
@@ -65,7 +143,7 @@ function SingleIndicatorDetail({
           onClick={handleRevert}
         >
           <UndoIcon size={12} />
-          원래대로
+          <span>원래대로</span>
         </button>
         <button
           type="button"
@@ -77,28 +155,8 @@ function SingleIndicatorDetail({
         >
           <EyeIcon size={14} off={!shown} />
         </button>
-        <button
-          type="button"
-          className="icon-btn size-6 text-danger"
-          aria-label={`${specName(live.spec)} 지우기`}
-          title="지우기"
-          onClick={() => {
-            removeIndicatorWithUndo(cellId, live);
-            onClose();
-          }}
-        >
-          <CloseIcon size={13} />
-        </button>
-        <button
-          type="button"
-          className="icon-btn size-6"
-          aria-label="상세 설정 닫기"
-          title="상세 설정 닫기 (Esc)"
-          onClick={onClose}
-        >
-          <CloseIcon size={14} />
-        </button>
       </header>
+      {switcher}
       <div className="b3-detail-body">
         <IndicatorSettingsForm
           draft={draft}
@@ -111,13 +169,33 @@ function SingleIndicatorDetail({
       </div>
       <footer className="b3-detail-foot">
         <span>즉시 반영</span>
-        <span>Esc 상세 닫기</span>
+        <button
+          type="button"
+          className="b3-detail-delete"
+          aria-label={`${specName(live.spec)} 지우기`}
+          title="지표 삭제"
+          onClick={() => {
+            removeIndicatorWithUndo(cellId, live);
+            onClose();
+          }}
+        >
+          <TrashIcon size={12} />
+          <span>지표 삭제</span>
+        </button>
       </footer>
     </>
   );
 }
 
-function MaGroupDetail({ cellId, onClose }: { cellId: WindowId; onClose(): void }) {
+function MaGroupDetail({
+  cellId,
+  switcher,
+  onClose,
+}: {
+  cellId: WindowId;
+  switcher: React.ReactNode;
+  onClose(): void;
+}) {
   const cell = useCell(cellId);
   const maLines = cell.chartSettings.indicators.filter(isMaConfig);
   const [openedMa] = useState(() => structuredClone(maLines));
@@ -137,11 +215,16 @@ function MaGroupDetail({ cellId, onClose }: { cellId: WindowId; onClose(): void 
   return (
     <>
       <header className="b3-detail-head">
-        <span aria-hidden="true" className="b3-ma-dots">
-          {maLines.slice(0, 4).map((line) => (
-            <i key={line.id} style={{ background: indicatorCssColor(shownColor(line.spec, line.style.colors)) }} />
-          ))}
-        </span>
+        <button
+          type="button"
+          className="b3-detail-back"
+          aria-label="상세 설정 닫기"
+          title="레이어 목록으로 (Esc)"
+          onClick={onClose}
+        >
+          <ArrowLeftIcon size={12} />
+          <span>레이어</span>
+        </button>
         <div className="b3-detail-title-wrap">
           <h3 className="b3-detail-title">이동평균선</h3>
           <span className="b3-detail-sub">가격 패널 · {maLines.length}개</span>
@@ -155,24 +238,16 @@ function MaGroupDetail({ cellId, onClose }: { cellId: WindowId; onClose(): void 
           onClick={handleRevert}
         >
           <UndoIcon size={12} />
-          원래대로
-        </button>
-        <button
-          type="button"
-          className="icon-btn size-6"
-          aria-label="상세 설정 닫기"
-          title="상세 설정 닫기 (Esc)"
-          onClick={onClose}
-        >
-          <CloseIcon size={14} />
+          <span>원래대로</span>
         </button>
       </header>
+      {switcher}
       <div className="b3-detail-body">
         <MaGroupEditorView cellId={cellId} allIndicators={cell.chartSettings.indicators} compact />
       </div>
       <footer className="b3-detail-foot">
         <span>즉시 반영</span>
-        <span>Esc 상세 닫기</span>
+        <span>Esc 목록으로</span>
       </footer>
     </>
   );
@@ -182,25 +257,26 @@ export function DockLeftDetail({
   cellId,
   target,
   indicators,
-  narrow,
+  onSelectTarget,
   onClose,
 }: {
   cellId: WindowId;
-  target: { kind: "indicator"; id: string } | { kind: "maGroup" };
+  target: NonNullable<DockSelectionTarget>;
   indicators: readonly IndicatorConfig[];
-  narrow: boolean;
+  onSelectTarget(target: DockSelectionTarget): void;
   onClose(): void;
 }) {
+  const switcher = <DetailSwitcher indicators={indicators} target={target} onSelectTarget={onSelectTarget} />;
+
   if (target.kind === "maGroup") {
     return (
       <section
         data-chart-control=""
         role="region"
         aria-label="지표 상세 설정"
-        className="b3-detail-sheet"
-        data-narrow={narrow || undefined}
+        className="b3-detail-pane"
       >
-        <MaGroupDetail key={`ma-group:${cellId}`} cellId={cellId} onClose={onClose} />
+        <MaGroupDetail key={`ma-group:${cellId}`} cellId={cellId} switcher={switcher} onClose={onClose} />
       </section>
     );
   }
@@ -215,8 +291,7 @@ export function DockLeftDetail({
       data-chart-control=""
       role="region"
       aria-label="지표 상세 설정"
-      className="b3-detail-sheet"
-      data-narrow={narrow || undefined}
+      className="b3-detail-pane"
     >
       <SingleIndicatorDetail
         key={config.id}
@@ -224,6 +299,7 @@ export function DockLeftDetail({
         config={config}
         instanceCount={sameKind.length}
         instanceIndex={instanceIndex}
+        switcher={switcher}
         onClose={onClose}
       />
     </section>

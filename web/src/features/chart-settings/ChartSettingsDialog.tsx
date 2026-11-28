@@ -55,6 +55,13 @@ function isSectionModified(sectionId: ChartSettingsSectionId, settings: ChartSet
   return indicatorWindow !== DEFAULT_INDICATOR_WINDOW;
 }
 
+const COMPACT_SECTION_LABEL: Record<ChartSettingsSectionId, string> = {
+  bars: "봉·축",
+  display: "범례",
+  grid: "격자",
+  windows: "창",
+};
+
 const SCALE_LABEL: Record<PriceScale, string> = { normal: "일반", log: "로그", percent: "%" };
 const SECTION_GROUPS = [
   { scope: "cell", label: "이 칸 설정" },
@@ -231,12 +238,14 @@ export function ChartSettingsSections({ cellId, compact = false }: { cellId: Win
               key={s.id}
               type="button"
               role="tab"
+              aria-label={s.label}
               aria-selected={activeSection === s.id}
               data-modified={isSectionModified(s.id, settings, indicatorWindow) ? "true" : undefined}
               className="cs-dock-pill"
+              title={s.label}
               onClick={() => setActiveSection(s.id)}
             >
-              <span>{s.label}</span>
+              <span>{COMPACT_SECTION_LABEL[s.id]}</span>
               <span aria-hidden="true" className="cs-mod-dot" />
             </button>
           ))}

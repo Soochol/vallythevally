@@ -27,7 +27,7 @@ beforeEach(() => {
   useSelectionStore.setState({
     activeCell: cellId,
     dialog: null,
-    chartDock: { cellId, mode: "current", indicatorId: null, snapped: true },
+    chartDock: { cellId, mode: "current", indicatorId: null },
     toasts: [],
     toast: null,
   });
@@ -35,29 +35,32 @@ beforeEach(() => {
 
 resetDomAfterEach();
 
-test("우측 레이어 목록을 유지한 채 좌측 상세 플라이아웃을 즉시 전환·토글 닫기할 수 있다", () => {
+test("우측 도킹 내부 드릴인 상세와 상단 빠른 전환 칩으로 지표를 전환하고 목록으로 돌아갈 수 있다", () => {
   const cellId = firstCellId();
   const { client } = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={makeHostRef()} />, { withToast: false });
 
   expect(screen.queryByRole("region", { name: "지표 상세 설정" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "가운데 모달로 전환" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "글래스 피크로 전환" })).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "거래량 설정" }));
   const detail = screen.getByRole("region", { name: "지표 상세 설정" });
   expect(within(detail).getByRole("heading", { name: "거래량" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "RSI 14 설정" })).toBeTruthy();
 
-  fireEvent.click(screen.getByRole("button", { name: "RSI 14 설정" }));
+  const switcher = within(detail).getByRole("group", { name: "지표 빠른 전환" });
+  fireEvent.click(within(switcher).getByRole("button", { name: "RSI" }));
   expect(within(screen.getByRole("region", { name: "지표 상세 설정" })).getByRole("heading", { name: "RSI" })).toBeTruthy();
 
-  fireEvent.click(screen.getByRole("button", { name: "이동평균 묶음 설정" }));
+  fireEvent.click(within(screen.getByRole("group", { name: "지표 빠른 전환" })).getByRole("button", { name: "이동평균" }));
   expect(within(screen.getByRole("region", { name: "지표 상세 설정" })).getByRole("heading", { name: "이동평균선" })).toBeTruthy();
 
-  fireEvent.click(screen.getByRole("button", { name: "이동평균 묶음 설정" }));
+  fireEvent.click(within(screen.getByRole("region", { name: "지표 상세 설정" })).getByRole("button", { name: "상세 설정 닫기" }));
   expect(screen.queryByRole("region", { name: "지표 상세 설정" })).toBeNull();
+  expect(screen.getByRole("button", { name: "거래량 설정" })).toBeTruthy();
   client.clear();
 });
 
-test("퀵 추가 바에서 텍스트 입력 Enter와 이평선 기간 칩으로 지표를 즉시 추가할 수 있다", () => {
+test("인라인 퀵 추가에서 이평선 기간 칩과 텍스트 입력 Enter로 지표를 즉시 추가할 수 있다", () => {
   const cellId = firstCellId();
   const { client } = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={makeHostRef()} />, { withToast: false });
 
@@ -70,9 +73,13 @@ test("퀵 추가 바에서 텍스트 입력 Enter와 이평선 기간 칩으로 
     { kind: "ma", method: "sma", period: 20 },
     { kind: "ma", method: "sma", period: 60 },
   ]);
+  expect(within(screen.getByRole("region", { name: "지표 상세 설정" })).getByRole("heading", { name: "이동평균선" })).toBeTruthy();
 
-  fireEvent.change(input, { target: { value: "bb 20 2" } });
-  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.click(screen.getByRole("button", { name: "상세 설정 닫기" }));
+  const inputAfter = screen.getByRole("combobox", { name: "지표 빠른 추가" });
+  fireEvent.focus(inputAfter);
+  fireEvent.change(inputAfter, { target: { value: "bb 20 2" } });
+  fireEvent.keyDown(inputAfter, { key: "Enter" });
   expect(
     chartWindows(useLayoutStore.getState().layout)[0]!.chartSettings.indicators.some((i) => i.spec.kind === "bollinger"),
   ).toBe(true);
@@ -80,7 +87,7 @@ test("퀵 추가 바에서 텍스트 입력 Enter와 이평선 기간 칩으로 
   client.clear();
 });
 
-test("우측 도킹 상단 탭은 레이어 · 드로잉 · 차트 순서이고 피크/고정 전환과 패널 병합·정리를 지원한다", () => {
+test("우측 도킹 상단 탭은 레이어 · 드로잉 · 차트 순서이고 패널 병합과 헤더 정리 메뉴를 지원한다", () => {
   const cellId = firstCellId();
   const { client } = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={makeHostRef()} />, { withToast: false });
 
@@ -89,10 +96,8 @@ test("우측 도킹 상단 탭은 레이어 · 드로잉 · 차트 순서이고 
   expect(buttons.map((b) => b.textContent)).toEqual(["레이어", "드로잉", "차트"]);
   expect(buttons[2]?.getAttribute("aria-label")).toBe("차트 설정");
 
-  fireEvent.click(screen.getByRole("button", { name: "글래스 피크로 전환" }));
-  expect(useSelectionStore.getState().chartDock?.snapped).toBe(false);
-
-  fireEvent.click(screen.getByRole("button", { name: "RSI 14 위 패널에 합치기" }));
+  fireEvent.click(screen.getByRole("button", { name: "RSI 14 패널 작업" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "RSI 14 위 패널에 합치기" }));
   expect(chartWindows(useLayoutStore.getState().layout)[0]!.chartSettings.panels).toHaveLength(1);
 
   fireEvent.click(screen.getByRole("button", { name: "RSI 14 숨기기" }));
@@ -106,12 +111,20 @@ test("우측 도킹 상단 탭은 레이어 · 드로잉 · 차트 순서이고 
   client.clear();
 });
 
-test("좁은 차트 폭에서는 모달로 튕기지 않고 글래스 피크 오버레이로 동작한다", () => {
+test("차트 폭에 따라 wide, compact, overlay 레이아웃으로 자동 전환되며 모달로 튕기지 않는다", () => {
   const cellId = firstCellId();
-  const { client } = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={makeHostRef(480)} />, { withToast: false });
+  const wide = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={makeHostRef(960)} />, { withToast: false });
+  expect(screen.getByRole("complementary", { name: "차트 우측 설정 패널" }).getAttribute("data-layout")).toBe("wide");
+  wide.unmount();
+  wide.client.clear();
 
+  const compact = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={makeHostRef(520)} />, { withToast: false });
+  expect(screen.getByRole("complementary", { name: "차트 우측 설정 패널" }).getAttribute("data-layout")).toBe("compact");
+  compact.unmount();
+  compact.client.clear();
+
+  const overlay = renderWithProviders(<ChartRightDock cellId={cellId} hostRef={makeHostRef(420)} />, { withToast: false });
   expect(useSelectionStore.getState().dialog).toBeNull();
-  const snapButton = screen.getByRole("button", { name: "우측 고정 도킹" }) as HTMLButtonElement;
-  expect(snapButton.disabled).toBe(true);
-  client.clear();
+  expect(screen.getByRole("complementary", { name: "차트 우측 설정 패널" }).getAttribute("data-layout")).toBe("overlay");
+  overlay.client.clear();
 });

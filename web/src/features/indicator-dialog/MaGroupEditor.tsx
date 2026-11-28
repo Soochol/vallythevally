@@ -46,11 +46,13 @@ function parseValidPeriod(raw: string, validate: ReturnType<typeof useValidator>
 function MaLineRow({
   cellId,
   line,
+  compact,
   onHover,
   validate,
 }: {
   cellId: WindowId;
   line: MaConfig;
+  compact: boolean;
   onHover(id: string | null): void;
   validate: ReturnType<typeof useValidator>;
 }) {
@@ -120,6 +122,7 @@ function MaLineRow({
         value={color}
         theme={THEME_SWATCHES}
         width={line.style.width}
+        size={compact ? "xs" : "sm"}
         onColorChange={updateColor}
         onWidthChange={updateWidth}
       />
@@ -270,7 +273,9 @@ export function MaGroupEditorView({ cellId, allIndicators, compact = false }: { 
             <div className="ic-card-tools">
               <button type="button" className="ic-text-action" onClick={() => setAllMethod("sma")}>모두 단순</button>
               <button type="button" className="ic-text-action" onClick={() => setAllMethod("ema")}>모두 지수</button>
-              <button type="button" className="ic-text-action" onClick={sortByPeriod}>기간순 정렬</button>
+              <button type="button" className="ic-text-action" aria-label="기간순 정렬" title="기간순 정렬" onClick={sortByPeriod}>
+                {compact ? "정렬" : "기간순 정렬"}
+              </button>
             </div>
           )}
         </div>
@@ -280,7 +285,7 @@ export function MaGroupEditorView({ cellId, allIndicators, compact = false }: { 
             <p className="py-3 text-center text-s text-text-3">표시할 이동평균선을 추가하세요.</p>
           ) : (
             maLines.map((line) => (
-              <MaLineRow key={line.id} cellId={cellId} line={line} onHover={setHoveredId} validate={validator} />
+              <MaLineRow key={line.id} cellId={cellId} line={line} compact={compact} onHover={setHoveredId} validate={validator} />
             ))
           )}
         </div>
@@ -293,7 +298,7 @@ export function MaGroupEditorView({ cellId, allIndicators, compact = false }: { 
             aria-invalid={addError}
             aria-describedby={addError ? addErrorId : undefined}
             value={newPeriod}
-            placeholder="기간 (예: 20)"
+            placeholder={compact ? "기간 (예: 240)" : "기간 (예: 20)"}
             autoComplete="off"
             className="ui-field ic-ma-add-input"
             onChange={(e) => {
@@ -308,9 +313,9 @@ export function MaGroupEditorView({ cellId, allIndicators, compact = false }: { 
               }
             }}
           />
-          <button type="button" className="btn-primary ic-ma-add-btn" onClick={addLine}>
+          <button type="button" className="btn-primary ic-ma-add-btn" aria-label="이동평균선 추가" onClick={addLine}>
             <PlusIcon size={12} />
-            이동평균선 추가
+            {compact ? "추가" : "이동평균선 추가"}
           </button>
         </div>
         {addError && <Errors id={addErrorId} messages={["1 이상의 정수를 입력하세요"]} />}

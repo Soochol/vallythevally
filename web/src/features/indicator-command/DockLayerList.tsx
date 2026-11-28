@@ -5,7 +5,7 @@ import { axisSlotLabel, nextIndicatorAxis, resolvePanelScales } from "../../char
 import type { ChartSettings, IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { useLayoutStore } from "../../stores/layout";
-import { ArrowIcon, ChevronIcon, CloseIcon, EyeIcon, MoreIcon, PlusIcon } from "../icons";
+import { ArrowIcon, ChevronIcon, ChevronRightIcon, CloseIcon, EyeIcon, MoreIcon, PlusIcon } from "../icons";
 import { isMaConfig } from "../indicator-dialog/MaGroupEditor";
 import { removeIndicatorsWithUndo, removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { treeChildLabel, type AddCategory } from "./model";
@@ -21,11 +21,15 @@ export interface DockLayerListProps {
   cellId: WindowId;
   settings: ChartSettings;
   selectedTarget: DockSelectionTarget;
-  isSnapped: boolean;
   onSelectTarget(target: DockSelectionTarget): void;
   onOpenQuickAdd(category: AddCategory): void;
-  cleanupOpen: boolean;
-  onCleanupOpenChange(open: boolean): void;
+}
+
+interface RowMenuAction {
+  key: string;
+  label: string;
+  ariaLabel: string;
+  run(): void;
 }
 
 function compactParams(config: IndicatorConfig): string {
@@ -35,31 +39,79 @@ function compactParams(config: IndicatorConfig): string {
   return full.startsWith(label) ? full.slice(label.length).trim() : treeChildLabel(config.spec);
 }
 
-export function DockLayerList({
-  cellId,
-  settings,
-  selectedTarget,
-  isSnapped,
-  onSelectTarget,
-  onOpenQuickAdd,
-  cleanupOpen,
-  onCleanupOpenChange,
-}: DockLayerListProps) {
-  const [dangerRowId, setDangerRowId] = useState<string | null>(null);
-  const [dangerPanelId, setDangerPanelId] = useState<string | null>(null);
-  const cleanupRef = useRef<HTMLDivElement>(null);
-  const compareInfos = useSymbolInfos(settings.compare);
+function RowActionMenu({
+  fullName,
+  actions,
+  open,
+  onToggle,
+  onClose,
+}: {
+  fullName: string;
+  actions: readonly RowMenuAction[];
+  open: boolean;
+  onToggle(): void;
+  onClose(): void;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!cleanupOpen) return;
+    if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (cleanupRef.current && event.target instanceof Node && !cleanupRef.current.contains(event.target)) {
-        onCleanupOpenChange(false);
+      if (wrapRef.current && event.target instanceof Node && !wrapRef.current.contains(event.target)) {
+        onClose();
       }
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [cleanupOpen, onCleanupOpenChange]);
+  }, [open, onClose]);
+
+  if (actions.length === 0) return null;
+
+  return (
+    <div ref={wrapRef} className="b3-row-menu-wrap">
+      <button
+        type="button"
+        className="b3-row-act"
+        aria-label={`${fullName} 패널 작업`}
+        aria-expanded={open}
+        title="패널 이동 · 분리"
+        onClick={onToggle}
+      >
+        <MoreIcon size={12} />
+      </button>
+      {open && (
+        <div className="b3-row-menu" role="menu" aria-label={`${fullName} 패널 작업`}>
+          {actions.map((action) => (
+            <button
+              key={action.key}
+              type="button"
+              role="menuitem"
+              aria-label={action.ariaLabel}
+              onClick={() => {
+                action.run();
+                onClose();
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function DockLayerList({
+  cellId,
+  settings,
+  selectedTarget,
+  onSelectTarget,
+  onOpenQuickAdd,
+}: DockLayerListProps) {
+  const [dangerRowId, setDangerRowId] = useState<string | null>(null);
+  const [dangerPanelId, setDangerPanelId] = useState<string | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const compareInfos = useSymbolInfos(settings.compare);
 
   const maLines = useMemo(() => settings.indicators.filter(isMaConfig), [settings.indicators]);
   const priceNonMa = useMemo(
@@ -78,12 +130,6 @@ export function DockLayerList({
     [settings.panels, settings.indicators],
   );
 
-  const hiddenIndicators = useMemo(
-    () => settings.indicators.filter((item) => !item.visible),
-    [settings.indicators],
-  );
-  const allSubPanelsCollapsed = subPanels.length > 0 && subPanels.every((entry) => entry.panel.collapsed);
-
   const isIndicatorSelected = (id: string) => selectedTarget?.kind === "indicator" && selectedTarget.id === id;
   const isMaGroupSelected = selectedTarget?.kind === "maGroup"
     || (selectedTarget?.kind === "indicator" && maLines.some((line) => line.id === selectedTarget.id));
@@ -98,42 +144,17 @@ export function DockLayerList({
     }
   };
 
-  const toggleAllSubPanels = () => {
-    const store = useLayoutStore.getState();
-    for (const entry of subPanels) {
-      if (entry.panel.collapsed !== !allSubPanelsCollapsed) {
-        store.togglePanel(cellId, entry.panel.id);
-      }
-    }
-    onCleanupOpenChange(false);
-  };
-
-  const showAllHidden = () => {
-    const store = useLayoutStore.getState();
-    for (const item of hiddenIndicators) store.updateIndicator(cellId, item.id, { visible: true });
-    onCleanupOpenChange(false);
-  };
-
-  const removeAllHidden = () => {
-    if (selectedTarget?.kind === "indicator" && hiddenIndicators.some((item) => item.id === selectedTarget.id)) {
-      onSelectTarget(null);
-    }
-    if (selectedTarget?.kind === "maGroup" && maLines.length > 0 && maLines.every((item) => !item.visible)) {
-      onSelectTarget(null);
-    }
-    removeIndicatorsWithUndo(cellId, hiddenIndicators, `숨긴 지표 ${hiddenIndicators.length}개를 지웠습니다`);
-    onCleanupOpenChange(false);
-  };
-
   const toggleSelectIndicator = (id: string) => {
+    setOpenMenuId(null);
     onSelectTarget(isIndicatorSelected(id) ? null : { kind: "indicator", id });
   };
 
   const toggleSelectMaGroup = () => {
+    setOpenMenuId(null);
     onSelectTarget(isMaGroupSelected ? null : { kind: "maGroup" });
   };
 
-  const priceLayerCount = (maLines.length > 0 ? 1 : 0) + priceNonMa.length + settings.compare.length;
+  const priceIndicatorCount = maLines.length + priceNonMa.length + settings.compare.length;
 
   return (
     <div className="b3-layers-wrap">
@@ -141,8 +162,18 @@ export function DockLayerList({
         <section className="b3-panel-card" aria-label="가격 패널">
           <div className="b3-panel-head">
             <span className="b3-panel-title">가격 패널</span>
-            <span className="b3-panel-count">{priceLayerCount}</span>
+            <span className="b3-panel-count">{priceIndicatorCount}</span>
             <span className="flex-1" />
+            <button
+              type="button"
+              className="b3-layer-pill"
+              aria-pressed={settings.candlesOnTop}
+              aria-label={settings.candlesOnTop ? "캔들 지표 위에 그리기 켜짐" : "캔들 지표 아래에 그리기"}
+              title="캔들과 지표 겹침 순서 전환"
+              onClick={() => useLayoutStore.getState().setCandlesOnTop(cellId, !settings.candlesOnTop)}
+            >
+              {settings.candlesOnTop ? "캔들 위" : "캔들 아래"}
+            </button>
             <button
               type="button"
               className="b3-panel-act"
@@ -155,21 +186,12 @@ export function DockLayerList({
           </div>
 
           <div className="b3-panel-body">
-            <div className="b3-candle-row">
-              <span aria-hidden="true" className="b3-candle-glyph" />
-              <span className="b3-candle-label">캔들</span>
-              <span className="b3-candle-meta">기준층</span>
-              <button
-                type="button"
-                className="b3-layer-pill"
-                aria-pressed={settings.candlesOnTop}
-                aria-label={settings.candlesOnTop ? "캔들 지표 위에 그리기 켜짐" : "캔들 지표 아래에 그리기"}
-                title="캔들과 지표 겹침 순서 전환"
-                onClick={() => useLayoutStore.getState().setCandlesOnTop(cellId, !settings.candlesOnTop)}
-              >
-                {settings.candlesOnTop ? "지표 위" : "지표 아래"}
+            {priceIndicatorCount === 0 && (
+              <button type="button" className="b3-panel-empty-btn" onClick={() => onOpenQuickAdd("price")}>
+                <PlusIcon size={11} />
+                <span>가격 지표 없음 · 클릭해서 추가</span>
               </button>
-            </div>
+            )}
 
             {maLines.length > 0 && (
               <div
@@ -179,7 +201,6 @@ export function DockLayerList({
                 data-danger-hover={dangerRowId === "ma-group" || undefined}
                 onClick={toggleSelectMaGroup}
               >
-                {isMaGroupSelected && <span aria-hidden="true" className="b3-select-notch" />}
                 <button
                   type="button"
                   className="b3-row-eye"
@@ -192,16 +213,18 @@ export function DockLayerList({
                 >
                   <EyeIcon size={13} off={!maLines.some((line) => line.visible)} />
                 </button>
-                <span aria-hidden="true" className="b3-ma-dots">
-                  {maLines.slice(0, 4).map((line) => (
-                    <i
-                      key={line.id}
-                      style={{
-                        background: indicatorCssColor(shownColor(line.spec, line.style.colors)),
-                        opacity: line.visible ? 1 : 0.3,
-                      }}
-                    />
-                  ))}
+                <span aria-hidden="true" className="b3-swatch-slot">
+                  <span className="b3-ma-dots-grid">
+                    {maLines.slice(0, 4).map((line) => (
+                      <i
+                        key={line.id}
+                        style={{
+                          background: indicatorCssColor(shownColor(line.spec, line.style.colors)),
+                          opacity: line.visible ? 1 : 0.3,
+                        }}
+                      />
+                    ))}
+                  </span>
                 </span>
                 <button
                   type="button"
@@ -218,8 +241,9 @@ export function DockLayerList({
                     {maLines.map((line) => line.spec.period).join("·")}
                   </span>
                 </button>
-                <span className="b3-row-count">{maLines.filter((line) => line.visible).length}/{maLines.length}</span>
-                <div className="b3-row-acts" onClick={(e) => e.stopPropagation()}>
+                <div className="b3-row-right" onClick={(e) => e.stopPropagation()}>
+                  <span className="b3-row-count">{maLines.filter((line) => line.visible).length}/{maLines.length}</span>
+                  <span aria-hidden="true" className="b3-row-chev"><ChevronRightIcon size={11} /></span>
                   <button
                     type="button"
                     className="b3-row-act b3-row-act-danger"
@@ -245,6 +269,14 @@ export function DockLayerList({
               const params = compactParams(config);
               const hasColorSwatch = colorLine(config.spec) !== null;
               const swatchCss = hasColorSwatch ? indicatorCssColor(shownColor(config.spec, config.style.colors)) : "var(--text-3)";
+              const menuActions: RowMenuAction[] = config.spec.kind === "volume"
+                ? [{
+                  key: "split-volume",
+                  label: "아래 패널로 분리",
+                  ariaLabel: "거래량 아래 패널로 분리",
+                  run: () => useLayoutStore.getState().setIndicatorPlacement(cellId, config.id, "panel"),
+                }]
+                : [];
               return (
                 <div
                   key={config.id}
@@ -254,7 +286,6 @@ export function DockLayerList({
                   data-danger-hover={dangerRowId === config.id || undefined}
                   onClick={() => toggleSelectIndicator(config.id)}
                 >
-                  {selected && <span aria-hidden="true" className="b3-select-notch" />}
                   <button
                     type="button"
                     className="b3-row-eye"
@@ -267,7 +298,9 @@ export function DockLayerList({
                   >
                     <EyeIcon size={13} off={!config.visible} />
                   </button>
-                  <span aria-hidden="true" className="b3-swatch-bar" style={{ background: swatchCss, height: Math.min(4, Math.max(2, config.style.width)) }} />
+                  <span aria-hidden="true" className="b3-swatch-slot">
+                    <span className="b3-swatch-bar" style={{ background: swatchCss, height: Math.min(4, Math.max(2, config.style.width)) }} />
+                  </span>
                   <button
                     type="button"
                     className="b3-row-main"
@@ -281,18 +314,15 @@ export function DockLayerList({
                     <span className="b3-row-name">{KINDS[config.spec.kind].label}</span>
                     {params && <span className="b3-row-params">{params}</span>}
                   </button>
-                  <div className="b3-row-acts" onClick={(e) => e.stopPropagation()}>
-                    {config.spec.kind === "volume" && (
-                      <button
-                        type="button"
-                        className="b3-row-act"
-                        aria-label="거래량 아래 패널로 분리"
-                        title="아래 패널로 분리"
-                        onClick={() => useLayoutStore.getState().setIndicatorPlacement(cellId, config.id, "panel")}
-                      >
-                        <ArrowIcon size={11} dir="down" />
-                      </button>
-                    )}
+                  <div className="b3-row-right" onClick={(e) => e.stopPropagation()}>
+                    <RowActionMenu
+                      fullName={full}
+                      actions={menuActions}
+                      open={openMenuId === config.id}
+                      onToggle={() => setOpenMenuId((cur) => (cur === config.id ? null : config.id))}
+                      onClose={() => setOpenMenuId(null)}
+                    />
+                    <span aria-hidden="true" className="b3-row-chev"><ChevronRightIcon size={11} /></span>
                     <button
                       type="button"
                       className="b3-row-act b3-row-act-danger"
@@ -317,19 +347,26 @@ export function DockLayerList({
               const info = compareInfos.find((item) => item.code === code);
               const name = info?.name ?? code;
               return (
-                <div key={code} className="b3-compare-row">
-                  <span aria-hidden="true" className="b3-swatch-bar" style={{ background: COMPARE_TOKENS[index % COMPARE_TOKENS.length] }} />
-                  <span className="b3-row-name">{name}</span>
-                  <span className="ui-badge" data-tone="accent">비교 %</span>
-                  <button
-                    type="button"
-                    className="b3-row-act b3-row-act-danger"
-                    aria-label={`${name} 비교 지우기`}
-                    title="비교 종목 지우기"
-                    onClick={() => useLayoutStore.getState().removeCompare(cellId, code)}
-                  >
-                    <CloseIcon size={12} />
-                  </button>
+                <div key={code} className="b3-layer-row b3-compare-row">
+                  <span aria-hidden="true" className="b3-compare-mark">%</span>
+                  <span aria-hidden="true" className="b3-swatch-slot">
+                    <span className="b3-swatch-bar" style={{ background: COMPARE_TOKENS[index % COMPARE_TOKENS.length] }} />
+                  </span>
+                  <div className="b3-row-main">
+                    <span className="b3-row-name">{name}</span>
+                    <span className="b3-row-params">비교</span>
+                  </div>
+                  <div className="b3-row-right">
+                    <button
+                      type="button"
+                      className="b3-row-act b3-row-act-danger"
+                      aria-label={`${name} 비교 지우기`}
+                      title="비교 종목 지우기"
+                      onClick={() => useLayoutStore.getState().removeCompare(cellId, code)}
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -339,6 +376,7 @@ export function DockLayerList({
         {subPanels.map(({ panel, index, members }) => {
           const scales = members.length > 1 ? resolvePanelScales(settings.indicators, panel.id) : null;
           const panelTitle = `아래 패널 ${index + 1}`;
+          const collapsedSummary = members.map((item) => KINDS[item.spec.kind].label).join(" · ");
           return (
             <section
               key={panel.id}
@@ -359,8 +397,11 @@ export function DockLayerList({
                   <ChevronIcon size={11} />
                 </button>
                 <span className="b3-panel-title">{panelTitle}</span>
-                {members.length > 1 && <span className="ui-badge" data-tone="accent">병합 {members.length}</span>}
-                {panel.collapsed && <span className="b3-panel-count">접힘</span>}
+                {panel.collapsed ? (
+                  <span className="b3-panel-summary">· {collapsedSummary}</span>
+                ) : (
+                  members.length > 1 && <span className="b3-merge-badge">병합 {members.length}</span>
+                )}
                 <span className="flex-1" />
                 {subPanels.length > 1 && (
                   <>
@@ -415,6 +456,31 @@ export function DockLayerList({
                     const swatchCss = hasColorSwatch ? indicatorCssColor(shownColor(config.spec, config.style.colors)) : "var(--text-3)";
                     const slot = scales?.get(config.id)?.slot ?? null;
                     const prevPanel = index > 0 ? subPanels[index - 1]?.panel : null;
+                    const menuActions: RowMenuAction[] = [];
+                    if (config.spec.kind === "volume") {
+                      menuActions.push({
+                        key: "overlay-price",
+                        label: "가격 패널에 겹치기",
+                        ariaLabel: "거래량 가격 패널에 겹치기",
+                        run: () => useLayoutStore.getState().setIndicatorPlacement(cellId, config.id, "price"),
+                      });
+                    }
+                    if (prevPanel) {
+                      menuActions.push({
+                        key: "merge-up",
+                        label: "위 패널에 합치기",
+                        ariaLabel: `${full} 위 패널에 합치기`,
+                        run: () => useLayoutStore.getState().mergeIndicatorIntoPanel(cellId, config.id, prevPanel.id),
+                      });
+                    }
+                    if (members.length > 1) {
+                      menuActions.push({
+                        key: "split-new",
+                        label: "새 패널로 분리",
+                        ariaLabel: `${full} 새 패널로 분리`,
+                        run: () => useLayoutStore.getState().splitIndicatorToNewPanel(cellId, config.id, index + 1),
+                      });
+                    }
                     return (
                       <div
                         key={config.id}
@@ -424,7 +490,6 @@ export function DockLayerList({
                         data-danger-hover={dangerRowId === config.id || undefined}
                         onClick={() => toggleSelectIndicator(config.id)}
                       >
-                        {selected && <span aria-hidden="true" className="b3-select-notch" />}
                         <button
                           type="button"
                           className="b3-row-eye"
@@ -437,7 +502,9 @@ export function DockLayerList({
                         >
                           <EyeIcon size={13} off={!config.visible} />
                         </button>
-                        <span aria-hidden="true" className="b3-swatch-bar" style={{ background: swatchCss, height: Math.min(4, Math.max(2, config.style.width)) }} />
+                        <span aria-hidden="true" className="b3-swatch-slot">
+                          <span className="b3-swatch-bar" style={{ background: swatchCss, height: Math.min(4, Math.max(2, config.style.width)) }} />
+                        </span>
                         <button
                           type="button"
                           className="b3-row-main"
@@ -451,54 +518,26 @@ export function DockLayerList({
                           <span className="b3-row-name">{KINDS[config.spec.kind].label}</span>
                           {params && <span className="b3-row-params">{params}</span>}
                         </button>
-                        {slot && (
-                          <button
-                            type="button"
-                            className="b3-axis-pill"
-                            aria-label={`${full} Y축 전환 (현재 ${axisSlotLabel(slot)})`}
-                            title="Y축 전환 (R → L → 독립)"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              useLayoutStore.getState().setIndicatorAxis(cellId, config.id, nextIndicatorAxis(slot));
-                            }}
-                          >
-                            {axisSlotLabel(slot)}
-                          </button>
-                        )}
-                        <div className="b3-row-acts" onClick={(e) => e.stopPropagation()}>
-                          {config.spec.kind === "volume" && (
+                        <div className="b3-row-right" onClick={(e) => e.stopPropagation()}>
+                          {slot && (
                             <button
                               type="button"
-                              className="b3-row-act"
-                              aria-label="거래량 가격 패널에 겹치기"
-                              title="가격 패널에 겹치기"
-                              onClick={() => useLayoutStore.getState().setIndicatorPlacement(cellId, config.id, "price")}
+                              className="b3-axis-pill"
+                              aria-label={`${full} Y축 전환 (현재 ${axisSlotLabel(slot)})`}
+                              title="Y축 전환 (R → L → 독립)"
+                              onClick={() => useLayoutStore.getState().setIndicatorAxis(cellId, config.id, nextIndicatorAxis(slot))}
                             >
-                              <ArrowIcon size={11} dir="up" />
+                              {axisSlotLabel(slot)}
                             </button>
                           )}
-                          {prevPanel && (
-                            <button
-                              type="button"
-                              className="b3-row-act"
-                              aria-label={`${full} 위 패널에 합치기`}
-                              title="위 패널에 합치기"
-                              onClick={() => useLayoutStore.getState().mergeIndicatorIntoPanel(cellId, config.id, prevPanel.id)}
-                            >
-                              ⤴
-                            </button>
-                          )}
-                          {members.length > 1 && (
-                            <button
-                              type="button"
-                              className="b3-row-act"
-                              aria-label={`${full} 새 패널로 분리`}
-                              title="새 패널로 분리"
-                              onClick={() => useLayoutStore.getState().splitIndicatorToNewPanel(cellId, config.id, index + 1)}
-                            >
-                              ⤵
-                            </button>
-                          )}
+                          <RowActionMenu
+                            fullName={full}
+                            actions={menuActions}
+                            open={openMenuId === config.id}
+                            onToggle={() => setOpenMenuId((cur) => (cur === config.id ? null : config.id))}
+                            onClose={() => setOpenMenuId(null)}
+                          />
+                          <span aria-hidden="true" className="b3-row-chev"><ChevronRightIcon size={11} /></span>
                           <button
                             type="button"
                             className="b3-row-act b3-row-act-danger"
@@ -536,35 +575,11 @@ export function DockLayerList({
       </div>
 
       <footer className="b3-foot">
-        <span className="b3-foot-status">
-          <i aria-hidden="true" className="b3-status-dot" data-snapped={isSnapped || undefined} />
-          {isSnapped ? "우측 고정" : "글래스 피크"} · 지표 {settings.indicators.length}
-        </span>
-        <div ref={cleanupRef} className="b3-cleanup-wrap">
-          <button
-            type="button"
-            className="b3-cleanup-btn"
-            aria-label="레이어 정리 메뉴"
-            aria-expanded={cleanupOpen}
-            onClick={() => onCleanupOpenChange(!cleanupOpen)}
-          >
-            정리
-            <MoreIcon size={13} />
-          </button>
-          {cleanupOpen && (
-            <div className="b3-cleanup-menu" role="menu" aria-label="레이어 정리">
-              <button type="button" role="menuitem" disabled={subPanels.length === 0} onClick={toggleAllSubPanels}>
-                {allSubPanelsCollapsed ? "아래 패널 모두 펼치기" : "아래 패널 모두 접기"}
-              </button>
-              <button type="button" role="menuitem" disabled={hiddenIndicators.length === 0} onClick={showAllHidden}>
-                숨긴 지표 모두 보이기 ({hiddenIndicators.length})
-              </button>
-              <button type="button" role="menuitem" className="b3-cleanup-danger" disabled={hiddenIndicators.length === 0} onClick={removeAllHidden}>
-                숨긴 지표 모두 삭제 ({hiddenIndicators.length})
-              </button>
-            </div>
-          )}
-        </div>
+        <span className="b3-foot-status">적용된 지표 {settings.indicators.length}개</span>
+        <button type="button" className="b3-foot-add" onClick={() => onOpenQuickAdd("all")}>
+          <PlusIcon size={11} />
+          <span>지표 추가</span>
+        </button>
       </footer>
     </div>
   );

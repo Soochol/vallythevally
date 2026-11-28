@@ -212,7 +212,7 @@ function seedTickReplay(scenario: Scenario) {
   );
 }
 
-test("/replay는 test2 풀폭 배치·4대 보조지표·체결·프로그램·10호가·거래원(이동/숫자)을 보이고 상단 종목찾기·연동색이 없다", async ({ page, scenario }) => {
+test("/replay는 센터드 3열 콕핏·선택형 보조 흐름·체결/프로그램/거래원 탭·10호가를 보이고 상단 종목찾기·연동색이 없다", async ({ page, scenario }) => {
   seedTickReplay(scenario);
   await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
 
@@ -227,13 +227,38 @@ test("/replay는 test2 풀폭 배치·4대 보조지표·체결·프로그램·1
   await expect(topbar.getByRole("button", { name: /^보낼 연동 색/ })).toHaveCount(0);
   await expect(page.locator(".page-frame[data-full-width]")).toBeVisible();
 
-  const subs = page.getByTestId("replay-sub-indicators");
-  await expect(subs.locator('[data-indicator="totals"]')).toContainText("총잔량");
-  await expect(subs.locator('[data-indicator="obi"]')).toContainText("호가 잔량비");
-  await expect(subs.locator('[data-indicator="strength"]')).toContainText("체결강도");
-  await expect(subs.locator('[data-indicator="program"]')).toContainText("프로그램 누적");
+  const deckBox = (await page.getByTestId("replay-deck").boundingBox())!;
+  const workspaceBox = (await page.getByTestId("replay-workspace").boundingBox())!;
+  const chartBox = (await page.getByTestId("replay-slot-chart").boundingBox())!;
+  const ladderSlotBox = (await page.getByTestId("replay-slot-ladder").boundingBox())!;
+  const rightSlotBox = (await page.getByTestId("replay-slot-right").boundingBox())!;
+  expect(deckBox.y + deckBox.height).toBeLessThanOrEqual(workspaceBox.y + 4);
+  expect(chartBox.x).toBeLessThan(ladderSlotBox.x);
+  expect(ladderSlotBox.x).toBeLessThan(rightSlotBox.x);
 
+  const subs = page.getByTestId("replay-sub-indicators");
+  await expect(subs.locator('[data-indicator="obi"]')).toContainText("호가 잔량비");
+  await subs.locator('[data-indicator-tab="totals"]').click();
+  await expect(subs.locator('[data-indicator="totals"]')).toContainText("총잔량");
+  await subs.locator('[data-indicator-tab="strength"]').click();
+  await expect(subs.locator('[data-indicator="strength"]')).toContainText("체결강도");
+  await subs.locator('[data-indicator-tab="program"]').click();
+  await expect(subs.locator('[data-indicator="program"]')).toContainText("프로그램 누적");
+  await subs.locator('[data-indicator-tab="none"]').click();
+  await expect(subs.locator("[data-indicator]")).toHaveCount(0);
+  await subs.locator('[data-indicator-tab="obi"]').click();
+  await expect(subs.locator('[data-indicator="obi"]')).toBeVisible();
+
+  await expect(page.getByTestId("replay-tab-trades")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("replay-trades-pane")).toBeVisible();
+  await expect(page.getByTestId("replay-trade-strength")).toHaveAttribute("data-dir", "up");
+  await expect(page.getByTestId("replay-sim-status")).toHaveCount(0);
+  await expect(page.getByTestId("replay-ladder")).toHaveClass(/\bod\b/);
+  await expect(page.getByTestId("replay-ladder").locator(".mw-footer.od-footer .mw-strip-ratio")).toBeVisible();
+  const ladderRowBox = (await page.getByTestId("replay-ladder").locator(".mw-lr").first().boundingBox())!;
+  expect(ladderRowBox.height).toBeCloseTo(24, 0);
+
+  await page.getByTestId("replay-tab-program").click();
   await expect(page.getByTestId("replay-program-pane")).toBeVisible();
   await expect(page.getByTestId("replay-program-net-qty")).toContainText("+1,200");
   await expect(page.getByTestId("replay-program-row")).toHaveCount(1);
@@ -252,6 +277,7 @@ test("/replay는 test2 풀폭 배치·4대 보조지표·체결·프로그램·1
   expect(bestAskBox.y).toBeGreaterThanOrEqual(ladderBox.y - 1);
   expect(bestBidBox.y + bestBidBox.height).toBeLessThanOrEqual(ladderBox.y + ladderBox.height + 1);
 
+  await page.getByTestId("replay-tab-brokers").click();
   const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");
   await expect(brokersPane.getByTestId("replay-broker-view-transfer")).toHaveAttribute("aria-pressed", "true");
@@ -364,6 +390,21 @@ test("가상 매매 시뮬레이션 주문·미체결·체결·되감기 복원�
   await page.getByTestId("replay-sim-reset").click();
   await expect(page.getByTestId("replay-sim-qty")).toHaveText("0주");
   await expect(page.getByTestId("replay-sim-fill-row")).toHaveCount(0);
+
+  await qtyInput.fill("20");
+  await page.getByTestId("replay-sim-market-buy").click();
+  await expect(page.getByTestId("replay-sim-qty")).toHaveText("20주");
+  await expect(page.getByTestId("replay-sim-avg")).toHaveText("71,100원");
+
+  await page.getByTestId("replay-sim-half-sell").click();
+  await expect(page.getByTestId("replay-sim-qty")).toHaveText("10주");
+
+  await page.getByTestId("replay-sim-account-toggle").click();
+  await expect(page.getByTestId("replay-sim-account")).toBeVisible();
+  await expect(page.getByTestId("replay-sim-cash-input")).toBeVisible();
+  await expect(page.getByTestId("replay-sim-fee-toggle")).toBeVisible();
+  await page.getByTestId("replay-sim-account-toggle").click();
+  await expect(page.getByTestId("replay-sim-account")).toHaveCount(0);
 });
 
 test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 시각, 분봉 주기 전환과 재생 버튼 대비가 동작한다", async ({ page, scenario }) => {
@@ -424,6 +465,7 @@ test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 �
   await expect(qtyInput).not.toHaveAttribute("data-ratio-active", "");
   await expect(higherAskBuyCell.locator(".od-preview")).toHaveText("매수 25");
 
+  await page.getByTestId("replay-tab-brokers").click();
   const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");
   await brokersPane.getByTestId("replay-broker-view-table").click();
@@ -465,7 +507,7 @@ test("전량 매수 가격별 주문, 총 자산 원 표기, 총잔량 중앙 �
   expect(playBg).not.toBe(raisedBg);
 });
 
-test("종목 클릭 시 기존 SearchDialog로 종목을 전환하고, 스플리터 크기 조절과 하단 데크 중앙 배치가 동작한다", async ({ page, scenario }) => {
+test("종목 클릭 시 기존 SearchDialog로 종목을 전환하고, 3열 스플리터 너비 조절과 상단 데크 중앙 배치가 동작한다", async ({ page, scenario }) => {
   seedTickReplay(scenario);
   scenario.reply("/api/symbols/000660/book-replay/days", { body: { symbol: "000660", days: [] } });
   await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
@@ -481,6 +523,7 @@ test("종목 클릭 시 기존 SearchDialog로 종목을 전환하고, 스플리
 
   const chartBefore = (await page.getByTestId("replay-slot-chart").boundingBox())!;
   const ladderBefore = (await page.getByTestId("replay-slot-ladder").boundingBox())!;
+  const rightBefore = (await page.getByTestId("replay-slot-right").boundingBox())!;
 
   const mainSplitter = (await page.getByTestId("replay-splitter-main").boundingBox())!;
   await page.mouse.move(mainSplitter.x + mainSplitter.width / 2, mainSplitter.y + mainSplitter.height / 2);
@@ -491,14 +534,21 @@ test("종목 클릭 시 기존 SearchDialog로 종목을 전환하고, 스플리
   const chartAfter = (await page.getByTestId("replay-slot-chart").boundingBox())!;
   expect(chartAfter.width).toBeLessThan(chartBefore.width - 20);
 
+  const ladderBeforeRightDrag = (await page.getByTestId("replay-slot-ladder").boundingBox())!;
+  const rightBeforeRightDrag = (await page.getByTestId("replay-slot-right").boundingBox())!;
+
   const rightSplitter = (await page.getByTestId("replay-splitter-right").boundingBox())!;
   await page.mouse.move(rightSplitter.x + rightSplitter.width / 2, rightSplitter.y + rightSplitter.height / 2);
   await page.mouse.down();
-  await page.mouse.move(rightSplitter.x + rightSplitter.width / 2, rightSplitter.y + 60, { steps: 4 });
+  await page.mouse.move(rightSplitter.x + 60, rightSplitter.y + rightSplitter.height / 2, { steps: 4 });
   await page.mouse.up();
 
   const ladderAfter = (await page.getByTestId("replay-slot-ladder").boundingBox())!;
-  expect(ladderAfter.height).toBeGreaterThan(ladderBefore.height + 30);
+  const rightAfter = (await page.getByTestId("replay-slot-right").boundingBox())!;
+  expect(ladderAfter.width).toBeGreaterThan(ladderBeforeRightDrag.width + 20);
+  expect(rightAfter.width).toBeLessThan(rightBeforeRightDrag.width - 20);
+  expect(ladderBefore.width).toBeGreaterThan(360);
+  expect(rightBefore.width).toBeGreaterThan(280);
 
   await page.getByTestId("replay-symbol-picker").click();
   const dialog = page.getByRole("dialog", { name: "종목 검색" });
@@ -538,6 +588,7 @@ test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵
 
   await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
 
+  await page.getByTestId("replay-tab-brokers").click();
   const brokersPane = page.getByTestId("replay-brokers-pane");
   const brokers = page.getByTestId("replay-brokers");
   await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
@@ -551,9 +602,9 @@ test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵
   await toggleOther.click();
   await preset30.click();
 
-  await brokersPane.getByTestId("replay-tab-journal").click();
+  await page.getByTestId("replay-tab-journal").click();
   await expect(brokersPane.getByTestId("replay-sim-journal")).toBeVisible();
-  await brokersPane.getByTestId("replay-tab-brokers").click();
+  await page.getByTestId("replay-tab-brokers").click();
   await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
 
   await brokersPane.getByTestId("replay-broker-view-board").click();
@@ -591,6 +642,7 @@ test("호가 복기 거래원 패널의 보기·카드 모양·이동 하위 옵
   expect(scenario.documents.uiPrefs().brokers).not.toHaveProperty("transferLevel");
 
   await page.reload();
+  await page.getByTestId("replay-tab-brokers").click();
   await expect(brokers.getByTestId("broker-transfer-sankey")).toBeVisible();
   await assertTransferOptions();
 
@@ -929,7 +981,11 @@ test("KRX 단독 아카이브 날짜는 배지·전일종가·연월 점프·프
   await expect(page.getByTestId("replay-resolution-badge")).toHaveAttribute("data-venue-scope", "krx_archive");
   await expect(page.getByTestId("replay-resolution-badge")).toHaveText("KRX 단독 · 아카이브");
   await expect(page.getByTestId("replay-prev-close")).toHaveText("75,000");
+
+  await page.getByTestId("replay-tab-program").click();
   await expect(page.getByTestId("replay-program-pane")).toContainText("KRX 아카이브에는 프로그램 매매 데이터가 없습니다");
+
+  await page.getByTestId("replay-tab-brokers").click();
   await expect(page.getByTestId("replay-brokers-archive-badge")).toHaveText("KRX 단독");
 
   await page.getByTestId("replay-symbol-picker").click();

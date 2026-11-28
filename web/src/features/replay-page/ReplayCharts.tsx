@@ -103,8 +103,19 @@ function defaultViewportFor(totalBars: number): ChartViewport {
   return { start: 0, end: totalBars };
 }
 
+export type ReplaySubIndicator = "obi" | "strength" | "totals" | "program" | "none";
+
+const SUB_INDICATOR_OPTIONS: readonly { readonly key: ReplaySubIndicator; readonly label: string }[] = [
+  { key: "obi", label: "호가 잔량비" },
+  { key: "strength", label: "체결강도" },
+  { key: "totals", label: "총잔량" },
+  { key: "program", label: "프로그램 누적" },
+  { key: "none", label: "숨김" },
+];
+
 export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, palette, onScrub }: Props) {
   const [timeframe, setTimeframe] = useState<ReplayChartTimeframe>(1);
+  const [activeSub, setActiveSub] = useState<ReplaySubIndicator>("obi");
   const [panning, setPanning] = useState(false);
   const [renderTick, setRenderTick] = useState(0);
 
@@ -484,7 +495,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
               ctx.fillStyle = palette.text3;
               ctx.font = `600 11px ${palette.fontSans}`;
               ctx.textAlign = "center";
-              ctx.fillText("블라인드 복기 (H 해제)", blindLeft + (PAD_L + plotW - blindLeft) / 2, padT + priceH / 2);
+              ctx.fillText("블라인드", blindLeft + (PAD_L + plotW - blindLeft) / 2, padT + priceH / 2);
             }
             ctx.restore();
           }
@@ -848,7 +859,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
       unsubFrame();
       unsubPaper?.();
     };
-  }, [session, engine, paper, blindMode, bookmarks, palette, timeframe, renderTick]);
+  }, [session, engine, paper, blindMode, bookmarks, palette, timeframe, activeSub, renderTick]);
 
   const scrubAtClientX = (targetEl: HTMLElement, clientX: number) => {
     const rect = targetEl.getBoundingClientRect();
@@ -920,18 +931,19 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
   };
 
   return (
-    <section className="rp-col" aria-label="분봉 차트와 4대 보조지표">
-      <div className="rp-pane-head">
+    <section className="rp-col" aria-label="분봉 차트와 보조지표">
+      <div className="mw-head rp-chart-head">
         <div className="rp-pane-title">
-          <span>{`${timeframe}분봉 · VWAP`}</span>
+          <span className="mw-head-name">{`${timeframe}분봉 · VWAP`}</span>
           <span ref={hmLabelRef} className="rp-muted rp-mono">09:00</span>
         </div>
         <div className="rp-pane-controls">
-          <div className="rp-seg rp-mono" role="group" aria-label="분봉 주기" data-testid="replay-chart-timeframe">
+          <div className="ui-seg" data-size="sm" role="group" aria-label="분봉 주기" data-testid="replay-chart-timeframe">
             {REPLAY_CHART_TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
                 type="button"
+                className="ui-seg-item"
                 aria-pressed={timeframe === tf}
                 onClick={() => setTimeframe(tf)}
               >
@@ -963,79 +975,106 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
           </div>
         </div>
 
-        <div className="rp-sub-panes" data-testid="replay-sub-indicators">
-          <div
-            className="rp-sub-pane"
-            data-indicator="totals"
-            onPointerDown={handlePointerDown}
-            onPointerMove={(e) => handlePointerMove("sub", e)}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerLeave}
-            onDoubleClick={handleResetZoom}
-          >
-            <div className="rp-sub-overlay rp-mono">
-              <span className="rp-sub-name">총잔량</span>
-              <span className="rp-sub-vals">
-                <span className="rp-down"><i className="rp-sw-dot" data-tone="down" />매도 <b ref={totalsAskRef}>-</b></span>
-                <span className="rp-up"><i className="rp-sw-dot" data-tone="up" />매수 <b ref={totalsBidRef}>-</b></span>
-              </span>
-            </div>
-            <canvas ref={totalsCanvasRef} className="rp-canvas" />
+        <div className="rp-sub-section" data-testid="replay-sub-indicators">
+          <div className="rp-sub-bar" role="group" aria-label="보조 흐름 선택">
+            {SUB_INDICATOR_OPTIONS.map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                className="rp-sub-tab"
+                data-indicator-tab={opt.key}
+                aria-pressed={activeSub === opt.key}
+                onClick={() => setActiveSub(opt.key)}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
 
-          <div
-            className="rp-sub-pane"
-            data-indicator="obi"
-            onPointerDown={handlePointerDown}
-            onPointerMove={(e) => handlePointerMove("sub", e)}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerLeave}
-            onDoubleClick={handleResetZoom}
-          >
-            <div className="rp-sub-overlay rp-mono">
-              <span className="rp-sub-name">호가 잔량비</span>
-              <span className="rp-sub-vals">
-                <b ref={obiValRef} className="rp-muted">-</b>
-              </span>
-            </div>
-            <canvas ref={obiCanvasRef} className="rp-canvas" />
-          </div>
+          {activeSub !== "none" && (
+            <div className="rp-sub-single">
+              {activeSub === "totals" && (
+                <div
+                  className="rp-sub-pane"
+                  data-indicator="totals"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={(e) => handlePointerMove("sub", e)}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerLeave}
+                  onDoubleClick={handleResetZoom}
+                >
+                  <div className="rp-sub-overlay rp-mono">
+                    <span className="rp-sub-name">총잔량</span>
+                    <span className="rp-sub-vals">
+                      <span className="rp-down"><i className="rp-sw-dot" data-tone="down" />매도 <b ref={totalsAskRef}>-</b></span>
+                      <span className="rp-up"><i className="rp-sw-dot" data-tone="up" />매수 <b ref={totalsBidRef}>-</b></span>
+                    </span>
+                  </div>
+                  <canvas ref={totalsCanvasRef} className="rp-canvas" />
+                </div>
+              )}
 
-          <div
-            className="rp-sub-pane"
-            data-indicator="strength"
-            onPointerDown={handlePointerDown}
-            onPointerMove={(e) => handlePointerMove("sub", e)}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerLeave}
-            onDoubleClick={handleResetZoom}
-          >
-            <div className="rp-sub-overlay rp-mono">
-              <span className="rp-sub-name">체결강도</span>
-              <span className="rp-sub-vals">
-                <b ref={strengthValRef} className="rp-muted">-</b>
-              </span>
-            </div>
-            <canvas ref={strengthCanvasRef} className="rp-canvas" />
-          </div>
+              {activeSub === "obi" && (
+                <div
+                  className="rp-sub-pane"
+                  data-indicator="obi"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={(e) => handlePointerMove("sub", e)}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerLeave}
+                  onDoubleClick={handleResetZoom}
+                >
+                  <div className="rp-sub-overlay rp-mono">
+                    <span className="rp-sub-name">호가 잔량비</span>
+                    <span className="rp-sub-vals">
+                      <b ref={obiValRef} className="rp-muted">-</b>
+                    </span>
+                  </div>
+                  <canvas ref={obiCanvasRef} className="rp-canvas" />
+                </div>
+              )}
 
-          <div
-            className="rp-sub-pane"
-            data-indicator="program"
-            onPointerDown={handlePointerDown}
-            onPointerMove={(e) => handlePointerMove("sub", e)}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerLeave}
-            onDoubleClick={handleResetZoom}
-          >
-            <div className="rp-sub-overlay rp-mono">
-              <span className="rp-sub-name">프로그램 누적</span>
-              <span className="rp-sub-vals">
-                <b ref={programValRef} className="rp-muted">자료 없음</b>
-              </span>
+              {activeSub === "strength" && (
+                <div
+                  className="rp-sub-pane"
+                  data-indicator="strength"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={(e) => handlePointerMove("sub", e)}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerLeave}
+                  onDoubleClick={handleResetZoom}
+                >
+                  <div className="rp-sub-overlay rp-mono">
+                    <span className="rp-sub-name">체결강도</span>
+                    <span className="rp-sub-vals">
+                      <b ref={strengthValRef} className="rp-muted">-</b>
+                    </span>
+                  </div>
+                  <canvas ref={strengthCanvasRef} className="rp-canvas" />
+                </div>
+              )}
+
+              {activeSub === "program" && (
+                <div
+                  className="rp-sub-pane"
+                  data-indicator="program"
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={(e) => handlePointerMove("sub", e)}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerLeave}
+                  onDoubleClick={handleResetZoom}
+                >
+                  <div className="rp-sub-overlay rp-mono">
+                    <span className="rp-sub-name">프로그램 누적</span>
+                    <span className="rp-sub-vals">
+                      <b ref={programValRef} className="rp-muted">자료 없음</b>
+                    </span>
+                  </div>
+                  <canvas ref={programCanvasRef} className="rp-canvas" />
+                </div>
+              )}
             </div>
-            <canvas ref={programCanvasRef} className="rp-canvas" />
-          </div>
+          )}
         </div>
       </div>
     </section>

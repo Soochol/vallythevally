@@ -80,7 +80,7 @@ export interface PaperSummary {
   readonly totalFees: number;
   readonly openOrders: readonly PaperOpenOrder[];
   readonly fills: readonly PaperFill[];
-  readonly status: PaperStatusNotice;
+  readonly status: PaperStatusNotice | null;
   readonly lastRewindUndo: PaperRewindUndo | null;
 }
 
@@ -188,10 +188,7 @@ export class ReplayPaperEngine {
   private loopAnchorSnapshot: PaperAccountSnapshot | null = null;
   private lastRewindUndo: PaperRewindUndo | null = null;
   private readonly fillFlashes = new Map<number, number>();
-  private status: PaperStatusNotice = {
-    tone: "info",
-    text: "좌측(매도)·우측(매수) 칸을 눌러 가상 주문을 등록하세요",
-  };
+  private status: PaperStatusNotice | null = null;
 
   constructor(options?: { readonly initialCash?: number; readonly nowPerf?: () => number }) {
     this.initialCash = options?.initialCash ?? DEFAULT_PAPER_INITIAL_CASH;

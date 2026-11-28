@@ -77,15 +77,13 @@ export function ReplayProgramPane({ engine, previousClose, isArchive = false, on
   const hasTotals = snap.buyQty !== null && snap.sellQty !== null;
 
   return (
-    <section className="rp-col" aria-label="프로그램 체결창" data-testid="replay-program-pane">
+    <section className="rp-stream-pane" aria-label="프로그램 체결창" data-testid="replay-program-pane">
       <div className="mw-frame pg" data-testid="replay-program">
         <div
           className="mw-head pg-head"
           data-direction={direction}
           title={hasTotals ? `매수 ${formatQuantity(snap.buyQty!)}주 · 매도 ${formatQuantity(snap.sellQty!)}주` : undefined}
         >
-          <span className="mw-head-name">프로그램</span>
-          <span className="mw-head-div" aria-hidden="true" />
           <span className="pg-net">
             <span className="pg-cap">순매수</span>
             <b data-testid="replay-program-net-qty">{snap.netQty === null ? "—" : withSign(net, formatQuantity(Math.abs(net)))}</b>
@@ -115,7 +113,7 @@ export function ReplayProgramPane({ engine, previousClose, isArchive = false, on
           </svg>
         </div>
 
-        <div className="pg-table rp-mono" role="table" aria-label="프로그램 체결">
+        <div className="pg-table" role="table" aria-label="프로그램 체결">
           <div className="pg-tr pg-th" role="row">
             <span role="columnheader">시각</span>
             <span role="columnheader" className="pg-num">현재가</span>

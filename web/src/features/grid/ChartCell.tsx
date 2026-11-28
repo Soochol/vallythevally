@@ -13,7 +13,7 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
-import { defaultIndicatorMode, useSelectionStore } from "../../stores/selection";
+import { useSelectionStore } from "../../stores/selection";
 import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { appliedThemeKey, DEFAULT_THEME_KEY, subscribeTheme } from "../../persist/theme";
@@ -30,8 +30,7 @@ import { BeforeConnectCard } from "../status/BeforeConnectCard";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
 import { useAutoGuardLayer } from "../../chart/autoGuard/useAutoGuardLayer";
 import { useShownSettings } from "../indicator-command/preview";
-import { CHART_DOCK_MIN_WIDTH, ChartRightDock } from "../indicator-command/ChartRightDock";
-import { Icon } from "../icons";
+import { chartDockLayoutFor, ChartRightDock } from "../indicator-command/ChartRightDock";
 import { AxisMode } from "./AxisMode";
 import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
 import type { IndicatorConfig } from "../../chart/settings";
@@ -120,8 +119,12 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  const canSnapDock = cellWidth === 0 || cellWidth >= CHART_DOCK_MIN_WIDTH;
-  const snappedHere = cellDock !== null && cellDock.snapped && canSnapDock;
+  const dockLayout = cellDock !== null ? chartDockLayoutFor(cellWidth) : null;
+  const chartBoxClass = dockLayout === "wide"
+    ? "isolate absolute inset-y-0 left-0 right-[var(--size-320)]"
+    : dockLayout === "compact"
+      ? "isolate absolute inset-y-0 left-0 right-[var(--size-268)]"
+      : "isolate absolute inset-0";
 
   useEffect(() => {
     const c = new ChartController(chartEl.current!, {
@@ -231,36 +234,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       aria-busy={status.kind === "loading"}
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
-      <div ref={chartEl} className={snappedHere ? "isolate absolute inset-y-0 left-0 right-[var(--size-320)]" : "isolate absolute inset-0"} />
-      {cellDock === null && status.kind === "ready" && (
-        <div data-chart-control="" className="b3-edge-pill max-md:hidden" role="group" aria-label="차트 지표 도킹 열기">
-          <button
-            type="button"
-            className="b3-edge-pill-main"
-            aria-label="지표 레이어 열기"
-            title="지표 레이어 열기 (글래스 피크)"
-            onClick={() => useSelectionStore.getState().openChartDock(cellId, defaultIndicatorMode(cellId), null, false)}
-          >
-            <span aria-hidden="true" className="b3-edge-chev">‹</span>
-            <span>지표</span>
-            <span className="b3-edge-count">{cell.chartSettings.indicators.length}</span>
-          </button>
-          {canSnapDock && (
-            <button
-              type="button"
-              className="b3-edge-pill-snap"
-              aria-label="지표 패널 우측 고정"
-              title="우측 고정 도킹으로 열기"
-              onClick={() => useSelectionStore.getState().openChartDock(cellId, defaultIndicatorMode(cellId), null, true)}
-            >
-              <Icon size={12}>
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <path d="M14 4v16" />
-              </Icon>
-            </button>
-          )}
-        </div>
-      )}
+      <div ref={chartEl} className={chartBoxClass} />
       {status.kind === "ready" && <AxisMode cellId={cellId} corner={corner} />}
       {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />

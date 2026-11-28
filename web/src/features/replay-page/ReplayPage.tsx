@@ -7,6 +7,7 @@ import { isTypingTarget } from "../../lib/typingTarget";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
+import type { BuyRatioPercent } from "../order/orderRules";
 import { EmptyState, ErrorState, Skeleton } from "../overlay/State";
 import { PageFrame } from "../pages/PageFrame";
 import { useCanvasPalette } from "./canvasTheme";
@@ -15,6 +16,7 @@ import { ReplayCharts } from "./ReplayCharts";
 import { ReplayDatePicker } from "./ReplayDatePicker";
 import { type LoopRange, ReplayDeck, type TimelineZoom } from "./ReplayDeck";
 import { ReplayLadder } from "./ReplayLadder";
+import { ReplayPaperHud } from "./ReplayPaperHud";
 import { ReplayProgramPane } from "./ReplayProgramPane";
 import { ReplaySplitter } from "./ReplaySplitter";
 import { ReplayTradesPane } from "./ReplayTradesPane";
@@ -37,12 +39,13 @@ import { ReplayPaperEngine } from "./replayPaperEngine";
 import { useReplayData } from "./useReplayData";
 import "./replayPage.css";
 
+type RightStreamTab = "trades" | "program" | "brokers" | "journal";
+
 const DEFAULT_SYMBOL: SymbolCode = "005930";
 const DEFAULT_MODE: PlaybackMode = { kind: "time", speed: 1, skipIdleMs: null };
-const DEFAULT_LEFT_SHARE = 0.742;
-const DEFAULT_CHART_SHARE = 0.668;
-const DEFAULT_TRADES_SHARE = 0.46;
-const DEFAULT_LADDER_SHARE = 0.537;
+const DEFAULT_CHART_SHARE = 0.365;
+const DEFAULT_LADDER_SHARE = 0.54;
+const DEFAULT_SIM_QTY = "50";
 
 function initialSymbol(param: string | null): SymbolCode {
   if (param && !isIndexCode(param)) return param;
@@ -67,10 +70,14 @@ export function ReplayPage() {
     paramDate && /^\d{8}$/.test(paramDate) ? paramDate : null,
   );
 
-  const [leftShare, setLeftShare] = useState(DEFAULT_LEFT_SHARE);
   const [chartShare, setChartShare] = useState(DEFAULT_CHART_SHARE);
-  const [tradesShare, setTradesShare] = useState(DEFAULT_TRADES_SHARE);
   const [ladderShare, setLadderShare] = useState(DEFAULT_LADDER_SHARE);
+  const [rightTab, setRightTab] = useState<RightStreamTab>("trades");
+
+  const [qtyInput, setQtyInput] = useState(DEFAULT_SIM_QTY);
+  const [buyRatioPercent, setBuyRatioPercent] = useState<BuyRatioPercent | null>(null);
+  const [pickedPreset, setPickedPreset] = useState<string | null>(null);
+  const [paperTick, setPaperTick] = useState(0);
 
   const [deltaMode, setDeltaMode] = useState<DeltaMode>("tick");
   const [tapeMinWon, setTapeMinWon] = useState(0);
@@ -87,9 +94,7 @@ export function ReplayPage() {
   });
 
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const leftGroupRef = useRef<HTMLDivElement>(null);
-  const tapeGroupRef = useRef<HTMLDivElement>(null);
-  const rightGroupRef = useRef<HTMLDivElement>(null);
+  const rightPairRef = useRef<HTMLDivElement>(null);
   const headPriceRef = useRef<HTMLSpanElement>(null);
   const headDiffRef = useRef<HTMLSpanElement>(null);
   const headValRef = useRef<HTMLElement>(null);
@@ -129,6 +134,11 @@ export function ReplayPage() {
       engine.dispose();
     };
   }, [engine]);
+
+  useEffect(() => {
+    if (!paper) return;
+    return paper.subscribe(() => setPaperTick((t) => t + 1));
+  }, [paper]);
 
   useEffect(() => {
     if (!engine || !paper) return;
@@ -195,6 +205,17 @@ export function ReplayPage() {
     };
     return engine.subscribeFrame(applyHead);
   }, [engine, session]);
+
+  const parsedQty = useMemo(() => {
+    const n = Math.floor(Number(qtyInput));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }, [qtyInput]);
+
+  const journalBadge = useMemo(() => {
+    if (!paper) return "복기일지";
+    const s = paper.getSummary(null);
+    return `복기일지 (${s.fills.length}/${s.openOrders.length})`;
+  }, [paper, paperTick]);
 
   const updateDate = useCallback(
     (nextDate: string) => {
@@ -265,6 +286,17 @@ export function ReplayPage() {
     engine.setPlaying(false);
     engine.seekMs(ms);
   }, [engine]);
+
+  const handleFillSellableQty = useCallback((sellableQty: number) => {
+    setQtyInput(String(sellableQty));
+    setPickedPreset(null);
+    setBuyRatioPercent(null);
+  }, []);
+
+  const handleClearBuyRatio = useCallback(() => {
+    setBuyRatioPercent(null);
+    setPickedPreset(null);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -342,181 +374,36 @@ export function ReplayPage() {
 
   const body = (() => {
     if (data.publicMode) {
-      return <EmptyState title="공개 모드에서는 호가 복기를 지원하지 않습니다" />;
+      return <div className="rp-state-wrap"><EmptyState title="공개 모드에서는 호가 복기를 지원하지 않습니다" /></div>;
     }
     if (data.accessPending) {
-      return <Skeleton label="호가 복기 상태를 확인하는 중입니다" />;
+      return <div className="rp-state-wrap"><Skeleton label="호가 복기 상태를 확인하는 중입니다" /></div>;
     }
     if (!data.available) {
-      return <EmptyState title="호가 복기 수집 저장소가 연결되지 않았습니다" />;
+      return <div className="rp-state-wrap"><EmptyState title="호가 복기 수집 저장소가 연결되지 않았습니다" /></div>;
     }
     if (data.daysPending) {
-      return <Skeleton label="수집된 관측일을 불러오는 중입니다" />;
+      return <div className="rp-state-wrap"><Skeleton label="수집된 관측일을 불러오는 중입니다" /></div>;
     }
     if (data.activeDate === null) {
-      return <EmptyState title={`${symbolName}의 수집된 호가 복기 날짜가 없습니다`} />;
+      return <div className="rp-state-wrap"><EmptyState title={`${symbolName}의 수집된 호가 복기 날짜가 없습니다`} /></div>;
     }
     if (data.replayPending) {
-      return <Skeleton label={`${formatShortDay(data.activeDate)} 호가 복기 자료를 불러오는 중입니다`} />;
+      return <div className="rp-state-wrap"><Skeleton label={`${formatShortDay(data.activeDate)} 호가 복기 자료를 불러오는 중입니다`} /></div>;
     }
     if (data.replayFailed) {
-      return <ErrorState message="호가 복기 자료를 불러오지 못했습니다" retry={data.retryReplay} />;
+      return <div className="rp-state-wrap"><ErrorState message="호가 복기 자료를 불러오지 못했습니다" retry={data.retryReplay} /></div>;
     }
     const coverage = data.replayMeta?.coverage ?? data.replayDay?.coverage;
     if (coverage === "symbol_not_collected") {
-      return <EmptyState title="이 종목은 수집 대상이 아닙니다" />;
+      return <div className="rp-state-wrap"><EmptyState title="이 종목은 수집 대상이 아닙니다" /></div>;
     }
     if (coverage === "day_not_collected" || !session || !engine || !paper) {
-      return <EmptyState title="이 날의 수집 호가 자료가 없습니다" />;
+      return <div className="rp-state-wrap"><EmptyState title="이 날의 수집 호가 자료가 없습니다" /></div>;
     }
 
     return (
       <div className="rp-stage">
-        <div ref={workspaceRef} className="rp-workspace" data-testid="replay-workspace">
-          <div
-            ref={leftGroupRef}
-            className="rp-split-row rp-left-group"
-            style={{ flexGrow: leftShare, flexShrink: 1, flexBasis: 0 }}
-          >
-            <div
-              className="rp-pane-slot"
-              data-testid="replay-slot-chart"
-              style={{ flexGrow: chartShare, flexShrink: 1, flexBasis: 0 }}
-            >
-              <ReplayCharts
-                session={session}
-                engine={engine}
-                paper={paper}
-                blindMode={blindMode}
-                bookmarks={bookmarks}
-                palette={palette}
-                onScrub={scrubSec}
-              />
-            </div>
-
-            <ReplaySplitter
-              orientation="vertical"
-              value={chartShare}
-              min={0.3}
-              max={0.82}
-              defaultValue={DEFAULT_CHART_SHARE}
-              containerRef={leftGroupRef}
-              label="차트와 체결 영역 너비 조절"
-              testId="replay-splitter-chart"
-              onChange={setChartShare}
-            />
-
-            <div
-              ref={tapeGroupRef}
-              className="rp-split-row rp-tape-group"
-              style={{ flexGrow: 1 - chartShare, flexShrink: 1, flexBasis: 0 }}
-            >
-              <div
-                className="rp-pane-slot"
-                data-testid="replay-slot-trades"
-                style={{ flexGrow: tradesShare, flexShrink: 1, flexBasis: 0 }}
-              >
-                <ReplayTradesPane
-                  engine={engine}
-                  previousClose={session.previousClose}
-                  tapeMinWon={tapeMinWon}
-                  onTapeMinWon={setTapeMinWon}
-                  onJumpMs={jumpMs}
-                />
-              </div>
-
-              <ReplaySplitter
-                orientation="vertical"
-                value={tradesShare}
-                min={0.25}
-                max={0.75}
-                defaultValue={DEFAULT_TRADES_SHARE}
-                containerRef={tapeGroupRef}
-                label="체결창과 프로그램 체결창 너비 조절"
-                testId="replay-splitter-tape"
-                onChange={setTradesShare}
-              />
-
-              <div
-                className="rp-pane-slot"
-                data-testid="replay-slot-program"
-                style={{ flexGrow: 1 - tradesShare, flexShrink: 1, flexBasis: 0 }}
-              >
-                <ReplayProgramPane
-                  engine={engine}
-                  previousClose={session.previousClose}
-                  isArchive={data.isArchive}
-                  onJumpMs={jumpMs}
-                />
-              </div>
-            </div>
-          </div>
-
-          <ReplaySplitter
-            orientation="vertical"
-            value={leftShare}
-            min={0.45}
-            max={0.84}
-            defaultValue={DEFAULT_LEFT_SHARE}
-            containerRef={workspaceRef}
-            label="좌측 영역과 우측 영역 너비 조절"
-            testId="replay-splitter-main"
-            onChange={setLeftShare}
-          />
-
-          <div
-            ref={rightGroupRef}
-            className="rp-split-col rp-right-group"
-            style={{ flexGrow: 1 - leftShare, flexShrink: 1, flexBasis: 0 }}
-          >
-            <div
-              className="rp-pane-slot"
-              data-testid="replay-slot-ladder"
-              style={{ flexGrow: ladderShare, flexShrink: 1, flexBasis: 0 }}
-            >
-              <ReplayLadder
-                engine={engine}
-                paper={paper}
-                previousClose={session.previousClose}
-                tickStepOf={session.tickStepOf}
-                deltaMode={deltaMode}
-                onDeltaMode={setDeltaMode}
-                onUndoRewind={handleUndoRewind}
-              />
-            </div>
-
-            <ReplaySplitter
-              orientation="horizontal"
-              value={ladderShare}
-              min={0.28}
-              max={0.76}
-              defaultValue={DEFAULT_LADDER_SHARE}
-              containerRef={rightGroupRef}
-              label="호가주문창과 거래원 높이 조절"
-              testId="replay-splitter-right"
-              onChange={setLadderShare}
-            />
-
-            <div
-              className="rp-pane-slot"
-              data-testid="replay-slot-brokers"
-              style={{ flexGrow: 1 - ladderShare, flexShrink: 1, flexBasis: 0 }}
-            >
-              <ReplayBrokersPane
-                engine={engine}
-                paper={paper}
-                dayStartUnix={session.dayStartUnix}
-                activeSecond={control.activeSecond}
-                blindMode={blindMode}
-                isArchive={data.isArchive}
-                onJumpMs={jumpMs}
-                brokerDay={data.brokerDay}
-                bars1m={data.bars1m}
-              />
-            </div>
-          </div>
-        </div>
-
         <ReplayDeck
           session={session}
           engine={engine}
@@ -537,6 +424,162 @@ export function ReplayPage() {
           onZoom={setZoom}
           onScrub={scrubSec}
         />
+
+        <div ref={workspaceRef} className="rp-workspace" data-testid="replay-workspace">
+          <div
+            className="rp-pane-slot rp-cockpit-left"
+            data-testid="replay-slot-chart"
+            style={{ flexGrow: chartShare, flexShrink: 1, flexBasis: 0 }}
+          >
+            <ReplayCharts
+              session={session}
+              engine={engine}
+              paper={paper}
+              blindMode={blindMode}
+              bookmarks={bookmarks}
+              palette={palette}
+              onScrub={scrubSec}
+            />
+          </div>
+
+          <ReplaySplitter
+            orientation="vertical"
+            value={chartShare}
+            min={0.24}
+            max={0.5}
+            defaultValue={DEFAULT_CHART_SHARE}
+            containerRef={workspaceRef}
+            label="차트와 호가 콕핏 너비 조절"
+            testId="replay-splitter-main"
+            onChange={setChartShare}
+          />
+
+          <div
+            ref={rightPairRef}
+            className="rp-split-row rp-cockpit-pair"
+            style={{ flexGrow: 1 - chartShare, flexShrink: 1, flexBasis: 0 }}
+          >
+            <div
+              className="rp-pane-slot rp-cockpit-center"
+              data-testid="replay-slot-ladder"
+              style={{ flexGrow: ladderShare, flexShrink: 1, flexBasis: 0 }}
+            >
+              <ReplayLadder
+                engine={engine}
+                paper={paper}
+                previousClose={session.previousClose}
+                tickStepOf={session.tickStepOf}
+                deltaMode={deltaMode}
+                qtyInput={qtyInput}
+                buyRatioPercent={buyRatioPercent}
+                pickedPreset={pickedPreset}
+                onQtyInputChange={setQtyInput}
+                onBuyRatioPercentChange={setBuyRatioPercent}
+                onPickedPresetChange={setPickedPreset}
+                onDeltaMode={setDeltaMode}
+                onUndoRewind={handleUndoRewind}
+              />
+            </div>
+
+            <ReplaySplitter
+              orientation="vertical"
+              value={ladderShare}
+              min={0.44}
+              max={0.68}
+              defaultValue={DEFAULT_LADDER_SHARE}
+              containerRef={rightPairRef}
+              label="호가 사다리와 우측 분석 영역 너비 조절"
+              testId="replay-splitter-right"
+              onChange={setLadderShare}
+            />
+
+            <div
+              className="rp-pane-slot rp-cockpit-right"
+              data-testid="replay-slot-right"
+              style={{ flexGrow: 1 - ladderShare, flexShrink: 1, flexBasis: 0 }}
+            >
+              <ReplayPaperHud
+                engine={engine}
+                paper={paper}
+                qtyNum={parsedQty}
+                buyRatioPercent={buyRatioPercent}
+                onFillSellableQty={handleFillSellableQty}
+                onClearBuyRatio={handleClearBuyRatio}
+              />
+
+              <div className="rp-col rp-right-stream">
+                <div className="rp-right-tabs" role="group" aria-label="우측 수급 및 복기 전환">
+                  <button
+                    type="button"
+                    data-testid="replay-tab-trades"
+                    aria-pressed={rightTab === "trades"}
+                    onClick={() => setRightTab("trades")}
+                  >
+                    체결
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="replay-tab-program"
+                    aria-pressed={rightTab === "program"}
+                    onClick={() => setRightTab("program")}
+                  >
+                    프로그램
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="replay-tab-brokers"
+                    aria-pressed={rightTab === "brokers"}
+                    onClick={() => setRightTab("brokers")}
+                  >
+                    거래원
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="replay-tab-journal"
+                    aria-pressed={rightTab === "journal"}
+                    onClick={() => setRightTab("journal")}
+                  >
+                    {journalBadge}
+                  </button>
+                </div>
+
+                <div className="rp-right-stream-body">
+                  {rightTab === "trades" && (
+                    <ReplayTradesPane
+                      engine={engine}
+                      previousClose={session.previousClose}
+                      tapeMinWon={tapeMinWon}
+                      onTapeMinWon={setTapeMinWon}
+                      onJumpMs={jumpMs}
+                    />
+                  )}
+                  {rightTab === "program" && (
+                    <ReplayProgramPane
+                      engine={engine}
+                      previousClose={session.previousClose}
+                      isArchive={data.isArchive}
+                      onJumpMs={jumpMs}
+                    />
+                  )}
+                  {(rightTab === "brokers" || rightTab === "journal") && (
+                    <ReplayBrokersPane
+                      engine={engine}
+                      paper={paper}
+                      dayStartUnix={session.dayStartUnix}
+                      activeSecond={control.activeSecond}
+                      blindMode={blindMode}
+                      isArchive={data.isArchive}
+                      onJumpMs={jumpMs}
+                      brokerDay={data.brokerDay}
+                      bars1m={data.bars1m}
+                      forcedMode={rightTab}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   })();
@@ -544,72 +587,73 @@ export function ReplayPage() {
   return (
     <PageFrame title="호가 복기" fullWidth hideLinkColorPicker>
       <div className="rp-root" data-testid="replay-page">
-        <div className="rp-context-bar">
-          <button
-            type="button"
-            className="rp-symbol-btn"
-            data-testid="replay-symbol-picker"
-            aria-haspopup="dialog"
-            title="복기 종목 전환 (/)"
-            onClick={() => openSearch("replay")}
-          >
-            <span className="rp-symbol-name">{symbolName}</span>
-            <span className="rp-symbol-code rp-mono">{code}</span>
-            <kbd>/</kbd>
-          </button>
-
-          <ReplayDatePicker
-            days={data.days}
-            archiveDays={data.archiveDays}
-            activeDate={data.activeDate}
-            onSelect={updateDate}
-          />
-
-          {session && (
-            <div className="rp-head-quote rp-mono">
-              <span ref={headPriceRef} className="rp-head-price" data-testid="replay-head-price">-</span>
-              <span ref={headDiffRef} className="rp-head-diff" data-testid="replay-head-diff" hidden />
-              <div className="rp-head-meta">
-                <span>기준가 <b data-testid="replay-prev-close">{prevClose !== null ? formatPrice(prevClose, false) : "-"}</b></span>
-                <span>누적대금 <b ref={headValRef}>-</b></span>
-                <span>커버리지 <b>{`${session.coveragePct.toFixed(1)}%`}</b></span>
-              </div>
-            </div>
-          )}
-
-          <div className="rp-context-right">
-            <span
-              className="rp-badge-mini"
-              data-testid="replay-resolution-badge"
-              data-resolution={resolution}
-              data-venue-scope={data.isArchive ? "krx_archive" : "combined"}
-              title={
-                data.isArchive
-                  ? "hoga-ops 과거 수집본(KRX 단독·비수정주가)입니다. 2025년 3월 이후 NXT 거래분은 포함되지 않습니다."
-                  : undefined
-              }
+        <header className="rp-context-bar">
+          <div className="rp-top-inner">
+            <button
+              type="button"
+              className="rp-symbol-btn"
+              data-testid="replay-symbol-picker"
+              aria-haspopup="dialog"
+              title="복기 종목 전환 (/)"
+              onClick={() => openSearch("replay")}
             >
-              {data.isArchive
-                ? "KRX 단독 · 아카이브"
-                : resolution === "tick"
-                  ? "통합 · 틱 복기"
-                  : "장중 1분 요약 · 마감 후 틱 복기"}
-            </span>
+              <span className="rp-symbol-name">{symbolName}</span>
+              <span className="rp-symbol-code rp-mono">{code}</span>
+              <kbd>/</kbd>
+            </button>
+
+            <ReplayDatePicker
+              days={data.days}
+              archiveDays={data.archiveDays}
+              activeDate={data.activeDate}
+              onSelect={updateDate}
+            />
+
             {session && (
-              <button
-                type="button"
-                className="rp-flat-btn"
-                data-testid="replay-blind-btn"
-                aria-pressed={blindMode}
-                title="미래 봉 가리기 (H)"
-                onClick={() => setBlindMode((prev) => !prev)}
-              >
-                <span>미래 봉 가리기</span>
-                <kbd>H</kbd>
-              </button>
+              <div className="rp-head-quote rp-mono">
+                <span ref={headPriceRef} className="rp-head-price" data-testid="replay-head-price">-</span>
+                <span ref={headDiffRef} className="rp-head-diff" data-testid="replay-head-diff" hidden />
+                <div className="rp-head-meta">
+                  <span>기준가 <b data-testid="replay-prev-close">{prevClose !== null ? formatPrice(prevClose, false) : "-"}</b></span>
+                  <span>누적대금 <b ref={headValRef}>-</b></span>
+                </div>
+              </div>
             )}
+
+            <div className="rp-context-right">
+              <span
+                className="rp-badge-mini"
+                data-testid="replay-resolution-badge"
+                data-resolution={resolution}
+                data-venue-scope={data.isArchive ? "krx_archive" : "combined"}
+                title={
+                  data.isArchive
+                    ? "hoga-ops 과거 수집본(KRX 단독·비수정주가)입니다. 2025년 3월 이후 NXT 거래분은 포함되지 않습니다."
+                    : undefined
+                }
+              >
+                {data.isArchive
+                  ? "KRX 단독 · 아카이브"
+                  : resolution === "tick"
+                    ? "틱 복기"
+                    : "1분 요약"}
+              </span>
+              {session && (
+                <button
+                  type="button"
+                  className="rp-flat-btn"
+                  data-testid="replay-blind-btn"
+                  aria-pressed={blindMode}
+                  title="미래 봉 가리기 (H)"
+                  onClick={() => setBlindMode((prev) => !prev)}
+                >
+                  <span>미래 봉 가리기</span>
+                  <kbd>H</kbd>
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        </header>
 
         <div className="rp-body">{body}</div>
       </div>

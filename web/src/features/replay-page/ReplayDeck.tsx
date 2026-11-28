@@ -385,7 +385,7 @@ export function ReplayDeck({
   };
 
   return (
-    <footer className="rp-deck" data-testid="replay-deck">
+    <section className="rp-deck" aria-label="호가 복기 재생 제어" data-testid="replay-deck">
       <div className="rp-deck-controls">
         <div className="rp-deck-left">
           <div className="rp-clock-box">
@@ -540,6 +540,6 @@ export function ReplayDeck({
       <div className="rp-timeline-axis rp-mono">
         {axisLabels.map((label, idx) => <span key={idx}>{label}</span>)}
       </div>
-    </footer>
+    </section>
   );
 }
