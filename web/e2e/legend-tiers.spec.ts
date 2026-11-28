@@ -240,9 +240,9 @@ test("화면 내 최고 꼬리표는 범례 상자와 겹치지 않는다", asyn
   expect(await page.evaluate((time) => window.chartProbe.chart.timeScale().timeToCoordinate(time) !== null, toChartTime(source.bars[peak]!.t))).toBe(true);
 });
 
-test("바로가기 모드의 알약은 범례 머리줄에 있고 닫기 버튼 이름은 바로가기 끝내기다", async ({ page, scenario }) => {
+test("바로가기 모드의 알약은 범례 밖 상단 중앙에 있고 범례가 펼쳐져도 겹치거나 밀리지 않으며 닫기 버튼 이름은 바로가기 끝내기다", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
-  seedCharts(scenario, [chartWindow("cell-0", { visibleBars: 50 }, "D"), chartWindow("cell-1", { visibleBars: 50 }, "5m")], { rows: [["cell-0", "cell-1"]] });
+  seedCharts(scenario, [chartWindow("cell-0", { visibleBars: 50 }, "D"), chartWindow("cell-1", { visibleBars: 50, indicators: movingAverages(4) }, "5m")], { rows: [["cell-0", "cell-1"]] });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.clock.setFixedTime(new Date("2026-11-09T10:00:00+09:00"));
   await page.goto("/");
@@ -269,10 +269,33 @@ test("바로가기 모드의 알약은 범례 머리줄에 있고 닫기 버튼 
   const menu = page.getByRole("menu", { name: "드로잉 메뉴", exact: true });
   await expect(menu).toBeVisible();
   await menu.getByRole("menuitem", { name: /^바로가기 · / }).click();
-  const head = cell(page, 2).locator("[data-legend-head]");
-  const badge = head.getByRole("group", { name: "바로가기 모드" });
+
+  const pane = cell(page, 2);
+  const badge = pane.getByRole("group", { name: "바로가기 모드" });
   await expect(badge).toBeVisible();
-  await expect(badge).toContainText("과거 보기");
+  await expect(badge).toContainText(/과거 보기 \d{4}-\d{2}-\d{2} · 실시간 멈춤/);
+  await expect(pane.locator(".chart-legend").getByRole("group", { name: "바로가기 모드" })).toHaveCount(0);
+  await expect(pane.locator("[data-legend-head]").getByRole("group", { name: "바로가기 모드" })).toHaveCount(0);
+  await frames(page, 8);
+
+  const chartBox = (await chartOf(pane).boundingBox())!;
+  const badgeBoxBefore = (await badge.boundingBox())!;
+  const legendBoxBefore = (await pane.locator(".chart-legend").boundingBox())!;
+  expect(Math.abs((badgeBoxBefore.x + badgeBoxBefore.width / 2) - (chartBox.x + chartBox.width / 2))).toBeLessThanOrEqual(2);
+  expect(badgeBoxBefore.y).toBeGreaterThanOrEqual(chartBox.y);
+  expect(badgeBoxBefore.y + badgeBoxBefore.height).toBeLessThanOrEqual(legendBoxBefore.y + 0.5);
+
+  const foldPill = pane.getByRole("button", { name: /^지표 4/ });
+  await foldPill.click();
+  await expect(foldPill).toHaveAttribute("aria-expanded", "true");
+  await frames(page, 6);
+
+  const badgeBoxAfter = (await badge.boundingBox())!;
+  const legendBoxAfter = (await pane.locator(".chart-legend").boundingBox())!;
+  expect(Math.abs(badgeBoxAfter.x - badgeBoxBefore.x)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(badgeBoxAfter.y - badgeBoxBefore.y)).toBeLessThanOrEqual(0.5);
+  expect(badgeBoxAfter.y + badgeBoxAfter.height).toBeLessThanOrEqual(legendBoxAfter.y + 0.5);
+
   const close = badge.getByRole("button", { name: "바로가기 끝내기", exact: true });
   await expect(close).toBeVisible();
   const box = await close.boundingBox();

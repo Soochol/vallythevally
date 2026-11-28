@@ -46,7 +46,7 @@ import { DaySeparators } from "./daySeparators";
 import { extremeChange, type ExtremeTag, ExtremeTags } from "./extremeTags";
 import { FineBars } from "./fineBars";
 import { JumpBadge } from "./jumpBadge";
-import { type FetchJump, JumpableFeed } from "./jumpFeed";
+import { type FetchJump, JumpableFeed, keepsJumpMode } from "./jumpFeed";
 import { type Extreme, findExtremes } from "./extremes";
 import { type OpenPort, openIndicatorPort } from "./indicators/client";
 import { isProgramFlow, isTickCvd } from "./indicators/kinds";
@@ -70,6 +70,7 @@ import { InitialRange, RIGHT_OFFSET } from "./initialRange";
 
 /** 왼쪽 끝이 이 봉 수 안으로 들어오면 과거 페이지를 받는다(frontend.md §5.7). */
 const LOAD_OLDER_WITHIN = 50;
+const MAX_JUMP_PRESERVE_PAGES = 12;
 const DEFAULT_PRICE_TOP_MARGIN = 0.14;
 const PRICE_BOTTOM_MARGIN = 0.08;
 const STATUS_INTERVAL_MS = 250;
@@ -167,6 +168,7 @@ export interface ControllerDeps {
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
   onCompareRemove?: (code: SymbolCode) => void;
   onCorner?: (corner: { width: number; height: number }) => void;
+  badgeHost?: HTMLElement;
 }
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
@@ -199,6 +201,8 @@ export class ChartController {
   private readonly badge: JumpBadge;
   private jumpToken = 0;
   private jumpInterval: BarInterval | null = null;
+  private enteringJump: { date: KstDate; interval: BarInterval } | null = null;
+  private extendingJump = false;
   private pendingEnd: UnixSeconds | null = null;
   private readonly fineBars: FineBars;
   private readonly onStatus: (s: CellStatus) => void;
@@ -282,7 +286,7 @@ export class ChartController {
       reserveTop: (legendBottom, paneHeight) => this.reservePriceTop(legendBottom, paneHeight),
     });
     this.extremeTags = new ExtremeTags(el);
-    this.badge = new JumpBadge(this.legend.statusAnchor, () => this.feed.endMode());
+    this.badge = new JumpBadge(deps.badgeHost ?? el, () => this.feed.endMode());
     this.daySeparators = new DaySeparators(this.chart, {
       shown: () => this.view !== null && this.view.settings.showDaySeparators && isIntraday(this.view.period),
       bars: () => this.bars,
@@ -448,6 +452,19 @@ export class ChartController {
       });
     }
     if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
+      this.jumpToken++;
+      this.enteringJump = null;
+      this.extendingJump = false;
+      const preservingJump = prev !== null && this.feed.activeDate !== null && keepsJumpMode({ symbol: prev.symbol, venue: prev.venue, period: prev.period }, { symbol: next.symbol, venue: next.venue, period: next.period });
+      if (preservingJump) {
+        const edge = barAtRightEdge(this.bars, this.rightEdgeT());
+        const last = this.bars.at(-1);
+        if (edge !== null && last !== undefined) {
+          this.jumpInterval = edge.t < last.t ? barInterval(edge.t, prev.period) : null;
+        }
+      } else {
+        this.jumpInterval = null;
+      }
       if (prev && isIndexCode(prev.symbol) !== isIndex) {
         this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, this.priceAxisGeometry()) });
         this.indicators.refreshPriceFormat();
@@ -643,6 +660,7 @@ export class ChartController {
     this.unwatch();
     this.stopMicroFeeds();
     this.feed.dispose();
+    this.el.removeAttribute("data-jump-active");
     this.badge.dispose();
     this.fineBars.dispose();
     this.compare.dispose();
@@ -1057,6 +1075,8 @@ export class ChartController {
     const last = this.bars[lastIndex];
     const paneHeight = this.chart.panes()[0]?.getHeight() ?? 0;
     const obstacles: { left: number; top: number; right: number; bottom: number }[] = [];
+    const badgeBox = this.badge.box(this.el);
+    if (badgeBox) obstacles.push(badgeBox);
     if (found && last) {
       const firstX = xOf(first);
       const lastX = xOf(lastIndex);
@@ -1198,9 +1218,13 @@ export class ChartController {
     const held = jumpHeld({ bars: this.bars, interval: request.interval, date: request.date, modeDate });
     const route = jumpRoute({ period: view.period, date: request.date, today, held });
     if (route === "mode") {
-      this.jumpInterval = request.interval;
+      const pending = { date: request.date, interval: request.interval };
+      this.enteringJump = pending;
       const entry = await this.feed.enterMode(request.date);
-      if (entry !== "entered") return entry;
+      if (entry !== "entered") {
+        if (this.enteringJump === pending) this.enteringJump = null;
+        return entry;
+      }
       if (token !== this.jumpToken) return "cancelled";
       if (this.regularFilterActive() && lastBarBefore(this.bars, request.interval) === null) {
         const reached = await this.feed.olderUntil((h) => lastBarBefore(displayBars(this.deriveHistory(h)), request.interval) !== null);
@@ -1232,6 +1256,10 @@ export class ChartController {
   }
 
   private onJumpEntered(raw: History): void {
+    if (this.enteringJump !== null && this.enteringJump.date === this.feed.activeDate && this.feed.mode?.entering !== true) {
+      this.jumpInterval = this.enteringJump.interval;
+      this.enteringJump = null;
+    }
     this.pendingEnd = null;
     this.initialRange.release();
     this.rawHistory = raw;
@@ -1249,10 +1277,19 @@ export class ChartController {
     });
     const latest = bars[bars.length - 1];
     if (latest) {
-      this.ready = { kind: "ready", latest, prev: bars[bars.length - 2] ?? null, isCurrent: false, olderError: null, olderLoading: false, intradayEnd: false };
-      this.onStatus(this.ready);
       const end = this.jumpInterval ? lastBarBefore(bars, this.jumpInterval) : null;
-      if (end) this.fitEndingAt(bars[end.index]!.t);
+      if (end === null && this.jumpInterval !== null && h.nextBefore !== null) {
+        this.ready = null;
+        this.extendingJump = true;
+        this.onStatus({ kind: "loading" });
+        this.renderBadge();
+        void this.extendJumpToInterval(this.jumpInterval, this.jumpToken);
+      } else {
+        this.ready = { kind: "ready", latest, prev: bars[bars.length - 2] ?? null, isCurrent: false, olderError: null, olderLoading: false, intradayEnd: false };
+        this.onStatus(this.ready);
+        if (end) this.fitEndingAt(bars[end.index]!.t);
+        else this.fitInitialRange();
+      }
     } else if (this.regularFilterActive() && h.nextBefore !== null) {
       this.ready = null;
       this.onStatus({ kind: "loading" });
@@ -1266,7 +1303,39 @@ export class ChartController {
     this.updateIntradayEnd();
   }
 
+  private async extendJumpToInterval(target: BarInterval, token: number): Promise<void> {
+    let pages = 0;
+    try {
+      const reached = await this.feed.olderUntil((history) => {
+        if (lastBarBefore(displayBars(this.deriveHistory(history)), target) !== null) return true;
+        pages += 1;
+        return pages >= MAX_JUMP_PRESERVE_PAGES;
+      });
+      if (this.disposed || token !== this.jumpToken || reached === "stale" || this.feed.activeDate === null) return;
+      const latest = this.bars[this.bars.length - 1];
+      if (!latest) return;
+      this.ready = { kind: "ready", latest, prev: this.bars[this.bars.length - 2] ?? null, isCurrent: false, olderError: null, olderLoading: false, intradayEnd: false };
+      this.onStatus(this.ready);
+      const end = lastBarBefore(this.bars, target);
+      if (end) this.fitEndingAt(this.bars[end.index]!.t);
+      else this.fitInitialRange();
+      this.compare.coverFrom(this.leftT());
+      this.renderLegend();
+      this.updateIntradayEnd();
+    } finally {
+      if (token === this.jumpToken) {
+        this.extendingJump = false;
+        this.renderBadge();
+      }
+    }
+  }
+
   private onModeChanged(): void {
+    if (this.feed.mode === null) {
+      this.jumpInterval = null;
+      this.enteringJump = null;
+      this.extendingJump = false;
+    }
     this.syncCompare();
     this.syncMicroFeeds();
     this.renderBadge();
@@ -1328,13 +1397,23 @@ export class ChartController {
   private renderBadge(): void {
     const mode = this.feed.mode;
     const view = this.view;
-    if (!mode || !view) return this.badge.show(null);
-    this.badge.show({
-      date: mode.date,
-      receiving: mode.entering || this.ready?.olderLoading === true,
-      unadjustedDays: mode.unadjustedDays,
-      compareHidden: this.feed.activeDate !== null && compareEntries(view).length > 0,
-    });
+    const visible = mode !== null && view !== null;
+    const toggled = this.el.hasAttribute("data-jump-active") !== visible;
+    this.el.toggleAttribute("data-jump-active", visible);
+    if (!visible) {
+      this.badge.show(null);
+    } else {
+      this.badge.show({
+        date: mode.date,
+        receiving: mode.entering || this.extendingJump || this.ready?.olderLoading === true,
+        unadjustedDays: mode.unadjustedDays,
+        compareHidden: this.feed.activeDate !== null && compareEntries(view).length > 0,
+      });
+    }
+    if (toggled) {
+      this.legend.fit("content");
+      this.scheduleFrame();
+    }
   }
 
   private fitEndingAt(endT: UnixSeconds): void {

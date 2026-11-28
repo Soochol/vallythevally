@@ -4,6 +4,7 @@ import type { KstDate } from "../api/generated/KstDate";
 import type { ApiRequestError } from "../api/http";
 import type { MarketSocketLike } from "../api/socket";
 import { BarFeed, type FeedListener, type FetchPage, type History } from "./barFeed";
+import { isIntraday } from "./time";
 
 export type FetchJump = (q: JumpQuery, signal: AbortSignal) => Promise<JumpBarsPage>;
 
@@ -20,10 +21,15 @@ export interface JumpableListener extends FeedListener {
   modeChanged(): void;
 }
 
+export function keepsJumpMode(prev: SeriesKey | null, next: SeriesKey): boolean {
+  return prev !== null && prev.symbol === next.symbol && prev.venue === next.venue && isIntraday(prev.period) && isIntraday(next.period);
+}
+
 interface Mode {
   date: KstDate;
   feed: BarFeed;
   unadjusted: Set<KstDate>;
+  loading: boolean;
 }
 
 interface Entering extends Mode {
@@ -46,8 +52,13 @@ export class JumpableFeed {
   }
 
   get mode(): JumpModeView | null {
-    const shown = this.entering ?? this.active;
-    return shown ? { date: shown.date, entering: this.entering !== null, unadjustedDays: [...shown.unadjusted].sort() } : null;
+    if (this.entering) {
+      return { date: this.entering.date, entering: true, unadjustedDays: [...this.entering.unadjusted].sort() };
+    }
+    if (this.active) {
+      return { date: this.active.date, entering: this.active.loading, unadjustedDays: [...this.active.unadjusted].sort() };
+    }
+    return null;
   }
 
   get activeDate(): KstDate | null {
@@ -55,16 +66,30 @@ export class JumpableFeed {
   }
 
   open(key: SeriesKey): void {
-    const hadMode = this.active !== null;
+    const prevKey = this.key;
+    const hadEntering = this.entering !== null;
+    const hadActive = this.active !== null;
+    const keepDate = this.active && keepsJumpMode(prevKey, key) ? this.active.date : null;
     this.key = key;
-    this.dropEntering("cancelled");
+    this.dropEntering("cancelled", false);
+    if (keepDate !== null) {
+      this.reopenMode(key, keepDate);
+      return;
+    }
     this.dropActive();
     this.normal.open(key);
-    if (hadMode) this.listener.modeChanged();
+    if (hadEntering || hadActive) this.listener.modeChanged();
   }
 
   reload(): void {
-    this.current.reload();
+    if (this.active !== null) {
+      this.active.unadjusted.clear();
+      this.active.loading = true;
+      this.listener.modeChanged();
+      this.active.feed.reload();
+      return;
+    }
+    this.normal.reload();
   }
 
   needOlder(): void {
@@ -85,13 +110,8 @@ export class JumpableFeed {
     this.dropEntering("cancelled");
     return new Promise<JumpEntry>((settle) => {
       const unadjusted = new Set<KstDate>();
-      const fetchPage: FetchPage = (q, signal) =>
-        this.fetchJump({ ...q, date }, signal).then((page) => {
-          for (const day of page.unadjustedDays) unadjusted.add(day);
-          return jumpAsBarsPage(page);
-        });
-      const feed: BarFeed = new BarFeed(fetchPage, this.jumpListener(() => entering, () => this.active?.feed === feed ? this.active : null));
-      const entering: Entering = { date, feed, unadjusted, settle };
+      const feed: BarFeed = this.createJumpBarFeed(date, unadjusted, this.jumpListener(() => entering, () => (this.active?.feed === feed ? this.active : null)));
+      const entering: Entering = { date, feed, unadjusted, loading: true, settle };
       this.entering = entering;
       this.listener.modeChanged();
       feed.open(key);
@@ -121,6 +141,25 @@ export class JumpableFeed {
     this.dropEntering("cancelled");
   }
 
+  private createJumpBarFeed(date: KstDate, unadjusted: Set<KstDate>, listener: FeedListener): BarFeed {
+    const fetchPage: FetchPage = (q, signal) =>
+      this.fetchJump({ ...q, date }, signal).then((page) => {
+        for (const day of page.unadjustedDays) unadjusted.add(day);
+        return jumpAsBarsPage(page);
+      });
+    return new BarFeed(fetchPage, listener);
+  }
+
+  private reopenMode(key: SeriesKey, date: KstDate): void {
+    this.dropActive();
+    this.normal.dispose();
+    const unadjusted = new Set<KstDate>();
+    const feed: BarFeed = this.createJumpBarFeed(date, unadjusted, this.jumpListener(() => null, () => (this.active?.feed === feed ? this.active : null)));
+    this.active = { date, feed, unadjusted, loading: true };
+    this.listener.modeChanged();
+    feed.open(key);
+  }
+
   private dropEntering(entry: JumpEntry, notify = true): void {
     const entering = this.entering;
     if (!entering) return;
@@ -135,17 +174,25 @@ export class JumpableFeed {
     this.active = null;
   }
 
-  private jumpListener(entering: () => Entering, active: () => Mode | null): FeedListener {
-    const pending = () => (this.entering === entering() ? this.entering : null);
+  private jumpListener(entering: () => Entering | null, active: () => Mode | null): FeedListener {
+    const pending = () => {
+      const target = entering();
+      return target !== null && this.entering === target ? target : null;
+    };
     return {
       reset: (history) => {
         const waiting = pending();
         if (!waiting) {
-          if (active()) this.listener.reset(history);
+          const current = active();
+          if (!current) return;
+          current.loading = false;
+          this.listener.jumpEntered(history);
+          this.listener.modeChanged();
           return;
         }
         if (history.bars.length === 0) return this.dropEntering("empty");
         this.entering = null;
+        waiting.loading = false;
         const previous = this.active;
         this.active = waiting;
         previous?.feed.dispose();
@@ -156,7 +203,11 @@ export class JumpableFeed {
       },
       failed: (error: ApiRequestError) => {
         if (pending()) return this.dropEntering("failed");
-        if (active()) this.listener.failed(error);
+        const current = active();
+        if (!current) return;
+        current.loading = false;
+        this.listener.failed(error);
+        this.listener.modeChanged();
       },
       prepended: (history, added) => {
         if (!active()) return;

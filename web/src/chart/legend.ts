@@ -226,7 +226,6 @@ function sameGeometryInputs(first: LegendGeometryInputs, second: LegendGeometryI
  */
 export class Legend {
   readonly root = el("div", "chart-legend pointer-events-none absolute left-5 top-4 flex max-w-[calc(100%-90px)] flex-col gap-2");
-  readonly statusAnchor = el("span", "inline-flex flex-none");
   readonly body = el("div", "relative z-[4] flex min-w-0 flex-col gap-2");
   private readonly name = el("span", "pointer-events-none min-w-0 truncate text-l font-semibold");
   private readonly sub = el("span", "flex-none text-s text-text-3");
@@ -296,9 +295,8 @@ export class Legend {
     this.regularBadge.dataset.regularHoursBadge = "";
     this.regularBadge.title = "정규장(09:00~15:30) 봉만 표시 중";
     this.regularBadge.hidden = true;
-    this.statusAnchor.dataset.statusAnchor = "";
     this.ohlcLine.dataset.ohlcLine = "";
-    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.regularBadge, this.price.row, this.notice, this.statusAnchor);
+    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.regularBadge, this.price.row, this.notice);
     this.name.setAttribute("role", "heading");
     this.name.setAttribute("aria-level", "2");
     this.notice.hidden = true;
@@ -315,7 +313,6 @@ export class Legend {
     this.presentationResize.observe(parent);
     this.presentationMutations = new MutationObserver(() => this.fit("content"));
     this.presentationMutations.observe(this.venueAnchor, { subtree: true, childList: true, characterData: true, attributes: true });
-    this.presentationMutations.observe(this.statusAnchor, { subtree: true, childList: true, characterData: true, attributes: true });
     document.fonts.addEventListener("loadingdone", this.fontsChanged);
     void document.fonts.ready.then(this.fontsChanged);
   }
@@ -357,11 +354,11 @@ export class Legend {
     this.body.hidden = !display.showLegend;
     if (display.showLegend) {
       this.period.before(this.venueAnchor);
-      this.head.append(this.notice, this.statusAnchor);
+      this.head.append(this.notice);
       this.mountPriceRow();
     } else {
       this.ohlc.before(this.venueAnchor);
-      this.ohlcLine.append(this.notice, this.statusAnchor);
+      this.ohlcLine.append(this.notice);
       this.head.after(this.ohlcLine);
     }
   }
@@ -630,7 +627,6 @@ export class Legend {
     root.style.pointerEvents = "none";
     const head = this.head.cloneNode(true) as HTMLElement;
     head.querySelector("[data-price-row]")?.remove();
-    head.querySelector(".chart-jump[hidden]")?.remove();
     const body = el("div", this.body.className);
     body.hidden = !this.display.showLegend;
     const price = priceFields();

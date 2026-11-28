@@ -6,9 +6,9 @@ import type { JumpBarsPage } from "../api/generated/JumpBarsPage";
 import { ApiRequestError } from "../api/http";
 import type { SubEvent } from "../api/socket";
 import { displayBars, type History } from "./barFeed";
-import { JumpableFeed } from "./jumpFeed";
+import { JumpableFeed, keepsJumpMode } from "./jumpFeed";
 
-const key = (symbol: string, period: SeriesKey["period"] = "1m"): SeriesKey => ({ symbol, venue: "combined", period });
+const key = (symbol: string, period: SeriesKey["period"] = "1m", venue: SeriesKey["venue"] = "combined"): SeriesKey => ({ symbol, venue, period });
 const bar = (t: number): Bar => ({ t, o: t, h: t, l: t, c: t, v: 1 });
 const latest = (bars: Bar[], nextBefore: number | null = null): BarsPage => ({ symbol: "005930", venue: "combined", period: "1m", bars, current: null, nextBefore, seq: null });
 const jump = (bars: Bar[], nextBefore: number | null = null, unadjustedDays: string[] = []): JumpBarsPage => ({ symbol: "005930", venue: "combined", period: "1m", date: "2026-11-09", bars, nextBefore, unadjustedDays });
@@ -234,5 +234,132 @@ describe("이어 받기", () => {
     const replaced = h.feed.olderUntil(() => false);
     h.feed.open(key("000660", "D"));
     expect(await replaced).toBe("stale");
+  });
+});
+
+describe("분봉 주기 전환 시 바로가기 모드 유지", () => {
+  test("keepsJumpMode는 같은 종목·거래소의 분봉끼리만 참이다", () => {
+    expect(keepsJumpMode(null, key("005930", "1m"))).toBe(false);
+    expect(keepsJumpMode(key("005930", "5m"), key("005930", "1m"))).toBe(true);
+    expect(keepsJumpMode(key("005930", "1m"), key("005930", "60m"))).toBe(true);
+    expect(keepsJumpMode(key("005930", "5m"), key("005930", "D"))).toBe(false);
+    expect(keepsJumpMode(key("005930", "D"), key("005930", "5m"))).toBe(false);
+    expect(keepsJumpMode(key("005930", "5m"), key("000660", "1m"))).toBe(false);
+    expect(keepsJumpMode(key("005930", "5m", "combined"), key("005930", "1m", "krx"))).toBe(false);
+  });
+
+  test("활성 모드 중 분봉에서 다른 분봉으로 바꾸면 같은 기준일로 점프 페이지를 받고 평소 조회·구독을 열지 않는다", async () => {
+    const h = await entered();
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: false, unadjustedDays: ["2026-11-02"] });
+    const normalCountBefore = h.normal.length;
+
+    h.feed.open(key("005930", "5m"));
+    expect(h.normal).toHaveLength(normalCountBefore);
+    expect(h.subscribers()).toBe(0);
+    expect(h.feed.activeDate).toBe("2026-11-09");
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: true, unadjustedDays: [] });
+    expect(h.jumps).toHaveLength(2);
+    expect(h.jumps[1]!.q).toMatchObject({ symbol: "005930", venue: "combined", period: "5m", date: "2026-11-09" });
+
+    h.jumps[1]!.resolve(jump([bar(20), bar(25), bar(30)], 20, ["2026-11-03"]));
+    await h.flush();
+    expect(h.feed.activeDate).toBe("2026-11-09");
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: false, unadjustedDays: ["2026-11-03"] });
+    expect(h.shown()).toEqual([20, 25, 30]);
+    expect(h.events.at(-2)).toBe("entered 3");
+    expect(h.events.at(-1)).toBe("mode");
+    expect(h.subscribers()).toBe(0);
+  });
+
+  test("분봉 전환 응답이 오기 전에 다른 분봉으로 빠르게 바꾸면 마지막 주기만 반영되고 이전 응답은 무시한다", async () => {
+    const h = await entered();
+    h.feed.open(key("005930", "5m"));
+    const firstSwitch = h.jumps[1]!;
+    h.feed.open(key("005930", "3m"));
+    const secondSwitch = h.jumps[2]!;
+    expect(h.feed.activeDate).toBe("2026-11-09");
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: true, unadjustedDays: [] });
+    expect(secondSwitch.q).toMatchObject({ period: "3m", date: "2026-11-09" });
+
+    firstSwitch.resolve(jump([bar(50), bar(55)]));
+    await h.flush();
+    expect(h.shown()).toEqual([10, 11]);
+    expect(h.feed.mode?.entering).toBe(true);
+
+    secondSwitch.resolve(jump([bar(30), bar(33), bar(36)]));
+    await h.flush();
+    expect(h.shown()).toEqual([30, 33, 36]);
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: false, unadjustedDays: [] });
+    expect(h.normal).toHaveLength(1);
+    expect(h.subscribers()).toBe(0);
+  });
+
+  test("분봉에서 일봉으로 바꾸면 모드가 끝나고 평소 조회와 구독을 연다", async () => {
+    const h = await entered();
+    h.feed.open(key("005930", "D"));
+    expect(h.feed.mode).toBeNull();
+    expect(h.feed.activeDate).toBeNull();
+    expect(h.normal).toHaveLength(2);
+    expect(h.normal[1]!.q).toMatchObject({ symbol: "005930", period: "D" });
+    expect(h.subscribers()).toBe(1);
+  });
+
+  test("같은 분봉 주기라도 종목이나 거래소가 바뀌면 모드가 끝난다", async () => {
+    const h1 = await entered();
+    h1.feed.open(key("000660", "1m"));
+    expect(h1.feed.mode).toBeNull();
+    expect(h1.feed.activeDate).toBeNull();
+    expect(h1.normal).toHaveLength(2);
+    expect(h1.subscribers()).toBe(1);
+
+    const h2 = await entered();
+    h2.feed.open(key("005930", "1m", "krx"));
+    expect(h2.feed.mode).toBeNull();
+    expect(h2.feed.activeDate).toBeNull();
+    expect(h2.normal).toHaveLength(2);
+    expect(h2.subscribers()).toBe(1);
+  });
+
+  test("분봉 전환 점프 응답을 받는 중 endMode를 누르면 새 주기의 평소 조회와 구독으로 돌아가고 늦은 점프 응답은 버린다", async () => {
+    const h = await entered();
+    h.feed.open(key("005930", "3m"));
+    const pendingJump = h.jumps[1]!;
+    expect(h.feed.mode?.entering).toBe(true);
+
+    h.feed.endMode();
+    expect(h.feed.mode).toBeNull();
+    expect(h.feed.activeDate).toBeNull();
+    expect(h.normal).toHaveLength(2);
+    expect(h.normal[1]!.q).toMatchObject({ symbol: "005930", period: "3m" });
+    expect(h.subscribers()).toBe(1);
+
+    pendingJump.resolve(jump([bar(99)]));
+    await h.flush();
+    expect(h.feed.mode).toBeNull();
+    expect(h.shown()).toEqual([10, 11]);
+
+    h.normal[1]!.resolve(latest([bar(200), bar(201)]));
+    await h.flush();
+    expect(h.shown()).toEqual([200, 201]);
+  });
+
+  test("분봉 전환 점프가 실패하면 로딩이 풀리고 reload로 같은 기준일 점프를 다시 시도한다", async () => {
+    const h = await entered();
+    h.feed.open(key("005930", "5m"));
+    h.jumps[1]!.reject(new ApiRequestError("kiwoom_unavailable", "timeout"));
+    await h.flush();
+    expect(h.feed.activeDate).toBe("2026-11-09");
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: false, unadjustedDays: [] });
+    expect(h.events).toContain("failed kiwoom_unavailable");
+
+    h.feed.reload();
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: true, unadjustedDays: [] });
+    expect(h.jumps).toHaveLength(3);
+    expect(h.jumps[2]!.q).toMatchObject({ symbol: "005930", period: "5m", date: "2026-11-09" });
+
+    h.jumps[2]!.resolve(jump([bar(40), bar(45)], null, ["2026-11-01"]));
+    await h.flush();
+    expect(h.feed.mode).toEqual({ date: "2026-11-09", entering: false, unadjustedDays: ["2026-11-01"] });
+    expect(h.shown()).toEqual([40, 45]);
   });
 });
