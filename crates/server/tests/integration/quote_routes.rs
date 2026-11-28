@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use axum::{Router, body::Body, http::Request};
 use domain::{KstDate, Market, Symbol, SymbolInfo, SymbolKind};
+use duckdb::Connection;
 use futures::future::BoxFuture;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -299,4 +300,141 @@ async fn bad_requests_are_refused_without_reading_files() {
     let (status, _) = harness.get(&format!("/api/symbols/{CODE}/quote-totals?period=1m&from=2026-10-25&to=2026-11-24")).await;
     assert_eq!(status, 200, "31일은 받는다");
     assert_eq!(harness.kiwoom.calls.load(Ordering::SeqCst), 0);
+}
+
+fn write_hogaplay_snapshots(root: &std::path::Path, date: &str, symbol: &str, rows: &[(i64, i32, i64, i64, i64, usize)]) {
+    let dir = root.join(date).join(symbol).join("hogaplay");
+    std::fs::create_dir_all(&dir).unwrap();
+    let conn = Connection::open_in_memory().unwrap();
+    let mut selects = Vec::with_capacity(rows.len());
+    for &(ts_ms, seq, ask1, bid1, qty, levels) in rows {
+        let mut cols = vec![format!("{ts_ms}::BIGINT AS ts_ms"), format!("{seq}::INTEGER AS seq")];
+        for level in 1..=10 {
+            let p = if level <= levels { ask1 + (level as i64 - 1) * 100 } else { 0 };
+            let q = if level <= levels { qty } else { 0 };
+            cols.push(format!("{p}::BIGINT AS ask_p{level}, {q}::BIGINT AS ask_q{level}"));
+        }
+        for level in 1..=10 {
+            let p = if level <= levels { bid1 - (level as i64 - 1) * 100 } else { 0 };
+            let q = if level <= levels { qty * 2 } else { 0 };
+            cols.push(format!("{p}::BIGINT AS bid_p{level}, {q}::BIGINT AS bid_q{level}"));
+        }
+        let tot_ask = qty * (levels as i64);
+        let tot_bid = qty * 2 * (levels as i64);
+        cols.push(format!("{tot_ask}::BIGINT AS tot_ask, {tot_bid}::BIGINT AS tot_bid"));
+        selects.push(format!("SELECT {}", cols.join(", ")));
+    }
+    conn.execute_batch(&format!(
+        "SET threads = 1; COPY ({}) TO '{}' (FORMAT parquet)",
+        selects.join(" UNION ALL "),
+        dir.join("snapshots.parquet").display()
+    ))
+    .unwrap();
+}
+
+async fn start_with_paths(paths: server::shared_data::CollectorPaths) -> Harness {
+    let clock = Clock::frozen(kst(KstDate::new(2026, 11, 24).unwrap(), 10, 1, 30));
+    let kiwoom = Kiwoom::default();
+    let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
+    let rest = KiwoomRest::new(Arc::new(kiwoom.clone()), auth, clock.clone());
+    let symbols = Arc::new(SymbolDirectory::default());
+    let info = |(code, nxt_enabled): (&str, bool)| SymbolInfo { symbol: Symbol::parse(code).unwrap(), name: code.to_owned(), kind: SymbolKind::Common, market: Market::Kospi, nxt_enabled };
+    symbols.replace(Directory::build([(CODE, true), (KRX_ONLY, false)].into_iter().map(info).collect()));
+    let tmp = tempfile::tempdir().unwrap();
+    let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
+    let (stream, _desired) = KiwoomStream::detached();
+    let (_events, events) = tokio::sync::mpsc::channel(1);
+    let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
+    let state = application(ApplicationInputs { rest: rest.clone(), clock: clock.clone(), symbols, db, screener_store: store, stream: (stream, events), static_dir: tmp.path().to_owned(), screener_update_on_connect: false });
+    rest.set_access(Access::Open);
+    let shared = paths.shared_dir().map(std::path::Path::to_path_buf).unwrap_or_else(|| tmp.path().join("shared"));
+    state.collector_paths.configure(paths);
+    Harness { app: router(state), clock, kiwoom, shared, _tmp: tmp }
+}
+
+#[tokio::test]
+async fn hogaplay_archive_only_serves_quote_totals_and_quote_depth_without_shared_dir() {
+    let archive_root = tempfile::tempdir().unwrap();
+    let archive_dir = archive_root.path().join("parquet");
+    write_hogaplay_snapshots(
+        &archive_dir,
+        "20240827",
+        CODE,
+        &[
+            (90010000, 1, 76_100, 76_000, 250, 4),
+            (90045000, 2, 76_100, 76_000, 100, 4),
+            (90120000, 3, 76_200, 76_100, 150, 4),
+            (90230000, 4, 76_200, 76_100, 999, 2),
+            (90510000, 5, 76_300, 76_200, 200, 4),
+        ],
+    );
+    let harness = start_with_paths(server::shared_data::CollectorPaths::archive_only(archive_dir)).await;
+
+    let page = harness.ok(&format!("/api/symbols/{CODE}/quote-totals?period=1m&venue=combined&from=2024-08-26&to=2024-08-27")).await;
+    assert_eq!(page["available"], json!(true));
+    assert_eq!(
+        page["days"],
+        json!([{"date": "2024-08-26", "state": "none"}, {"date": "2024-08-27", "state": "closed"}])
+    );
+    let got: Vec<(String, i64, i64)> = points(&page)
+        .iter()
+        .map(|point| (hhmm(point), point["ask"].as_i64().unwrap(), point["bid"].as_i64().unwrap()))
+        .collect();
+    assert_eq!(got, shown(&[("09:00", 400, 800), ("09:01", 600, 1_200), ("09:05", 800, 1_600)]));
+
+    let five = harness.totals("period=5m&venue=combined&from=2024-08-27&to=2024-08-27").await;
+    assert_eq!(five, shown(&[("09:05", 800, 1_600)]));
+
+    let krx = harness.ok(&format!("/api/symbols/{CODE}/quote-totals?period=1m&venue=krx&from=2024-08-27&to=2024-08-27")).await;
+    assert_eq!(krx["available"], json!(true));
+    assert!(points(&krx).is_empty());
+
+    let nxt = harness.ok(&format!("/api/symbols/{CODE}/quote-totals?period=1m&venue=nxt&from=2024-08-27&to=2024-08-27")).await;
+    assert_eq!(nxt["available"], json!(true));
+    assert!(points(&nxt).is_empty());
+
+    let depth_peak = harness.depth("period=1m&venue=combined&source=peak&from=2024-08-27&to=2024-08-27").await;
+    assert_eq!(depth_peak.len(), 3);
+    assert_eq!(depth_peak[0].0, "09:00");
+    assert_eq!(depth_peak[0].1[0], json!([76_100, 250]));
+
+    let missing_stock = harness.ok("/api/symbols/035420/quote-totals?period=1m&venue=combined&from=2024-08-27&to=2024-08-27").await;
+    assert_eq!(missing_stock["available"], json!(true));
+    assert_eq!(missing_stock["days"], json!([{"date": "2024-08-27", "state": "notCollected"}]));
+    assert!(points(&missing_stock).is_empty());
+}
+
+#[tokio::test]
+async fn native_quote_minutes_takes_priority_over_hogaplay_archive_on_overlapping_day() {
+    let root = tempfile::tempdir().unwrap();
+    let shared_dir = root.path().join("shared");
+    let archive_dir = root.path().join("parquet");
+    write_closed_quotes(
+        &closed_day_dir(&shared_dir, MONDAY),
+        MONDAY,
+        CODE,
+        &ClosedQuotes { minutes: vec![book(at(9, 0), 100, 50)], gaps: vec![(seconds(9, 1, 0), seconds(20, 0, 0))] },
+    )
+    .unwrap();
+    write_hogaplay_snapshots(&archive_dir, MONDAY, CODE, &[(90030000, 1, 76_100, 76_000, 999, 4)]);
+    write_hogaplay_snapshots(&archive_dir, "20261120", CODE, &[(90030000, 1, 75_100, 75_000, 100, 4)]);
+
+    let paths = server::shared_data::CollectorPaths::shared_only(shared_dir).with_archive(Some(archive_dir));
+    let harness = start_with_paths(paths).await;
+
+    let page = harness.ok(&format!("/api/symbols/{CODE}/quote-totals?period=1m&venue=combined&from=2026-11-20&to=2026-11-23")).await;
+    assert_eq!(page["available"], json!(true));
+    assert_eq!(
+        page["days"],
+        json!([
+            {"date": "2026-11-20", "state": "closed"},
+            {"date": "2026-11-21", "state": "none"},
+            {"date": "2026-11-22", "state": "none"},
+            {"date": "2026-11-23", "state": "closed"},
+        ])
+    );
+    let pts = points(&page);
+    assert_eq!(pts.len(), 2);
+    assert_eq!(pts[0], json!({"t": unix("20261120", 9, 0), "ask": 400, "bid": 800}));
+    assert_eq!(pts[1], json!({"t": unix(MONDAY, 9, 0), "ask": 100, "bid": 50}));
 }
