@@ -12,14 +12,16 @@ describe("호가주문 설정", () => {
     expect(parseOrderSettings({ amountPresets: [5, 6, 7, 8], presetMode: "sell", ladderDensity: "compact", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" })).toEqual({ amountPresets: [5, 6, 7, 8], presetMode: "sell", ladderDensity: "compact", averageDot: false, divider: false, rate: false, skipSpreadGap: true, maskAccount: false, keepLastEntry: false, sound: false, venue: "nxt", account: "ref-b" });
   });
 
-  it("호가 간격 밀도는 기본이 보통이고 없거나 모르는 값이면 보통이며 촘촘·보통·여유를 그대로 읽는다", () => {
+  it("호가 간격 밀도는 기본이 보통이고 없거나 모르는 값이면 보통이며 초촘촘·촘촘·보통·여유를 그대로 읽는다", () => {
     expect(DEFAULT_ORDER_SETTINGS.ladderDensity).toBe("normal");
     expect(parseOrderSettings({}).ladderDensity).toBe("normal");
     expect(parseOrderSettings({ ladderDensity: "wide" }).ladderDensity).toBe("normal");
     expect(parseOrderSettings({ ladderDensity: 2 }).ladderDensity).toBe("normal");
+    expect(parseOrderSettings({ ladderDensity: "ultra" }).ladderDensity).toBe("ultra");
     expect(parseOrderSettings({ ladderDensity: "compact" }).ladderDensity).toBe("compact");
     expect(parseOrderSettings({ ladderDensity: "normal" }).ladderDensity).toBe("normal");
     expect(parseOrderSettings({ ladderDensity: "spacious" }).ladderDensity).toBe("spacious");
+    expect(ladderRowHeightPx("ultra")).toBe(16);
     expect(ladderRowHeightPx("compact")).toBe(20);
     expect(ladderRowHeightPx("normal")).toBe(24);
     expect(ladderRowHeightPx("spacious")).toBe(30);

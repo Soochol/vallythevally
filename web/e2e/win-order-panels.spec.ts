@@ -244,15 +244,15 @@ test("호가주문 설정에서 호가 간격을 바꾸면 행 높이·카드·�
 
   await openSettings(page);
   const density = page.getByTestId("order-settings").getByRole("group", { name: "호가 간격" });
-  await expect(density.getByRole("button", { name: "보통" })).toHaveAttribute("aria-pressed", "true");
+  await expect(density.getByRole("button", { name: "보통", exact: true })).toHaveAttribute("aria-pressed", "true");
 
-  await density.getByRole("button", { name: "촘촘" }).click();
+  await density.getByRole("button", { name: "촘촘", exact: true }).click();
   await expect(win(page)).toHaveAttribute("data-ladder-density", "compact");
   await expect.poll(rowHeight).toBe(20);
   await expect.poll(cardHeight).toBe(200);
   await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "compact" });
 
-  await density.getByRole("button", { name: "여유" }).click();
+  await density.getByRole("button", { name: "여유", exact: true }).click();
   await expect(win(page)).toHaveAttribute("data-ladder-density", "spacious");
   await expect.poll(rowHeight).toBe(30);
   await expect.poll(cardHeight).toBe(300);
@@ -260,15 +260,39 @@ test("호가주문 설정에서 호가 간격을 바꾸면 행 높이·카드·�
 
   await page.keyboard.press("Escape");
   lastTrade(scenario, BASE);
+  const ladder = page.getByTestId("order-ladder");
   await page.getByTestId("order-explorer").click();
   await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
-  await expect.poll(() => page.getByTestId("order-ladder").evaluate((el) => el.scrollHeight)).toBeGreaterThanOrEqual(fullTickCount * 30);
+  await expect.poll(() => ladder.evaluate((el) => el.scrollHeight)).toBeGreaterThanOrEqual(fullTickCount * 30);
+  await page.getByTestId("order-explorer").click();
+  await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "false");
+
+  await openSettings(page);
+  await density.getByRole("button", { name: "초촘촘", exact: true }).click();
+  await expect(win(page)).toHaveAttribute("data-ladder-density", "ultra");
+  await expect.poll(rowHeight).toBe(16);
+  await expect.poll(cardHeight).toBe(160);
+  await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "ultra" });
+
+  await page.keyboard.press("Escape");
+  await page.getByTestId("order-explorer").click();
+  await expect(page.getByTestId("order-explorer")).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => ladder.evaluate((el) => el.scrollHeight)).toBeGreaterThanOrEqual(fullTickCount * 16);
+  await expect.poll(() => ladder.evaluate((el) => el.scrollHeight)).toBeLessThan(fullTickCount * 20);
+  const current = cellAt(page, "buy", BASE);
+  await expect(current).toBeVisible();
+  await expect.poll(async () => {
+    const area = await ladder.boundingBox();
+    const middle = await current.boundingBox();
+    if (!area || !middle) return Number.POSITIVE_INFINITY;
+    return Math.abs(middle.y + middle.height / 2 - (area.y + area.height / 2));
+  }).toBeLessThan(30);
 
   await page.reload();
   await expect(win(page)).toBeVisible();
-  await expect(win(page)).toHaveAttribute("data-ladder-density", "spacious");
-  await expect.poll(rowHeight).toBe(30);
-  await expect.poll(cardHeight).toBe(300);
+  await expect(win(page)).toHaveAttribute("data-ladder-density", "ultra");
+  await expect.poll(rowHeight).toBe(16);
+  await expect.poll(cardHeight).toBe(160);
 });
 
 

@@ -1275,7 +1275,7 @@ test.describe("10호가 창 높이 축소", () => {
     expect(await ladderFit(page)).toEqual({ total: FULL_LADDER_ROWS, asks: 10, bids: 10, outside: 0 });
   });
 
-  test("10호가 설정에서 호가 간격을 촘촘·여유·보통으로 바꾸면 행 높이·카드·낮은 창 표시 단수가 즉시 바뀌고 새로고침해도 유지된다", async ({ page, scenario }) => {
+  test("10호가 설정에서 호가 간격을 초촘촘·촘촘·여유·보통으로 바꾸면 행 높이·카드·낮은 창 표시 단수가 즉시 바뀌고 새로고침해도 유지된다", async ({ page, scenario }) => {
     await openFitBookWindow(page, scenario);
     const rowHeight = () => ladderRows(page).first().evaluate((row) => Math.round(row.getBoundingClientRect().height * 10) / 10);
     const cardHeight = () => infoCard(page).evaluate((card) => Math.round(card.getBoundingClientRect().height * 10) / 10);
@@ -1288,44 +1288,82 @@ test.describe("10호가 창 높이 축소", () => {
     const pop = page.getByTestId("book-settings");
     await expect(pop).toBeVisible();
     const density = pop.getByRole("group", { name: "호가 간격" });
-    await expect(density.getByRole("button", { name: "보통" })).toHaveAttribute("aria-pressed", "true");
+    await expect(density.getByRole("button", { name: "보통", exact: true })).toHaveAttribute("aria-pressed", "true");
 
-    await density.getByRole("button", { name: "여유" }).click();
+    await density.getByRole("button", { name: "여유", exact: true }).click();
     await expect(book(page)).toHaveAttribute("data-ladder-density", "spacious");
     await expect.poll(rowHeight).toBe(30);
     await expect.poll(cardHeight).toBe(300);
     await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "spacious" });
 
-    await density.getByRole("button", { name: "촘촘" }).click();
+    await density.getByRole("button", { name: "촘촘", exact: true }).click();
     await expect(book(page)).toHaveAttribute("data-ladder-density", "compact");
     await expect.poll(rowHeight).toBe(20);
     await expect.poll(cardHeight).toBe(200);
     await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "compact" });
+
+    await density.getByRole("button", { name: "초촘촘", exact: true }).click();
+    await expect(book(page)).toHaveAttribute("data-ladder-density", "ultra");
+    await expect.poll(rowHeight).toBe(16);
+    await expect.poll(cardHeight).toBe(160);
+    await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "ultra" });
+
+    const popOverflow = await pop.evaluate((el) => ({
+      popover: el.scrollWidth <= el.clientWidth,
+      segmented: [...el.querySelectorAll<HTMLElement>("[role='group']")].every((group) => group.scrollWidth <= group.clientWidth),
+    }));
+    expect(popOverflow).toEqual({ popover: true, segmented: true });
+
+    const ultraRowCheck = await ladderRows(page).first().evaluate((row) => {
+      const rowBox = row.getBoundingClientRect();
+      const nodes = [...row.querySelectorAll<HTMLElement>(".mw-px-num, .mw-px small, .mw-qty-value")];
+      const boxes = nodes.map((node) => ({
+        name: node.className || node.tagName.toLowerCase(),
+        scrollHeight: node.scrollHeight,
+        box: node.getBoundingClientRect(),
+      }));
+      const tall = boxes.filter((item) => item.scrollHeight > rowBox.height + 0.5).map((item) => `${item.name}:${item.scrollHeight}`);
+      const overlapped = boxes.flatMap((a, i) =>
+        boxes
+          .slice(i + 1)
+          .filter((b) => Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left) > 0.5 && Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top) > 0.5)
+          .map((b) => `${a.name}|${b.name}`),
+      );
+      return { count: boxes.length, tall, overlapped };
+    });
+    expect(ultraRowCheck).toEqual({ count: 3, tall: [], overlapped: [] });
 
     await page.keyboard.press("Escape");
     await expect(pop).toHaveCount(0);
 
     await setBookGroupHeight(page, 560);
-    await expect.poll(async () => (await ladderFit(page)).total).toBe(FULL_LADDER_ROWS);
-    expect((await ladderFit(page)).outside).toBe(0);
-
     await page.getByTestId("book-settings-button").click();
-    await page.getByTestId("book-settings").getByRole("group", { name: "호가 간격" }).getByRole("button", { name: "보통" }).click();
+    await density.getByRole("button", { name: "보통", exact: true }).click();
     await expect.poll(rowHeight).toBe(24);
     await expect.poll(async () => (await ladderFit(page)).total).toBeLessThan(FULL_LADDER_ROWS);
     expect((await ladderFit(page)).outside).toBe(0);
 
-    await page.getByTestId("book-settings").getByRole("group", { name: "호가 간격" }).getByRole("button", { name: "촘촘" }).click();
+    await density.getByRole("button", { name: "촘촘", exact: true }).click();
     await expect.poll(rowHeight).toBe(20);
     await expect.poll(async () => (await ladderFit(page)).total).toBe(FULL_LADDER_ROWS);
-    await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "compact" });
+    expect((await ladderFit(page)).outside).toBe(0);
+
+    await setBookGroupHeight(page, 480);
+    await expect.poll(async () => (await ladderFit(page)).total).toBeLessThan(FULL_LADDER_ROWS);
+    expect((await ladderFit(page)).outside).toBe(0);
+
+    await density.getByRole("button", { name: "초촘촘", exact: true }).click();
+    await expect.poll(rowHeight).toBe(16);
+    await expect.poll(async () => (await ladderFit(page)).total).toBe(FULL_LADDER_ROWS);
+    expect((await ladderFit(page)).outside).toBe(0);
+    await pollSaved(() => scenario.documents.uiState()["orderSettings"]).toMatchObject({ ladderDensity: "ultra" });
 
     await setBookGroupHeight(page, null);
     await page.reload();
     await expect(cell(page)).toHaveAttribute("aria-busy", "false");
     await windowTabs(page).getByRole("tab", { name: /^10호가/ }).click();
-    await expect(book(page)).toHaveAttribute("data-ladder-density", "compact");
-    await expect.poll(rowHeight).toBe(20);
-    await expect.poll(cardHeight).toBe(200);
+    await expect(book(page)).toHaveAttribute("data-ladder-density", "ultra");
+    await expect.poll(rowHeight).toBe(16);
+    await expect.poll(cardHeight).toBe(160);
   });
 });
