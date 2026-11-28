@@ -188,8 +188,8 @@ for (const count of [4, 300, 3000]) test(`source ${count} uses bounded projectio
   const before = await page.evaluate(() => ({ counts: { ...window.legendSources.counts }, projection: window.legendSources.projections.at(-1), nodes: document.querySelectorAll("*").length, elements: [...document.querySelectorAll("*")].map((element) => `${element.tagName}:${element.getAttribute("class") ?? ""}`) }));
   expect(before.projection?.fields.find((field) => field.key === "price/0")?.alternatives).toHaveLength(count);
   expect(before.projection?.fields).toHaveLength(9);
-  expect(before.projection?.nodes).toBe(33);
-  expect(before.projection?.peakNodes).toBe(42);
+  expect(before.projection?.nodes).toBe(32);
+  expect(before.projection?.peakNodes).toBe(41);
   for (const bar of extended.slice(-Math.min(count, 20), -1)) await hover(page, bar.t);
   await frames(page, 30);
   const hovered = await page.evaluate(() => ({ counts: { ...window.legendSources.counts }, nodes: document.querySelectorAll("*").length, elements: [...document.querySelectorAll("*")].map((element) => `${element.tagName}:${element.getAttribute("class") ?? ""}`) }));
