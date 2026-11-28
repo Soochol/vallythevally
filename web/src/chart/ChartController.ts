@@ -38,7 +38,7 @@ import { isIndexCode, isMinutePeriod, type MinutePeriod, PERIOD_LABEL, symbolSub
 import { type ShownVenue, venueLabel } from "../lib/venue";
 import type { ReplayEngine, ReplayEngineFrame } from "../features/replay-page/replayEngine";
 import type { ReplaySession } from "../features/replay-page/replayModel";
-import { projectTickReplayBars } from "../features/tick-replay/chartBars";
+import { planTickReplayTransition, projectTickReplayBars } from "../features/tick-replay/chartBars";
 import { displayBars, type FetchPage, filterRegularHistory, type History } from "./barFeed";
 import { barAtRightEdge, type JumpAnchor, jumpAnchor, jumpHeld, type JumpOutcome, jumpRoute, kstDateOf, lastBarBefore } from "./barJump";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
@@ -787,48 +787,38 @@ export class ChartController {
       regularHoursOnly: this.regularFilterActive(),
       isArchive: tr.isArchive,
     });
-    const h: History = { bars, current, nextBefore: this.tickReplayNextBefore() };
     const prev = this.bars;
-    const next = displayBars(h);
-    this.history = h;
+    const plan = planTickReplayTransition({
+      prevHistory: this.history,
+      prevBars: prev,
+      nextBars: bars,
+      nextCurrent: current,
+      nextBefore: this.tickReplayNextBefore(),
+      refit,
+      preserveRange,
+    });
+    this.history = plan.history;
 
+    if (plan.kind === "noop") {
+      return;
+    }
+
+    const next = plan.bars;
     const lastNext = next[next.length - 1];
-    const prevLast = prev[prev.length - 1];
-    const prevSecondLast = prev[prev.length - 2];
-    const nextSecondLast = next[next.length - 2];
-    const sameBar = (a: Bar | undefined, b: Bar | undefined): boolean =>
-      a !== undefined && b !== undefined && a.t === b.t && a.o === b.o && a.h === b.h && a.l === b.l && a.c === b.c && a.v === b.v;
-    const sameCountTail =
-      !refit
-      && !preserveRange
-      && prev.length > 0
-      && next.length === prev.length
-      && lastNext !== undefined
-      && prevLast?.t === lastNext.t
-      && (next.length < 2 || sameBar(prevSecondLast, nextSecondLast));
-    const appendedTail =
-      !refit
-      && !preserveRange
-      && prev.length > 0
-      && next.length === prev.length + 1
-      && lastNext !== undefined
-      && prevLast !== undefined
-      && nextSecondLast !== undefined
-      && prevLast.t === nextSecondLast.t;
-
-    if (sameCountTail || appendedTail) {
+    if (plan.kind === "tail") {
       this.bars = next;
-      if (appendedTail && !sameBar(prevLast, nextSecondLast)) {
-        this.pendingDraw.set(nextSecondLast!.t, nextSecondLast!);
+      for (const bar of plan.drawBars) {
+        this.pendingDraw.set(bar.t, bar);
       }
-      this.pendingDraw.set(lastNext!.t, lastNext!);
       this.exposeBarsToE2e();
-      this.indicators.advance(h, lastNext!, current !== null && lastNext!.t === current.t ? "live" : "confirmed");
+      for (const step of plan.steps) {
+        this.indicators.advance(step.history, step.bar, step.kind);
+      }
       this.requestTailLegendSources(next.length - 1);
-    } else if (preserveRange && prev.length > 0) {
+    } else if (plan.preserveRange) {
       this.withDataGuard(() => preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
         this.setBars(next);
-        this.indicators.reset(h);
+        this.indicators.reset(plan.history);
       }));
       if (this.financialHoverTime !== null) this.hoverIndex = barIndexAt(this.bars, this.financialHoverTime);
       this.renderLegend();
@@ -837,7 +827,7 @@ export class ChartController {
       this.financialHoverTime = null;
       this.withDataGuard(() => {
         this.setBars(next);
-        this.indicators.reset(h);
+        this.indicators.reset(plan.history);
         if ((refit || prev.length === 0) && next.length > 0) this.fitInitialRange();
       });
       this.renderLegend();
@@ -850,7 +840,7 @@ export class ChartController {
         kind: "ready",
         latest: lastNext,
         prev: next[next.length - 2] ?? null,
-        isCurrent: current !== null && lastNext.t === current.t,
+        isCurrent: plan.history.current !== null && lastNext.t === plan.history.current.t,
         olderError: this.ready?.olderError ?? null,
         olderLoading: this.ready?.olderLoading ?? false,
         intradayEnd: this.ready?.intradayEnd ?? false,
