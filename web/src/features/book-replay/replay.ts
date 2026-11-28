@@ -14,6 +14,7 @@ export type ReplayView =
       readonly at: UnixSeconds;
       readonly book: BookView;
       readonly lastPrice: number | null;
+      readonly previousClose: number | null;
       readonly trades: readonly TradeRow[];
     };
 
@@ -112,9 +113,28 @@ export interface ReplayReference {
 
 const NO_BOUNDS: PriceBounds = { lower: null, upper: null };
 
-export function replayReference(at: UnixSeconds, now: UnixSeconds, live: ReplayReference): ReplayReference {
-  if (kstDateOf(at) === kstDateOf(now)) return live;
-  return { previousClose: null, bounds: NO_BOUNDS };
+const usablePreviousClose = (value: number | null | undefined): number | null =>
+  value !== null && value !== undefined && Number.isFinite(value) && value > 0 ? value : null;
+
+export function resolveReplayPreviousClose(
+  dayPreviousClose: number | null | undefined,
+  isToday: boolean,
+  livePreviousClose: number | null,
+): number | null {
+  return usablePreviousClose(dayPreviousClose) ?? (isToday ? usablePreviousClose(livePreviousClose) : null);
+}
+
+export function replayReference(
+  at: UnixSeconds,
+  now: UnixSeconds,
+  live: ReplayReference,
+  dayPreviousClose: number | null = null,
+): ReplayReference {
+  const isToday = kstDateOf(at) === kstDateOf(now);
+  return {
+    previousClose: resolveReplayPreviousClose(dayPreviousClose, isToday, live.previousClose),
+    bounds: isToday ? live.bounds : NO_BOUNDS,
+  };
 }
 
 export function todayRefreshDelayMs(
@@ -165,6 +185,7 @@ export function replayView(day: BookReplayDay, bar: BarInterval, now: UnixSecond
       expected: null,
     },
     lastPrice: trades[0]?.price ?? null,
+    previousClose: usablePreviousClose(day.previousClose),
     trades,
   };
 }

@@ -12,6 +12,7 @@ const DAY: BookReplayDay = {
   symbol: "005930",
   date: "20261123",
   coverage: "collected",
+  previousClose: 71_000,
   covered: [[540, 600], [602, 900]],
   books: [
     { minute: 540, asks: [[71_200, 30], [71_300, 31]], bids: [[71_100, 60]], totalAsk: 300, totalBid: 600 },

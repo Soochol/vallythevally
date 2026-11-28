@@ -48,6 +48,7 @@ pub(super) fn read_live_day(shared: &Path, stock: StockCode, date: KstDate, date
         symbol: symbol_code(stock),
         date: date_str.to_owned(),
         coverage: api::BookReplayCoverage::Collected,
+        previous_close: None,
         covered,
         books,
         trades,

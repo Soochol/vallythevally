@@ -69,12 +69,13 @@ describe("resolveLadderMarket", () => {
     expect(resolved.totals).toEqual({ ask: 1_000, bid: 2_000, source: "regular", description: null });
   });
 
-  it("clears previousClose and bounds for a prior-day replay and builds pastRows", () => {
+  it("clears previousClose and bounds for a prior-day replay without collected previousClose and builds pastRows", () => {
     const pastReplay: ReplayView = {
       kind: "past",
       at: 1_763_943_600,
       book: PAST_VIEW,
       lastPrice: 69_000,
+      previousClose: null,
       trades: [],
     };
     const resolved = resolveLadderMarket({
@@ -98,6 +99,41 @@ describe("resolveLadderMarket", () => {
     expect(resolved.expected).toBeNull();
     expect(resolved.totals).toEqual({ ask: 300, bid: 400, source: "regular", description: null });
     expect(resolved.pastRows.length).toBeGreaterThan(0);
+    expect(resolved.pastRows.every((row) => row.rate === null)).toBe(true);
+  });
+
+  it("uses collected previousClose for a prior-day replay while keeping bounds open", () => {
+    const pastReplay: ReplayView = {
+      kind: "past",
+      at: 1_763_943_600,
+      book: {
+        ...PAST_VIEW,
+        asks: [{ price: 120_100, quantity: 30, change: 0 }],
+        bids: [{ price: 120_000, quantity: 40, change: 0 }],
+      },
+      lastPrice: 120_100,
+      previousClose: 120_000,
+      trades: [],
+    };
+    const resolved = resolveLadderMarket({
+      book: LIVE_BOOK,
+      afterHours: null,
+      lastPrice: 70_000,
+      previousClose: 69_500,
+      fundamentals: { lowerLimit: 48_650, upperLimit: 90_350 } as never,
+      symbolKind: "common",
+      replay: pastReplay,
+      vi: null,
+      nowSeconds: 1_764_032_400,
+      serverNowSeconds: 1_764_032_400,
+      skipSpreadGap: false,
+    });
+
+    expect(resolved.headPreviousClose).toBe(120_000);
+    expect(resolved.replayRef).toEqual({ previousClose: 120_000, bounds: { lower: null, upper: null } });
+    const askRow = resolved.pastRows.find((row) => row.price === 120_100);
+    expect(askRow?.ask?.quantity).toBe(30);
+    expect(askRow?.rate).toBeCloseTo(((120_100 - 120_000) / 120_000) * 100, 6);
   });
 
   it("returns empty view and null totals when replay has no coverage", () => {

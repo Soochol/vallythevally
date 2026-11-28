@@ -18,6 +18,7 @@ const DAY: BookReplayDay = {
   symbol: CODE,
   date: "20261123",
   coverage: "collected",
+  previousClose: 70_000,
   covered: [[540, 560], [570, 620]],
   books: [
     {
@@ -367,5 +368,53 @@ test.describe("호가 복기 주문 추가", () => {
     expect(lockBox!.x).toBeGreaterThanOrEqual(venueBox!.x + venueBox!.width);
     expect(lockBox!.x - (venueBox!.x + venueBox!.width)).toBeLessThan(20);
     expect(stripBox!.x + stripBox!.width - (lockBox!.x + lockBox!.width)).toBeLessThan(24);
+  });
+
+  test("과거일 봉 호가 복기에서 호가주문창 가격 색상과 등락률이 해당 날짜 기준가로 적용된다", async ({ page, scenario }) => {
+    const prevMidnight = MIDNIGHT - 86_400;
+    const prevAt = (hour: number, minute: number) => prevMidnight + hour * 3600 + minute * 60;
+    const prevBars: Bar[] = Array.from({ length: 30 }, (_, i) => ({
+      t: prevAt(8, 30 + i * 5),
+      o: 120_000,
+      h: 120_300,
+      l: 119_800,
+      c: 120_100,
+      v: 1_000,
+    }));
+    const prevDay: BookReplayDay = {
+      symbol: CODE,
+      date: "20261122",
+      coverage: "collected",
+      previousClose: 120_000,
+      covered: [[540, 560]],
+      books: [
+        {
+          minute: 540,
+          asks: [[120_200, 100], [120_300, 120]],
+          bids: [[120_000, 150], [119_900, 180]],
+          totalAsk: 500,
+          totalBid: 600,
+        },
+      ],
+      trades: [[540, 32_420, 120_200, 20]],
+    };
+    await page.addInitScript(installChartProbe);
+    ordersOn(scenario);
+    tradingApi(scenario, []);
+    scenario.reply((url) => url.pathname === "/api/bars", {
+      body: { symbol: CODE, venue: "combined", period: "5m", bars: prevBars, current: null, nextBefore: prevAt(8, 25), seq: null },
+    });
+    scenario.reply("/api/book-replay/access", { body: { available: true } });
+    scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/book-replay` && url.searchParams.get("date") === "20261122", {
+      body: prevDay,
+    });
+    await openOrderWindow(page, scenario, false, "krx", undefined, false, undefined, (windows) =>
+      windows.map((window) => (window.kind === "chart" ? { ...window, period: "5m" as const, chartSettings: { ...SETTINGS, visibleBars: 40 } } : window)));
+    await replayToggle(page).click();
+
+    await pointAt(page, prevAt(9, 0));
+    await expect(win(page)).toHaveAttribute("data-replay", "past");
+    await expect(win(page).locator(".mw-px.mw-up", { hasText: "120,200" })).toContainText("+0.17%");
+    await expect(win(page).locator(".mw-px.mw-down", { hasText: "119,900" })).toContainText("−0.08%");
   });
 });

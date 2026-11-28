@@ -6,6 +6,7 @@ import { formatDecimal } from "../../lib/format";
 import { marketSocket } from "../../stores/realtime";
 import { useVenue } from "../../stores/ui";
 import { ReplayStrip } from "../book-replay/ReplayStrip";
+import { resolveReplayPreviousClose } from "../book-replay/replay";
 import { useTradesReplay } from "../book-replay/useTradesReplay";
 import { useBookReplayEnabled, useWorkspaceReplayCursor } from "../book-replay/useWorkspaceReplayCursor";
 import { MarketWindowGate } from "../market-window/MarketWindowGate";
@@ -31,10 +32,13 @@ function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
   const isLive = cursor.kind === "live";
   const { state, history, feedError, retry } = useTradeTape(marketSocket, code, venue, undefined, isLive);
   const quote = useDayQuote(code, venue);
-  const previousClose = cursor.kind === "pointed" && !cursor.isToday ? null : quote.previousClose;
   const [minKey, setMinKey] = useState<MinAmountKey>("all");
   const minWon = minAmountWon(minKey);
   const replay = useTradesReplay(code, cursor, venue, minWon);
+  const previousClose =
+    replay.kind === "past"
+      ? resolveReplayPreviousClose(replay.previousClose, cursor.kind === "pointed" && cursor.isToday, quote.previousClose)
+      : quote.previousClose;
 
   const effectiveVenue = state.historyVenue ?? venue;
   const liveView = isLive ? visibleEntries(state, effectiveVenue, minWon) : null;

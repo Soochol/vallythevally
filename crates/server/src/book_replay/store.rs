@@ -7,6 +7,8 @@ use crate::api;
 use crate::clock::kst;
 use crate::collected_store::{StockCoverage, bucket_file_name, file_exists, open_connection, path_str};
 
+use super::reference::read_store_previous_close;
+
 const BOOK_QUERY: &str = "
 WITH picked AS (
     SELECT
@@ -52,6 +54,7 @@ ORDER BY minute ASC, item.r ASC, item.n ASC
 ";
 
 pub(super) struct DayReplayData {
+    pub previous_close: Option<u64>,
     pub covered: Vec<[u32; 2]>,
     pub books: Vec<api::BookReplayBook>,
     pub trades: Vec<(u32, u32, u64, i64)>,
@@ -65,15 +68,16 @@ pub(super) fn read_day_data(day_dir: &Path, date: KstDate, stock_code: &str, buc
     let has_books = file_exists(&book_path)?;
     let has_trades = file_exists(&trade_path)?;
     if !has_books && !has_trades {
-        return Ok(DayReplayData { covered: Vec::new(), books: Vec::new(), trades: Vec::new() });
+        return Ok(DayReplayData { previous_close: None, covered: Vec::new(), books: Vec::new(), trades: Vec::new() });
     }
     let conn = open_connection()?;
     let day_start_ms = kst(date, 0, 0, 0).unix() * 1000;
     let day_end_ms = day_start_ms + 86_400_000;
     let books = if has_books { query_books(&conn, &book_path, &symbol, day_start_ms, day_end_ms)? } else { Vec::new() };
     let trades = if has_trades { query_trades(&conn, &trade_path, &symbol, day_start_ms, day_end_ms)? } else { Vec::new() };
+    let previous_close = read_store_previous_close(&conn, day_dir, date, stock_code, buckets)?;
     let covered = compute_covered(day_start_ms, books.first().map(|b| b.minute), coverage.end_minute_exclusive, &coverage.gaps);
-    Ok(DayReplayData { covered, books, trades })
+    Ok(DayReplayData { previous_close, covered, books, trades })
 }
 
 fn query_books(conn: &Connection, path: &Path, symbol: &str, day_start_ms: i64, day_end_ms: i64) -> Result<Vec<api::BookReplayBook>, String> {

@@ -29,6 +29,7 @@ const REPLAY_DAY: BookReplayDay = {
   symbol: CODE,
   date: "20261123",
   coverage: "collected",
+  previousClose: 71_000,
   covered: [[540, 560], [570, 620]],
   books: [
     {
@@ -272,6 +273,7 @@ test("지난 날 봉은 등락률 없이 오늘 상·하한가 밖 호가도 그
     symbol: CODE,
     date: "20261122",
     coverage: "collected",
+    previousClose: null,
     covered: [[540, 620]],
     books: [
       {
@@ -319,6 +321,74 @@ test("지난 날 봉은 등락률 없이 오늘 상·하한가 밖 호가도 그
   await expect(bookWindow(page).locator(".mw-px small")).toHaveCount(0);
 });
 
+test("과거일과 마지막 거래일 다음날 전환에서도 수집 기준가로 10호가창 색상과 등락률이 적용되고 오늘 상·하한 밖 호가도 남는다", async ({ page, scenario }) => {
+  await page.clock.install({ time: new Date("2026-11-23T14:00:00+09:00") });
+  const prevDay = MIDNIGHT - 86_400;
+  const prevAt = (hour: number, minute: number) => prevDay + hour * 3600 + minute * 60;
+  const pastBars: Bar[] = Array.from({ length: 30 }, (_, i) => ({
+    t: prevAt(8, 30 + i * 5),
+    o: 119_800 + i * 50,
+    h: 120_100 + i * 50,
+    l: 119_700 + i * 50,
+    c: 120_000 + i * 50,
+    v: 1000 + i * 10,
+  }));
+  const pastReplay: BookReplayDay = {
+    symbol: CODE,
+    date: "20261122",
+    coverage: "collected",
+    previousClose: 119_900,
+    covered: [[540, 620]],
+    books: [
+      {
+        minute: 540,
+        asks: [
+          [120_000, 50],
+          [120_100, 60],
+        ],
+        bids: [
+          [119_900, 70],
+          [119_800, 80],
+        ],
+        totalAsk: 500,
+        totalBid: 700,
+      },
+    ],
+    trades: [[540, 32_420, 120_000, 10]],
+  };
+  seedLayout(scenario);
+  seedMarket(scenario, 80_000);
+  scenario.reply((url) => url.pathname === "/api/bars", {
+    body: { symbol: CODE, venue: "combined", period: "5m", bars: pastBars, current: null, nextBefore: prevAt(8, 25), seq: null },
+  });
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
+  scenario.reply(
+    (url) => url.pathname === `/api/symbols/${CODE}/book-replay` && url.searchParams.get("date") === "20261122",
+    { body: pastReplay },
+  );
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await replayToggle(page).click();
+
+  const pos = await barCoordinate(page, prevAt(9, 0));
+  await page.mouse.move(pos.x, pos.y);
+  await frames(page);
+
+  await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
+  await expect(bookWindow(page).getByTestId("market-symbol-price")).toHaveText("120,000");
+  await expect(bookWindow(page).getByTestId("market-symbol-price")).toHaveAttribute("data-tone", "up");
+  await expect(bookWindow(page).locator(".od-head-rate")).toHaveText("▲0.08%");
+  await expect(bookWindow(page).locator(".mw-px.mw-up", { hasText: "120,000" })).toContainText("+0.08%");
+  await expect(bookWindow(page).locator(".mw-px.mw-down", { hasText: "119,800" })).toContainText("−0.08%");
+  await expect(bookWindow(page).getByTestId("ladder-trade").first().locator(".mw-trade-price")).toHaveAttribute("data-tone", "up");
+
+  await page.clock.fastForward(12 * 3600 * 1000);
+  await frames(page);
+  await expect(bookWindow(page).locator(".mw-px.mw-up", { hasText: "120,000" })).toContainText("+0.08%");
+  await expect(bookWindow(page).locator(".mw-px.mw-down", { hasText: "119,800" })).toContainText("−0.08%");
+});
+
 test("오늘 마감 봉이 미수집이고 응답이 20초 넘었으면 곧바로 다시 받고 다른 봉을 스쳐도 20초 주기가 밀리지 않는다", async ({ page, scenario }) => {
   await page.clock.install({ time: new Date("2026-11-23T09:20:00+09:00") });
   seedLayout(scenario);
@@ -329,6 +399,7 @@ test("오늘 마감 봉이 미수집이고 응답이 20초 넘었으면 곧바�
     symbol: CODE,
     date: "20261123",
     coverage: "collected",
+    previousClose: 71_000,
     covered: [[540, 544]],
     books: [
       { minute: 540, asks: [[71_200, 120]], bids: [[71_100, 150]], totalAsk: 1_200, totalBid: 2_400 },
@@ -406,6 +477,7 @@ test("재조회가 실패해도 이미 받은 수집 호가는 유지되고 20�
     symbol: CODE,
     date: "20261123",
     coverage: "collected",
+    previousClose: 71_000,
     covered: [[540, 544]],
     books: [{ minute: 540, asks: [[71_200, 120]], bids: [[71_100, 150]], totalAsk: 1_200, totalBid: 2_400 }],
     trades: [[540, 32_420, 71_200, 25]],

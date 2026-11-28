@@ -33,6 +33,7 @@ const FALLBACK_DAY: BookReplayDay = {
   symbol: CODE,
   date: DATE,
   coverage: "collected",
+  previousClose: 70_000,
   covered: [[540, 542]],
   books: [{ minute: 540, asks: [[71_100, 1000]], bids: [[71_000, 1400]], totalAsk: 7_600, totalBid: 4_200 }],
   trades: [[540, 32_410, 71_000, 100]],

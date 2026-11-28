@@ -3,4 +3,4 @@ import type { BookReplayBook } from "./BookReplayBook";
 import type { BookReplayCoverage } from "./BookReplayCoverage";
 import type { SymbolCode } from "./SymbolCode";
 
-export type BookReplayDay = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, covered: [number, number][], books: Array<BookReplayBook>, trades: [number, number, number, number][], };
+export type BookReplayDay = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, previousClose: number | null, covered: [number, number][], books: Array<BookReplayBook>, trades: [number, number, number, number][], };

@@ -3,4 +3,4 @@ import type { BookReplayCoverage } from "./BookReplayCoverage";
 import type { BookReplayProgramRow } from "./BookReplayProgramRow";
 import type { SymbolCode } from "./SymbolCode";
 
-export type BookReplayProgramDay = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, gaps: [number, number][], rows: Array<BookReplayProgramRow>, };
+export type BookReplayProgramDay = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, previousClose: number | null, gaps: [number, number][], rows: Array<BookReplayProgramRow>, };
