@@ -12,7 +12,6 @@ import { IntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { AddWindowMenu } from "./AddWindowMenu";
-import { ChartDockToggle } from "./ChartDockToggle";
 import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
@@ -241,7 +240,6 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
         </div>
         <span className="dock-tab-actions">
           {stripOverflow.overflowing && <TabListMenu group={group} onSelect={select} />}
-          {shown.kind === "chart" && <ChartDockToggle id={shown.id} compact={rect.w < 460} />}
           <AddWindowMenu targetGroup={group.id} />
           {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}><CollapseIcon size={14} /></button>}
         </span>

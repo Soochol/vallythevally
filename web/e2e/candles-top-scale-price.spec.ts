@@ -3,6 +3,7 @@ import type { Bar } from "../src/api/generated/Bar";
 import { type ChartSettings, DEFAULT_CHART_SETTINGS, type IndicatorConfig } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { chooseSettingsMenu, openChartSettings } from "./chart-settings-menu";
+import { addTyped, closeAdd } from "./indicator-ui";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, firstChart, pollSaved, test, withFirstChart } from "./harness";
 
 const DAY = 86_400;
@@ -153,13 +154,10 @@ test("캔들을 지표 위에 스위치는 가격 패널 지표와 캔들의 그
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expectMainAboveOverlays(7, "Candlestick");
 
-  await openChartSettings(page, "범례 · 표시");
-  await dialog(page).getByRole("group", { name: "차트 설정 영역", exact: true }).getByRole("button", { name: "지표", exact: true }).click();
-  const cmdDialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
-  await cmdDialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("이평 5");
-  await cmdDialog.getByRole("button", { name: "이동평균 단순 5 추가", exact: true }).click();
+  await addTyped(page, "이평 5");
   await pollSaved(() => saved(scenario).indicators.length).toBe(4);
-  await cmdDialog.getByRole("group", { name: "차트 설정 영역", exact: true }).getByRole("button", { name: "차트 설정", exact: true }).click();
+  await closeAdd(page);
+  await openChartSettings(page, "범례 · 표시");
   await expectMainAboveOverlays(8, "Candlestick");
   await chooseSettingsMenu(page, "봉 · 축");
   const styleGroup = dialog(page).getByRole("group", { name: "봉 모양" });
@@ -295,7 +293,7 @@ test("가격만 축에 맞춤 스위치는 일목 구름만 켜져 있어도 구
   }).toBe(true);
 });
 
-test("Esc 되돌리기와 기본값 복원 및 구역 수정 표시가 두 스위치에 모두 동작한다", async ({ page, scenario }) => {
+test("Esc로 닫아도 바꾼 값이 남고, 기본값 복원과 구역 수정 표시가 두 스위치에 모두 동작한다", async ({ page, scenario }) => {
   const sma200: IndicatorConfig = {
     id: "sma-200",
     spec: { kind: "ma", method: "sma", period: 200 },
@@ -304,7 +302,6 @@ test("Esc 되돌리기와 기본값 복원 및 구역 수정 표시가 두 스�
     style: { colors: ["ind-1"], width: 2 },
   };
 
-  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "dialog" });
   seedChart(scenario, { indicators: [sma200], panels: [] }, makeStepBars(200, 130));
   await openChart(page);
 
@@ -341,17 +338,14 @@ test("Esc 되돌리기와 기본값 복원 및 구역 수정 표시가 두 스�
 
   await page.keyboard.press("Escape");
   await expect(dialog(page)).toBeHidden();
-  await pollSaved(() => ({ top: saved(scenario).candlesOnTop, scale: saved(scenario).scalePriceOnly })).toEqual({ top: false, scale: false });
+  await pollSaved(() => ({ top: saved(scenario).candlesOnTop, scale: saved(scenario).scalePriceOnly })).toEqual({ top: true, scale: true });
   await expect.poll(async () => {
     const o = await pane0Orders(page);
     const r0 = await visiblePriceRange(page, 0);
-    return o !== null && o.main !== null && o.overlays.length === 1 && o.overlays[0]! > o.main && r0 !== null && r0.to > 55_000;
+    return o !== null && o.main !== null && o.overlays.length === 1 && o.overlays[0]! < o.main && r0 !== null && r0.to < 53_000;
   }).toBe(true);
 
-  await openChartSettings(page, "봉 · 축");
-  await scalePriceOnlySwitch(page).click();
-  await chooseSettingsMenu(page, "범례 · 표시");
-  await candlesOnTopSwitch(page).click();
+  await openChartSettings(page, "범례 · 표시");
   await expect(barsTab).toHaveAttribute("data-modified", "true");
   await expect(displayTab).toHaveAttribute("data-modified", "true");
   await expect(resetBtn).toBeEnabled();

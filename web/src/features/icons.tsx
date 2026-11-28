@@ -184,11 +184,13 @@ export const ICON_PATHS = {
   star: "M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z",
   grip: "M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01",
   split: "M4 6h16M4 18h16M12 10v5m-3-2 3 3 3-3",
+  plus: "M12 5v14M5 12h14",
+  sliders: "M4 8h8M16 8h4M4 16h4M12 16h8",
 };
-export type MarkupIcon = "up" | "down" | "gear" | "close" | "eye" | "eyeOff" | "grip" | "split";
+export type MarkupIcon = "up" | "down" | "gear" | "close" | "eye" | "eyeOff" | "grip" | "split" | "plus" | "sliders";
 export function iconMarkup(name: MarkupIcon, size = 14): string {
   const path = ICON_PATHS[name === "eyeOff" ? "eye" : name];
-  const extra = name === "gear" ? '<circle cx="12" cy="12" r="3"/>' : name === "eye" || name === "eyeOff" ? '<circle cx="12" cy="12" r="2.6"/>' : "";
+  const extra = name === "gear" ? '<circle cx="12" cy="12" r="3"/>' : name === "eye" || name === "eyeOff" ? '<circle cx="12" cy="12" r="2.6"/>' : name === "sliders" ? '<circle cx="14" cy="8" r="2"/><circle cx="10" cy="16" r="2"/>' : "";
   const slash = name === "eyeOff" ? '<path d="m4 4 16 16"/>' : "";
   const strokeWidth = name === "grip" ? "2.4" : "1.5";
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/>${extra}${slash}</svg>`;

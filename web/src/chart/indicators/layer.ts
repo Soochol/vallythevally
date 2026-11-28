@@ -32,7 +32,7 @@ import { applyToPoints, DrawQueue, pointAtTime } from "./drawQueue";
 import { FinancialIndicatorStore } from "./financialFamily";
 import { addIchimokuCloud, buildIchimokuCloudPoints, ichimokuPalette, type IchimokuCloudSeries } from "./ichimokuCloud";
 import { computeAnchoredVwap, resolveQuickAnchor } from "./anchoredVwap";
-import { isAnchoredVwap, isFinancial, isFinancialBar, isFlow, isInvestorFlow, isMicro, isProIndicator, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, isVolumeProfile, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName } from "./kinds";
+import { isAnchoredVwap, isFinancial, isFinancialBar, isFlow, isInvestorFlow, isMicro, isProIndicator, isProgramFlow, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, isVolumeProfile, type PlotLineId as LineId, isBarLine, lineColor, placementsOf, specLines, specName, nameParts, type NameToken } from "./kinds";
 import { computeBarVolumeProfile } from "./volumeProfile";
 import { InvestorFlowController, type InvestorFamilyDeps, type InvestorTarget } from "./investorFamily";
 import { type MicroFamilyDeps, MicroIndicatorController, type MicroTarget, tickCvdLineValue } from "./microFamily";
@@ -88,6 +88,7 @@ export interface IndicatorPanelInfo {
 export interface IndicatorRow {
   id: string;
   name: string;
+  tokens?: readonly NameToken[];
   color: string;
   values: LegendValue[];
   state: "ok" | "pending" | "hidden" | EngineErrorKind;
@@ -873,6 +874,7 @@ export class IndicatorLayer {
       return {
         id: config.id,
         name: specName(config.spec),
+        tokens: nameParts(config.spec).tokens,
         color: config.spec.kind === "ichimoku"
           ? ichimokuPalette(tokens).conversion
           : primary < 0 ? tokens.text2 : indicatorColorValue(tokens, lineColor(config.spec, config.style.colors, primary)),

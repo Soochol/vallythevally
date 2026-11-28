@@ -1,10 +1,8 @@
 import type { QuoteTotalsPage } from "../src/api/generated/QuoteTotalsPage";
 import { formatVolume } from "../src/lib/format";
 import { cell, expect, test } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 test("총잔량을 더하면 분봉에 매도·매수 값이 보이고 일봉에서는 사라진다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const sample = scenario.market.page({ symbol: "005930", period: "5m", venue: "combined" });
   const bars = sample.current ? [...sample.bars, sample.current] : sample.bars;
   const ask = 61_287;
@@ -43,13 +41,15 @@ test("총잔량을 더하면 분봉에 매도·매수 값이 보이고 일봉에
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "총잔량 추가 후보", exact: true }).click();
-  await expect(dialog).toContainText("주식·ETF 분봉의 호가 자료입니다");
-  await dialog.getByRole("button", { name: "총잔량 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "총잔량", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const totalsRow = page.locator("[data-indicator-row]").filter({ hasText: "총잔량" });
   await expect(totalsRow).toHaveCount(1);
+  await totalsRow.locator("[data-indicator-edit]").click();
+  await expect(page.getByRole("dialog", { name: "총잔량 설정", exact: true })).toContainText("주식·ETF 분봉의 호가 자료입니다");
+  await page.keyboard.press("Escape");
   await expect(totalsRow).toContainText(formatVolume(ask));
   await expect(totalsRow).toContainText(formatVolume(bid));
 
@@ -74,7 +74,6 @@ test("총잔량을 더하면 분봉에 매도·매수 값이 보이고 일봉에
 });
 
 test("서버에 호가 자료 폴더가 없으면 수집 폴더 미설정 안내를 보인다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   scenario.on(
     (url, request) => request.method() === "GET" && /^\/api\/symbols\/[^/]+\/quote-totals$/.test(url.pathname),
     (request) => {
@@ -89,9 +88,9 @@ test("서버에 호가 자료 폴더가 없으면 수집 폴더 미설정 안내
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "총잔량 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "총잔량 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "총잔량", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const totalsRow = page.locator("[data-indicator-row]").filter({ hasText: "총잔량" });
   await expect(totalsRow).toHaveCount(1);

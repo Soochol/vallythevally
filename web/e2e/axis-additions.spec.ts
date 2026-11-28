@@ -4,7 +4,7 @@ import { installAxisProbe } from "./axis-probe";
 import { chartDisplayOptions, seedChartDisplay } from "./chart-display-fixture";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, chartOf, expect, test, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
+import { openCompare } from "./indicator-ui";
 import { selectOption } from "./select-option";
 
 declare global { interface Window { axisPaints: number } }
@@ -22,7 +22,6 @@ type BarShape = (daysAgo: number) => { price: number; volume: number };
 const DEFAULT_SHAPE: BarShape = (daysAgo) => ({ price: 190500 - daysAgo * 100, volume: 1000000 });
 
 async function open(page: Page, scenario: Scenario, period = "D", shape: BarShape = DEFAULT_SHAPE) {
-  useCenterIndicatorWindow(scenario);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
@@ -47,11 +46,12 @@ const plotted = (page: Page) => page.evaluate(() => window.chartProbe.chart.pane
 
 async function addIndicator(page: Page, label: string, name: string) {
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
+  const dialog = page.getByRole("dialog", { name: "지표 더하기", exact: true });
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill(label);
-  await dialog.getByRole("option", { name: `${name} 추가 후보`, exact: true }).click();
-  await dialog.getByRole("button", { name: `${name} 추가`, exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  const option = dialog.getByRole("option", { name: label, exact: true });
+  if ((await option.getAttribute("aria-selected")) === "true") await dialog.getByRole("button", { name: `${label} 하나 더`, exact: true }).click();
+  else await option.click();
+  await page.keyboard.press("Escape");
   await expect(page.locator("[data-indicator-row]").filter({ hasText: name }).last()).toBeVisible();
 }
 
@@ -90,11 +90,10 @@ for (const [label, name, lines, period] of [
 test("비교 종목 추가 뒤 오류 없이 차트를 계속 그리고 축 폭 72px를 유지한다", async ({ page, scenario }) => {
   const errors = await open(page, scenario);
   const before = await plotted(page);
-  await page.getByRole("button", { name: "비교", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
+  const dialog = await openCompare(page);
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("삼성SDI");
   await dialog.getByRole("option", { name: /삼성SDI/ }).first().click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(page.locator('[data-compare-row="006400"]')).toBeVisible();
   await expect.poll(() => plotted(page)).toBe(before + 1);
   await assertDrawing(page, errors);

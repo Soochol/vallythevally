@@ -18,7 +18,6 @@ export type Theme = UiState["theme"];
 
 export const MAX_RECENT = 10;
 
-export type IndicatorWindow = "dialog" | "inspector";
 
 export interface UiPrefs {
   lastLayoutId: string | null;
@@ -29,7 +28,6 @@ export interface UiPrefs {
   drawing: DrawingPrefs;
   lastMinute: MinutePeriod;
   collapsedWatchGroups: readonly string[];
-  indicatorWindow: IndicatorWindow | null;
   layoutMode: LayoutMode;
   venue: Venue;
   orderSettings: OrderSettings;
@@ -51,7 +49,6 @@ export const DEFAULT_UI_PREFS: UiPrefs = {
   drawing: DEFAULT_DRAWING_PREFS,
   lastMinute: "3m",
   collapsedWatchGroups: [],
-  indicatorWindow: null,
   layoutMode: "dock",
   venue: "combined",
   orderSettings: DEFAULT_ORDER_SETTINGS,
@@ -71,7 +68,7 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     console.warn("UiState가 객체가 아니어서 기본값으로 엽니다", raw);
     return { prefs: DEFAULT_UI_PREFS, extra: {} };
   }
-  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow, layoutMode, venue, orderSettings, orderEntries, hotkeys, pageLink, bookReplay, brokers, revision: _revision, ...extra } = raw as Record<string, unknown>;
+  const { rightPanel: _rightPanel, panelWidth: _panelWidth, rightPanelWidth: _rightPanelWidth, lastLayoutId, theme, watchCollapsed: _watchCollapsed, recentSymbols, activeWatchlistId, watchColumns, drawing, lastMinute, pinnedMinutes: _pinnedMinutes, collapsedWatchGroups, indicatorWindow: _indicatorWindow, layoutMode, venue, orderSettings, orderEntries, hotkeys, pageLink, bookReplay, brokers, revision: _revision, ...extra } = raw as Record<string, unknown>;
   const bad: string[] = [];
   const pick = <T>(key: string, value: unknown, ok: (x: unknown) => x is T, fallback: T, missingOk = false): T => {
     if (ok(value)) return value;
@@ -79,7 +76,6 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     return fallback;
   };
   pick("theme", theme, (x): x is Theme => x === "dark" || x === "light", DEFAULT_UI_PREFS.theme);
-  const windowMode = pick("indicatorWindow", indicatorWindow, (x): x is IndicatorWindow | null => x === null || x === "dialog" || x === "inspector", null, true);
   const parsedHotkeys = parseHotkeys(hotkeys);
   if (!parsedHotkeys.clean) bad.push("hotkeys");
   const prefs: UiPrefs = {
@@ -89,7 +85,6 @@ export function parseUiState(raw: unknown): { prefs: UiPrefs; extra: UiExtra } {
     activeWatchlistId: pick("activeWatchlistId", activeWatchlistId, (x): x is string | null => x === null || typeof x === "string", null, true),
     watchColumns: pick("watchColumns", watchColumns, isColumns, DEFAULT_WATCH_COLUMNS, true),
     drawing: parseDrawingPrefs(drawing),
-    indicatorWindow: windowMode,
     layoutMode: pick("layoutMode", layoutMode, (x): x is LayoutMode => x === "dock" || x === "canvas", "dock", true),
     venue: pick("venue", venue, (x): x is Venue => typeof x === "string" && isVenue(x), DEFAULT_UI_PREFS.venue, true),
     orderSettings: parseOrderSettings(orderSettings),

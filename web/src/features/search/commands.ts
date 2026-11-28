@@ -10,7 +10,7 @@ import type { CommandIcon, SearchCommand } from "../commands/registry";
 import { BookIcon, BrokersIcon, CameraIcon, ChartIcon, ClockIcon, CopyIcon, EtfIcon, FunnelIcon, GearIcon, HeatmapIcon, IndicatorIcon, KeyboardIcon, ListIcon, LogScaleIcon, MarketIcon, OrderIcon, PreMarketIcon, ProgramIcon, RankingIcon, TradesIcon, UndoIcon, WhaleIcon, WorkspaceIcon } from "../icons";
 import { RAIL_PAGES } from "../page-rail/pages";
 import { CHART_LIMIT_REASON, WINDOW_LIMIT_REASON, addWindow, workspaceRoom } from "../workspace/manage";
-import { openIndicatorCommand } from "../indicator-command/open";
+import { openIndicatorAdd } from "../indicator-command/open";
 import { pressScale } from "../indicator-dialog/compareForm";
 import { saveSnapshot } from "../snapshot/saveSnapshot";
 import { openSystemSettings } from "../system-settings/open";
@@ -96,7 +96,7 @@ export const defaultSearchCommands = (keys: ActionKeys): readonly SearchCommand[
   ...HOTKEY_ACTIONS.flatMap(({ id: actionId, name: label, effect: action }): SearchCommand[] => {
     const shortcut = shortcutOf(keys, actionId);
     switch (action.kind) {
-      case "indicators": return [{ id: "indicators", label, shortcut, group: "chart", icon: IndicatorIcon, run: ({ cellId }) => openIndicatorCommand(cellId) }];
+      case "indicators": return [{ id: "indicators", label, shortcut, group: "chart", icon: IndicatorIcon, run: ({ cellId }) => openIndicatorAdd(cellId) }];
       case "toggleLog": return [{ id: "log", label, shortcut, group: "chart", icon: LogScaleIcon, run: ({ cellId }) => {
         const layout = useLayoutStore.getState();
         const cell = chartWindows(layout.layout).find((c) => c.id === cellId);

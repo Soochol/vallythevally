@@ -1,53 +1,18 @@
-import type { SymbolInfo } from "../../api/generated/SymbolInfo";
-import { isFinancial, isInvestorFlow, isQuote, isTickCvd, KINDS, specName, type IndicatorKind } from "../../chart/indicators/kinds";
-import type { ChartSettings, IndicatorConfig } from "../../chart/settings";
-import type { IndicatorCommandMode } from "../../stores/selection";
-import type { SearchList } from "../search/searchList";
+import { isFinancial, isInvestorFlow, isQuote, isTickCvd, KINDS, type IndicatorKind } from "../../chart/indicators/kinds";
+import type { ChartSettings } from "../../chart/settings";
 import { parseIndicatorInput, type IndicatorCandidate } from "./parseInput";
 
-export type { IndicatorCommandMode };
-
-export const INDICATOR_DIALOG_TABS = [
-  { mode: "current", label: "이 칸에 띄운 지표" },
-  { mode: "add", label: "지표 추가" },
-] as const satisfies readonly { mode: IndicatorCommandMode; label: string }[];
-
-export type AddCategory = "all" | "price" | "panel" | "quote" | "fin";
-
-export const ADD_CATEGORIES = [
-  { id: "all", label: "전체" },
-  { id: "price", label: "가격" },
-  { id: "panel", label: "아래" },
-  { id: "quote", label: "호가" },
-  { id: "fin", label: "재무" },
-] as const satisfies readonly { id: AddCategory; label: string }[];
-
-export const MA_GROUP_KEY = "current:ma-group";
-
-export type CommandHint = { keys: string; action: string };
-
-export function commandHints(mode: IndicatorCommandMode): readonly CommandHint[] {
-  if (mode === "current") return [{ keys: "↑↓", action: "고르기" }, { keys: "Tab", action: "설정" }, { keys: "Esc", action: "되돌리고 닫기" }];
-  if (mode === "compare") return [{ keys: "↑↓", action: "고르기" }, { keys: "Enter", action: "추가하고 계속" }, { keys: "Shift+Enter", action: "추가하고 닫기" }, { keys: "Esc", action: "되돌리고 닫기" }];
-  return [{ keys: "↑↓", action: "고르기" }, { keys: "Tab", action: "설정" }, { keys: "Enter", action: "추가하고 계속" }, { keys: "Shift+Enter", action: "추가하고 닫기" }, { keys: "Esc", action: "되돌리고 닫기" }];
-}
-
-export const PRICE_GROUP = "가격 패널";
-export const BELOW_GROUP = "아래 패널";
+export const PRICE_GROUP = "가격 위에 겹치는 지표";
+export const BELOW_GROUP = "아래 패널에 그리는 지표";
 export const QUOTE_GROUP = "호가지표";
 export const FINANCIAL_GROUP = "재무지표";
 const GROUP_ORDER = [PRICE_GROUP, BELOW_GROUP, QUOTE_GROUP, FINANCIAL_GROUP];
 
-export type CommandRow = { kind: "current"; key: string; group: string; config: IndicatorConfig }
+export const QUICK_MA_PERIODS = [5, 10, 20, 60, 120, 240] as const;
+
+export type AddRow =
   | { kind: "candidate"; key: string; group: string; candidate: IndicatorCandidate }
-  | { kind: "symbol"; key: string; group: string; info: SymbolInfo; selectable: boolean };
-
-export type DialogRow = CommandRow | { kind: "maGroup"; key: typeof MA_GROUP_KEY; group: typeof PRICE_GROUP; lines: IndicatorConfig[] };
-
-export type TreeCandidateRow = { kind: "candidate"; key: string; group: string; candidate: IndicatorCandidate; instanceCount: number };
-export type TreeCurrentRow = { kind: "current"; key: string; group: string; parentKey: string; index: number; config: IndicatorConfig };
-export type TreeSymbolRow = { kind: "symbol"; key: string; group: string; info: SymbolInfo; selectable: boolean };
-export type TreeDialogRow = TreeCandidateRow | TreeCurrentRow | TreeSymbolRow;
+  | { kind: "switch"; key: string; group: string; candidate: IndicatorCandidate; count: number };
 
 export function indicatorPeriodBadge(kind: IndicatorKind): string | null {
   const spec = KINDS[kind].defaults;
@@ -57,87 +22,6 @@ export function indicatorPeriodBadge(kind: IndicatorKind): string | null {
   return null;
 }
 
-export function treeChildLabel(spec: IndicatorConfig["spec"]): string {
-  const label = KINDS[spec.kind].label;
-  const full = specName(spec);
-  if (full === label) return label;
-  const detail = full.startsWith(label) ? full.slice(label.length).trim() : full;
-  return `${label} (${detail})`;
-}
-
-export function unifiedIndicatorRows(settings: ChartSettings, input: string, collapsedKinds: ReadonlySet<IndicatorKind>): TreeDialogRow[] {
-  const hasQuery = input.trim() !== "";
-  const candidates = parseIndicatorInput(input)
-    .map((candidate) => ({ group: candidateGroup(candidate), candidate }))
-    .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
-  const out: TreeDialogRow[] = [];
-  for (const { group, candidate } of candidates) {
-    const parentKey = `new:${candidate.kind}:${input}`;
-    const instances = settings.indicators.filter((config) => config.spec.kind === candidate.kind);
-    out.push({ kind: "candidate", key: parentKey, group, candidate, instanceCount: instances.length });
-    if (hasQuery || !collapsedKinds.has(candidate.kind)) {
-      instances.forEach((config, idx) => {
-        out.push({ kind: "current", key: currentKey(config.id), group, parentKey, index: idx + 1, config });
-      });
-    }
-  }
-  return out;
-}
-
-export function selectedTreeRow(rows: readonly TreeDialogRow[], chosen: string, preferCurrent = false): TreeDialogRow | undefined {
-  const direct = rows.find((row) => row.key === chosen && (row.kind !== "symbol" || row.selectable));
-  if (direct) return direct;
-  if (preferCurrent) {
-    const firstCurrent = rows.find((row) => row.kind === "current");
-    if (firstCurrent) return firstCurrent;
-  }
-  return rows.find((row) => row.kind === "candidate" || row.kind === "current" || (row.kind === "symbol" && row.selectable));
-}
-
-export function matchesCategory(group: string, category: AddCategory): boolean {
-  if (category === "all") return true;
-  if (category === "price") return group === PRICE_GROUP;
-  if (category === "panel") return group === BELOW_GROUP;
-  if (category === "quote") return group === QUOTE_GROUP;
-  return group === FINANCIAL_GROUP;
-}
-
-export function groupDialogRows(rows: readonly CommandRow[], mode: IndicatorCommandMode, category: AddCategory, hasQuery: boolean): DialogRow[] {
-  if (mode === "add") {
-    return hasQuery || category === "all" ? [...rows] : rows.filter((row) => matchesCategory(row.group, category));
-  }
-  if (mode !== "current") return [...rows];
-  const maLines = rows.filter((row): row is Extract<CommandRow, { kind: "current" }> => row.kind === "current" && row.config.spec.kind === "ma").map((row) => row.config);
-  const rest = rows.filter((row) => !(row.kind === "current" && row.config.spec.kind === "ma"));
-  if (maLines.length === 0) return rest;
-  return [{ kind: "maGroup", key: MA_GROUP_KEY, group: PRICE_GROUP, lines: maLines }, ...rest];
-}
-
-export function selectedDialogRow(rows: readonly DialogRow[], chosen: string): DialogRow | undefined {
-  const direct = rows.find((row) => row.key === chosen && (row.kind !== "symbol" || row.selectable));
-  if (direct) return direct;
-  if (chosen.startsWith("current:")) {
-    const id = chosen.slice("current:".length);
-    const maGroup = rows.find((row) => row.kind === "maGroup" && row.lines.some((line) => line.id === id));
-    if (maGroup) return maGroup;
-  }
-  return rows.find((row) => row.kind === "maGroup" || row.kind === "candidate" || row.kind === "current" || (row.kind === "symbol" && row.selectable));
-}
-
-export function modeAfterInput(mode: IndicatorCommandMode, _input: string): IndicatorCommandMode {
-  return mode;
-}
-
-function matchesCurrentIndicator(config: IndicatorConfig, input: string, matchedKinds: ReadonlySet<string>): boolean {
-  const q = input.trim().toLowerCase();
-  if (q === "") return true;
-  if (matchedKinds.has(config.spec.kind)) return true;
-  const label = KINDS[config.spec.kind].label.toLowerCase();
-  const full = specName(config.spec).toLowerCase();
-  const kind = config.spec.kind.toLowerCase();
-  return full.includes(q) || label.includes(q) || kind.includes(q);
-}
-
 export function candidateGroup(candidate: IndicatorCandidate): string {
   const kind = KINDS[candidate.kind];
   if (isQuote(kind.defaults)) return QUOTE_GROUP;
@@ -145,35 +29,24 @@ export function candidateGroup(candidate: IndicatorCandidate): string {
   return kind.place === "price" ? PRICE_GROUP : BELOW_GROUP;
 }
 
-export const currentKey = (id: string) => `current:${id}`;
-
-const byGroup = (rows: CommandRow[]) => rows.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
-
-export function commandRows(settings: ChartSettings, input: string, mode: IndicatorCommandMode, symbols: SearchList): CommandRow[] {
-  switch (mode) {
-    case "current": {
-      const matchedKinds = input.trim() === "" ? new Set<string>() : new Set<string>(parseIndicatorInput(input).map((c) => c.kind));
-      return byGroup(
-        settings.indicators
-          .filter((config) => matchesCurrentIndicator(config, input, matchedKinds))
-          .map((config) => ({ kind: "current", key: currentKey(config.id), group: config.panel === "price" ? PRICE_GROUP : BELOW_GROUP, config })),
-      );
-    }
-    case "add":
-      return byGroup(parseIndicatorInput(input).map((candidate) => ({ kind: "candidate", key: `new:${candidate.kind}:${input}`, group: candidateGroup(candidate), candidate })));
-    case "compare":
-      return symbols.rows.map(({ info }) => ({ kind: "symbol", key: `symbol:${info.code}`, group: "비교에 추가", info, selectable: symbols.selectable }));
-  }
+function hasNumbers(input: string): boolean {
+  const numeric = /^(.*?)([+-]?(?:\d|\.\d).*)$/.exec(input.trim());
+  return numeric !== null && numeric[1]!.trim() !== "";
 }
 
-export function selectedRow(rows: readonly CommandRow[], chosen: string): CommandRow | undefined {
-  return rows.find((row) => row.key === chosen && (row.kind !== "symbol" || row.selectable))
-    ?? rows.find((row) => row.kind === "candidate" || row.kind === "current" || (row.kind === "symbol" && row.selectable));
+export function addRows(settings: Pick<ChartSettings, "indicators">, input: string): AddRow[] {
+  const typed = hasNumbers(input);
+  return parseIndicatorInput(input)
+    .map((candidate): AddRow => {
+      const group = candidateGroup(candidate);
+      if (typed && KINDS[candidate.kind].fields.length > 0) return { kind: "candidate", key: `new:${candidate.kind}:${input}`, group, candidate };
+      return { kind: "switch", key: `kind:${candidate.kind}`, group, candidate, count: settings.indicators.filter((item) => item.spec.kind === candidate.kind).length };
+    })
+    .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group));
 }
 
-export function commandKey(event: { key: string; shiftKey: boolean; isComposing: boolean }) {
-  if (event.isComposing) return { kind: "ignore" } as const;
-  if (event.key === "Enter") return { kind: "submit", close: event.shiftKey } as const;
-  if (event.key === "ArrowDown" || event.key === "ArrowUp") return { kind: "move", step: event.key === "ArrowDown" ? 1 : -1 } as const;
-  return { kind: "ignore" } as const;
+export function stepRow(index: number, by: 1 | -1, length: number): number {
+  if (length === 0) return -1;
+  if (index < 0) return by === 1 ? 0 : length - 1;
+  return (index + by + length) % length;
 }

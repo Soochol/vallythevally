@@ -3,6 +3,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, firstChart, pollSaved, test, withFirstChart } from "./harness";
+import { openPanelPlace } from "./indicator-ui";
 
 const VOLUME = { id: "volume", spec: { kind: "volume", maPeriod: 20 }, panel: "p-volume", visible: true, style: { colors: ["ind-1"], width: 1 } };
 const RSI = { id: "rsi", spec: { kind: "rsi", period: 14, signal: null }, panel: "p-rsi", visible: true, style: { colors: ["ind-2"], width: 1 } };
@@ -100,8 +101,9 @@ test("합쳐진 패널에서 축 배지를 누르면 L→독립→R 순으로 �
   await expect(axisBtn).toHaveText("R");
   await pollSaved(() => saved(scenario).indicators.find((i) => i.id === "rsi")?.axis).toBe("right");
 
-  await row(page, "rsi").hover();
-  await row(page, "rsi").getByRole("button", { name: /새 패널로 분리/ }).click();
+  const bubble = await openPanelPlace(page, "rsi");
+  await bubble.getByRole("group", { name: "패널 자리" }).getByRole("button", { name: "따로", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect.poll(() => paneCount(page)).toBe(4);
   await pollSaved(() => saved(scenario).panels.length).toBe(3);
   await expect(row(page, "rsi").locator("[data-indicator-axis]")).toBeHidden();

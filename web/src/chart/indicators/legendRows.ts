@@ -1,14 +1,14 @@
 import { domSelect } from "../../features/menu/domSelect";
 import { mountLayer } from "../../features/overlay/topLayer";
 import { iconMarkup, type MarkupIcon } from "../../features/icons";
-import { type FinancialReport, indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
 import { axisSlotLabel, type ResolvedAxisSlot } from "./scales";
+import { type FinancialReport, indicatorErrorText, type IndicatorRow, type PriceLegendValues } from "./layer";
 import type { FinancialDetailRow } from "../financials";
 import { FOLD_ABOVE_ROWS, indicatorRowsFolded, type LegendField, type LegendProjection, type LegendTier } from "../legendProjection";
 import { sameSlotSignature, type SlotSignature, slotSignature } from "../legendShapes";
 import { indicatorsPinnedOpen, onIndicatorsPinnedChange, setIndicatorsPinnedOpen } from "../legendFold";
 
-export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "collapse" | "split" | "axis";
+export type IndicatorCommand = "edit" | "toggle" | "remove" | "collapse" | "axis";
 
 const ROW =
   "group pointer-events-auto flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
@@ -16,6 +16,9 @@ const ROW =
 const BTN = "grid size-[18px] place-items-center rounded-s text-xs text-text-2 hover:bg-raised hover:text-text";
 const FOLD_BUTTON = "pointer-events-auto flex min-h-6 w-max items-center gap-1 rounded-s px-1.5 text-xs text-text-2 hover:text-text bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
 const ROWS_BOX = "flex flex-col gap-px";
+const TOKEN = "indicator-token";
+const ADD_BUTTON = "legend-add pointer-events-auto max-md:hidden";
+const ADD_LABEL = "지표";
 
 interface ValueSpan {
   span: HTMLSpanElement;
@@ -28,15 +31,13 @@ interface RowEls {
   grip: HTMLSpanElement;
   swatch: HTMLSpanElement;
   name: HTMLButtonElement;
+  tokens: HTMLSpanElement;
   collapse: HTMLButtonElement;
   values: HTMLSpanElement;
   badge: HTMLSpanElement;
   axis: HTMLButtonElement;
-  split: HTMLButtonElement;
   toggle: HTMLButtonElement;
   remove: HTMLButtonElement;
-  up: HTMLButtonElement;
-  down: HTMLButtonElement;
   commandButtons: readonly HTMLButtonElement[];
   measureButtons: readonly HTMLButtonElement[];
   valueSpans: ValueSpan[];
@@ -50,6 +51,7 @@ interface RowEls {
   dispose(): void;
   reports: readonly FinancialReport[] | null;
   lastName: string;
+  lastTokens: string;
   lastColor: string;
   lastState: IndicatorRow["state"] | null;
   lastCollapsed: boolean | null;
@@ -65,8 +67,6 @@ interface RowEls {
   lastPanelId: string;
   lastMaxWidth: string;
   lastLeft: string;
-  lastUpDisabled: boolean;
-  lastDownDisabled: boolean;
   lastPaneTop: number | null;
   lastPaneHeight: number | null;
   lastLeftAxisWidth: number;
@@ -117,6 +117,21 @@ export interface PaneBounds { readonly top: number; readonly height: number }
 
 type RowKey = "panel" | "price";
 
+function addButton(): HTMLButtonElement {
+  const button = el("button", ADD_BUTTON);
+  button.type = "button";
+  button.dataset.chartControl = "";
+  button.dataset.indicatorAdd = "";
+  button.title = "지표·비교 종목 더하기";
+  button.setAttribute("aria-label", "지표 더하기");
+  button.setAttribute("aria-haspopup", "dialog");
+  const icon = el("span", "legend-add-icon");
+  icon.innerHTML = iconMarkup("plus", 12);
+  icon.setAttribute("aria-hidden", "true");
+  button.append(icon, el("span", "", ADD_LABEL));
+  return button;
+}
+
 function foldButton(): HTMLButtonElement {
   const button = el("button", FOLD_BUTTON);
   button.type = "button";
@@ -129,6 +144,7 @@ function foldButton(): HTMLButtonElement {
 
 export class IndicatorLegend {
   readonly priceBox = el("div", "relative flex flex-col gap-px");
+  readonly addBox = addButton();
   private readonly rowsBox = el("div", ROWS_BOX);
   private readonly fold = foldButton();
   private readonly rows = new Map<string, RowEls>();
@@ -164,9 +180,11 @@ export class IndicatorLegend {
 
   constructor(
     private readonly overlay: HTMLElement,
-    private readonly onCommand: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void,
+    private readonly onCommand: (id: string, command: IndicatorCommand, anchor: HTMLElement, field?: string) => void,
     private readonly onFoldChange: () => void = () => {},
+    onAdd: (anchor: HTMLElement) => void = () => {},
   ) {
+    this.addBox.addEventListener("click", () => onAdd(this.addBox));
     this.priceBox.dataset.indicatorFoldBox = "";
     this.rowsBox.dataset.indicatorFoldPanel = "";
     this.priceBox.append(this.fold, this.rowsBox);
@@ -243,16 +261,6 @@ export class IndicatorLegend {
             r.lastMaxWidth = maxWidth;
             r.root.style.maxWidth = maxWidth;
           }
-        }
-        const upDisabled = row.panel.index === 0;
-        if (r.lastUpDisabled !== upDisabled) {
-          r.lastUpDisabled = upDisabled;
-          r.up.disabled = upDisabled;
-        }
-        const downDisabled = row.panel.index === row.panel.count - 1;
-        if (r.lastDownDisabled !== downDisabled) {
-          r.lastDownDisabled = downDisabled;
-          r.down.disabled = downDisabled;
         }
         if (panes !== null) {
           const pane = panes[row.panel.index + 1];
@@ -390,6 +398,10 @@ export class IndicatorLegend {
     return { root, fields };
   }
 
+  addProjection(): LegendProjection {
+    return { root: addButton(), fields: [] };
+  }
+
   invalidatePanelLayout(): void {
     for (const r of this.rows.values()) r.lastPaneTop = null;
   }
@@ -401,6 +413,7 @@ export class IndicatorLegend {
     this.rows.clear();
     this.unsubscribePinned();
     this.priceBox.remove();
+    this.addBox.remove();
   }
 
   private place(r: RowEls, key: RowKey): void {
@@ -421,7 +434,6 @@ export class IndicatorLegend {
     r.lastMaxWidth = "";
     r.lastLeft = "";
     r.lastTop = "";
-    for (const button of [r.collapse, r.up, r.down]) button.hidden = !panel;
     labelButton(r.remove, panel ? "패널 닫기" : "지우기");
     r.labelsDirty = true;
   }
@@ -440,6 +452,9 @@ export class IndicatorLegend {
     name.type = "button";
     name.dataset.chartControl = "";
     name.dataset.indicatorEdit = id;
+    const tokens = el("span", "indicator-tokens");
+    tokens.dataset.indicatorTokens = "";
+    tokens.hidden = true;
     const values = el("span", "flex gap-1.5 font-medium");
     values.dataset.indicatorValues = "";
     const badge = el("span", "rounded-[9px] border border-line px-1.5 text-xs text-text-3");
@@ -461,20 +476,16 @@ export class IndicatorLegend {
       b.dataset.fade = "";
       labelButton(b, label);
       b.dataset.indicatorCommand = command;
-      if (command === "edit") b.dataset.indicatorEdit = id;
       if (interactive) b.addEventListener("click", () => this.onCommand(id, command, b));
       tools.append(b);
       return b;
     };
-    const collapse = button("down", "패널 접기", "collapse");
-    const up = button("up", "패널 위로", "up");
-    const down = button("down", "패널 아래로", "down");
-    const split = button("split", "새 패널로 분리", "split");
-    split.hidden = true;
-    const edit = button("gear", "설정", "edit");
+    const collapse = button("up", "패널 펼치기", "collapse");
+    collapse.hidden = true;
+    delete collapse.dataset.fade;
     const toggle = button("eye", "숨기기", "toggle");
     const remove = button("close", "지우기", "remove");
-    const commandButtons = [axis, collapse, up, down, split, edit, toggle, remove] as const;
+    const commandButtons = [axis, collapse, toggle, remove] as const;
     const detail = el("details", "relative min-w-0 text-text-2");
     const summary = el("summary", "max-w-[18ch] cursor-pointer truncate text-xs max-md:max-w-[10ch]", "자료·갱신");
     summary.dataset.chartControl = "";
@@ -495,21 +506,25 @@ export class IndicatorLegend {
     const text = el("dl", "financial-detail-rows text-xs");
     box.append(select, text);
     detail.append(summary, box);
-    root.append(grip, swatch, name, detail, values, badge, axis, tools);
+    root.append(grip, swatch, name, tokens, detail, values, badge, axis, tools);
     const row: RowEls = {
-      root, grip, swatch, name, collapse, values, badge, axis, split, toggle, remove, up, down,
+      root, grip, swatch, name, tokens, collapse, values, badge, axis, toggle, remove,
       commandButtons,
-      measureButtons: [name, axis, collapse, up, down, split, edit, toggle, remove],
+      measureButtons: [name, axis, collapse, toggle, remove],
       valueSpans: [],
       key: null, detail, summary, text, select, reports: null, currentRows: [], shownRows: null, dispose: () => {},
-      lastName: "", lastColor: "", lastState: null, lastCollapsed: null, lastHasDetail: null,
+      lastName: "", lastTokens: "", lastColor: "", lastState: null, lastCollapsed: null, lastHasDetail: null,
       lastDetailStatus: "", lastDetailSummary: "", lastBadge: "",
       lastDraggable: null, lastMemberCount: 1, lastSlotIndex: 0, lastAxisSlot: null, lastAxisExplicit: null, lastPanelId: "",
-      lastMaxWidth: "", lastLeft: "", lastUpDisabled: false, lastDownDisabled: false,
+      lastMaxWidth: "", lastLeft: "",
       lastPaneTop: null, lastPaneHeight: null, lastLeftAxisWidth: -1, lastTop: "", lastPanelLayoutKey: "", labelsDirty: true,
     };
     if (interactive) {
       name.addEventListener("click", () => this.onCommand(id, row.lastCollapsed === true ? "collapse" : "edit", name));
+      tokens.addEventListener("click", (event) => {
+        const token = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-indicator-token]") : null;
+        if (token) this.onCommand(id, row.lastCollapsed === true ? "collapse" : "edit", name, token.dataset.indicatorToken);
+      });
       root.addEventListener("click", (event) => {
         if (row.lastCollapsed === true && !event.composedPath().some((target) => target instanceof Element && target.matches("button,summary"))) {
           this.onCommand(id, "collapse", root);
@@ -531,10 +546,26 @@ export class IndicatorLegend {
     const collapsedChanged = r.lastCollapsed !== collapsed;
     const stateChanged = r.lastState !== row.state;
 
-    if (nameChanged) {
+    const tokens = row.tokens ?? [];
+    const tokenKey = tokens.map((token) => `${token.key}=${token.text}`).join(" ");
+    if (nameChanged || r.lastTokens !== tokenKey) {
       r.lastName = row.name;
-      r.name.textContent = row.name;
+      r.lastTokens = tokenKey;
+      const suffix = tokens.map((token) => token.text).join(" ");
+      const head = tokens.length > 0 && row.name.endsWith(` ${suffix}`) ? `${row.name.slice(0, row.name.length - suffix.length - 1)} ` : row.name;
+      r.name.textContent = head;
       r.name.title = row.name;
+      r.tokens.hidden = head === row.name;
+      const buttons = r.tokens.hidden ? [] : tokens.flatMap((token, i) => {
+        const b = el("button", TOKEN, token.text);
+        b.type = "button";
+        b.dataset.chartControl = "";
+        b.dataset.indicatorToken = token.key;
+        b.title = "눌러서 바꾸기";
+        b.setAttribute("aria-label", `${row.name} ${token.text} 바꾸기`);
+        return i === 0 ? [b] : [" ", b];
+      });
+      r.tokens.replaceChildren(...buttons);
       r.labelsDirty = true;
     }
 
@@ -566,12 +597,8 @@ export class IndicatorLegend {
 
     if (collapsedChanged) {
       r.lastCollapsed = collapsed;
-      labelButton(r.collapse, collapsed ? "패널 펼치기" : "패널 접기");
+      r.collapse.hidden = !collapsed;
       r.collapse.setAttribute("aria-expanded", String(!collapsed));
-      const collapseIcon = collapsed ? "up" : "down";
-      if (r.collapse.dataset.icon !== collapseIcon) { r.collapse.innerHTML = iconMarkup(collapseIcon); r.collapse.dataset.icon = collapseIcon; }
-      if (collapsed) delete r.collapse.dataset.fade;
-      else r.collapse.dataset.fade = "";
       r.root.classList.toggle("indicator-collapsed", collapsed);
       if (interactive && collapsed) r.root.dataset.chartControl = "";
       else delete r.root.dataset.chartControl;
@@ -601,9 +628,9 @@ export class IndicatorLegend {
     const memberCount = row.panel?.memberCount ?? 1;
     const slotIndex = row.panel?.slotIndex ?? 0;
     const panelId = row.panel?.panelId ?? "";
+    const merged = row.panel !== null && memberCount >= 2;
     const axisSlot = row.panel?.axisSlot ?? "right";
     const axisExplicit = row.panel?.axisExplicit === true;
-    const merged = row.panel !== null && memberCount >= 2;
 
     if (r.lastDraggable !== draggable) {
       r.lastDraggable = draggable;
@@ -621,27 +648,21 @@ export class IndicatorLegend {
     if (r.lastMemberCount !== memberCount || r.lastSlotIndex !== slotIndex) {
       r.lastMemberCount = memberCount;
       r.lastSlotIndex = slotIndex;
-      const showPanelControls = row.panel !== null && slotIndex === 0;
-      for (const button of [r.collapse, r.up, r.down]) button.hidden = !showPanelControls;
-      r.split.hidden = !(merged || (row.panel === null && draggable));
       r.axis.hidden = !merged;
       labelButton(r.remove, row.panel !== null && !merged ? "패널 닫기" : "지우기");
       r.labelsDirty = true;
     } else if (row.panel === null) {
-      r.split.hidden = !draggable;
       r.axis.hidden = true;
     }
 
     if (r.lastAxisSlot !== axisSlot || r.lastAxisExplicit !== axisExplicit) {
       r.lastAxisSlot = axisSlot;
       r.lastAxisExplicit = axisExplicit;
-      const slotText = axisSlotLabel(axisSlot);
-      r.axis.textContent = slotText;
+      r.axis.textContent = axisSlotLabel(axisSlot);
       r.axis.dataset.axisSlot = axisSlot;
       if (axisExplicit) r.axis.dataset.axisExplicit = "true";
       else delete r.axis.dataset.axisExplicit;
-      const axisTitle = axisSlot === "right" ? "우측 Y축 (클릭하여 전환)" : axisSlot === "left" ? "좌측 Y축 (클릭하여 전환)" : "독립 스케일 (클릭하여 전환)";
-      labelButton(r.axis, axisTitle);
+      labelButton(r.axis, axisSlot === "right" ? "우측 Y축 (클릭하여 전환)" : axisSlot === "left" ? "좌측 Y축 (클릭하여 전환)" : "독립 스케일 (클릭하여 전환)");
       r.labelsDirty = true;
     }
 

@@ -1,16 +1,14 @@
 import type { Page } from "@playwright/test";
 import { expect } from "./harness";
 
-export type SettingsMenu = "봉 · 축" | "범례 · 표시" | "격자 · 구분선" | "창 · 동작" | "봉·축" | "표시" | "지표 창";
+export type SettingsMenu = "봉 · 축" | "범례 · 표시" | "격자 · 구분선" | "봉·축" | "표시";
 
-const MENU_ALIAS: Record<SettingsMenu, "봉 · 축" | "범례 · 표시" | "격자 · 구분선" | "창 · 동작"> = {
+const MENU_ALIAS: Record<SettingsMenu, "봉 · 축" | "범례 · 표시" | "격자 · 구분선"> = {
   "봉 · 축": "봉 · 축",
   "범례 · 표시": "범례 · 표시",
   "격자 · 구분선": "격자 · 구분선",
-  "창 · 동작": "창 · 동작",
   "봉·축": "봉 · 축",
   "표시": "범례 · 표시",
-  "지표 창": "창 · 동작",
 };
 
 export async function chooseSettingsMenu(page: Page, menu: SettingsMenu) {

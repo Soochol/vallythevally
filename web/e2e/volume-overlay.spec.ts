@@ -3,7 +3,6 @@ import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 const VOLUME = { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p-volume", visible: true, style: { colors: ["ind-1"], width: 1 } };
 const RSI = { id: "rsi", spec: { kind: "rsi", period: 14, signal: null }, panel: "p-rsi", visible: true, style: { colors: ["ind-2"], width: 1 } };
@@ -35,7 +34,6 @@ function volumeBars(page: Page) {
 }
 
 async function open(page: Page, scenario: Scenario, indicators: object[] = [VOLUME], panels: object[] = [{ id: "p-volume", stretch: 0.25 }]) {
-  useCenterIndicatorWindow(scenario);
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators, panels };
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", period: "D", chartSettings }) });
@@ -129,7 +127,7 @@ test("막대 불투명도는 막대 색의 알파로 저장·복원된다", asyn
   await expect.poll(() => volumeBars(page).then((bars) => bars?.alphas)).toEqual([0.8]);
 });
 
-test("범례 팝오버에서 겹치기를 켠 뒤 Esc는 별도 패널로 되돌린다", async ({ page, scenario }) => {
+test("범례 팝오버에서 겹치기를 켠 뒤 처음 값으로는 별도 패널로 되돌린다", async ({ page, scenario }) => {
   await open(page, scenario);
   await openPopover(page);
   await overlaySwitch(page).click();
@@ -137,9 +135,10 @@ test("범례 팝오버에서 겹치기를 켠 뒤 Esc는 별도 패널로 되돌
   await opacitySlider(page).focus();
   await page.keyboard.press("ArrowLeft");
   await pollSaved(() => savedVolume(scenario)?.style.barOpacity).toBe(0.37);
+  await popover(page).getByRole("button", { name: "처음 값으로", exact: true }).click();
+  await expect.poll(() => paneCount(page)).toBe(2);
   await page.keyboard.press("Escape");
   await expect(popover(page)).toHaveCount(0);
-  await expect.poll(() => paneCount(page)).toBe(2);
   await expect.poll(() => volumeBars(page).then((bars) => ({ pane: bars?.pane, alphas: bars?.alphas }))).toEqual({ pane: 1, alphas: [0.38] });
   await pollSaved(() => savedVolume(scenario)?.panel).toBe("p-volume");
   expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.25 }]);
@@ -147,7 +146,7 @@ test("범례 팝오버에서 겹치기를 켠 뒤 Esc는 별도 패널로 되돌
   await expect(row(page, "volume").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
 
-test("겹치기를 켰다 끈 뒤 Esc는 열 때의 패널 순서와 높이로 되돌린다", async ({ page, scenario }) => {
+test("겹치기를 켰다 끈 뒤 처음 값으로는 열 때의 패널 순서와 높이로 되돌린다", async ({ page, scenario }) => {
   const panels = [{ id: "p-rsi", stretch: 0.4 }, { id: "p-volume", stretch: 0.3 }];
   await open(page, scenario, [RSI, VOLUME], panels);
   await openPopover(page);
@@ -155,45 +154,30 @@ test("겹치기를 켰다 끈 뒤 Esc는 열 때의 패널 순서와 높이로 �
   await pollSaved(() => savedVolume(scenario)?.panel).toBe("price");
   await overlaySwitch(page).click();
   await pollSaved(() => saved(scenario).panels.map((p) => p.stretch)).toEqual([0.25, 0.4]);
+  await popover(page).getByRole("button", { name: "처음 값으로", exact: true }).click();
+  await pollSaved(() => saved(scenario).panels).toEqual(panels);
   await page.keyboard.press("Escape");
   await expect(popover(page)).toHaveCount(0);
-  await pollSaved(() => saved(scenario).panels).toEqual(panels);
   expect(savedVolume(scenario)?.panel).toBe("p-volume");
   await expect(row(page, "volume").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
 
-test("차트 옆 지표 창에서 겹치기를 건드리지 않고 Esc를 누르면 그사이 옮긴 다른 패널 순서를 지킨다", async ({ page, scenario }) => {
-  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
-  await open(page, scenario, [RSI, VOLUME], [{ id: "p-rsi", stretch: 0.4 }, { id: "p-volume", stretch: 0.3 }]);
-  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "지표", exact: true }).click();
-  const inspector = page.getByRole("region", { name: "지표", exact: true });
-  await inspector.getByRole("button", { name: "거래량 설정", exact: true }).click();
-  const slider = inspector.getByRole("slider", { name: "막대 불투명도", exact: true });
-  await expect(slider).toBeVisible();
-  await row(page, "rsi").getByRole("button", { name: "RSI 14 패널 아래로" }).dispatchEvent("click");
-  await pollSaved(() => saved(scenario).panels.map((p) => p.id)).toEqual(["p-volume", "p-rsi"]);
-  await slider.focus();
-  await page.keyboard.press("Escape");
-  await expect(slider).toHaveCount(0);
-  await row(page, "rsi").getByRole("button", { name: "RSI 14 숨기기" }).dispatchEvent("click");
-  await pollSaved(() => saved(scenario).indicators.find((i) => i.id === "rsi")?.visible).toBe(false);
-  expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.3 }, { id: "p-rsi", stretch: 0.4 }]);
-});
-
-test("지표 창에서 겹치기를 켜고 더한 거래량은 가격 패널에 겹쳐 더해진다", async ({ page, scenario }) => {
+test("하나 더로 넣은 거래량은 말풍선에서 겹치기를 켜면 가격 패널로 옮겨진다", async ({ page, scenario }) => {
   await open(page, scenario);
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
+  const dialog = page.getByRole("dialog", { name: "지표 더하기" });
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("거래량");
-  const toggle = dialog.getByRole("switch", { name: "가격 패널에 겹치기", exact: true });
-  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await dialog.getByRole("button", { name: "거래량 하나 더", exact: true }).click();
   await expect.poll(() => paneCount(page)).toBe(3);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await cell(page).locator("[data-indicator-row]", { hasText: "거래량" }).last().locator("[data-indicator-edit]").click();
+  const toggle = page.getByRole("dialog", { name: "거래량 설정", exact: true }).getByRole("switch", { name: "가격 패널에 겹치기", exact: true });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
   await toggle.click();
   await expect.poll(() => paneCount(page)).toBe(2);
-  await dialog.getByRole("button", { name: "거래량 추가", exact: true }).click();
   await pollSaved(() => saved(scenario).indicators.map((i) => [i.spec.kind, i.panel])).toEqual([["volume", "p-volume"], ["volume", "price"]]);
   expect(saved(scenario).panels).toEqual([{ id: "p-volume", stretch: 0.25 }]);
-  expect(await paneCount(page)).toBe(2);
 });
 
 test("1024×768 창에서 범례 팝오버의 두 조작이 창 안에 있다", async ({ page, scenario }) => {

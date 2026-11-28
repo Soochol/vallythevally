@@ -1,7 +1,6 @@
 import { beforeEach, expect, test } from "vitest";
 import { DEFAULT_CHART_SETTINGS } from "../chart/settings";
 import { detachWindow, moveFloat } from "../layout/dock/floats";
-import { useSelectionStore } from "./selection";
 import { useUiStore } from "./ui";
 import { orderEntryKey, type OrderEntry } from "../features/order/orderEntries";
 import { DEFAULT_UI_PREFS } from "../persist/uiState";
@@ -458,14 +457,6 @@ test("창이 상한 50개이면 새 창과 복제는 아무것도 바꾸지 않�
   state().showWindow("trades");
   expect(state().layout.windows).toHaveLength(MAX_WINDOWS);
   expect(shownTab("trades")).toBe(true);
-});
-
-test("창이 상한 50개라 지표 창을 더하지 못하면 인스펙터 요청을 남기지 않고 가운데 창으로 연다", () => {
-  fillWithTrades();
-  useSelectionStore.getState().openIndicatorInspector(firstChart().id, "add", null);
-  expect(state().layout.windows.some((w) => w.kind === "indicators")).toBe(false);
-  expect(useSelectionStore.getState().inspector).toBeNull();
-  expect(useSelectionStore.getState().dialog).toMatchObject({ kind: "indicatorCommand", cellId: firstChart().id, mode: "add" });
 });
 
 test("같은 종류 창 더하기는 kind-2 id로 둘째 창을 만들고 그 탭을 고른다", () => {

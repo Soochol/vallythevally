@@ -6,7 +6,6 @@ import { installChartProbe } from "./chart-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 import { chooseSettingsMenu, openChartSettings } from "./chart-settings-menu";
-import { useCenterIndicatorWindow } from "./indicator-window";
 const KST = 32_400;
 const BARS_PER_DAY = 40;
 const DAYS = ["2026-11-04", "2026-11-05", "2026-11-06"];
@@ -149,15 +148,13 @@ test("새로고침 뒤에도 날짜 구분선 스위치가 켜져 있고 구분�
 });
 
 test("지표 패널을 더하면 새 패널에도 날짜 구분선을 긋는다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   openMinute(scenario, { showDaySeparators: true });
   await open(page);
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
+  const dialog = page.getByRole("dialog", { name: "지표 더하기", exact: true });
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("RSI");
-  await dialog.getByRole("option", { name: "RSI 14 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "RSI 14 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "RSI", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(page.locator("[data-indicator-row]").filter({ hasText: "RSI 14" }).last()).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.chartProbe.chart.panes().length)).toBe(3);
   await expectSeparatorsOnEveryPane(page, 3);
@@ -169,7 +166,7 @@ test("1024x768에서 날짜 구분선 스위치를 포함한 차트 설정 창�
   await open(page);
   await setSwitch(page, true);
   await expect(daySwitch(page)).toHaveAttribute("title", "분봉에서 날짜가 바뀌는 자리에 세로선");
-  for (const menu of ["봉·축", "표시", "지표 창"] as const) {
+  for (const menu of ["봉·축", "표시", "격자 · 구분선"] as const) {
     await chooseSettingsMenu(page, menu);
     for (const control of await popover(page).locator("button, input").all()) {
       const box = (await control.boundingBox())!;

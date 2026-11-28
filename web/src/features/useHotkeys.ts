@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { matchHotkey } from "../lib/hotkeys";
 import { isTypingTarget } from "../lib/typingTarget";
 import { DESKTOP_QUERY } from "../lib/media";
-import { openIndicatorCommand } from "./indicator-command/open";
+import { openIndicatorAdd } from "./indicator-command/open";
 import { PERIODS } from "../lib/symbol";
 import { chartWindows, useLayoutStore } from "../stores/layout";
 import { useSelectionStore } from "../stores/selection";
@@ -49,7 +49,7 @@ export function useHotkeys(enabled: boolean) {
       if (!cell) return;
       switch (action.kind) {
         case "indicators":
-          return openIndicatorCommand(cellId);
+          return openIndicatorAdd(cellId);
         case "showWatchlist":
           return layout.showWindow("watchlist");
         case "period":

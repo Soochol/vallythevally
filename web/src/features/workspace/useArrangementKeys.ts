@@ -8,6 +8,7 @@ import { useSelectionStore } from "../../stores/selection";
 import { useAccountStore } from "../../stores/account";
 import { ownsChartKeyboard } from "../overlay/topLayer";
 import { wizardVisible, useWizardStore } from "../setup-wizard/wizardOpen";
+import { undoChartSettings } from "../indicator-command/settingsHistory";
 import { focusTab } from "./dockInteraction";
 
 export type ArrangementKeyCommand = "undo" | "redo";
@@ -53,6 +54,7 @@ export function useArrangementKeys(enabled: boolean) {
       const command = arrangementKeyCommand(e, sceneOf(e));
       if (!command) return;
       e.preventDefault();
+      if (undoChartSettings({ kind: "workspace" }, command === "redo")) return;
       const layout = useLayoutStore.getState();
       const focused = focusedTab();
       const available = command === "undo" ? layout.steps.length > 0 : layout.redos.length > 0;

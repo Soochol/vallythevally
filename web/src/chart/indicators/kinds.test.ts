@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { colorsFrom, firstUnusedColor, isFinancial, isFlow, isForeignFlow, isInstitutionFlow, isInvestorFlow, isMicro, isProgramFlow, isQuote, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName } from "./kinds";
+import { colorsFrom, firstUnusedColor, isFinancial, isFlow, isForeignFlow, isInstitutionFlow, isInvestorFlow, isMicro, isProgramFlow, isQuote, isQuoteDepth, isQuoteTotals, isTechnical, isTickCvd, KIND_ORDER, KINDS, lineColor, colorLine, placementsOf, shownColor, specLines, specName, nameParts } from "./kinds";
 
 test("기본값은 backend.md §9.5 표를 따른다", () => {
   expect(KIND_ORDER.map((k) => KINDS[k].defaults)).toEqual([
@@ -121,4 +121,13 @@ test("계층별 CVD와 프로그램 수급은 아래 패널의 미세 수급 지
   expect(specLines({ ...inst, displayMode: "both" })).toEqual(["flowBar", "flowCum"]);
   expect([isInvestorFlow(foreign), isForeignFlow(foreign), isInstitutionFlow(foreign), isFlow(foreign), isTechnical(foreign), isMicro(foreign)]).toEqual([true, true, false, true, false, false]);
   expect([isInvestorFlow(inst), isInstitutionFlow(inst), isForeignFlow(inst), isFlow(inst), isTechnical(inst)]).toEqual([true, true, false, true, false]);
+});
+
+test("이름 끝의 숫자 설정값은 필드 순서의 토큰으로 나누고, 숫자로 끝나지 않는 이름은 그대로 둔다", () => {
+  expect(nameParts({ kind: "ma", method: "sma", period: 20 })).toEqual({ head: "이동평균 단순", tokens: [{ key: "period", text: "20" }] });
+  expect(nameParts({ kind: "bollinger", period: 20, k: 2 })).toEqual({ head: "볼린저 밴드", tokens: [{ key: "period", text: "20" }, { key: "k", text: "2" }] });
+  expect(nameParts({ kind: "rsi", period: 14, signal: null })).toEqual({ head: "RSI", tokens: [{ key: "period", text: "14" }] });
+  expect(nameParts({ kind: "rsi", period: 14, signal: 9 }).tokens.map((token) => token.key)).toEqual(["period", "signal"]);
+  expect(nameParts({ kind: "volume", maPeriod: 20 })).toEqual({ head: "거래량", tokens: [] });
+  expect(nameParts({ kind: "revenue" })).toEqual({ head: "매출액", tokens: [] });
 });

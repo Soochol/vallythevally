@@ -369,6 +369,30 @@ export function specName(spec: IndicatorSpec): string {
   return (kindInfo(spec.kind).name as (s: IndicatorSpec) => string)(spec);
 }
 
+export interface NameToken { readonly key: string; readonly text: string }
+export interface NameParts { readonly head: string; readonly tokens: readonly NameToken[] }
+
+const NAME_PARTS = new WeakMap<IndicatorSpec, NameParts>();
+
+export function nameParts(spec: IndicatorSpec): NameParts {
+  const known = NAME_PARTS.get(spec);
+  if (known) return known;
+  const name = specName(spec);
+  const values: Record<string, unknown> = { ...spec };
+  const tokens: NameToken[] = [];
+  for (const field of KINDS[spec.kind].fields) {
+    if (field.type !== "int" && field.type !== "float" && field.type !== "optionalInt") continue;
+    const value = values[field.key];
+    if (typeof value === "number") tokens.push({ key: field.key, text: String(value) });
+  }
+  const suffix = tokens.map((token) => token.text).join(" ");
+  const parts: NameParts = tokens.length > 0 && name.endsWith(` ${suffix}`)
+    ? { head: name.slice(0, name.length - suffix.length - 1), tokens }
+    : { head: name, tokens: [] };
+  NAME_PARTS.set(spec, parts);
+  return parts;
+}
+
 export function specLines(spec: IndicatorSpec): PlotLineId[] {
   return (kindInfo(spec.kind).lines as (s: IndicatorSpec) => PlotLineId[])(spec);
 }

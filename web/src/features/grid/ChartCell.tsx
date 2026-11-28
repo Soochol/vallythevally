@@ -14,7 +14,7 @@ import { shownVenue, venueLabel } from "../../lib/venue";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
-import { openIndicatorCommand, shownIndicatorWindow } from "../indicator-command/open";
+import { openIndicatorBubble, toggleChartSettings, toggleIndicatorAdd } from "../indicator-command/open";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { appliedThemeKey, DEFAULT_THEME_KEY, subscribeTheme } from "../../persist/theme";
 import { useVenue } from "../../stores/ui";
@@ -30,41 +30,28 @@ import { BeforeConnectCard } from "../status/BeforeConnectCard";
 import { useDrawingSurface } from "../../chart/drawings/useDrawingSurface";
 import { useAutoGuardLayer } from "../../chart/autoGuard/useAutoGuardLayer";
 import { useShownSettings } from "../indicator-command/preview";
-import { chartDockLayoutFor, ChartRightDock } from "../indicator-command/ChartRightDock";
 import { AxisMode } from "./AxisMode";
-import { IndicatorPopover } from "../indicator-dialog/IndicatorPopover";
-import type { IndicatorConfig } from "../../chart/settings";
 import { DrawingOverlay } from "../drawings/DrawingOverlay";
 import { useWindowVisible } from "../workspace/windowVisibility";
 import { attachController } from "./controllers";
 import type { WindowId } from "../../layout/kinds";
 
-function runIndicatorCommand(cellId: WindowId, id: string, command: IndicatorCommand): void {
+function runIndicatorCommand(cellId: WindowId, id: string, command: Exclude<IndicatorCommand, "edit">): void {
   const store = useLayoutStore.getState();
   const cell = chartWindows(store.layout).find((c) => c.id === cellId);
   const config = cell?.chartSettings.indicators.find((i) => i.id === id);
   if (!cell || !config) return;
   switch (command) {
-    case "edit":
-      return;
     case "collapse":
       return store.togglePanel(cellId, config.panel);
     case "toggle":
       return store.updateIndicator(cellId, id, { visible: !config.visible });
     case "remove":
       return removeIndicatorWithUndo(cellId, config);
-    case "up":
-    case "down":
-      return store.movePanel(cellId, config.panel, command === "up" ? -1 : 1);
-    case "split": {
-      const panelIndex = config.panel === "price" ? -1 : cell.chartSettings.panels.findIndex((p) => p.id === config.panel);
-      return store.splitIndicatorToNewPanel(cellId, id, panelIndex < 0 ? 0 : panelIndex + 1);
-    }
     case "axis": {
       if (config.panel === "price") return;
-      const scales = resolvePanelScales(cell.chartSettings.indicators, config.panel);
-      const currentSlot = scales.get(id)?.slot ?? "right";
-      return store.setIndicatorAxis(cellId, id, nextIndicatorAxis(currentSlot));
+      const slot = resolvePanelScales(cell.chartSettings.indicators, config.panel).get(id)?.slot ?? "right";
+      return store.setIndicatorAxis(cellId, id, nextIndicatorAxis(slot));
     }
   }
 }
@@ -95,14 +82,11 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const pointerSnap = useChartPointerStore((s) => s.snap);
   const lastSnapSeq = useRef(0);
   const openSearch = useSelectionStore((s) => s.openSearch);
-  const cellDock = useSelectionStore((s) => (s.chartDock?.cellId === cellId ? s.chartDock : null));
   const windowVisible = useWindowVisible();
   const sectionEl = useRef<HTMLElement>(null);
   const chartEl = useRef<HTMLDivElement>(null);
   const badgeHostEl = useRef<HTMLDivElement>(null);
   const ctl = useRef<ChartController | null>(null);
-  const [cellWidth, setCellWidth] = useState(0);
-  const [editing, setEditing] = useState<{ initial: IndicatorConfig; anchor: HTMLElement } | null>(null);
   const [corner, setCorner] = useState({ width: 72, height: 28 });
   const [venueAnchor, setVenueAnchor] = useState<HTMLElement | null>(null);
   const onStatusRef = useRef(onStatus);
@@ -110,22 +94,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const cellIdRef = useRef(cellId);
   cellIdRef.current = cellId;
 
-  useEffect(() => {
-    const el = sectionEl.current;
-    if (!el) return;
-    const measure = () => setCellWidth(el.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const dockLayout = cellDock !== null ? chartDockLayoutFor(cellWidth) : null;
-  const chartInsetClass = dockLayout === "wide"
-    ? "absolute inset-y-0 left-0 right-[var(--size-320)]"
-    : dockLayout === "compact"
-      ? "absolute inset-y-0 left-0 right-[var(--size-268)]"
-      : "absolute inset-0";
+  const chartInsetClass = "absolute inset-0";
   const chartBoxClass = `isolate ${chartInsetClass}`;
   const badgeHostClass = `pointer-events-none ${chartInsetClass} ${status.kind === "ready" ? "z-[6]" : "z-[15]"}`;
 
@@ -135,17 +104,12 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       onStatus: (s) => onStatusRef.current(s),
       socket: marketSocket,
       badgeHost: badgeHostEl.current!,
-      onIndicatorCommand: (id, command, anchor) => {
+      onIndicatorCommand: (id, command, anchor, field) => {
         if (command !== "edit") return runIndicatorCommand(cellIdRef.current, id, command);
-        const selection = useSelectionStore.getState();
-        if (selection.chartDock?.cellId === cellIdRef.current) {
-          selection.openChartDock(cellIdRef.current, "current", id);
-          return;
-        }
-        if (shownIndicatorWindow() === "inspector") return openIndicatorCommand(cellIdRef.current, "current", id);
-        const initial = chartWindows(useLayoutStore.getState().layout).find((c) => c.id === cellIdRef.current)?.chartSettings.indicators.find((i) => i.id === id);
-        if (initial) setEditing((current) => current?.initial.id === id ? current : { initial, anchor });
+        openIndicatorBubble(cellIdRef.current, id, anchor, field ?? null);
       },
+      onIndicatorAdd: (anchor) => toggleIndicatorAdd(cellIdRef.current, anchor),
+      onChartSettings: (anchor) => toggleChartSettings(cellIdRef.current, anchor),
       onIndicatorMerge: (indicatorId, targetPanelId) => useLayoutStore.getState().mergeIndicatorIntoPanel(cellIdRef.current, indicatorId, targetPanelId),
       onIndicatorSplit: (indicatorId, insertAt) => useLayoutStore.getState().splitIndicatorToNewPanel(cellIdRef.current, indicatorId, insertAt),
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(cellIdRef.current, stretches),
@@ -233,6 +197,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   return (
     <section
       ref={sectionEl}
+      data-cell={cellId}
       tabIndex={0}
       aria-label={`칸 ${cellNumber}: ${[name, venueLabel(cell.symbol, venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
       aria-busy={status.kind === "loading"}
@@ -242,7 +207,6 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       {status.kind === "ready" && <AxisMode cellId={cellId} corner={corner} />}
       {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />
-      {editing && cell.chartSettings.indicators.some((i) => i.id === editing.initial.id) && <IndicatorPopover key={editing.initial.id} cellId={cellId} {...editing} editRoot={chartEl.current!} onClose={() => setEditing(null)} />}
       {status.kind === "loading" && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[15] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}
       {olderError && (
         <div
@@ -280,7 +244,6 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       )}
       <div ref={badgeHostEl} className={badgeHostClass} />
       {notice && <BeforeConnectCard notice={notice} />}
-      <ChartRightDock cellId={cellId} hostRef={sectionEl} />
     </section>
   );
 }
