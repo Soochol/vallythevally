@@ -5,7 +5,6 @@ import type { Locator } from "@playwright/test";
 import type { ScreenerResult } from "../src/api/generated/ScreenerResult";
 import { panel, rows, runButton, updateBand, waitForUpdateToFinish } from "./screener-page";
 import { barTimes, cell, chartOf, dragTowardPast, expect, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 test("초성으로 찾은 종목을 열고 과거로 끌면 과거 봉이 앞에 붙는다", async ({ page }) => {
   await page.goto("/");
@@ -112,8 +111,7 @@ test("Ctrl+Enter로 관심종목을 넣고 빼며 Shift+Enter는 비교에 추�
   await expect(cell(page)).toHaveAttribute("aria-label", before!);
 });
 
-test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
+test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ page }) => {
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.keyboard.press("/");
@@ -133,7 +131,7 @@ test("시장 필터와 > 명령 모드에서 명령을 실행한다", async ({ p
   await page.keyboard.press("/");
   await input.fill("> 지표");
   await input.press("Enter");
-  await expect(page.getByRole("dialog", { name: "지표·비교 입력창", exact: true })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "지표 더하기", exact: true })).toBeVisible();
 });
 
 test("일부 시세 누락·추세 실패에도 다른 종목과 명령을 계속 고른다", async ({ scenario, page }) => {

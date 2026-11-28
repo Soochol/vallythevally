@@ -3,6 +3,7 @@ import { type IndicatorConfig, placementOfConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
+import { forgetRemembered, rememberRemoved } from "../indicator-command/memory";
 
 export function restoreIndicator(cellId: WindowId, config: IndicatorConfig): IndicatorConfig | null {
   const layout = useLayoutStore.getState();
@@ -29,6 +30,7 @@ export function restoreIndicators(cellId: WindowId, configs: readonly IndicatorC
 }
 
 export function removeIndicatorWithUndo(cellId: WindowId, config: IndicatorConfig): void {
+  rememberRemoved(cellId, [config]);
   useLayoutStore.getState().removeIndicator(cellId, config.id);
   let used = false;
   useSelectionStore.getState().showToast(`${specName(config.spec)} 지표를 지웠습니다`, {
@@ -36,6 +38,7 @@ export function removeIndicatorWithUndo(cellId: WindowId, config: IndicatorConfi
     run: () => {
       if (used) return;
       used = true;
+      forgetRemembered(cellId, config.spec.kind);
       restoreIndicator(cellId, config);
     },
     subscribe: () => () => undefined,
@@ -49,6 +52,7 @@ export function removeIndicatorsWithUndo(cellId: WindowId, configs: readonly Ind
     return;
   }
   const snapshot = configs.map((config) => structuredClone(config));
+  rememberRemoved(cellId, snapshot);
   const store = useLayoutStore.getState();
   for (const config of snapshot) store.removeIndicator(cellId, config.id);
   let used = false;
@@ -57,6 +61,7 @@ export function removeIndicatorsWithUndo(cellId: WindowId, configs: readonly Ind
     run: () => {
       if (used) return;
       used = true;
+      for (const config of snapshot) forgetRemembered(cellId, config.spec.kind);
       restoreIndicators(cellId, snapshot);
     },
     subscribe: () => () => undefined,

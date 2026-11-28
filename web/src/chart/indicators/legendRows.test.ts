@@ -147,22 +147,34 @@ test("지표 범례 줄은 이름과 단추에만 title을 두고 줄 컨테이�
   expect(nameOf(panelRow)?.title).toBe(VOLUME_PANE.name);
 });
 
-test("비활성 패널 이동 화살표는 호버 없이 드러나지 않고, 접힌 패널의 펼치기 화살표만 유지한다", () => {
+test("범례 줄의 조작은 숨기기와 지우기 둘이고, 접힌 패널에서만 펼치기 화살표가 나온다", () => {
   const overlay = new FakeElement("div");
   const legend = new IndicatorLegend(overlay as unknown as HTMLElement, () => {});
   legend.render([VOLUME_PANE], [{ top: 0, height: 300 }, { top: 300, height: 100 }]);
   const panelRow = overlay.children[0]!;
   const tools = panelRow.children.find((child) => "indicatorTools" in child.dataset)!;
   const buttonOf = (cmd: string) => tools.children.find((child) => child.dataset.indicatorCommand === cmd)!;
-  for (const cmd of ["collapse", "up", "down"]) {
-    const button = buttonOf(cmd);
-    expect("fade" in button.dataset).toBe(true);
-    expect(button.className).not.toContain("disabled:opacity-40");
-  }
+  expect(tools.children.map((child) => child.dataset.indicatorCommand)).toEqual(["collapse", "toggle", "remove"]);
+  expect(buttonOf("collapse").hidden).toBe(true);
+  expect("fade" in buttonOf("toggle").dataset).toBe(true);
   legend.render([volume({ index: 0, count: 1, collapsed: true })], [{ top: 0, height: 300 }, { top: 300, height: 30 }]);
+  expect(buttonOf("collapse").hidden).toBe(false);
   expect("fade" in buttonOf("collapse").dataset).toBe(false);
-  expect("fade" in buttonOf("up").dataset).toBe(true);
-  expect("fade" in buttonOf("down").dataset).toBe(true);
+});
+
+test("이름 끝의 숫자 설정값은 눌러서 바꾸는 토큰으로 나누고 줄 글자는 그대로 읽힌다", () => {
+  const edits: (string | undefined)[] = [];
+  const overlay = new FakeElement("div");
+  const legend = new IndicatorLegend(overlay as unknown as HTMLElement, (_id, _command, _anchor, field) => edits.push(field));
+  const ma = { ...movingAverage(20), tokens: [{ key: "period", text: "20" }] };
+  legend.render([ma], []);
+  const row = (legend.priceBox.children[1] as unknown as FakeElement).children[0]!;
+  const name = row.children.find((child) => "indicatorEdit" in child.dataset)!;
+  const tokens = row.children.find((child) => "indicatorTokens" in child.dataset)!;
+  expect(name.textContent).toBe(ma.name.slice(0, -2));
+  expect(name.title).toBe(ma.name);
+  expect(tokens.hidden).toBe(false);
+  expect(tokens.children.map((child) => [child.dataset.indicatorToken, child.textContent])).toEqual([["period", "20"]]);
 });
 
 test("접힌 지표 버튼은 호버로 열리지 않고 1클릭으로 즉시 인라인 펼침과 접힘을 전환한다", () => {

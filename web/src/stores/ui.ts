@@ -10,7 +10,7 @@ import { actualKeys, type ActionKeys, type HotkeyOverrides } from "../lib/hotkey
 import { type BrokerPrefs, mergeBrokerPrefs } from "../features/brokers/prefs";
 import { type OrderEntries, type OrderEntry, orderEntryKey, withOrderEntry } from "../features/order/orderEntries";
 import type { OrderSettings } from "../features/order/orderSettings";
-import { DEFAULT_UI_PREFS, MAX_RECENT, type IndicatorWindow, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
+import { DEFAULT_UI_PREFS, MAX_RECENT, type Theme, type UiExtra, type UiPrefs } from "../persist/uiState";
 import { registerWindowReclaim } from "./windowReclaim";
 
 interface UiStore {
@@ -28,7 +28,6 @@ interface UiStore {
   moveWatchColumn(column: WatchColumn, step: -1 | 1): void;
   setDrawingPrefs(patch: Partial<DrawingPrefs>): void;
   setWatchGroupCollapsed(id: string, collapsed: boolean, known: readonly string[]): void;
-  setIndicatorWindow(mode: IndicatorWindow | null): void;
   setLayoutMode(mode: LayoutMode): void;
   setVenue(venue: Venue): void;
   setOrderSettings(settings: OrderSettings): void;
@@ -89,7 +88,6 @@ export const useUiStore = create<UiStore>()((set, get) => {
         return brokers === p.brokers ? p : { ...p, brokers };
       }),
     setVenue: (venue) => edit((p) => (p.venue === venue ? p : { ...p, venue })),
-    setIndicatorWindow: (indicatorWindow) => edit((p) => (p.indicatorWindow === indicatorWindow ? p : { ...p, indicatorWindow })),
     setDrawingPrefs: (patch) => edit((p) => ({ ...p, drawing: { ...p.drawing, ...patch } })),
     setWatchGroupCollapsed: (id, collapsed, known) =>
       edit((p) => {

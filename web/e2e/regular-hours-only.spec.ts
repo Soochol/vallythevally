@@ -126,7 +126,7 @@ test("분봉에서 정규장만 보기를 켜면 정규장 봉만 남기고 배�
   expect(barRequests.length).toBe(requestsBeforeToggle);
 });
 
-test("정규장만 보기 설정은 새로고침 뒤 유지되고 Esc 되돌리기와 기본값 복원이 동작한다", async ({ page, scenario }) => {
+test("정규장만 보기 설정은 새로고침 뒤 유지되고 Esc로 닫아도 남으며 기본값 복원이 동작한다", async ({ page, scenario }) => {
   scenario.reply(
     (url) => url.pathname === "/api/bars" && url.searchParams.get("symbol") === "005930" && url.searchParams.get("period") === "3m",
     { body: { symbol: "005930", venue: "combined", period: "3m", bars: FULL_DAY_BARS, current: null, nextBefore: null, seq: null } },
@@ -154,11 +154,13 @@ test("정규장만 보기 설정은 새로고침 뒤 유지되고 Esc 되돌리�
   await expect(chart).toHaveAttribute("data-bar-count", String(FULL_DAY_BARS.length));
   await page.keyboard.press("Escape");
   await expect(popover(page)).toBeHidden();
-  await expect(chart).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length));
-  await expect(regularBadge(page)).toBeVisible();
-  await pollSaved(() => saved(scenario).regularHoursOnly).toBe(true);
+  await expect(chart).toHaveAttribute("data-bar-count", String(FULL_DAY_BARS.length));
+  await expect(regularBadge(page)).toBeHidden();
+  await pollSaved(() => saved(scenario).regularHoursOnly).toBe(false);
 
   await openChartSettings(page, "봉 · 축");
+  await regularSwitch(page).click();
+  await expect(chart).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length));
   await popover(page).getByRole("button", { name: "기본값 복원", exact: true }).click();
   await expect(regularSwitch(page)).toHaveAttribute("aria-checked", "false");
   await expect(chart).toHaveAttribute("data-bar-count", String(FULL_DAY_BARS.length));

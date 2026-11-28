@@ -291,40 +291,32 @@ for (const mode of MODES) {
     expect(charts(scenario)).toHaveLength(8);
   });
 
-  test(`${mode}: 지표 버튼은 기존 창을 드러내고 활성 칸의 내용을 따른다`, async ({ page, scenario }) => {
+  test(`${mode}: 지표 창은 활성 칸의 더하기 목록을 보이고 칸을 바꾸면 따라간다`, async ({ page, scenario }) => {
     seed(scenario, 2, mode);
-    scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector" });
     await page.goto("/");
     await ready(page, 2);
-    await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-    const inspector = page.getByRole("region", { name: "지표", exact: true });
-    await expect(inspector).toBeVisible();
-    await inspector.getByRole("searchbox").fill("이평 9");
-    await inspector.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
-    await inspector.getByRole("searchbox").fill("");
+    await topbar(page).getByRole("button", { name: "창 더하기", exact: true }).click();
+    await page.getByRole("menu", { name: "창 더하기" }).getByRole("menuitem", { name: /^지표/ }).click();
+    const panel = page.getByRole("region", { name: "지표", exact: true });
+    await expect(panel).toBeVisible();
+    const movingAverage = panel.getByRole("option", { name: "이동평균", exact: true });
+    if (mode === "dock") await tab(page, "cell-0").click();
+    else await head(page, "cell-0").click({ position: { x: 60, y: 17 } });
+    await expect(movingAverage).toHaveAttribute("aria-selected", "false");
+    await panel.getByRole("combobox", { name: "지표·비교 찾기" }).fill("이평 9");
+    await panel.getByRole("combobox", { name: "지표·비교 찾기" }).press("Enter");
+    await expect(panel.getByRole("combobox", { name: "지표·비교 찾기" })).toHaveValue("");
     const fold = cell(page).locator("[data-indicator-fold]:visible");
     if (await fold.count()) await fold.first().click();
     await cell(page).locator("[data-indicator-row]").filter({ hasText: "이동평균 단순 9" }).hover();
     await expect(cell(page).getByRole("button", { name: "이동평균 단순 9 설정 열기", exact: true })).toBeVisible();
+    await expect(movingAverage).toHaveAttribute("aria-selected", "true");
     if (mode === "dock") await tab(page, "cell-1").click();
     else await head(page, "cell-1").click({ position: { x: 60, y: 17 } });
-    await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-    await expect(inspector.getByRole("button", { name: "이동평균 단순 9 설정", exact: true })).toHaveCount(0);
+    await expect(movingAverage).toHaveAttribute("aria-selected", "false");
     if (mode === "dock") await tab(page, "cell-0").click();
     else await head(page, "cell-0").click({ position: { x: 60, y: 17 } });
-    await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-    await expect(inspector.getByRole("button", { name: "이동평균 단순 9 설정", exact: true })).toBeVisible();
-    if (mode === "dock") {
-      await detach(page, "indicators");
-      await detach(page, "screener");
-      await pollSaved(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("screener");
-      await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-      await pollSaved(() => placement(scenario).dock?.floats.at(-1)?.window).toBe("indicators");
-    } else {
-      await head(page, "watchlist").click({ position: { x: 60, y: 17 } });
-      await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-      await pollSaved(() => placement(scenario).canvas?.order.at(-1)).toBe("indicators");
-    }
+    await expect(movingAverage).toHaveAttribute("aria-selected", "true");
   });
 
   test(`${mode}: 끄는 중 저장 실패에도 배치를 지키고 다시 시도로 마지막 배치를 저장한다`, async ({ page, scenario }) => {

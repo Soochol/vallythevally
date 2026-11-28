@@ -17,7 +17,8 @@ import { ChartCell } from "./features/grid/ChartCell";
 import { PeriodChips } from "./features/phone/PeriodChips";
 import { PhoneHeader } from "./features/phone/PhoneHeader";
 import { PhoneTabs } from "./features/phone/PhoneTabs";
-import { IndicatorCommand } from "./features/indicator-command/IndicatorCommand";
+import { ChartPopHost } from "./features/indicator-command/ChartPopHost";
+import { watchChartSettings } from "./features/indicator-command/settingsHistory";
 import { ScreenDialog } from "./features/screen-dialog/ScreenDialog";
 import { PhoneScreener } from "./features/screener/ScreenerPanel";
 import { Landing } from "./features/landing/Landing";
@@ -55,6 +56,7 @@ import { applyStoredTheme } from "./persist/theme";
 
 applyStoredTheme();
 applyStoredDensity();
+watchChartSettings();
 
 export function ChartRoute() {
   const page = pageOfPath(useLocation().pathname) ?? "workspace";
@@ -154,7 +156,7 @@ function ChartScreen({ page }: { page: PageId }) {
       <PhoneSaveBand />
       <SearchDialog />
       <HotkeySheet />
-      <IndicatorCommand />
+      <ChartPopHost />
       <ScreenDialog />
       <SystemSettingsDialog />
       <SetupChangedNotice />

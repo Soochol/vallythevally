@@ -5,7 +5,6 @@ import type { Bar } from "../src/api/generated/Bar";
 import type { DrawingInput } from "../src/api/generated/DrawingInput";
 import type { LayoutWindow } from "../src/api/generated/LayoutWindow";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 test.use({ clockStart: "20261109100000" });
 
@@ -268,7 +267,6 @@ test("한 묶음에 쌓인 차트 탭 가운데 고른 탭이 새로고침 뒤�
 });
 
 test("범례 지표 설정 팝오버는 처음 열 때와 창 크기가 바뀐 뒤에도 자기 줄 아래에 있어 그 줄의 숨기기를 누를 수 있다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], panels: [{ id: "p-rsi", stretch: 0.25 }], indicators: [
     { id: "ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } },

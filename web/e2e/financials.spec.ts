@@ -7,7 +7,6 @@ import type { Scenario } from "./fixtures/scenario";
 import { parseChartSettings, type ChartSettings } from "../src/chart/settings";
 import { installFrameProbe } from "./frame-probe";
 import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, SEARCH_BUTTON_TITLE, firstChart, withFirstChart, pickDesktopVenue, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 const METRICS = ["revenue", "operating_income", "owner_roe", "investing_cash_flow", "dps", "debt_ratio"] as const;
 const LABELS = ["매출액", "영업이익", "지배주주 ROE", "투자활동 현금흐름", "DPS", "부채비율"];
@@ -42,7 +41,6 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
   test.use({ ...(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : {}) });
 
   test("메뉴 6종 추가·Q/D/Y 숨김 복원·음수와 0·설정 재열기", async ({ page, scenario }, testInfo) => {
-  useCenterIndicatorWindow(scenario);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.addInitScript(installFrameProbe);
@@ -51,10 +49,10 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
     await page.getByRole("button", { name: /^지표/ }).first().click();
     const dialog = page.getByRole("dialog");
     for (const label of LABELS) {
-      await dialog.getByRole("option", { name: `${label} 추가 후보`, exact: true }).click();
-      await dialog.getByRole("button", { name: `${label} 추가`, exact: true }).click();
+      await dialog.getByRole("option", { name: `${label}`, exact: true }).click();
     }
-    await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.mouse.move(2, 2);
     await expect(page.locator("[data-indicator-row]")).toHaveCount(7);
     await expect(page.locator("[data-indicator-row]").filter({ hasText: "DPS" })).toContainText("연간 전용");
     await choosePeriod(page, phone, "일");
@@ -80,7 +78,11 @@ for (const phone of [false, true]) test.describe(phone ? "휴대폰 재무지표
       await choosePeriod(page, phone, "연");
     }
     const revenue = page.locator("[data-indicator-row]").filter({ hasText: /^매출액/ });
-    await revenue.getByRole("button", { name: /패널 아래로/ }).click({ force: true });
+    await revenue.locator("[data-indicator-edit]").click();
+    const place = page.getByRole("dialog", { name: "매출액 설정", exact: true });
+    await place.getByRole("button", { name: /자세히/ }).click();
+    await place.getByRole("button", { name: "아래로", exact: true }).click();
+    await page.keyboard.press("Escape");
     await revenue.getByRole("button", { name: /숨기기/ }).click({ force: true });
     await pollSaved(async () => {
       const saved: Layout = await scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -248,21 +250,23 @@ test("서버에 재무자료가 없어도 가격과 기술지표를 사용하고
   await expect(row(page, "revenue")).toContainText("이 서버에 재무자료가 없습니다");
 });
 
-test("재무지표 미리보기 중에도 재무 수집 상태가 보이고 취소하면 사라진다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
+test("재무지표를 켜면 재무 수집 상태가 보이고 끄면 함께 사라진다", async ({ page, scenario }) => {
   await page.goto("/?symbol=005930&period=Q");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const status = page.getByLabel("재무 수집 상태");
-  const previewRow = page.locator("[data-indicator-row]").filter({ hasText: "매출액" });
+  const revenueRow = page.locator("[data-indicator-row]").filter({ hasText: "매출액" });
+  const kinds = () => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators.map((i) => i.spec.kind);
   await expect(status).toHaveCount(0);
   await page.getByRole("button", { name: /^지표/ }).first().click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
-  await dialog.getByRole("option", { name: "매출액 추가 후보", exact: true }).click();
-  await expect(previewRow).toHaveCount(1);
+  const dialog = page.getByRole("dialog", { name: "지표 더하기" });
+  const revenue = dialog.getByRole("option", { name: "매출액", exact: true });
+  await revenue.click();
+  await expect(revenueRow).toHaveCount(1);
   await expect(status).toBeVisible();
-  expect(parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators.map((i) => i.spec.kind)).not.toContain("revenue");
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(previewRow).toHaveCount(0);
+  await pollSaved(kinds).toContain("revenue");
+  await revenue.click();
+  await expect(revenueRow).toHaveCount(0);
   await expect(status).toHaveCount(0);
+  await pollSaved(kinds).not.toContain("revenue");
+  await expect(dialog).toBeVisible();
 });

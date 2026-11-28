@@ -5,20 +5,16 @@ import { financialValue } from "../src/chart/financials";
 import { financialTest } from "./financial-update-helpers";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
-import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, pollSaved, test, withFirstChart } from "./harness";
+import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, withFirstChart } from "./harness";
 import { selectOption } from "./select-option";
 
 const toolbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
 const settingsButton = (page: Page) => toolbar(page).getByRole("button", { name: "차트 설정", exact: true });
 const settingsPopover = (page: Page) => page.getByRole("dialog", { name: "차트 설정", exact: true });
 const indicatorButton = (page: Page) => toolbar(page).getByRole("button", { name: "지표", exact: true });
-const commandDialog = (page: Page) => page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
-const inspector = (page: Page) => page.getByRole("region", { name: "지표", exact: true });
+const commandDialog = (page: Page) => page.getByRole("dialog", { name: "지표 더하기", exact: true });
 const colorWindow = (page: Page) => page.getByRole("dialog", { name: "선 색", exact: true });
 const legendRow = (page: Page, id: string) => cell(page).locator(`[data-indicator-row="${id}"]`);
-
-const saveIndicatorWindow = (scenario: Scenario, indicatorWindow: "dialog" | "inspector" | null) =>
-  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow });
 
 function seedMovingAverage(scenario: Scenario) {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -38,19 +34,17 @@ async function open(page: Page, size: { width: number; height: number }) {
 
 const mainSeriesTypes = (page: Page) => page.evaluate(() => window.frameProbe.snapshot().filter((series) => series.data.length > 100).map((series) => series.type));
 
-test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 폭이 760px 이하이다", async ({ page }) => {
+test("1280x600에서 차트 설정 창은 단추 아래에 화면 안으로 다 들어오고 폭이 340px 이하이다", async ({ page }) => {
   await open(page, { width: 1280, height: 600 });
   await settingsButton(page).click();
   await expect(settingsPopover(page)).toBeVisible();
   const popover = (await settingsPopover(page).boundingBox())!;
-  expect(popover.width).toBeLessThanOrEqual(760);
+  const button = (await settingsButton(page).boundingBox())!;
+  expect(popover.width).toBeLessThanOrEqual(340);
   expect(popover.x).toBeGreaterThanOrEqual(0);
   expect(popover.x + popover.width).toBeLessThanOrEqual(1280);
-  expect(popover.y).toBeGreaterThanOrEqual(0);
+  expect(popover.y).toBeGreaterThanOrEqual(button.y + button.height);
   expect(popover.y + popover.height).toBeLessThanOrEqual(600);
-  expect(Math.abs(popover.x + popover.width / 2 - 1280 / 2)).toBeLessThanOrEqual(2);
-  expect(Math.abs(popover.y + popover.height / 2 - 600 / 2)).toBeLessThanOrEqual(2);
-  await expect(settingsPopover(page).locator("xpath=..")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
   for (const groupName of ["봉 모양", "가격 축"] as const) {
     const group = settingsPopover(page).getByRole("group", { name: groupName, exact: true });
     const selected = group.locator("[aria-pressed=true]");
@@ -62,22 +56,20 @@ test("1280x600에서 차트 설정 창은 화면 가운데에 다 들어오고 �
     await expect(selected).toHaveCSS("border-bottom-width", "2px");
     await expect(selected).toHaveCSS("border-bottom-color", "rgb(243, 241, 236)");
   }
-  await settingsPopover(page).getByRole("tab", { name: "창 · 동작", exact: true }).click();
-  await expect(settingsPopover(page).getByRole("region", { name: "창 · 동작", exact: true })).toBeInViewport();
+  await settingsPopover(page).getByRole("tab", { name: "격자 · 구분선", exact: true }).click();
+  await expect(settingsPopover(page).getByRole("region", { name: "격자 · 구분선", exact: true })).toBeInViewport();
 });
 
-test("800px에서 연 차트 설정 창도 화면 가운데에서 열리고 너비가 바뀌어도 가운데를 유지한다", async ({ page }) => {
-  await open(page, { width: 800, height: 900 });
+test("차트 설정 창은 창 너비가 바뀌어도 단추 아래에서 화면 안에 머문다", async ({ page }) => {
+  await open(page, { width: 1280, height: 900 });
   await settingsButton(page).click();
   await expect(settingsPopover(page)).toBeVisible();
-  const popover = (await settingsPopover(page).boundingBox())!;
-  expect(Math.abs(popover.x + popover.width / 2 - 800 / 2)).toBeLessThanOrEqual(2);
-  expect(Math.abs(popover.y + popover.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
-  await page.setViewportSize({ width: 900, height: 900 });
+  await page.setViewportSize({ width: 1000, height: 900 });
   await expect.poll(async () => {
     const box = (await settingsPopover(page).boundingBox())!;
-    return Math.abs(box.x + box.width / 2 - 900 / 2);
-  }).toBeLessThanOrEqual(2);
+    const button = (await settingsButton(page).boundingBox())!;
+    return box.x >= 0 && box.x + box.width <= 1000 && box.y >= button.y + button.height;
+  }).toBe(true);
 });
 
 test("봉 모양을 바꾸면 팝오버가 열린 채 차트에 바로 반영된다", async ({ page }) => {
@@ -94,52 +86,31 @@ test("봉 모양을 바꾸면 팝오버가 열린 채 차트에 바로 반영된
   await expect.poll(() => mainSeriesTypes(page)).not.toContain("Line");
 });
 
-test("1440px에서 저장된 선택이 없으면 지표 버튼이 차트 옆 지표 창을 열고 가운데 창을 고른 사용자는 가운데 창이 열린다", async ({ page, scenario }) => {
-  expect(scenario.documents.uiState()).not.toHaveProperty("indicatorWindow");
-  await open(page, { width: 1440, height: 900 });
-  await indicatorButton(page).click();
-  await expect(inspector(page)).toBeVisible();
-  await expect(commandDialog(page)).toHaveCount(0);
-
-  await settingsButton(page).click();
-  await settingsPopover(page).getByRole("tab", { name: "창 · 동작", exact: true }).click();
-  const windows = settingsPopover(page).getByRole("group", { name: "지표 창", exact: true });
-  await expect(windows.getByRole("button", { name: "차트 옆", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await windows.getByRole("button", { name: "가운데 창", exact: true }).click();
-  await pollSaved(() => scenario.documents.uiState().indicatorWindow).toBe("dialog");
-  await settingsPopover(page).getByRole("button", { name: "닫기", exact: true }).click();
-  await expect(settingsPopover(page)).toBeHidden();
-  await indicatorButton(page).click();
-  await expect(commandDialog(page)).toBeVisible();
-});
-
-test("가운데 지표 창은 폭이 760px 이하로 화면 가운데에 열리고 흐림 필터와 하단 적용 버튼이 없다", async ({ page, scenario }) => {
-  saveIndicatorWindow(scenario, "dialog");
-  await open(page, { width: 1440, height: 900 });
-  await indicatorButton(page).click();
-  const dialog = commandDialog(page);
-  await expect(dialog).toBeVisible();
-  const box = (await dialog.boundingBox())!;
-  expect(box.width).toBeLessThanOrEqual(760);
-  expect(Math.abs(box.x + box.width / 2 - 1440 / 2)).toBeLessThanOrEqual(2);
-  expect(Math.abs(box.y + box.height / 2 - 900 / 2)).toBeLessThanOrEqual(2);
-  expect(await dialog.evaluate((node) => getComputedStyle(node).backdropFilter)).toBe("none");
-  await expect(dialog.locator("xpath=..")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-  await expect(dialog.getByRole("button", { name: "거래량 설정", exact: true })).toBeVisible();
-  const footer = dialog.locator("footer");
-  await expect(footer.getByText("Tab", { exact: true })).toBeVisible();
-  await expect(footer.getByRole("button")).toHaveCount(0);
-  await expect(dialog.getByRole("tab", { name: "비교 종목", exact: true })).toHaveCount(0);
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
-  await toolbar(page).getByRole("button", { name: "비교", exact: true }).click();
-  const compareDialog = commandDialog(page);
-  const compareFooter = compareDialog.locator("footer");
-  await expect(compareFooter.getByText("Tab", { exact: true })).toHaveCount(0);
-  await expect(compareFooter.getByRole("button")).toHaveCount(0);
+test("지표 버튼은 화면 폭과 상관없이 같은 더하기 창을 단추 아래에 열고 흐림 필터와 적용 버튼이 없다", async ({ page }) => {
+  for (const width of [1440, 1000]) {
+    await open(page, { width, height: 900 });
+    await indicatorButton(page).click();
+    const dialog = commandDialog(page);
+    await expect(dialog).toBeVisible();
+    const box = (await dialog.boundingBox())!;
+    const button = (await indicatorButton(page).boundingBox())!;
+    expect(box.width).toBeLessThanOrEqual(340);
+    expect(box.y).toBeGreaterThanOrEqual(button.y + button.height);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(await dialog.evaluate((node) => getComputedStyle(node).backdropFilter)).toBe("none");
+    await expect(dialog.getByRole("option", { name: "거래량", exact: true })).toHaveAttribute("aria-selected", "true");
+    const footer = dialog.locator("footer");
+    await expect(footer.getByText("Enter", { exact: true })).toBeVisible();
+    await expect(footer.getByRole("button")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "종목 비교", exact: true }).click();
+    await expect(dialog.getByRole("listbox", { name: "비교 종목" })).toBeVisible();
+    await expect(footer.getByRole("button")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  }
 });
 
 test("범례에서 연 지표 팝오버는 높이가 360px 이하이고 색 더 보기를 누르면 색상표가 보인다", async ({ page, scenario }) => {
-  saveIndicatorWindow(scenario, "dialog");
   seedMovingAverage(scenario);
   await open(page, { width: 1440, height: 900 });
   await expect(legendRow(page, "ma")).toContainText("이동평균");
@@ -161,18 +132,18 @@ test("범례에서 연 지표 팝오버는 높이가 360px 이하이고 색 더 
 });
 
 test("지표와 드로잉에서 연 색 창의 제목이 같다", async ({ page, scenario }) => {
-  saveIndicatorWindow(scenario, "dialog");
+  seedMovingAverage(scenario);
   await open(page, { width: 1440, height: 900 });
-  await indicatorButton(page).click();
-  const command = commandDialog(page);
-  await command.getByRole("option", { name: "이동평균 단순 20 추가 후보", exact: true }).click();
-  await command.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
+  await legendRow(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
+  const bubble = page.getByRole("dialog", { name: /이동평균.*설정/ });
+  if ((await bubble.getByRole("button", { name: "색 더 보기", exact: true }).count()) > 0) await bubble.getByRole("button", { name: "색 더 보기", exact: true }).click();
+  await bubble.getByRole("button", { name: "직접 고르기", exact: true }).click();
   await expect(colorWindow(page)).toBeVisible();
   const indicatorTitle = await colorWindow(page).getByRole("heading").first().textContent();
   await page.keyboard.press("Escape");
   await expect(colorWindow(page)).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await expect(command).toHaveCount(0);
+  await expect(bubble).toHaveCount(0);
 
   const chart = (await chartOf(cell(page)).boundingBox())!;
   await cell(page).focus();
@@ -281,7 +252,8 @@ test.describe("차트 도구 후속", () => {
       expect(box.width).toBe(24);
       expect(box.height).toBe(24);
     }
-    const indicatorButton = await indicatorRow.locator('button[data-indicator-command="edit"]').boundingBox();
+    await indicatorRow.hover();
+    const indicatorButton = await indicatorRow.locator('button[data-indicator-command="toggle"]').boundingBox();
     expect(indicatorButton?.width).toBe(24);
     const [compareHeight, indicatorHeight] = await Promise.all([compareRow.evaluate((el) => el.getBoundingClientRect().height), indicatorRow.evaluate((el) => el.getBoundingClientRect().height)]);
     expect(compareHeight).toBe(indicatorHeight);

@@ -8,7 +8,6 @@ import { kstDateOf } from "../src/chart/barJump";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, pollSaved, test, withFirstChart } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 import { selectMinute } from "./select-option";
 
 function investorRow(day: KstDate, foreign: number, institution: number): InvestorNetSharesDay {
@@ -65,7 +64,6 @@ async function dragRowTo(page: Page, id: string, targetX: number, targetY: numbe
 }
 
 test("일봉에서 외국인·기관·프로그램 순매수를 추가하고 단일 요청 공유, 표시·집계·단위 전환과 주봉 롤업을 확인한다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const dailySample = scenario.market.page({ symbol: "005930", period: "D", venue: "combined" });
   const dailyBars = dailySample.current ? [...dailySample.bars, dailySample.current] : dailySample.bars;
   const lastDaily = dailyBars[dailyBars.length - 1]!;
@@ -145,13 +143,11 @@ test("일봉에서 외국인·기관·프로그램 순매수를 추가하고 단
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "외국인 순매수 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "외국인 순매수 추가", exact: true }).click();
-  await dialog.getByRole("option", { name: "기관 순매수 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "기관 순매수 추가", exact: true }).click();
-  await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "외국인 순매수", exact: true }).click();
+  await dialog.getByRole("option", { name: "기관 순매수", exact: true }).click();
+  await dialog.getByRole("option", { name: "프로그램 수급", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const foreignRow = cell(page).locator("[data-indicator-row]").filter({ hasText: "외국인 순매수" });
   const instRow = cell(page).locator("[data-indicator-row]").filter({ hasText: "기관 순매수" });
@@ -264,7 +260,6 @@ test("분봉으로 전환하면 외국인·기관은 설정을 보존한 채 안
 });
 
 test("기관 순매수를 외국인 순매수 패널에 합치면 우측 Y축을 공유하고 누적·주 단위로 바꾸면 좌측 Y축이 자동 활성화된다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = {
     v: 2,

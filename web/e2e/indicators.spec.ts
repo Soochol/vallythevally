@@ -4,7 +4,7 @@ import type { Layout } from "../src/api/generated/Layout";
 import { installFrameProbe } from "./frame-probe";
 import { parseChartSettings } from "../src/chart/settings";
 import { type Scenario, barTimes, cell, chartOf, DEFAULT_LAYOUT_ID, dragTowardPast, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
+import { addTyped, closeAdd } from "./indicator-ui";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -337,51 +337,44 @@ test.describe("체결 없던 분 뒤", () => {
   });
 });
 
-test("지표 창에서 테마 색을 고르면 토큰을, 색상표의 색을 고르면 HEX를 저장하고 고친 색도 같은 규칙을 따른다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
+test("범례 말풍선에서 테마 색을 고르면 토큰을, 색상표의 색을 고르면 HEX를 저장하고 고친 색도 같은 규칙을 따른다", async ({ page, scenario }) => {
   const saved = async () => parseChartSettings(firstChart(scenario.documents.layout(DEFAULT_LAYOUT_ID)).chartSettings).indicators.filter((i) => i.spec.kind === "ma").map((i) => i.style.colors);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창" });
-  const input = dialog.getByRole("combobox", { name: "지표·비교 찾기" });
-  const picker = page.getByRole("dialog", { name: "선 색", exact: true });
-  const theme = picker.getByRole("group", { name: "테마 색", exact: true });
-  const table = picker.getByRole("group", { name: "색상표", exact: true });
+  for (const query of ["이평 9", "이평 11"]) await addTyped(page, query);
+  await closeAdd(page);
+  await pollSaved(saved).toEqual([["ind-2"], ["ind-3"]]);
 
-  await input.fill("이평 9");
-  await dialog.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
-  await expect(theme.getByRole("button", { name: /^테마 2 / })).toHaveAttribute("aria-pressed", "true");
-  await theme.getByRole("button", { name: /^테마 4 / }).click();
-  await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
-  await expect(picker).toContainText("테마 4");
-  await page.keyboard.press("Escape");
-  await dialog.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
-  await pollSaved(saved).toEqual([["ind-4"]]);
+  const openBubble = async (name: string) => {
+    await page.locator("[data-indicator-row]", { hasText: name }).locator("[data-indicator-edit]").click();
+    const bubble = page.getByRole("dialog", { name: `${name} 설정`, exact: true });
+    await expect(bubble).toBeVisible();
+    const more = bubble.getByRole("button", { name: "색 더 보기", exact: true });
+    if ((await more.count()) > 0) await more.click();
+    return { bubble, theme: bubble.getByRole("group", { name: "테마 색", exact: true }), table: bubble.getByRole("group", { name: "색상표", exact: true }) };
+  };
 
-  await input.fill("이평 11");
-  await dialog.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
-  await table.getByRole("button", { name: "진한 파랑 #1848CC", exact: true }).click();
-  await expect(table.getByRole("button", { name: "진한 파랑 #1848CC", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(theme.getByRole("button", { pressed: true })).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await dialog.getByRole("button", { name: "이동평균 단순 11 추가", exact: true }).click();
-  await pollSaved(saved).toEqual([["ind-4"], ["#1848CC"]]);
+  const first = await openBubble("이동평균 단순 9");
+  await expect(first.theme.getByRole("button", { name: /^테마 2 / })).toHaveAttribute("aria-pressed", "true");
+  await first.theme.getByRole("button", { name: /^테마 4 / }).click();
+  await expect(first.theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
+  await pollSaved(saved).toEqual([["ind-4"], ["ind-3"]]);
 
-  await input.fill("");
-  await dialog.getByRole("button", { name: "이동평균 단순 9 설정", exact: true }).click();
-  await dialog.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
-  await expect(theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
-  await table.getByRole("button", { name: "분홍 #E91E63", exact: true }).click();
-  await page.keyboard.press("Escape");
-  await pollSaved(saved).toEqual([["#E91E63"], ["#1848CC"]]);
+  const second = await openBubble("이동평균 단순 11");
+  await second.table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true }).click();
+  await expect(second.table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(second.theme.getByRole("button", { pressed: true })).toHaveCount(0);
+  await pollSaved(saved).toEqual([["ind-4"], ["#4A7FE0"]]);
 
-  await dialog.getByRole("button", { name: "이동평균 단순 11 설정", exact: true }).click();
-  await dialog.getByRole("button", { name: "선 색 및 굵기 설정", exact: true }).click();
-  await expect(table.getByRole("button", { name: "진한 파랑 #1848CC", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await theme.getByRole("button", { name: /^테마 1 / }).click();
-  await page.keyboard.press("Escape");
-  await pollSaved(saved).toEqual([["#E91E63"], ["ind-1"]]);
+  const again = await openBubble("이동평균 단순 9");
+  await expect(again.theme.getByRole("button", { name: /^테마 4 / })).toHaveAttribute("aria-pressed", "true");
+  await again.table.getByRole("button", { name: "청록 #5FCDB8", exact: true }).click();
+  await pollSaved(saved).toEqual([["#5FCDB8"], ["#4A7FE0"]]);
+
+  const last = await openBubble("이동평균 단순 11");
+  await expect(last.table.getByRole("button", { name: "진한 파랑 #4A7FE0", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await last.theme.getByRole("button", { name: /^테마 1 / }).click();
+  await pollSaved(saved).toEqual([["#5FCDB8"], ["ind-1"]]);
 });
 
 test("일목균형표 설정에서 표시 요소 토글·보기 프리셋·구름대 불투명도를 바꾸면 차트 시리즈에 즉시 반영되고 새로고침 후에도 유지된다", async ({ page, scenario }) => {
@@ -415,8 +408,8 @@ test("일목균형표 설정에서 표시 요소 토글·보기 프리셋·구�
     lineVisibility: [true, true, true, true, true],
   });
 
-  await page.locator('[data-indicator-row="i1"] [data-indicator-command="edit"]').click();
-  const editor = page.getByRole("group", { name: "일목균형표 9 26 52 26 설정", exact: true });
+  await page.locator('[data-indicator-row="i1"] [data-indicator-edit]').click();
+  const editor = page.getByRole("dialog", { name: "일목균형표 9 26 52 26 설정", exact: true });
   await expect(editor).toBeVisible();
 
   await editor.getByRole("switch", { name: "구름대", exact: true }).click();
@@ -460,7 +453,7 @@ test("일목균형표 설정에서 표시 요소 토글·보기 프리셋·구�
     lineVisibility: [false, false, true, true, false],
   });
 
-  await page.locator('[data-indicator-row="i1"] [data-indicator-command="edit"]').click();
+  await page.locator('[data-indicator-row="i1"] [data-indicator-edit]').click();
   await expect(editor.getByRole("switch", { name: "구름대", exact: true })).toHaveAttribute("aria-checked", "true");
   await expect(editor.getByRole("switch", { name: "전환선", exact: true })).toHaveAttribute("aria-checked", "false");
   await expect(editor.getByRole("switch", { name: "기준선", exact: true })).toHaveAttribute("aria-checked", "false");

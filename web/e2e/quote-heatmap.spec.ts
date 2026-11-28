@@ -3,7 +3,6 @@ import type { QuoteDepthPage } from "../src/api/generated/QuoteDepthPage";
 import type { QuoteDepthSource } from "../src/api/generated/QuoteDepthSource";
 import { formatPrice, formatVolume } from "../src/lib/format";
 import { cell, expect, test } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 async function countHeatmapPixels(page: Page): Promise<{ ask: number; bid: number }> {
   return page.evaluate(() => {
@@ -51,7 +50,6 @@ async function countHeatmapPixels(page: Page): Promise<{ ask: number; bid: numbe
 }
 
 test("히트맵을 더하면 값이 보이고 기준을 바꾸면 그 기준으로 다시 받는다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const sample = scenario.market.page({ symbol: "005930", period: "5m", venue: "combined" });
   const bars = sample.current ? [...sample.bars, sample.current] : sample.bars;
   const lastBar = bars[bars.length - 1]!;
@@ -90,9 +88,9 @@ test("히트맵을 더하면 값이 보이고 기준을 바꾸면 그 기준으�
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "호가 잔량 히트맵 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "호가 잔량 히트맵 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "호가 잔량 히트맵", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const heatRow = page.locator("[data-indicator-row]").filter({ hasText: "호가 잔량 히트맵" });
   await expect(heatRow).toHaveCount(1);

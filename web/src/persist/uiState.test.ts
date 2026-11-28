@@ -13,7 +13,6 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     drawing: DEFAULT_UI_PREFS.drawing,
     lastMinute: "10m",
     collapsedWatchGroups: ["G1"],
-    indicatorWindow: "inspector",
     layoutMode: "dock",
     venue: "krx",
     phone: { symbol: "000660" },
@@ -28,7 +27,6 @@ test("옛 라이트 설정은 다크로 옮기고 다른 설정과 모르는 키
     drawing: DEFAULT_UI_PREFS.drawing,
     lastMinute: "10m",
     collapsedWatchGroups: ["G1"],
-    indicatorWindow: "inspector",
     layoutMode: "dock",
     venue: "krx",
     orderSettings: DEFAULT_UI_PREFS.orderSettings,
@@ -103,16 +101,11 @@ test("접은 관심종목 그룹은 없으면 빈 목록, 틀리면 기본값이
   expect(parseUiState(toUiState(prefs, extra))).toEqual({ prefs, extra });
 });
 
-test("지표 창 방식은 왕복하고, 없으면 경고 없이 고른 값 없음, 틀리면 고른 값 없음으로 연다", () => {
+test("없어진 지표 창 방식 값은 경고 없이 버린다", () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   const { prefs, extra } = parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "inspector" });
-  expect(parseUiState(toUiState(prefs, extra)).prefs.indicatorWindow).toBe("inspector");
-  const { indicatorWindow: _mode, ...older } = DEFAULT_UI_PREFS;
-  expect(parseUiState(older).prefs.indicatorWindow).toBeNull();
-  expect(parseUiState(toUiState(parseUiState(older).prefs, {})).prefs.indicatorWindow).toBeNull();
+  expect(toUiState(prefs, extra)).not.toHaveProperty("indicatorWindow");
   expect(warn).not.toHaveBeenCalled();
-  expect(parseUiState({ ...DEFAULT_UI_PREFS, indicatorWindow: "side" }).prefs.indicatorWindow).toBeNull();
-  expect(warn).toHaveBeenCalledOnce();
 });
 
 test("없어진 오른쪽 패널 설정은 값이 틀려도 경고 없이 읽고 버려 다시 저장하지 않는다", () => {

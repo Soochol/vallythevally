@@ -1,6 +1,5 @@
 import type { Page } from "@playwright/test";
 import { cell, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 test.use({ clockStart: "20261109100030", viewport: { width: 1440, height: 900 } });
 
@@ -117,13 +116,13 @@ test("옛 저장값의 고정 분봉은 꺼내지 않고 버리며, 열 때 활�
   await expect(minutes).toHaveAttribute("aria-pressed", "false");
 });
 
-test("지표 설정은 색 격자·굵기 견본·기간 프리셋을 한 장에 두고 바로 적용하며 머리에서 숨기고 지운다", async ({ page, scenario }, info) => {
-  useCenterIndicatorWindow(scenario);
+test("지표 설정은 색 격자·굵기 견본·기간 프리셋을 한 장에 두고 바로 적용하며 머리에서 숨기고 지운다", async ({ page }, info) => {
   await open(page);
   await toolbar(page).getByRole("button", { name: "지표", exact: true }).click();
   await page.keyboard.type("이평 20");
-  await page.keyboard.press("Shift+Enter");
-  await cell(page).getByRole("button", { name: "이동평균 단순 20 설정", exact: true }).first().click();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Escape");
+  await cell(page).getByRole("button", { name: "이동평균 단순 20 설정 열기", exact: true }).click();
   const settings = page.getByRole("dialog", { name: "이동평균 단순 20 설정", exact: true });
   await expect(settings.getByRole("group", { name: "색상표" })).toHaveCount(0);
   await settings.getByRole("button", { name: "색 더 보기", exact: true }).click();
@@ -134,7 +133,7 @@ test("지표 설정은 색 격자·굵기 견본·기간 프리셋을 한 장에
   await expect(settings.getByRole("group", { name: "선 색", exact: true })).toContainText("#5FCDB8");
   await settings.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "3", exact: true }).click();
   await settings.getByRole("group", { name: "자주 쓰는 기간" }).getByRole("button", { name: "60", exact: true }).click();
-  await expect(cell(page).getByRole("button", { name: "이동평균 단순 60 설정", exact: true }).first()).toBeVisible();
+  await expect(cell(page).getByRole("button", { name: "이동평균 단순 60 설정 열기", exact: true })).toBeVisible();
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: info.outputPath("1440-indicator-settings.png") });
   expect(await page.getByRole("dialog").count()).toBe(1);
 

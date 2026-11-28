@@ -6,7 +6,13 @@ import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
 import { type Scenario, cell, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
+import { openPanelPlace } from "./indicator-ui";
+
+async function collapsePanel(page: Page, id: string) {
+  const bubble = await openPanelPlace(page, id);
+  await bubble.getByRole("button", { name: "접기", exact: true }).click();
+  await expect(bubble).toHaveCount(0);
+}
 
 async function settings(scenario: Scenario) {
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
@@ -14,7 +20,6 @@ async function settings(scenario: Scenario) {
 }
 
 async function seed(scenario: Scenario) {
-  useCenterIndicatorWindow(scenario);
   const layout: Layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [
     { id: "ma", spec: { kind: "ma", method: "sma", period: 5 }, panel: "price", visible: true, style: { colors: ["#C7F36B"], width: 1 } },
@@ -48,7 +53,7 @@ async function resize(page: Page) {
   await page.mouse.up();
 }
 
-test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값과 선을 복원한다", async ({ page, scenario }) => {
+test("범례 설정은 기간·색·굵기를 즉시 그리고 처음 값으로가 값과 선을 복원하며 Esc는 닫기만 한다", async ({ page, scenario }) => {
   await open(page, scenario);
   const original = await maLine(page);
   await row(page, "ma").getByRole("button", { name: /설정 열기/ }).click();
@@ -66,11 +71,16 @@ test("범례 설정은 기간·색·굵기를 즉시 그리고 Esc로 처음 값
   await popup.getByRole("group", { name: "굵기", exact: true }).getByRole("button", { name: "5", exact: true }).click();
   await expect.poll(() => maLine(page).then((line) => line?.style)).toEqual({ color, width: 5, opacity: 1 });
   await pollSaved(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: [color], width: 5 });
-  await page.keyboard.press("Escape");
-  await expect(popup).toHaveCount(0);
+  await popup.getByRole("button", { name: "처음 값으로", exact: true }).click();
   await expect.poll(() => maLine(page).then((line) => ({ data: line?.data, style: line?.style }))).toEqual({ data: original?.data, style: original?.style });
   await pollSaved(async () => (await settings(scenario)).indicators[0]?.spec).toEqual({ kind: "ma", method: "sma", period: 5 });
   await pollSaved(async () => (await settings(scenario)).indicators[0]?.style).toEqual({ colors: ["#C7F36B"], width: 1 });
+  await popup.getByRole("textbox", { name: "기간", exact: true }).fill("12");
+  await expect(row(page, "ma")).toContainText("12");
+  await page.keyboard.press("Escape");
+  await expect(popup).toHaveCount(0);
+  await expect(row(page, "ma")).toContainText("12");
+  await pollSaved(async () => (await settings(scenario)).indicators[0]?.spec).toEqual({ kind: "ma", method: "sma", period: 12 });
   await expect(row(page, "ma").getByRole("button", { name: /설정 열기/ })).toBeFocused();
 });
 
@@ -81,8 +91,7 @@ test("높이와 접기를 저장하고 새로고침해 복원하며 접힌 패�
   await expect.poll(() => heights(page).then((values) => values[1]! - before[1]!)).toBeGreaterThan(35);
   await pollSaved(async () => (await settings(scenario)).panels[0]?.stretch).toBeGreaterThan(0.25);
   const resized = await heights(page);
-  await row(page, "volume").hover();
-  await row(page, "volume").getByRole("button", { name: /패널 접기/ }).click();
+  await collapsePanel(page, "volume");
   await expect.poll(() => heights(page).then((values) => values[1])).toBeLessThanOrEqual(31);
   await expect(row(page, "volume")).toContainText(/거래량.*\d/);
   await pollSaved(async () => (await settings(scenario)).panels[0]?.collapsed).toBe(true);
@@ -120,8 +129,7 @@ for (const key of ["T", "H"]) {
     await row(page, "ma").hover();
     await row(page, "ma").getByRole("button", { name: /숨기기/ }).click();
     await resize(page);
-    await row(page, "rsi").hover();
-    await row(page, "rsi").getByRole("button", { name: /패널 접기/ }).click();
+    await collapsePanel(page, "rsi");
     await pollSaved(async () => (await settings(scenario)).panels[1]?.collapsed).toBe(true);
     expect(scenario.documents.drawings("005930")).toEqual(before);
     expect(mutations).toEqual([]);
@@ -261,7 +269,6 @@ test.describe("범례 패널 회귀", () => {
   const layoutOf = async (scenario: Scenario): Promise<Layout> => scenario.documents.layout(DEFAULT_LAYOUT_ID);
 
   const openPanels = async (page: Page, scenario: Scenario, height = 900, stretches = Array.from({ length: 6 }, () => 0.25)) => {
-    useCenterIndicatorWindow(scenario);
     const saved = await layoutOf(scenario);
     const chartSettings = { v: 2, style: "candle", scale: "normal", compare: [], indicators: [
       ...[5, 20].map((period, i) => ({ id: `ma${i}`, spec: { kind: "ma", method: "sma", period }, panel: "price", visible: true, style: { colors: ["ind-1"], width: 1 } })),
@@ -334,7 +341,7 @@ test.describe("범례 패널 회귀", () => {
     await pollSaved(async () => firstChart(await layoutOf(scenario)).chartSettings).toMatchObject({ panels: [{ id: "p0", stretch: 0.25 }, { id: "p1", stretch: 0.25 }, { id: "p2", stretch: 0.3 }, { id: "p3", stretch: 0.3 }, { id: "p4", stretch: 0.3 }, { id: "p5", stretch: 0.3 }] });
   });
 
-  test("같은 지표 이름을 다시 눌러도 Esc는 처음 연 설정으로 돌아간다", async ({ page, scenario }) => {
+  test("같은 지표 이름을 다시 눌러도 창은 그대로이고 처음 값으로는 처음 연 설정으로 돌아간다", async ({ page, scenario }) => {
     await openPanels(page, scenario);
     const name = row(page, "ma0").getByRole("button", { name: /설정 열기/ });
     await row(page, "ma0").hover();
@@ -344,15 +351,15 @@ test.describe("범례 패널 회귀", () => {
     await expect(row(page, "ma0")).toContainText("단순 9");
     await name.click();
     await expect(popup).toBeVisible();
-    await page.keyboard.press("Escape");
+    await popup.getByRole("button", { name: "처음 값으로", exact: true }).click();
     await expect(row(page, "ma0")).toContainText("단순 5");
     await pollSaved(async () => firstChart(await layoutOf(scenario)).chartSettings).toMatchObject({ indicators: [ { id: "ma0", spec: { period: 5 } }, { id: "ma1", spec: { period: 20 } }, ...Array.from({ length: 6 }, (_, i) => ({ id: `rsi${i}` })) ] });
   });
 
-  test("다른 지표 이름은 한 번 눌러 전환하고 각 창의 Esc 원본을 따로 유지한다", async ({ page, scenario }) => {
+  test("다른 지표 이름은 한 번 눌러 전환하고 Esc는 각 창에서 바꾼 값을 그대로 둔다", async ({ page, scenario }) => {
     await openPanels(page, scenario);
     await row(page, "ma0").hover();
-    await row(page, "ma0").getByRole("button", { name: "이동평균 단순 5 설정", exact: true }).click();
+    await row(page, "ma0").getByRole("button", { name: /설정 열기/ }).click();
     await page.getByRole("dialog", { name: "이동평균 단순 5 설정", exact: true }).getByRole("textbox", { name: "기간", exact: true }).fill("9");
     await expect(row(page, "ma0")).toContainText("단순 9");
     await row(page, "ma1").hover();
@@ -363,16 +370,13 @@ test.describe("범례 패널 회귀", () => {
     await next.getByRole("textbox", { name: "기간", exact: true }).fill("25");
     await expect(row(page, "ma1")).toContainText("단순 25");
     await page.keyboard.press("Escape");
+    await expect(next).toHaveCount(0);
     await expect(row(page, "ma0")).toContainText("단순 9");
-    await expect(row(page, "ma1")).toContainText("단순 20");
-    await row(page, "ma0").hover();
-    await row(page, "ma0").getByRole("button", { name: /설정 열기/ }).click();
-    await page.getByRole("dialog", { name: "이동평균 단순 9 설정", exact: true }).getByRole("textbox", { name: "기간", exact: true }).fill("11");
-    await page.keyboard.press("Escape");
-    await expect(row(page, "ma0")).toContainText("단순 9");
+    await expect(row(page, "ma1")).toContainText("단순 25");
+    await pollSaved(async () => firstChart(await layoutOf(scenario)).chartSettings).toMatchObject({ indicators: [{ id: "ma0", spec: { period: 9 } }, { id: "ma1", spec: { period: 25 } }, ...Array.from({ length: 6 }, (_, i) => ({ id: `rsi${i}` }))] });
   });
 
-  test("보조지표 범례의 접기·이동 화살표는 평소 숨겨지고 호버 시 나타나며 접힌 상태에서는 펼치기 화살표만 보인다", async ({ page, scenario }) => {
+  test("범례 줄의 숨기기·지우기는 평소 숨겨지고 호버 시 나타나며 접힌 패널에는 펼치기 화살표가 늘 보인다", async ({ page, scenario }) => {
     await open(page, scenario);
     const box = await cell(page).boundingBox();
     if (!box) throw new Error("차트가 없습니다");
@@ -381,23 +385,17 @@ test.describe("범례 패널 회귀", () => {
     const opacityOf = (id: string, command: string) =>
       row(page, id).locator(`[data-indicator-command="${command}"]`).evaluate((node) => getComputedStyle(node).opacity);
 
-    for (const [id, command] of [["volume", "collapse"], ["volume", "up"], ["volume", "down"], ["rsi", "collapse"], ["rsi", "up"], ["rsi", "down"]] as const) {
-      await expect.poll(() => opacityOf(id, command)).toBe("0");
+    for (const id of ["volume", "rsi"]) {
+      await expect(row(page, id).locator("[data-indicator-command]:visible")).toHaveCount(2);
+      for (const command of ["toggle", "remove"]) await expect.poll(() => opacityOf(id, command)).toBe("0");
     }
-
     await row(page, "volume").hover();
-    await expect.poll(() => opacityOf("volume", "collapse")).toBe("1");
-    await expect.poll(() => opacityOf("volume", "up")).toBe("0.4");
-    await expect.poll(() => opacityOf("volume", "down")).toBe("1");
+    for (const command of ["toggle", "remove"]) await expect.poll(() => opacityOf("volume", command)).toBe("1");
 
-    await row(page, "rsi").hover();
-    await expect.poll(() => opacityOf("rsi", "collapse")).toBe("1");
-    await expect.poll(() => opacityOf("rsi", "up")).toBe("1");
-    await expect.poll(() => opacityOf("rsi", "down")).toBe("0.4");
-
-    await row(page, "rsi").getByRole("button", { name: /패널 접기/ }).click();
+    await collapsePanel(page, "rsi");
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.3);
+    await expect(row(page, "rsi").getByRole("button", { name: /패널 펼치기/ })).toBeVisible();
     await expect.poll(() => opacityOf("rsi", "collapse")).toBe("1");
-    await expect.poll(() => opacityOf("rsi", "down")).toBe("0");
+    await expect.poll(() => opacityOf("rsi", "remove")).toBe("0");
   });
 });

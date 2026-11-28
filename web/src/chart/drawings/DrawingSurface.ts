@@ -30,6 +30,7 @@ import type { DrawingBody, DrawingScope, ScreenPoint } from "./types";
 import type { DrawingPoint } from "../../api/generated/DrawingPoint";
 import { modeOf, registeredModes, type ModeContext, type TransientShapes } from "./modes";
 import type { WindowId } from "../../layout/kinds";
+import { registerDrawingDepth, undoChartSettings } from "../../features/indicator-command/settingsHistory";
 
 const surfaces = new Map<WindowId, DrawingSurface>();
 export const surfaceFor = (cellId: WindowId) => surfaces.get(cellId);
@@ -91,6 +92,7 @@ export class DrawingSurface implements ChartExtension {
     const blur = () => this.reset(); window.addEventListener("blur", blur);
     this.cleanup.push(() => window.removeEventListener("keydown", key, true), () => window.removeEventListener("blur", blur));
     this.cleanup.push(sync.subscribe(() => this.refresh()));
+    this.cleanup.push(registerDrawingDepth(cellId, () => sync.history(cellId).past.length));
     this.cleanup.push(host.fineBars.subscribe(() => this.refresh()));
     this.cleanup.push(useDrawingSession.subscribe((s, old) => {
       if (this.isActive() && (s.tool !== old.tool || s.mode !== old.mode)) {
@@ -480,7 +482,10 @@ export class DrawingSurface implements ChartExtension {
     else if ((e.code === "Delete" || e.code === "Backspace") && selected.length) this.remove();
     else if (ctrl && e.code === "KeyC" && selected.length) this.copy();
     else if (ctrl && e.code === "KeyV" && session.clip) this.paste();
-    else if (ctrl && (e.code === "KeyZ" || e.code === "KeyY")) this.sync.undo(this.cellId, e.code === "KeyY" || e.shiftKey);
+    else if (ctrl && (e.code === "KeyZ" || e.code === "KeyY")) {
+      const redo = e.code === "KeyY" || e.shiftKey;
+      if (!undoChartSettings({ kind: "chart", cellId: this.cellId }, redo)) this.sync.undo(this.cellId, redo);
+    }
     else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.code) && selected.length) {
       const f = this.projection(); const ctx = this.context(f).ctx;
       this.edits.nudge(selected, e.code as NudgeKey, { shiftBars: ctx.shiftBars, price: f.axes.price }, prefs.lockAll);

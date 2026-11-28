@@ -2,10 +2,8 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { cell, expect, test, pollSaved } from "./harness";
 import { expandDock } from "./drawing-probe";
-import { useCenterIndicatorWindow } from "./indicator-window";
 
 test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지막 분봉 복원을 지원한다", async ({ scenario, page }) => {
-  useCenterIndicatorWindow(scenario);
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.setViewportSize({ width: 390, height: 844 });
@@ -63,24 +61,22 @@ test("공통 메뉴는 잘리지 않고 선택·키보드·포커스와 마지�
   await page.mouse.up(); await page.keyboard.press("Escape");
   await expect(page.locator("select")).toHaveCount(0);
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
+  const dialog = page.getByRole("dialog", { name: "지표 더하기", exact: true });
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "지표", exact: true })).toBeFocused();
 });
 
-test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인한다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
+test("공통 범례 SVG와 화면 크기별 메뉴·페이지 경계를 확인한다", async ({ page }) => {
   await page.goto("/?symbol=005930");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "지표", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "지표·비교 입력창", exact: true });
-  await dialog.getByRole("option", { name: "이동평균 단순 20 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "이동평균 단순 20 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "지표 더하기", exact: true });
+  await dialog.getByRole("option", { name: "이동평균", exact: true }).click();
+  await page.keyboard.press("Escape");
   const row = page.locator("[data-indicator-row]").filter({ hasText: "이동평균" }).first();
   await expect(row).toBeVisible();
-  for (const name of ["설정", "숨기기", "지우기"]) {
+  for (const name of ["숨기기", "지우기"]) {
     const button = row.getByRole("button", { name: new RegExp(`${name}$`) });
     await expect(button.locator("svg")).toHaveCount(1);
     await expect(button).toHaveAttribute("title", name);

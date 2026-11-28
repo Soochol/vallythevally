@@ -6,7 +6,6 @@ import { MAX_RANGE_DAYS } from "../src/chart/quotes/coverage";
 import { formatBarTime, toChartTime } from "../src/chart/time";
 import { installChartProbe } from "./chart-probe";
 import { cell, chartOf, DEFAULT_LAYOUT_ID, expect, pollSaved, test } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
 import { selectMinute } from "./select-option";
 
 function rangeSpanDays(url: URL): number {
@@ -18,7 +17,6 @@ function rangeSpanDays(url: URL): number {
 }
 
 test("1분봉에서 계층별 CVD와 프로그램 수급을 추가하고 실시간 0B·0w 프레임으로 재조회 없이 갱신한다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const sample = scenario.market.page({ symbol: "005930", period: "1m", venue: "combined" });
   const bars = sample.current ? [...sample.bars, sample.current] : sample.bars;
   const lastBar = bars[bars.length - 1]!;
@@ -76,11 +74,10 @@ test("1분봉에서 계층별 CVD와 프로그램 수급을 추가하고 실시�
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
-  await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "계층별 CVD", exact: true }).click();
+  await dialog.getByRole("option", { name: "프로그램 수급", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
   const programRow = page.locator("[data-indicator-row]").filter({ hasText: "프로그램 수급" });
@@ -155,16 +152,15 @@ test("1분봉에서 계층별 CVD와 프로그램 수급을 추가하고 실시�
   expect(programRequests.length).toBe(programCountBefore);
 });
 
-test("수집 폴더 미설정과 일봉 전환 시 깔끔한 상태 문구를 보인다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
+test("수집 폴더 미설정과 일봉 전환 시 깔끔한 상태 문구를 보인다", async ({ page }) => {
   await page.goto("/?symbol=005930&period=1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "계층별 CVD", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
   await expect(cvdRow).toHaveCount(1);
@@ -177,7 +173,6 @@ test("수집 폴더 미설정과 일봉 전환 시 깔끔한 상태 문구를 �
 });
 
 test("60분봉에서 31일 초과 구간을 31일 이하 청크로 분할 조회해 계층별 CVD와 프로그램 수급을 표시한다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const sample = scenario.market.page({ symbol: "005930", period: "60m", venue: "combined" });
   const bars = sample.current ? [...sample.bars, sample.current] : sample.bars;
   const cvdSpans: number[] = [];
@@ -248,11 +243,10 @@ test("60분봉에서 31일 초과 구간을 31일 이하 청크로 분할 조회
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
-  await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "계층별 CVD", exact: true }).click();
+  await dialog.getByRole("option", { name: "프로그램 수급", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
   const programRow = page.locator("[data-indicator-row]").filter({ hasText: "프로그램 수급" });
@@ -265,7 +259,6 @@ test("60분봉에서 31일 초과 구간을 31일 이하 청크로 분할 조회
 });
 
 test("계층별 CVD 없이 프로그램 수급 비중을 켜면 0B trades를 구독하고 당일 누적 거래대금 기준으로 비중을 갱신한다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const sample = scenario.market.page({ symbol: "005930", period: "1m", venue: "combined" });
   const bars = sample.current ? [...sample.bars, sample.current] : sample.bars;
   const lastBar = bars[bars.length - 1]!;
@@ -296,9 +289,9 @@ test("계층별 CVD 없이 프로그램 수급 비중을 켜면 0B trades를 구
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "프로그램 수급", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const programRow = page.locator("[data-indicator-row]").filter({ hasText: "프로그램 수급" });
   await expect(programRow).toContainText("순매수 +2.00억");
@@ -364,18 +357,16 @@ test("계층별 CVD 없이 프로그램 수급 비중을 켜면 0B trades를 구
   await expect(programRow).toContainText("비중 25.0%");
 });
 
-test("계층별 CVD 마지막 활성 계층은 끌 수 없고 아래 프로그램 수급 범례가 가격 패널로 밀리지 않는다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
+test("계층별 CVD 마지막 활성 계층은 끌 수 없고 아래 프로그램 수급 범례가 가격 패널로 밀리지 않는다", async ({ page }) => {
   await page.goto("/?symbol=005930&period=1m");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
 
   await page.getByRole("button", { name: /^지표/ }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("option", { name: "계층별 CVD 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "계층별 CVD 추가", exact: true }).click();
-  await dialog.getByRole("option", { name: "프로그램 수급 추가 후보", exact: true }).click();
-  await dialog.getByRole("button", { name: "프로그램 수급 추가", exact: true }).click();
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await dialog.getByRole("option", { name: "계층별 CVD", exact: true }).click();
+  await dialog.getByRole("option", { name: "프로그램 수급", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await page.mouse.move(2, 2);
 
   const cvdRow = page.locator("[data-indicator-row]").filter({ hasText: "계층별 CVD" });
   const programRow = page.locator("[data-indicator-row]").filter({ hasText: "프로그램 수급" });

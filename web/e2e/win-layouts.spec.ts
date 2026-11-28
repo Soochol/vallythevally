@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
-import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, SEARCH_BUTTON_TITLE, test, pollSaved } from "./harness";
+import { cell, DEFAULT_LAYOUT_ID, expect, firstChart, SEARCH_BUTTON_TITLE, test, pollSaved, windowTab } from "./harness";
 
 test.use({ clockStart: "20261109100000" });
 const topbar = (page: Page) => page.getByRole("toolbar", { name: "차트 도구 막대" });
@@ -9,7 +9,7 @@ const menu = (page: Page) => page.getByRole("menu", { name: "레이아웃", exac
 const listGroup = (page: Page) => menu(page).getByRole("group", { name: "레이아웃 목록", exact: true });
 const crosshairGroup = (page: Page) => menu(page).getByRole("group", { name: "십자선 연동", exact: true });
 const layoutRadios = (page: Page) => listGroup(page).getByRole("menuitemradio");
-const inspector = (page: Page) => page.getByRole("region", { name: "지표", exact: true });
+const indicatorPanel = (page: Page) => page.getByRole("region", { name: "지표", exact: true });
 async function choose(page: Page, name: string) {
   await trigger(page).click();
   await menu(page).getByRole("menuitemradio", { name, exact: true }).click();
@@ -422,22 +422,23 @@ test("새 이름 저장으로 화면을 바꾸는 동안 입력과 거절 사유
   await expect(trigger(page)).toBeFocused();
 });
 
-test("같은 창 id를 가진 레이아웃으로 바꾸면 지표 인스펙터의 검색과 미리보기 초안을 비운다", async ({ page, scenario }) => {
+test("같은 창 id를 가진 레이아웃으로 바꾸면 지표 창의 검색과 미리보기 초안을 비운다", async ({ page, scenario }) => {
   const base = scenario.documents.layout();
-  const withInspector: Layout = { ...base, windows: [...base.windows, { id: "indicators", kind: "indicators", link: null }], placement: {}, revision: 1 };
-  scenario.documents.saveLayout(withInspector);
-  scenario.documents.saveLayout({ ...withInspector, id: "01900000-0000-7000-8000-0000000000b1", name: "복기" });
-  scenario.documents.saveUiState({ ...scenario.documents.uiState(), indicatorWindow: "inspector", revision: 1 });
+  const withPanel: Layout = { ...base, windows: [...base.windows, { id: "indicators", kind: "indicators", link: null }], placement: {}, revision: 1 };
+  scenario.documents.saveLayout(withPanel);
+  scenario.documents.saveLayout({ ...withPanel, id: "01900000-0000-7000-8000-0000000000b1", name: "복기" });
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
-  await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-  await inspector(page).getByRole("searchbox", { name: "지표·비교 찾기" }).fill("이평 9");
-  await expect(inspector(page).getByRole("button", { name: "이동평균 단순 9 추가 후보", exact: true })).toHaveAttribute("aria-expanded", "true");
+  await windowTab(page, "지표").click();
+  const search = indicatorPanel(page).getByRole("combobox", { name: "지표·비교 찾기" });
+  await search.fill("이평 9");
+  await expect(indicatorPanel(page).getByRole("option", { name: "이동평균 단순 9 더하기", exact: true })).toBeVisible();
+  await expect(cell(page).locator("[data-indicator-row]").filter({ hasText: "이동평균 단순 9" })).toHaveCount(1);
   await choose(page, "복기");
-  await topbar(page).getByRole("button", { name: "지표", exact: true }).click();
-  await expect(inspector(page).getByRole("searchbox", { name: "지표·비교 찾기" })).toHaveValue("");
-  await expect(inspector(page).getByRole("button", { name: "이동평균 단순 9 추가 후보", exact: true })).toHaveCount(0);
-  await expect(cell(page).getByText("이동평균 단순 9", { exact: true })).toHaveCount(0);
+  await windowTab(page, "지표").click();
+  await expect(search).toHaveValue("");
+  await expect(indicatorPanel(page).getByRole("option", { name: "이동평균 단순 9 더하기", exact: true })).toHaveCount(0);
+  await expect(cell(page).locator("[data-indicator-row]").filter({ hasText: "이동평균 단순 9" })).toHaveCount(0);
 });
 
 for (const roundTrip of [false, true]) {

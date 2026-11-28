@@ -4,7 +4,7 @@ import { keyTitle } from "../../lib/hotkeys";
 import { PERIOD_LABEL } from "../../lib/symbol";
 import { type ChartWindowState, useLayoutStore } from "../../stores/layout";
 import { useActionKeys } from "../../stores/ui";
-import { openIndicatorCommand } from "../indicator-command/open";
+import { toggleIndicatorAdd } from "../indicator-command/open";
 import { IndicatorIcon } from "../icons";
 import { RadioMenu } from "../menu/RadioMenu";
 
@@ -105,9 +105,10 @@ export function PeriodChips({ cell }: { cell: ChartWindowState }) {
         type="button"
         aria-haspopup="dialog"
         aria-label="지표"
+        data-chart-pop-opener="add"
         title={keyTitle("지표", keys, "indicators")}
         className="mb-2 mr-3 grid h-[36px] w-[44px] flex-none place-items-center rounded-full border border-line text-text"
-        onClick={() => openIndicatorCommand(cell.id)}
+        onClick={(event) => toggleIndicatorAdd(cell.id, event.currentTarget)}
       >
         <IndicatorIcon />
       </button>

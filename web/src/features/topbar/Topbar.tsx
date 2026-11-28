@@ -5,10 +5,10 @@ import { keyCapsLabel, keyTitle, periodActionId, searchTitle } from "../../lib/h
 import { useSymbolInfo } from "../../api/queries";
 import { PERIOD_LABEL, PERIODS, symbolSub } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
-import { defaultIndicatorMode, useSelectionStore, type ChartPanelMode } from "../../stores/selection";
+import { useSelectionStore } from "../../stores/selection";
 import { useActionKeys } from "../../stores/ui";
-import { openIndicatorCommand, useShownIndicatorWindow } from "../indicator-command/open";
-import { IndicatorIcon, SearchIcon, SlidersIcon, CompareIcon } from "../icons";
+import { toggleChartSettings, toggleIndicatorAdd } from "../indicator-command/open";
+import { PlusIcon, SearchIcon, SlidersIcon } from "../icons";
 import { ArrangeMenu } from "../layouts/ArrangeMenu";
 import { LayoutMenu } from "../layouts/LayoutMenu";
 import { VenuePicker } from "../venue/VenuePicker";
@@ -17,54 +17,18 @@ import { BookReplayToggle } from "../book-replay/BookReplayToggle";
 import { AutoGuardBadge } from "./AutoGuardBadge";
 import { TopbarClock } from "./TopbarClock";
 
-type PillSection = "indicators" | "settings" | "compare";
-
-function sectionOf(mode: ChartPanelMode): PillSection {
-  if (mode === "compare") return "compare";
-  if (mode === "settings") return "settings";
-  return "indicators";
-}
-
 export function Topbar() {
   const cellId = useSelectionStore((s) => s.activeCell);
   const openSearch = useSelectionStore((s) => s.openSearch);
-  const dialog = useSelectionStore((s) => s.dialog);
-  const chartDock = useSelectionStore((s) => s.chartDock);
+  const chartPop = useSelectionStore((s) => s.chartPop);
   const cell = useCell(cellId);
-  const opensDialog = useShownIndicatorWindow() === "dialog";
   const info = useSymbolInfo(cell.symbol).data;
   const name = info?.name ?? cell.symbol;
   const { setPeriod } = useLayoutStore.getState();
   const keys = useActionKeys();
 
-  const activeMode: ChartPanelMode | null =
-    dialog?.kind === "indicatorCommand" && dialog.cellId === cellId
-      ? dialog.mode
-      : chartDock?.cellId === cellId
-        ? (chartDock.mode === "drawings" ? "current" : chartDock.mode)
-        : null;
-  const activeSection = activeMode ? sectionOf(activeMode) : null;
-  const indicatorCount = cell.chartSettings.indicators.length;
-  const compareCount = cell.chartSettings.compare.length;
-
-  const toggleSection = (section: PillSection) => {
-    const selection = useSelectionStore.getState();
-    if (activeSection === section) {
-      if (dialog?.kind === "indicatorCommand") selection.closeDialog();
-      if (chartDock?.cellId === cellId) selection.closeChartDock();
-      return;
-    }
-    if (chartDock?.cellId === cellId) {
-      const nextMode: ChartPanelMode = section === "indicators" ? defaultIndicatorMode(cellId) : section;
-      selection.openChartDock(cellId, nextMode, null);
-      return;
-    }
-    if (section === "settings") {
-      selection.openIndicatorDialog(cellId, "settings", null);
-      return;
-    }
-    openIndicatorCommand(cellId, section === "compare" ? "compare" : defaultIndicatorMode(cellId));
-  };
+  const openHere = chartPop?.cellId === cellId ? chartPop.kind : null;
+  const addedCount = cell.chartSettings.indicators.length + cell.chartSettings.compare.length;
 
   return (
     <header role="toolbar" aria-label="차트 도구 막대" className="desktop-topbar ui-island relative z-20 mx-[var(--island-gap)] mt-[var(--island-gap)] h-[var(--island-h)] flex-none rounded-l max-md:hidden">
@@ -82,22 +46,16 @@ export function Topbar() {
               title={keyTitle(PERIOD_LABEL[p], keys, periodActionId(p))} onClick={() => setPeriod(cellId, p)}>{PERIOD_LABEL[p]}</button>
           ))}
         </div>
-        <div role="group" aria-label="차트 개별 설정" className="topbar-settings-pill" data-open={activeSection !== null || undefined}>
-          <button type="button" className="topbar-pill-btn" aria-label="지표" aria-haspopup={opensDialog ? "dialog" : undefined} aria-expanded={activeSection === "indicators"} title={keyTitle("지표", keys, "indicators")} onClick={() => toggleSection("indicators")}>
-            <IndicatorIcon />
+        <div role="group" aria-label="차트 개별 설정" className="topbar-settings-pill" data-open={openHere === "add" || openHere === "settings" || undefined}>
+          <button type="button" className="topbar-pill-btn" data-chart-pop-opener="add" aria-label="지표" aria-haspopup="dialog" aria-expanded={openHere === "add"} title={keyTitle("지표", keys, "indicators")} onClick={(event) => toggleIndicatorAdd(cellId, event.currentTarget)}>
+            <PlusIcon size={14} />
             <span className="topbar-label-lg">지표</span>
-            {indicatorCount > 0 && <span className="topbar-pill-count">{indicatorCount}</span>}
+            {addedCount > 0 && <span className="topbar-pill-count">{addedCount}</span>}
           </button>
           <span className="topbar-pill-div" aria-hidden="true" />
-          <button type="button" className="topbar-pill-btn" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={activeSection === "settings"} title="차트 설정" onClick={() => toggleSection("settings")}>
+          <button type="button" className="topbar-pill-btn" data-chart-pop-opener="settings" aria-label="차트 설정" aria-haspopup="dialog" aria-expanded={openHere === "settings"} title="차트 설정" onClick={(event) => toggleChartSettings(cellId, event.currentTarget)}>
             <SlidersIcon />
             <span className="topbar-label-lg">차트</span>
-          </button>
-          <span className="topbar-pill-div" aria-hidden="true" />
-          <button type="button" className="topbar-pill-btn" aria-label="비교" aria-haspopup={opensDialog ? "dialog" : undefined} aria-expanded={activeSection === "compare"} title="비교 종목" onClick={() => toggleSection("compare")}>
-            <CompareIcon />
-            <span className="topbar-label-lg">비교</span>
-            {compareCount > 0 && <span className="topbar-pill-count">{compareCount}</span>}
           </button>
         </div>
       </div>

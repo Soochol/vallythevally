@@ -40,7 +40,7 @@ function install(next: RestoredLayout) {
   const autosave = layoutAutosave();
   flushSync(() => usePersistStore.getState().setPhase({ kind: "restoring" }));
   clearActiveWindow();
-  useSelectionStore.setState({ activeCell: chartWindows(next.layout)[0]!.id, dialog: null, inspector: null, toast: null });
+  useSelectionStore.setState({ activeCell: chartWindows(next.layout)[0]!.id, dialog: null, chartPop: null, toast: null });
   useDrawingSession.getState().clearCells();
   useIndicatorPreview.setState({ current: null });
   useLayoutStore.getState().load(next.layout);

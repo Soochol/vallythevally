@@ -177,7 +177,9 @@ export interface ControllerDeps {
   /** 없으면 실시간 없이 조회한 봉만 그린다. */
   socket?: MarketSocketLike;
   indicators?: OpenPort;
-  onIndicatorCommand?: (id: string, command: IndicatorCommand, anchor: HTMLElement) => void;
+  onIndicatorCommand?: (id: string, command: IndicatorCommand, anchor: HTMLElement, field?: string) => void;
+  onIndicatorAdd?: (anchor: HTMLElement) => void;
+  onChartSettings?: (anchor: HTMLElement) => void;
   onIndicatorMerge?: (indicatorId: string, targetPanelId: "price" | Panel["id"]) => void;
   onIndicatorSplit?: (indicatorId: string, insertAt: number) => void;
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
@@ -293,7 +295,8 @@ export class ChartController {
     this.crosshairMarker = new CrosshairMarker({ element: el, chart: this.chart, bars: () => this.bars, period: () => this.period() });
     el.addEventListener("pointerleave", this.clearPointedBar);
     this.legend = new Legend(el, {
-      projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection()],
+      projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection(), this.indicatorLegend.addProjection()],
+      openSettings: (anchor) => deps.onChartSettings?.(anchor),
       readViewport: () => ({
         pricePane: this.paneBounds()[0] ?? null,
         axisWidth: this.chart.priceScale("right").width() + this.leftAxisWidth(),
@@ -331,9 +334,9 @@ export class ChartController {
       { fetchInvestorNetShares: deps.fetchInvestorNetShares },
     );
     this.indicators.attachMainSeries(this.main.api);
-    this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor) => deps.onIndicatorCommand?.(id, command, anchor), () => this.legend.fit("content"));
+    this.indicatorLegend = new IndicatorLegend(el, (id, command, anchor, field) => deps.onIndicatorCommand?.(id, command, anchor, field), () => this.legend.fit("content"), (anchor) => deps.onIndicatorAdd?.(anchor));
     this.compareLegend = new CompareLegend((code) => deps.onCompareRemove?.(code));
-    this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box);
+    this.legend.body.append(this.indicatorLegend.priceBox, this.compareLegend.box, this.indicatorLegend.addBox);
     this.resize = new ResizeObserver(() => {
       this.paneLayoutDirty = true;
       this.elVisible = crosshairVisible(el);

@@ -7,7 +7,6 @@ import { isHexColor, type HexColor } from "../../lib/colors";
 import { Errors, Row } from "../dialog/DialogParts";
 import { Segmented } from "../ui/Segmented";
 import { Switch } from "../ui/Switch";
-import { ColorStyleTrigger } from "../color/ColorStylePopover";
 import { ColorTable, type ThemeSwatch } from "../color/ColorTable";
 import { useColorMore } from "../color/colorMore";
 import { canOverlayPrice, hasBarOpacity, hasColor, indicatorPeriodNotice, placeErrors, type Draft, type FieldError, type Validate } from "./indicatorForm";
@@ -65,14 +64,13 @@ export function useValidator(): Validate | "loading" | "failed" {
   return validate;
 }
 
-export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSample = true, foldColors = false, colorControl = "table" }: {
+export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSample = true, foldColors = false }: {
   draft: Draft;
   color: IndicatorColor;
   errors: readonly FieldError[];
   onChange(draft: Draft): void;
   lineSample?: boolean;
   foldColors?: boolean;
-  colorControl?: "table" | "popover";
 }) {
   const ids = useId();
   const more = useColorMore();
@@ -83,15 +81,14 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
   const lined = hasColor(draft.form);
   const notice = indicatorPeriodNotice(kind);
   const css = indicatorCssColor(color);
-  const usePopover = colorControl === "popover";
   return <div className="@container flex flex-col gap-4">
     {notice && <p className="text-xs text-text-3">{notice}</p>}
     {lined && lineSample && <svg role="img" aria-label="선 미리보기" className="h-[60px] w-full flex-none rounded-m bg-chart-bg shadow-[inset_0_0_0_1px_var(--line)]" viewBox="0 0 636 60" preserveAspectRatio="none" fill="none">
       <path d="M0 44 C 50 42, 80 18, 140 24 S 230 48, 290 38 S 390 8, 450 16 S 560 34, 636 12" stroke={css} strokeWidth={draft.width} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
     </svg>}
-    <div className={lined && !usePopover ? "grid gap-5 @min-[600px]:grid-cols-[minmax(0,1fr)_320px]" : "flex flex-col gap-3"}>
-      <section aria-labelledby={`${ids}-values`} className={usePopover ? "ic-card" : "flex min-w-0 flex-col gap-3"}>
-        <h4 id={`${ids}-values`} className={usePopover ? "ic-card-title" : "text-xs text-text-3"}>설정값</h4>
+    <div className={lined ? "grid gap-5 @min-[600px]:grid-cols-[minmax(0,1fr)_320px]" : "flex flex-col gap-3"}>
+      <section aria-labelledby={`${ids}-values`} className="flex min-w-0 flex-col gap-3">
+        <h4 id={`${ids}-values`} className="text-xs text-text-3">설정값</h4>
         {KINDS[kind].fields.length === 0 && <p className="text-s text-text-3">정할 값이 없는 지표입니다.</p>}
         {kind === "ichimoku" && (
           <Row label="기간 프리셋">
@@ -199,6 +196,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
                 <span className="flex items-center gap-1.5">
                   <input
                     id={inputId}
+                    data-field={f.key}
                     type="text"
                     inputMode={f.type === "float" ? "decimal" : "numeric"}
                     value={text}
@@ -286,25 +284,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
         </>;
         })()}
       </section>
-      {lined && (usePopover ? (
-        <section aria-labelledby={`${ids}-line`} className="ic-card">
-          <div className="ic-card-head">
-            <h4 id={`${ids}-line`} className="ic-card-title">선 스타일</h4>
-            <span className="text-xs text-text-3">색상 · 굵기 선택</span>
-          </div>
-          <Row label="색상 · 굵기">
-            <ColorStyleTrigger
-              label="선 색"
-              value={color}
-              theme={THEME_SWATCHES}
-              width={draft.width}
-              size="lg"
-              onColorChange={(next) => onChange({ ...draft, color: next })}
-              onWidthChange={(width) => onChange({ ...draft, width })}
-            />
-          </Row>
-        </section>
-      ) : (
+      {lined && (
         <section aria-labelledby={`${ids}-line`} className="flex min-w-0 flex-col gap-3">
           <h4 id={`${ids}-line`} className="text-xs text-text-3">선</h4>
           <Row label="선 굵기">
@@ -316,7 +296,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
           </Row>
           <ColorTable label="선 색" value={color} theme={THEME_SWATCHES} width={draft.width} more={foldColors ? more : undefined} onChange={(next) => onChange({ ...draft, color: next })} />
         </section>
-      ))}
+      )}
     </div>
   </div>;
 }

@@ -3,7 +3,7 @@ import type { WindowId, WindowKind } from "../../layout/kinds";
 import { BookWindow } from "../book/BookWindow";
 import { BrokersWindow } from "../brokers/BrokersWindow";
 import { OrderWindow } from "../order/OrderWindow";
-import { IndicatorInspector } from "../indicator-inspector/IndicatorInspector";
+import { IndicatorAddWindow } from "../indicator-command/IndicatorAddWindow";
 import { PreMarketWindow } from "../premarket/PreMarketWindow";
 import { ProgramWindow } from "../program/ProgramWindow";
 import { RankingWindow } from "../ranking/RankingWindow";
@@ -22,7 +22,7 @@ export const WINDOW_CONTENT: { readonly [K in WindowKind]: WindowContent } = {
   chart: { Content: ChartWindow, overflow: "hidden" },
   watchlist: { Content: WatchPanel, overflow: "hidden" },
   screener: { Content: ScreenerPanel, overflow: "hidden" },
-  indicators: { Content: IndicatorInspector, overflow: "hidden" },
+  indicators: { Content: IndicatorAddWindow, overflow: "hidden" },
   trades: { Content: TradesWindow, overflow: "hidden" },
   book: { Content: BookWindow, overflow: "hidden" },
   program: { Content: ProgramWindow, overflow: "hidden" },

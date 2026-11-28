@@ -239,7 +239,7 @@ test("자동 저장이 멈추면 확인 port는 모든 칸 드로잉을 기다�
 });
 
 test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", async () => {
-  useUiStore.getState().setIndicatorWindow("inspector");
+  useUiStore.getState().setBookReplay(true);
   await vi.advanceTimersByTimeAsync(1000);
   expect(puts).toEqual([
     {
@@ -254,14 +254,13 @@ test("UI 설정을 바꾸면 모르는 키와 함께 UiState를 보낸다", asyn
         drawing: DEFAULT_UI_PREFS.drawing,
         lastMinute: "3m",
         collapsedWatchGroups: [],
-        indicatorWindow: "inspector",
         layoutMode: "dock",
         venue: "combined",
         orderSettings: DEFAULT_UI_PREFS.orderSettings,
         orderEntries: {},
         hotkeys: {},
         pageLink: "a",
-        bookReplay: false,
+        bookReplay: true,
         brokers: DEFAULT_UI_PREFS.brokers,
         revision: expect.any(Number),
       },
@@ -339,20 +338,20 @@ test("옛 한 목록 한도(64KB)에 들던 종목을 가장 긴 감싸개 20개
 
 test("UiState가 64KB를 넘으면 최근 본 종목을 지우고 한 번 다시 보낸다", async () => {
   const prefs = { ...DEFAULT_UI_PREFS, lastLayoutId: DEFAULT_LAYOUT.id };
-  const base = JSON.stringify({ ...toUiState({ ...prefs, indicatorWindow: "inspector" }, { blob: "" }), revision: Number.MAX_SAFE_INTEGER }).length;
+  const base = JSON.stringify({ ...toUiState({ ...prefs, bookReplay: true }, { blob: "" }), revision: Number.MAX_SAFE_INTEGER }).length;
   const blob = "x".repeat(PAYLOAD_LIMIT_BYTES - base);
   useUiStore.getState().load({ ...prefs, recentSymbols: ["005930", "000660"] }, { blob });
-  useUiStore.getState().setIndicatorWindow("inspector");
+  useUiStore.getState().setBookReplay(true);
   await vi.advanceTimersByTimeAsync(10_000);
   expect(toasts).toEqual([RECENT_CLEARED]);
   expect(puts).toHaveLength(1);
-  expect(puts[0]!.body).toMatchObject({ recentSymbols: [], indicatorWindow: "inspector" });
+  expect(puts[0]!.body).toMatchObject({ recentSymbols: [], bookReplay: true });
   expect(useUiStore.getState().prefs.recentSymbols).toEqual([]);
 });
 
 test("줄여도 64KB를 넘으면 보내지 않고 실패로 남는다", async () => {
   useUiStore.getState().load({ ...DEFAULT_UI_PREFS, recentSymbols: ["005930"] }, { blob: "x".repeat(PAYLOAD_LIMIT_BYTES) });
-  useUiStore.getState().setIndicatorWindow("inspector");
+  useUiStore.getState().setBookReplay(true);
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(puts).toEqual([]);
   expect(usePersistStore.getState().saves.ui).toEqual({ kind: "failed", reason: "too_large" });

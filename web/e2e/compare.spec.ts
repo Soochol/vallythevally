@@ -4,7 +4,7 @@ import { installChartProbe } from "./chart-probe";
 import { installFrameProbe } from "./frame-probe";
 import { selectOption } from "./select-option";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
-import { useCenterIndicatorWindow } from "./indicator-window";
+import { openCompare } from "./indicator-ui";
 
 test.use({ clockStart: "20261109100030" });
 
@@ -38,10 +38,13 @@ function sentFrames(scenario: Scenario): readonly Sent[] { return scenario.live.
 
 const tradeValues = (price: number, _time: string) => ({ c: Math.abs(Number(`+${price}`)), v: Math.abs(Number("1000")) });
 
-async function openCompareTab(page: Page): Promise<Locator> {
-  await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "비교", exact: true }).click();
-  const dialog = page.getByRole("dialog");
-  return dialog;
+const openCompareTab = openCompare;
+
+async function removeCompare(dialog: Locator, name: string) {
+  await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("");
+  const option = dialog.getByRole("option", { name, exact: true });
+  await expect(option).toHaveAttribute("aria-selected", "true");
+  await option.click();
 }
 
 async function addCompare(dialog: Locator, name: string) {
@@ -50,7 +53,6 @@ async function addCompare(dialog: Locator, name: string) {
 }
 
 test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그 구독을 풀고, 새로고침해도 남는다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const sent = sentFrames(scenario);
@@ -68,7 +70,8 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
   for (const code of ["006400", "000810", "IDX:001"]) await expect(row(page, code)).not.toHaveAttribute("data-last-t", "");
 
   await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).fill("삼성물산");
-  await dialog.getByRole("option", { name: /삼성물산/ }).first().click();
+  await expect(dialog.getByRole("option", { name: /삼성물산/ }).first()).toHaveAttribute("aria-disabled", "true");
+  await dialog.getByRole("combobox", { name: "지표·비교 찾기" }).press("Enter");
   await expect(rows(page)).toHaveCount(3);
   await expect(dialog).toContainText("비교 종목은 3개까지입니다");
 
@@ -76,7 +79,7 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
   await pollSaved(() => ["006400", "000810", "IDX:001"].map((s) => subOf(s) !== undefined)).toEqual([true, true, true]);
   await pollSaved(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "000810", "IDX:001"]);
 
-  await dialog.getByRole("button", { name: "삼성화재 지우기" }).click();
+  await removeCompare(dialog, "삼성화재");
   await expect(rows(page)).toHaveCount(2);
   await pollSaved(() => sent.some((m) => m.type === "unsubscribe" && m.sub === subOf("000810"))).toBe(true);
   await pollSaved(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "IDX:001"]);
@@ -92,13 +95,12 @@ test("비교 종목 탭에서 3개까지 넣고 4번째는 막히며, 빼면 그
   await pollSaved(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "IDX:001", "000810"]);
   await page.keyboard.press("Escape");
   await expect(reopened).toBeHidden();
-  await expect(rows(page)).toHaveCount(2);
-  await pollSaved(async () => (await settingsOf(scenario)).compare).toEqual(["006400", "IDX:001"]);
+  await expect(rows(page)).toHaveCount(3);
+  expect((await settingsOf(scenario)).compare).toEqual(["006400", "IDX:001", "000810"]);
   expect(errors).toEqual([]);
 });
 
 test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 동안은 %로 고정되고 다 빼면 저장된 축으로 돌아간다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   await seed(scenario);
   await page.goto("/");
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
@@ -119,12 +121,13 @@ test("% 축은 비교 종목 없이도 켜고 끄며, 비교 종목이 있는 �
   await expect(axis).toBeDisabled();
   await expect(axis).toHaveText("%");
   await expect(axis).toHaveAttribute("title", /./);
-  await expect(dialog.getByRole("switch", { name: "가격축을 % 변화로" })).toBeDisabled();
   await pollSaved(async () => (await settingsOf(scenario)).scale).toBe("log");
 
-  await dialog.getByRole("button", { name: "삼성SDI 지우기" }).click();
+  await removeCompare(dialog, "삼성SDI");
   await expect(chart).toHaveAttribute("data-price-scale", "log");
-  await dialog.getByRole("switch", { name: "가격축을 % 변화로" }).click();
+  await page.keyboard.press("Escape");
+  await expect(axis).toBeEnabled();
+  await selectOption(axis, "percent");
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
   await pollSaved(async () => (await settingsOf(scenario)).scale).toBe("percent");
 });
@@ -157,7 +160,6 @@ test("비교 종목도 체결마다 움직인다", async ({ page, scenario }) =>
 });
 
 test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 봉이 바뀌어도 주 봉 시리즈의 가격 좌표에 붙어 있다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   await seed(scenario, {}, "D");
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
@@ -191,7 +193,7 @@ test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 �
 
   const dialog = await openCompareTab(page);
   await addCompare(dialog, "코스피");
-  await dialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await page.keyboard.press("Escape");
   await expect(chart).toHaveAttribute("data-price-scale", "percent");
   await expect(row(page, "IDX:001")).not.toHaveAttribute("data-last-t", "");
   await expect.poll(onCandles).toBe(true);
@@ -208,7 +210,6 @@ test("일반 축에서 그린 드로잉은 % 축이 되고 스크롤로 기준 �
 });
 
 test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 아니다", async ({ page, scenario }) => {
-  useCenterIndicatorWindow(scenario);
   await seed(scenario, { compare: ["IDX:001"], indicators: [VOLUME], panels: [{ id: "p1", stretch: 0.25 }] }, "D");
   await page.addInitScript(installFrameProbe);
   await page.goto("/");
@@ -221,8 +222,8 @@ test("비교 종목이 저장된 칸을 열어도 지표 패널 축은 % 축이 
   await expect.poll(modes).toEqual({ main: 2, volume: 0 });
 
   const compareDialog = await openCompareTab(page);
-  await compareDialog.getByRole("button", { name: "코스피 지우기" }).click();
-  await compareDialog.getByRole("button", { name: "입력창 닫기", exact: true }).click();
+  await removeCompare(compareDialog, "코스피");
+  await page.keyboard.press("Escape");
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "normal");
   await selectOption(cell(page).getByRole("combobox", { name: "가격축 방식" }), "log");
   await expect.poll(modes).toEqual({ main: 1, volume: 0 });
