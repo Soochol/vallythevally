@@ -22,9 +22,10 @@ async function boxOf(locator: Locator) {
 const emptyTabs = (group: Locator) => group.locator(".dock-tabs");
 async function doubleClickEmpty(group: Locator) {
   const row = await boxOf(emptyTabs(group));
-  const last = await boxOf(group.locator(".dock-tab-group").last());
   const add = await boxOf(group.locator(".dock-add"));
-  const gap = (last.x + last.width + add.x) / 2;
+  const actions = group.locator(".dock-tab-actions");
+  const rightEdge = (await actions.isVisible()) ? (await boxOf(actions)).x : row.x + row.width - 8;
+  const gap = (add.x + add.width + rightEdge) / 2;
   await emptyTabs(group).dblclick({ position: { x: gap - row.x, y: row.height / 2 } });
 }
 

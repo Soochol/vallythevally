@@ -98,12 +98,12 @@ test("분봉에서 정규장만 보기를 켜면 정규장 봉만 남기고 배�
   await expect(compareRow).toContainText("+100.00%");
 
   const requestsBeforeToggle = barRequests.length;
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await expect(regularSwitch(page)).toHaveAttribute("aria-checked", "false");
   await regularSwitch(page).click();
 
   await expect(regularSwitch(page)).toHaveAttribute("aria-checked", "true");
-  await expect(popover(page).getByRole("tab", { name: "봉 · 축", exact: true })).toHaveAttribute("data-modified", "true");
+  await expect(popover(page).getByRole("tab", { name: "시간", exact: true })).toHaveAttribute("data-modified", "true");
   await expect(chart).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length));
   await expect(chart).toHaveAttribute("data-first-bar-t", String(REGULAR_BARS[0]!.t));
   await expect(chart).toHaveAttribute("data-last-bar-t", String(REGULAR_BARS.at(-1)!.t));
@@ -136,7 +136,7 @@ test("정규장만 보기 설정은 새로고침 뒤 유지되고 Esc로 닫아�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   const chart = chartOf(cell(page));
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await regularSwitch(page).click();
   await expect(chart).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length));
   await pollSaved(() => saved(scenario).regularHoursOnly).toBe(true);
@@ -148,7 +148,7 @@ test("정규장만 보기 설정은 새로고침 뒤 유지되고 Esc로 닫아�
   await expect(chart).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length));
   await expect(regularBadge(page)).toBeVisible();
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await expect(regularSwitch(page)).toHaveAttribute("aria-checked", "true");
   await regularSwitch(page).click();
   await expect(chart).toHaveAttribute("data-bar-count", String(FULL_DAY_BARS.length));
@@ -158,7 +158,7 @@ test("정규장만 보기 설정은 새로고침 뒤 유지되고 Esc로 닫아�
   await expect(regularBadge(page)).toBeHidden();
   await pollSaved(() => saved(scenario).regularHoursOnly).toBe(false);
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await regularSwitch(page).click();
   await expect(chart).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length));
   await popover(page).getByRole("button", { name: "기본값 복원", exact: true }).click();
@@ -180,7 +180,7 @@ test("일봉에서는 정규장만 보기를 켜도 모든 봉을 유지하고 �
   const chart = chartOf(cell(page));
   await expect(chart).toHaveAttribute("data-bar-count", String(dailyBars.length));
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await regularSwitch(page).click();
   await expect(regularSwitch(page)).toHaveAttribute("aria-checked", "true");
   await pollSaved(() => saved(scenario).regularHoursOnly).toBe(true);
@@ -223,7 +223,7 @@ test("정규장만 보기 중 장외 실시간 체결은 숨겼다가 스위치�
   await expect(chart).toHaveAttribute("data-last-close", String(updatedLastRegular.c));
   await expect(cell(page).locator("[data-price-row]")).toContainText("63,500");
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await regularSwitch(page).click();
   await expect(chart).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length + 2));
   await expect(chart).toHaveAttribute("data-last-bar-t", String(afterBar2.t));
@@ -276,7 +276,7 @@ test("정규장 자동 과거 조회가 실패해도 rawHistory가 남아 스위
   await expect(chart).toHaveAttribute("data-bar-count", "0");
 
   const requestsBeforeToggleOff = barRequests.length;
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await regularSwitch(page).click();
   await expect(chart).toHaveAttribute("data-bar-count", String(PRE_MARKET_BARS.length));
   await expect(cell(page).getByRole("button", { name: "다시 시도" })).toBeHidden();
@@ -460,7 +460,7 @@ test("정규장만 보기 중 장외 실시간 수급 틱이 CVD·프로그램 �
 
   const cvdCountBeforeToggle = cvdRequests.length;
   const programCountBeforeToggle = programRequests.length;
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "시간");
   await regularSwitch(page).click();
   await expect(chartOf(cell(page))).toHaveAttribute("data-bar-count", String(REGULAR_BARS.length));
   await expect(cvdRow).toContainText("초대형 +1.50억");

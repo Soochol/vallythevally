@@ -33,11 +33,13 @@ const SECTIONS = [
 type SymbolRow = { kind: "symbol"; key: string; info: SymbolInfo; on: boolean; reason: string | null };
 type Row = AddRow | SymbolRow;
 
-export function IndicatorAddPanel({ cellId, section, onSection, autoFocus = false, regionLabel }: {
+export function IndicatorAddPanel({ cellId, section, onSection, autoFocus = false, focusNonce = 0, embedded = false, regionLabel }: {
   cellId: WindowId;
   section: AddSection;
   onSection(section: AddSection): void;
   autoFocus?: boolean;
+  focusNonce?: number;
+  embedded?: boolean;
   regionLabel?: string;
 }) {
   const cell = useCell(cellId);
@@ -57,8 +59,9 @@ export function IndicatorAddPanel({ cellId, section, onSection, autoFocus = fals
   const compared = useSymbolInfos(settings.compare);
   const symbols = searchList(query, { watch, recent: [] }, search.data);
 
-  const rows: Row[] = useMemo(() => {
-    if (!comparing) return addRows(settings, input);
+  const indicatorRows = useMemo(() => (comparing ? [] : addRows(settings, input)), [comparing, settings, input]);
+  const symbolRows = useMemo(() => {
+    if (!comparing) return [];
     const listed = new Set<string>();
     const out: SymbolRow[] = [];
     const push = (info: SymbolInfo) => {
@@ -70,13 +73,17 @@ export function IndicatorAddPanel({ cellId, section, onSection, autoFocus = fals
     if (query === "") for (const info of compared) push(info);
     for (const { info } of symbols.rows) push(info);
     return out;
-  }, [comparing, settings, input, query, compared, symbols.rows, cell.symbol]);
+  }, [comparing, settings, query, compared, symbols.rows, cell.symbol]);
+  const rows: Row[] = comparing ? symbolRows : indicatorRows;
 
   const activeIndex = rows.length === 0 ? -1 : Math.min(active, rows.length - 1);
   const activeRow = activeIndex < 0 ? null : rows[activeIndex]!;
   const optionId = (index: number) => `${ids}-option-${index}`;
 
   useEffect(() => { setActive(0); }, [input, section]);
+  useEffect(() => {
+    if (focusNonce > 0) inputRef.current?.focus();
+  }, [focusNonce]);
   useEffect(() => {
     if (activeIndex >= 0) document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
@@ -150,7 +157,7 @@ export function IndicatorAddPanel({ cellId, section, onSection, autoFocus = fals
 
   return <div className="ia-panel" data-chart-control="" role={regionLabel ? "region" : undefined} aria-label={regionLabel}>
     <header className="ia-head">
-      <h3 className="ia-title"><span>더하기</span><small>{name} · {PERIOD_LABEL[cell.period]}</small></h3>
+      {embedded ? <span className="ia-sub-cell">{name} · {PERIOD_LABEL[cell.period]}</span> : <h3 className="ia-title"><span>더하기</span><small>{name} · {PERIOD_LABEL[cell.period]}</small></h3>}
       <Segmented label="더할 것" mode="pressed" size="sm" options={SECTIONS} value={section} onChange={(next) => { onSection(next); setInput(""); refocus(); }} />
     </header>
     <label className="ia-search">

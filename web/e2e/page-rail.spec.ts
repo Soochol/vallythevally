@@ -113,9 +113,10 @@ test("다른 페이지에서 누른 키는 숨은 작업 영역에 닿지 않는
   await expect(groups).toHaveCount(2);
   const last = groups.last();
   const row = (await last.locator(".dock-tabs").boundingBox())!;
-  const lastTab = (await last.locator(".dock-tab-group").last().boundingBox())!;
   const add = (await last.locator(".dock-add").boundingBox())!;
-  await last.locator(".dock-tabs").dblclick({ position: { x: (lastTab.x + lastTab.width + add.x) / 2 - row.x, y: row.height / 2 } });
+  const actions = last.locator(".dock-tab-actions");
+  const rightEdge = (await actions.isVisible()) ? (await actions.boundingBox())!.x : row.x + row.width - 8;
+  await last.locator(".dock-tabs").dblclick({ position: { x: (add.x + add.width + rightEdge) / 2 - row.x, y: row.height / 2 } });
   await expect(groups).toHaveCount(1);
   await railLink(page, "시장 종합").click();
   await expect(page.getByRole("main", { name: "시장 종합", exact: true })).toBeVisible();

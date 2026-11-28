@@ -14,7 +14,7 @@ import { shownVenue, venueLabel } from "../../lib/venue";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
 import { useSelectionStore } from "../../stores/selection";
-import { openIndicatorBubble, toggleChartSettings, toggleIndicatorAdd } from "../indicator-command/open";
+import { openIndicatorBubble, toggleIndicatorAdd } from "../indicator-command/open";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { appliedThemeKey, DEFAULT_THEME_KEY, subscribeTheme } from "../../persist/theme";
 import { useVenue } from "../../stores/ui";
@@ -111,7 +111,6 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
         openIndicatorBubble(cellIdRef.current, id, anchor, field ?? null);
       },
       onIndicatorAdd: (anchor) => toggleIndicatorAdd(cellIdRef.current, anchor),
-      onChartSettings: (anchor) => toggleChartSettings(cellIdRef.current, anchor),
       onIndicatorMerge: (indicatorId, targetPanelId) => useLayoutStore.getState().mergeIndicatorIntoPanel(cellIdRef.current, indicatorId, targetPanelId),
       onIndicatorSplit: (indicatorId, insertAt) => useLayoutStore.getState().splitIndicatorToNewPanel(cellIdRef.current, indicatorId, insertAt),
       onPanelStretch: (stretches) => useLayoutStore.getState().setPanelStretches(cellIdRef.current, stretches),
@@ -220,7 +219,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       tabIndex={0}
       aria-label={`칸 ${cellNumber}: ${[name, venueLabel(cell.symbol, venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
       aria-busy={showLoading}
-      className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
+      className="relative min-h-0 min-w-0 flex-1 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className={chartBoxClass} />
       {status.kind === "ready" && <AxisMode cellId={cellId} corner={corner} />}

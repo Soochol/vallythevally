@@ -2,7 +2,6 @@ import type { Bar } from "../api/generated/Bar";
 import type { Period } from "../api/generated/Period";
 import type { UnixSeconds } from "../api/generated/UnixSeconds";
 import { type Direction, direction, formatChange, formatPercent, formatPrice } from "../lib/format";
-import { iconMarkup } from "../features/icons";
 import type { PaneBounds } from "./indicators/legendRows";
 import { denserTier, legendTier, reserveLegendFields, type LegendField, type LegendProjection, type LegendTier } from "./legendProjection";
 import { OptionalTrackedValues, TrackedValues, valueShape } from "./legendShapes";
@@ -192,7 +191,6 @@ function emptyAlternatives(): LayoutAlternatives {
 type LegendViewport = { readonly pricePane: PaneBounds | null; readonly axisWidth: number };
 export type LegendBox = { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number };
 type LegendHost = {
-  openSettings?(anchor: HTMLElement): void;
   readonly projectRows: () => readonly LegendProjection[];
   readonly readViewport: () => LegendViewport;
   readonly applyTier: (tier: LegendTier) => void;
@@ -234,7 +232,6 @@ export class Legend {
   readonly venueAnchor = el("span", "inline-flex flex-none max-md:hidden");
   private readonly period = el("span", "flex-none text-s text-text-3");
   private readonly regularBadge = el("span", `${NEUTRAL_PILL} flex-none max-md:hidden`, "정규장");
-  private readonly settings = el("button", "legend-settings pointer-events-auto flex-none");
   private readonly price = priceFields();
   private readonly notice = el("span", `${WARNING_PILL} break-keep max-md:hidden`);
   private readonly head = el("div", "relative z-[6] flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden whitespace-nowrap rounded-s bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)] pr-1");
@@ -299,15 +296,7 @@ export class Legend {
     this.regularBadge.title = "정규장(09:00~15:30) 봉만 표시 중";
     this.regularBadge.hidden = true;
     this.ohlcLine.dataset.ohlcLine = "";
-    this.settings.type = "button";
-    this.settings.dataset.chartControl = "";
-    this.settings.dataset.chartSettingsOpen = "";
-    this.settings.title = "차트 설정";
-    this.settings.setAttribute("aria-label", "이 차트 설정");
-    this.settings.setAttribute("aria-haspopup", "dialog");
-    this.settings.innerHTML = iconMarkup("sliders", 13);
-    this.settings.onclick = () => this.presentationHost.openSettings?.(this.settings);
-    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.regularBadge, this.settings, this.price.row, this.notice);
+    this.head.append(this.name, this.sub, this.venueAnchor, this.period, this.regularBadge, this.price.row, this.notice);
     this.name.setAttribute("role", "heading");
     this.name.setAttribute("aria-level", "2");
     this.notice.hidden = true;
