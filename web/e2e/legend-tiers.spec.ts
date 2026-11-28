@@ -286,6 +286,17 @@ test("바로가기 모드의 알약은 범례 밖 상단 중앙에 있고 범례
   expect(badgeBoxBefore.y + badgeBoxBefore.height).toBeLessThanOrEqual(legendBoxBefore.y + 0.5);
 
   const foldPill = pane.getByRole("button", { name: /^지표 4/ });
+  await expect(foldPill).toHaveAttribute("aria-expanded", "true");
+  await foldPill.click();
+  await expect(foldPill).toHaveAttribute("aria-expanded", "false");
+  await frames(page, 6);
+
+  const badgeBoxFolded = (await badge.boundingBox())!;
+  const legendBoxFolded = (await pane.locator(".chart-legend").boundingBox())!;
+  expect(Math.abs(badgeBoxFolded.x - badgeBoxBefore.x)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(badgeBoxFolded.y - badgeBoxBefore.y)).toBeLessThanOrEqual(0.5);
+  expect(badgeBoxFolded.y + badgeBoxFolded.height).toBeLessThanOrEqual(legendBoxFolded.y + 0.5);
+
   await foldPill.click();
   await expect(foldPill).toHaveAttribute("aria-expanded", "true");
   await frames(page, 6);
@@ -338,7 +349,7 @@ test("일봉과 분봉 차트 범례가 동일한 1줄 헤더로 통일되고 �
   }
 });
 
-test("접힌 지표 4개는 호버로 열리지 않고 버튼 1클릭으로 즉시 펼치고 다시 눌러 닫는다", async ({ page, scenario }) => {
+test("지표 4개는 기본 펼침으로 시작하고 버튼 1클릭으로 접고 다시 펼치며 접힌 상태에서 호버로 열리지 않는다", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
   seedCharts(scenario, [chartWindow("cell-0", { indicators: movingAverages(4) }, "D")]);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -348,15 +359,6 @@ test("접힌 지표 4개는 호버로 열리지 않고 버튼 1클릭으로 즉�
   const foldBox = current.locator("[data-indicator-fold-box]");
   const pill = current.getByRole("button", { name: /^지표 4/ });
   const thirdRow = current.locator('[data-indicator-row="ma20"]');
-  await expect(foldBox).toHaveAttribute("data-folded", "");
-  await expect(pill).toHaveAttribute("aria-expanded", "false");
-  await expect(thirdRow).toBeHidden();
-
-  await pill.hover();
-  await expect(foldBox).toHaveAttribute("data-folded", "");
-  await expect(thirdRow).toBeHidden();
-
-  await pill.click();
   await expect(foldBox).not.toHaveAttribute("data-folded", "");
   await expect(foldBox).not.toHaveAttribute("data-open", "");
   await expect(pill).toHaveAttribute("aria-expanded", "true");
@@ -376,4 +378,15 @@ test("접힌 지표 4개는 호버로 열리지 않고 버튼 1클릭으로 즉�
   await expect(pill).toHaveAttribute("aria-expanded", "false");
   await expect(pill).toContainText("▾");
   await expect(thirdRow).toBeHidden();
+
+  await pill.hover();
+  await expect(foldBox).toHaveAttribute("data-folded", "");
+  await expect(thirdRow).toBeHidden();
+
+  await pill.click();
+  await expect(foldBox).not.toHaveAttribute("data-folded", "");
+  await expect(foldBox).not.toHaveAttribute("data-open", "");
+  await expect(pill).toHaveAttribute("aria-expanded", "true");
+  await expect(pill).toContainText("▴");
+  await expect(thirdRow).toBeVisible();
 });
