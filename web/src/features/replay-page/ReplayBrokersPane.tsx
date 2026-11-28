@@ -31,6 +31,7 @@ interface Props {
   readonly onJumpMs: (ms: number) => void;
   readonly brokerDay: BrokerDayResult;
   readonly bars1m: readonly Bar[];
+  readonly forcedMode?: BottomPaneMode;
 }
 
 const EMPTY_RUNS: ReadonlyMap<string, readonly TrackRun[]> = new Map();
@@ -48,8 +49,11 @@ export function ReplayBrokersPane({
   onJumpMs,
   brokerDay,
   bars1m,
+  forcedMode,
 }: Props) {
-  const [bottomPane, setBottomPane] = useState<BottomPaneMode>("brokers");
+  const [internalPane, setInternalPane] = useState<BottomPaneMode>("brokers");
+  const bottomPane = forcedMode ?? internalPane;
+  const setBottomPane = setInternalPane;
   const [journalTab, setJournalTab] = useState<JournalTab>("fills");
   const [paperTick, setPaperTick] = useState(0);
   const brokerView = useUiStore((s) => s.prefs.brokers.replayView);
@@ -120,24 +124,26 @@ export function ReplayBrokersPane({
   return (
     <section className="rp-col" aria-label="거래원 및 가상매매" data-testid="replay-brokers-pane">
       <div className="rp-bottom-switch">
-        <div className="rp-seg" role="group" aria-label="하단 분석 전환">
-          <button
-            type="button"
-            data-testid="replay-tab-brokers"
-            aria-pressed={bottomPane === "brokers"}
-            onClick={() => setBottomPane("brokers")}
-          >
-            거래원
-          </button>
-          <button
-            type="button"
-            data-testid="replay-tab-journal"
-            aria-pressed={bottomPane === "journal"}
-            onClick={() => setBottomPane("journal")}
-          >
-            {`가상 매매 (${paperSummary.fills.length}/${paperSummary.openOrders.length})`}
-          </button>
-        </div>
+        {forcedMode === undefined && (
+          <div className="rp-seg" role="group" aria-label="하단 분석 전환">
+            <button
+              type="button"
+              data-testid="replay-tab-brokers"
+              aria-pressed={bottomPane === "brokers"}
+              onClick={() => setBottomPane("brokers")}
+            >
+              거래원
+            </button>
+            <button
+              type="button"
+              data-testid="replay-tab-journal"
+              aria-pressed={bottomPane === "journal"}
+              onClick={() => setBottomPane("journal")}
+            >
+              {`가상 매매 (${paperSummary.fills.length}/${paperSummary.openOrders.length})`}
+            </button>
+          </div>
+        )}
 
         {bottomPane === "brokers" ? (
           <div className="rp-brokers-head-controls">

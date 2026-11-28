@@ -3,7 +3,6 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
-  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -17,9 +16,7 @@ import type { ReplayEngine, ReplayEngineFrame } from "./replayEngine";
 import { type DeltaMode, formatReplayClock, formatSignedQty } from "./replayModel";
 import {
   affordableMaxBuyQuantity,
-  DEFAULT_PAPER_INITIAL_CASH,
   PAPER_AMOUNT_PRESETS_MAN,
-  PAPER_CASH_PRESETS_MAN,
   type PaperMarketContext,
   type PaperOrderSide,
   type PaperSummary,
@@ -35,6 +32,12 @@ interface Props {
   readonly previousClose: number | null;
   readonly tickStepOf: (price: number) => number;
   readonly deltaMode: DeltaMode;
+  readonly qtyInput: string;
+  readonly buyRatioPercent: BuyRatioPercent | null;
+  readonly pickedPreset: string | null;
+  readonly onQtyInputChange: (next: string) => void;
+  readonly onBuyRatioPercentChange: (next: BuyRatioPercent | null) => void;
+  readonly onPickedPresetChange: (next: string | null) => void;
   readonly onDeltaMode: (mode: DeltaMode) => void;
   readonly onUndoRewind: () => void;
 }
@@ -46,7 +49,6 @@ const DAY_TAG_LABEL = {
 } as const;
 
 const ROW_INDICES = Array.from({ length: 20 }, (_, i) => i);
-const DEFAULT_SIM_QTY = 50;
 const MAN_WON = 10_000;
 
 interface DragView {
@@ -139,15 +141,17 @@ export function ReplayLadder({
   previousClose,
   tickStepOf,
   deltaMode,
+  qtyInput,
+  buyRatioPercent,
+  pickedPreset,
+  onQtyInputChange,
+  onBuyRatioPercentChange,
+  onPickedPresetChange,
   onDeltaMode,
   onUndoRewind,
 }: Props) {
   const [clickMode, setClickMode] = useState<OrderClickMode>("single");
-  const [cashInputMan, setCashInputMan] = useState(String(DEFAULT_PAPER_INITIAL_CASH / MAN_WON));
-  const [qtyInput, setQtyInput] = useState(String(DEFAULT_SIM_QTY));
   const [presetMode, setPresetMode] = useState<PresetMode>("amount");
-  const [pickedPreset, setPickedPreset] = useState<string | null>(null);
-  const [buyRatioPercent, setBuyRatioPercent] = useState<BuyRatioPercent | null>(null);
   const [paperTick, setPaperTick] = useState(0);
   const [refPrice, setRefPrice] = useState<number | null>(() => referencePriceOf(engine.getFrame()));
   const [dragView, setDragView] = useState<DragView | null>(null);
@@ -169,20 +173,9 @@ export function ReplayLadder({
   const ratioBidPctRef = useRef<HTMLSpanElement>(null);
   const obiRef = useRef<HTMLElement>(null);
 
-  const pnlQtyRef = useRef<HTMLElement>(null);
-  const pnlSellRemainRef = useRef<HTMLElement>(null);
-  const pnlAvgRef = useRef<HTMLElement>(null);
-  const pnlUnrealCellRef = useRef<HTMLDivElement>(null);
-  const pnlUnrealRef = useRef<HTMLElement>(null);
-  const pnlRealCellRef = useRef<HTMLDivElement>(null);
-  const pnlRealRef = useRef<HTMLElement>(null);
-  const pnlAvailRef = useRef<HTMLElement>(null);
-  const pnlEquityCellRef = useRef<HTMLDivElement>(null);
-  const pnlEquityRef = useRef<HTMLElement>(null);
-
   const rowPricesRef = useRef<(number | null)[]>(ROW_INDICES.map(() => null));
   const prevRowQtyRef = useRef<Map<string, number>>(new Map());
-  const qtyNumRef = useRef<number>(DEFAULT_SIM_QTY);
+  const qtyNumRef = useRef<number>(50);
   const buyRatioPercentRef = useRef<BuyRatioPercent | null>(null);
   const dragOriginRef = useRef<{
     readonly side: PaperOrderSide;
@@ -228,8 +221,8 @@ export function ReplayLadder({
   buyRatioPercentRef.current = buyRatioPercent;
 
   useEffect(() => {
-    setBuyRatioPercent(null);
-    setPickedPreset(null);
+    onBuyRatioPercentChange(null);
+    onPickedPresetChange(null);
     userScrolledRef.current = false;
     const el = ladderScrollRef.current;
     if (!el) return;
@@ -287,39 +280,11 @@ export function ReplayLadder({
     [summary.openOrders],
   );
 
-  const applyPnlDom = useCallback(
-    (markPrice: number | null) => {
-      const s = paper.getSummary(markPrice);
-      setText(pnlQtyRef.current, `${formatPrice(s.quantity, false)}주`);
-      setText(
-        pnlSellRemainRef.current,
-        s.reservedSellQuantity > 0 ? `가능 ${formatPrice(s.sellableQuantity, false)}` : "",
-      );
-      setText(pnlAvgRef.current, s.quantity > 0 ? `${formatPrice(Math.round(s.avgPrice), false)}원` : "-");
-
-      const uTone = s.unrealizedPnl > 0 ? "up" : s.unrealizedPnl < 0 ? "down" : null;
-      setAttr(pnlUnrealCellRef.current, "data-tone", uTone);
-      setText(pnlUnrealRef.current, `${formatSignedQty(s.unrealizedPnl)}원 (${formatPercent(s.unrealizedPct)})`);
-
-      const rTone = s.realizedPnl > 0 ? "up" : s.realizedPnl < 0 ? "down" : null;
-      setAttr(pnlRealCellRef.current, "data-tone", rTone);
-      setText(pnlRealRef.current, `${formatSignedQty(s.realizedPnl)}원`);
-
-      setText(pnlAvailRef.current, `${formatPrice(s.availableCash, false)}원`);
-
-      const eqTone = s.totalReturn > 0 ? "up" : s.totalReturn < 0 ? "down" : null;
-      setAttr(pnlEquityCellRef.current, "data-tone", eqTone);
-      setText(pnlEquityRef.current, `${formatPrice(Math.round(s.totalEquity), false)}원 (${formatPercent(s.totalReturnPct)})`);
-    },
-    [paper],
-  );
-
   useEffect(() => {
     const apply = (frame: ReplayEngineFrame) => {
       const snapshot = frame.ladder;
       const markPrice = referencePriceOf(frame);
       setRefPrice((prev) => (prev === markPrice ? prev : markPrice));
-      applyPnlDom(markPrice);
 
       const spreadLabel = snapshot.inGap
         ? "—"
@@ -508,7 +473,7 @@ export function ReplayLadder({
       unsubFrame();
       unsubPaper();
     };
-  }, [engine, paper, previousClose, tickStepOf, applyPnlDom, parsedQty, buyRatioPercent]);
+  }, [engine, paper, previousClose, tickStepOf, parsedQty, buyRatioPercent]);
 
   useEffect(() => {
     const onPointerMove = (e: globalThis.PointerEvent) => {
@@ -595,8 +560,8 @@ export function ReplayLadder({
       : parsedQty;
     const placed = paper.placeOrder(side, price, orderQty, marketContextOf(frame));
     if (placed && side === "buy" && buyRatioPercent !== null) {
-      setBuyRatioPercent(null);
-      setPickedPreset(null);
+      onBuyRatioPercentChange(null);
+      onPickedPresetChange(null);
     }
   };
 
@@ -624,40 +589,24 @@ export function ReplayLadder({
     setCtxMenu({ x: e.clientX, y: e.clientY, side: null, price: null });
   };
 
-  const handleCashPreset = (man: number) => {
-    setCashInputMan(String(man));
-    setBuyRatioPercent(null);
-    setPickedPreset(null);
-    paper.reset(man * MAN_WON, engine.getFrame().cursorMs);
-  };
-
-  const handleCashInputCommit = () => {
-    const parsed = Math.floor(Number(cashInputMan.replace(/[^0-9]/g, "")));
-    const clamped = Number.isFinite(parsed) && parsed >= 100 ? Math.min(1_000_000, parsed) : DEFAULT_PAPER_INITIAL_CASH / MAN_WON;
-    setCashInputMan(String(clamped));
-    setBuyRatioPercent(null);
-    setPickedPreset(null);
-    paper.reset(clamped * MAN_WON, engine.getFrame().cursorMs);
-  };
-
   const handleQtyChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setQtyInput(e.target.value.replace(/[^0-9]/g, ""));
-    setPickedPreset(null);
-    setBuyRatioPercent(null);
+    onQtyInputChange(e.target.value.replace(/[^0-9]/g, ""));
+    onPickedPresetChange(null);
+    onBuyRatioPercentChange(null);
   };
 
   const handleQtyKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (buyRatioPercent !== null && /^[0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      setPickedPreset(null);
-      setBuyRatioPercent(null);
+      onPickedPresetChange(null);
+      onBuyRatioPercentChange(null);
       return;
     }
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
     e.preventDefault();
     const step = (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1);
-    setPickedPreset(null);
-    setBuyRatioPercent(null);
-    setQtyInput(String(Math.max(1, (Number(qtyInput) || 0) + step)));
+    onPickedPresetChange(null);
+    onBuyRatioPercentChange(null);
+    onQtyInputChange(String(Math.max(1, (Number(qtyInput) || 0) + step)));
   };
 
   const presetButtons = useMemo<readonly {
@@ -716,106 +665,6 @@ export function ReplayLadder({
         </div>
       </div>
 
-      <div className="rp-sim-account" data-testid="replay-sim-account">
-        <div className="rp-sim-cap-group">
-          <span className="rp-sim-cap-label">예수금</span>
-          <input
-            className="rp-sim-cap-input rp-mono"
-            data-testid="replay-sim-cash-input"
-            inputMode="numeric"
-            aria-label="초기 예수금(만원)"
-            value={cashInputMan}
-            onChange={(e) => setCashInputMan(e.target.value.replace(/[^0-9]/g, ""))}
-            onBlur={handleCashInputCommit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleCashInputCommit();
-            }}
-          />
-          <span className="rp-muted">만원</span>
-        </div>
-        <div className="rp-sim-cap-presets" role="group" aria-label="초기 예수금 프리셋">
-          {PAPER_CASH_PRESETS_MAN.map((man) => (
-            <button
-              key={man}
-              type="button"
-              className="rp-sim-mini-btn rp-mono"
-              aria-pressed={summary.initialCash === man * MAN_WON}
-              onClick={() => handleCashPreset(man)}
-            >
-              {man >= 10_000 ? `${man / 10_000}억` : `${man / 1_000}천만`}
-            </button>
-          ))}
-        </div>
-        <div className="rp-sim-cap-actions">
-          <button
-            type="button"
-            className="rp-sim-mini-btn"
-            data-testid="replay-sim-fee-toggle"
-            aria-pressed={summary.feeEnabled}
-            title="수수료 0.015% + 매도 거래세 0.15% 반영 여부"
-            onClick={() => paper.setFeeEnabled(!summary.feeEnabled)}
-          >
-            {summary.feeEnabled ? "수수료·세금 ON" : "수수료·세금 OFF"}
-          </button>
-          <button
-            type="button"
-            className="rp-sim-mini-btn"
-            data-danger=""
-            data-testid="replay-sim-reset"
-            onClick={() => {
-              setBuyRatioPercent(null);
-              setPickedPreset(null);
-              paper.reset(undefined, engine.getFrame().cursorMs);
-            }}
-          >
-            초기화
-          </button>
-        </div>
-      </div>
-
-      <div className="rp-sim-pnl rp-mono" data-testid="replay-sim-pnl">
-        <button
-          type="button"
-          className="od-cellbtn"
-          data-testid="replay-sim-qty-btn"
-          disabled={summary.sellableQuantity <= 0}
-          title="클릭 시 매도 가능 전량을 수량칸에 채움"
-          onClick={() => {
-            if (summary.sellableQuantity > 0) {
-              setQtyInput(String(summary.sellableQuantity));
-              setPickedPreset(null);
-              setBuyRatioPercent(null);
-            }
-          }}
-        >
-          <small>
-            <span>보유수량</span>
-            <i ref={pnlSellRemainRef} className="od-remaining" />
-          </small>
-          <b ref={pnlQtyRef} data-testid="replay-sim-qty">0주</b>
-        </button>
-        <div className="od-cellbtn">
-          <small>매입평단가</small>
-          <b ref={pnlAvgRef} data-testid="replay-sim-avg">-</b>
-        </div>
-        <div ref={pnlUnrealCellRef} className="od-cellbtn">
-          <small>평가손익</small>
-          <b ref={pnlUnrealRef} data-testid="replay-sim-unreal">0원 (0.00%)</b>
-        </div>
-        <div ref={pnlRealCellRef} className="od-cellbtn">
-          <small>실현손익</small>
-          <b ref={pnlRealRef} data-testid="replay-sim-real">0원</b>
-        </div>
-        <div className="od-cellbtn">
-          <small>주문가능 현금</small>
-          <b ref={pnlAvailRef} data-testid="replay-sim-avail">{`${formatPrice(summary.availableCash, false)}원`}</b>
-        </div>
-        <div ref={pnlEquityCellRef} className="od-cellbtn">
-          <small>총 자산 (수익률)</small>
-          <b ref={pnlEquityRef} data-testid="replay-sim-equity">{`${formatPrice(Math.round(summary.totalEquity), false)}원 (0.00%)`}</b>
-        </div>
-      </div>
-
       <div className="od-qty rp-sim-qty-row" data-testid="replay-sim-quantity-row">
         <input
           className="od-qty-input rp-mono"
@@ -838,8 +687,8 @@ export function ReplayLadder({
               aria-pressed={presetMode === option.value}
               onClick={() => {
                 setPresetMode(option.value);
-                setPickedPreset(null);
-                setBuyRatioPercent(null);
+                onPickedPresetChange(null);
+                onBuyRatioPercentChange(null);
               }}
             >
               {option.label}
@@ -866,12 +715,12 @@ export function ReplayLadder({
                 }
                 onClick={() => {
                   if (btn.buyRatio !== null) {
-                    setPickedPreset(null);
-                    setBuyRatioPercent((prev) => (prev === btn.buyRatio ? null : btn.buyRatio));
+                    onPickedPresetChange(null);
+                    onBuyRatioPercentChange(buyRatioPercent === btn.buyRatio ? null : btn.buyRatio);
                   } else {
-                    setPickedPreset(btn.key);
-                    setBuyRatioPercent(null);
-                    setQtyInput(String(btn.qty));
+                    onPickedPresetChange(btn.key);
+                    onBuyRatioPercentChange(null);
+                    onQtyInputChange(String(btn.qty));
                   }
                 }}
               >
@@ -880,16 +729,6 @@ export function ReplayLadder({
             );
           })}
         </div>
-        <button
-          type="button"
-          className="rp-sim-flatten"
-          data-testid="replay-sim-flatten"
-          disabled={summary.quantity <= 0}
-          title="현재 매수 1호가로 보유 전량 즉시 청산"
-          onClick={() => paper.flattenPosition(marketContextOf(engine.getFrame()))}
-        >
-          시장가 청산
-        </button>
       </div>
 
       <div ref={gapBannerRef} className="rp-banner" data-mode="gap" role="status" data-testid="replay-gap-banner" hidden>
