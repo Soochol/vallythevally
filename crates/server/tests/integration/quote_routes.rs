@@ -385,9 +385,13 @@ async fn hogaplay_archive_only_serves_quote_totals_and_quote_depth_without_share
     let five = harness.totals("period=5m&venue=combined&from=2024-08-27&to=2024-08-27").await;
     assert_eq!(five, shown(&[("09:05", 800, 1_600)]));
 
-    let krx = harness.ok(&format!("/api/symbols/{CODE}/quote-totals?period=1m&venue=krx&from=2024-08-27&to=2024-08-27")).await;
-    assert_eq!(krx["available"], json!(true));
-    assert!(points(&krx).is_empty());
+    let krx = harness.totals("period=1m&venue=krx&from=2024-08-27&to=2024-08-27").await;
+    assert_eq!(krx, shown(&[("09:00", 400, 800), ("09:01", 600, 1_200), ("09:05", 800, 1_600)]));
+
+    let krx_depth = harness.depth("period=1m&venue=krx&source=peak&from=2024-08-27&to=2024-08-27").await;
+    assert_eq!(krx_depth.len(), 3);
+    assert_eq!(krx_depth[0].0, "09:00");
+    assert_eq!(krx_depth[0].1[0], json!([76_100, 250]));
 
     let nxt = harness.ok(&format!("/api/symbols/{CODE}/quote-totals?period=1m&venue=nxt&from=2024-08-27&to=2024-08-27")).await;
     assert_eq!(nxt["available"], json!(true));
@@ -437,4 +441,10 @@ async fn native_quote_minutes_takes_priority_over_hogaplay_archive_on_overlappin
     assert_eq!(pts.len(), 2);
     assert_eq!(pts[0], json!({"t": unix("20261120", 9, 0), "ask": 400, "bid": 800}));
     assert_eq!(pts[1], json!({"t": unix(MONDAY, 9, 0), "ask": 100, "bid": 50}));
+
+    let krx_page = harness.ok(&format!("/api/symbols/{CODE}/quote-totals?period=1m&venue=krx&from=2026-11-20&to=2026-11-23")).await;
+    let krx_pts = points(&krx_page);
+    assert_eq!(krx_pts.len(), 2);
+    assert_eq!(krx_pts[0], json!({"t": unix("20261120", 9, 0), "ask": 400, "bid": 800}));
+    assert_eq!(krx_pts[1], json!({"t": unix(MONDAY, 9, 0), "ask": 99, "bid": 48}));
 }
