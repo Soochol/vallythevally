@@ -20,6 +20,11 @@ export const test = base.extend<{ scenario: Scenario; clockStart: string | null 
         ? { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } }
         : { body: { available: false } },
     );
+    scenario.on("/api/book-replay/catalog", () =>
+      scenario.publicMode.kind === "public"
+        ? { status: 404, body: { error: { code: "not_found", message: "공개 리스너에 없는 경로입니다", reason: null, retryAt: null, manualActionRequired: false } } }
+        : { body: { items: [] } },
+    );
     scenario.on(
       (url) => /^\/api\/symbols\/[^/]+\/book-replay\/days$/.test(url.pathname),
       (request) => {

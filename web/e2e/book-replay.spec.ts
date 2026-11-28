@@ -534,3 +534,23 @@ test("재조회가 실패해도 이미 받은 수집 호가는 유지되고 20�
   await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
   await expect(bookWindow(page).getByTestId("price-ladder")).toContainText("71,900");
 });
+
+test("KRX 단독 아카이브 수집본을 가리키면 10호가 상태 줄에 KRX 단독 배지를 보인다", async ({ page, scenario }) => {
+  seedLayout(scenario);
+  seedMarket(scenario, 80_000);
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/book-replay`, {
+    body: { ...REPLAY_DAY, venueScope: "krx_archive" },
+  });
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await replayToggle(page).click();
+
+  const pos = await barCoordinate(page, at(9, 0));
+  await page.mouse.move(pos.x, pos.y);
+  await frames(page);
+
+  await expect(bookWindow(page)).toHaveAttribute("data-replay", "past");
+  await expect(bookWindow(page).getByTestId("replay-archive-badge")).toHaveText("KRX 단독");
+});

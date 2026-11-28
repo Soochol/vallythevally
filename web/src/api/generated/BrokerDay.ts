@@ -2,6 +2,7 @@
 import type { BookReplayCoverage } from "./BookReplayCoverage";
 import type { BrokerDaySource } from "./BrokerDaySource";
 import type { FeedBrokers } from "./FeedBrokers";
+import type { ReplayVenueScope } from "./ReplayVenueScope";
 import type { SymbolCode } from "./SymbolCode";
 
-export type BrokerDay = { symbol: SymbolCode, date: string, source: BrokerDaySource, coverage?: BookReplayCoverage, snapshots: Array<FeedBrokers>, gaps: [number, number][], live: boolean, cursor: string, reset: boolean, };
+export type BrokerDay = { symbol: SymbolCode, date: string, source: BrokerDaySource, coverage?: BookReplayCoverage, venueScope?: ReplayVenueScope, snapshots: Array<FeedBrokers>, gaps: [number, number][], live: boolean, cursor: string, reset: boolean, };

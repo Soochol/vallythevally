@@ -5,6 +5,7 @@ import { fetchBrokerDay, type BrokerDay } from "../../api/brokers";
 import type { Bar } from "../../api/generated/Bar";
 import type { BookReplayCoverage } from "../../api/generated/BookReplayCoverage";
 import type { BrokerDaySource } from "../../api/generated/BrokerDaySource";
+import type { ReplayVenueScope } from "../../api/generated/ReplayVenueScope";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import { isIndexCode } from "../../lib/symbol";
@@ -33,6 +34,7 @@ interface CachedPastDay {
   readonly date: string;
   readonly source: BrokerDaySource;
   readonly coverage?: BookReplayCoverage;
+  readonly venueScope?: ReplayVenueScope;
   readonly state: BrokerState;
   readonly gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
 }
@@ -68,6 +70,7 @@ function toCachedPastDay(reply: BrokerDay): CachedPastDay {
     date: reply.date,
     source: reply.source,
     coverage: reply.coverage,
+    venueScope: reply.venueScope,
     state: compactBrokerState(appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps)),
     gaps: reply.gaps,
   };
@@ -140,6 +143,7 @@ function usePastBrokerDay(code: SymbolCode, date: string | null): BrokerDayResul
       date: query.data.date,
       source: query.data.source,
       coverage: query.data.coverage,
+      venueScope: query.data.venueScope,
       state: query.data.state,
       gaps: query.data.gaps,
       failed: false,

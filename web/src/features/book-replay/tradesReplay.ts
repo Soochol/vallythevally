@@ -1,5 +1,6 @@
 import type { BookReplayTradeRow } from "../../api/generated/BookReplayTradeRow";
 import type { BookReplayTrades } from "../../api/generated/BookReplayTrades";
+import type { ReplayVenueScope } from "../../api/generated/ReplayVenueScope";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { Venue } from "../../api/generated/Venue";
 import { gapContaining, kstDayBounds } from "../brokers/history";
@@ -14,6 +15,7 @@ export type TradesReplayView =
       readonly kind: "past";
       readonly at: UnixSeconds;
       readonly venue: Venue;
+      readonly venueScope?: ReplayVenueScope;
       readonly previousClose: number | null;
       readonly cumVolume: number;
       readonly strength: number | null;
@@ -107,6 +109,7 @@ export function projectTradesReplay(
     kind: "past",
     at: cursor.at,
     venue: data.venue,
+    venueScope: data.venueScope,
     previousClose: data.previousClose ?? null,
     cumVolume: data.cumVolume,
     strength: data.strength,

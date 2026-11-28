@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { isIndexCode } from "../lib/symbol";
 import { usePublicMode } from "../public-mode/serverMode";
 import type { BookReplayAccess } from "./generated/BookReplayAccess";
+import type { BookReplayCatalog } from "./generated/BookReplayCatalog";
 import type { BookReplayDay } from "./generated/BookReplayDay";
 import type { BookReplayDays } from "./generated/BookReplayDays";
 import type { BookReplayMeta } from "./generated/BookReplayMeta";
@@ -55,6 +56,18 @@ export function useBookReplayLockAvailable(enabled: boolean): boolean {
 }
 
 export const bookReplayAvailable = (access: ReturnType<typeof useBookReplayAccess>): boolean => access.data?.available === true;
+
+export function useBookReplayCatalog(enabled: boolean) {
+  const publicMode = usePublicMode();
+  return useQuery({
+    queryKey: ["book-replay", "catalog"] as const,
+    queryFn: ({ signal }) => getJson<BookReplayCatalog>("/api/book-replay/catalog", signal),
+    enabled: enabled && !publicMode,
+    staleTime: DAYS_STALE_MS,
+    gcTime: GC_TIME_MS,
+    retry: false,
+  });
+}
 
 export function useBookReplayDay(code: SymbolCode, date: string | null, options: { readonly enabled: boolean }) {
   const publicMode = usePublicMode();

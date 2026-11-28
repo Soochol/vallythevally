@@ -1,5 +1,6 @@
 import type { BookReplayBook } from "../../api/generated/BookReplayBook";
 import type { BookReplayDay } from "../../api/generated/BookReplayDay";
+import type { ReplayVenueScope } from "../../api/generated/ReplayVenueScope";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { BarInterval } from "../../chart/crosshairSync";
 import { toChartTime } from "../../chart/time";
@@ -15,6 +16,7 @@ export type ReplayView =
       readonly book: BookView;
       readonly lastPrice: number | null;
       readonly previousClose: number | null;
+      readonly venueScope?: ReplayVenueScope;
       readonly trades: readonly TradeRow[];
     };
 
@@ -186,6 +188,7 @@ export function replayView(day: BookReplayDay, bar: BarInterval, now: UnixSecond
     },
     lastPrice: trades[0]?.price ?? null,
     previousClose: usablePreviousClose(day.previousClose),
+    venueScope: day.venueScope,
     trades,
   };
 }

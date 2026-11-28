@@ -3,6 +3,7 @@ import type { BookReplayCoverage } from "./BookReplayCoverage";
 import type { BookReplayMinuteCheckpoint } from "./BookReplayMinuteCheckpoint";
 import type { BookReplayResolution } from "./BookReplayResolution";
 import type { BookReplaySpanSummary } from "./BookReplaySpanSummary";
+import type { ReplayVenueScope } from "./ReplayVenueScope";
 import type { SymbolCode } from "./SymbolCode";
 
-export type BookReplayMeta = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, resolution: BookReplayResolution, spanMinutes: number, covered: [number, number][], gapsMs: [number, number][], spans: Array<BookReplaySpanSummary>, minutes: Array<BookReplayMinuteCheckpoint>, };
+export type BookReplayMeta = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, resolution: BookReplayResolution, spanMinutes: number, previousClose?: number | null, venueScope?: ReplayVenueScope, covered: [number, number][], gapsMs: [number, number][], spans: Array<BookReplaySpanSummary>, minutes: Array<BookReplayMinuteCheckpoint>, };

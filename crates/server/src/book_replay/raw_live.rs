@@ -161,6 +161,8 @@ pub(super) fn read_live_meta(
         coverage: day.coverage,
         resolution,
         span_minutes: u32::from(SPAN_MINUTES),
+        previous_close: day.previous_close,
+        venue_scope: None,
         covered: day.covered,
         gaps_ms: Vec::new(),
         spans,

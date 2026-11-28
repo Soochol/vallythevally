@@ -19,6 +19,7 @@ pub mod etf;
 pub mod fundamentals;
 pub mod heatmap_board;
 pub mod heatmap_flow;
+pub mod hoga_archive;
 pub mod kiwoom_themes;
 pub mod intraday_feed;
 pub mod financials;

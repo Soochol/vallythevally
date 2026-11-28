@@ -1,6 +1,7 @@
 import type { BrokerDay } from "../../api/brokers";
 import type { BookReplayCoverage } from "../../api/generated/BookReplayCoverage";
 import type { BrokerDaySource } from "../../api/generated/BrokerDaySource";
+import type { ReplayVenueScope } from "../../api/generated/ReplayVenueScope";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { UnixSeconds } from "../../api/generated/UnixSeconds";
 import type { FeedEvent } from "../../api/socket";
@@ -16,6 +17,7 @@ export interface BrokerDaySnapshot {
   readonly date: string | null;
   readonly source: BrokerDaySource | null;
   readonly coverage?: BookReplayCoverage;
+  readonly venueScope?: ReplayVenueScope;
   readonly state: BrokerState;
   readonly gaps: readonly (readonly [UnixSeconds, UnixSeconds])[];
   readonly failed: boolean;
@@ -88,13 +90,14 @@ function applyCollected(previous: BrokerDaySnapshot, reply: BrokerDay): BrokerDa
     previous.date === reply.date &&
     previous.source === reply.source &&
     previous.coverage === reply.coverage &&
+    previous.venueScope === reply.venueScope &&
     !previous.failed &&
     nextState === previous.state &&
     nextGaps === previous.gaps
   ) {
     return previous;
   }
-  return { mode: "collected", date: reply.date, source: reply.source, coverage: reply.coverage, state: nextState, gaps: nextGaps, failed: false };
+  return { mode: "collected", date: reply.date, source: reply.source, coverage: reply.coverage, venueScope: reply.venueScope, state: nextState, gaps: nextGaps, failed: false };
 }
 
 function toFallbackSnapshot(reply: BrokerDay): BrokerDaySnapshot {
@@ -102,6 +105,7 @@ function toFallbackSnapshot(reply: BrokerDay): BrokerDaySnapshot {
     mode: "fallback",
     date: reply.date,
     source: reply.source,
+    venueScope: reply.venueScope,
     state: compactBrokerState(appendSnapshots(EMPTY_BROKER_STATE, reply.snapshots, reply.gaps)),
     gaps: reply.gaps,
     failed: false,

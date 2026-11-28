@@ -35,6 +35,10 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
 
   const daysQuery = useBookReplayDays(code, available);
   const days = daysQuery.data?.days ?? [];
+  const archiveDays = useMemo<ReadonlySet<string>>(
+    () => new Set(daysQuery.data?.archiveDays ?? []),
+    [daysQuery.data?.archiveDays],
+  );
 
   const serverTimeOrigin = useServerClock((s) => s.serverTimeOrigin);
   const today = kstDateOf(serverNow(serverTimeOrigin));
@@ -58,12 +62,17 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
     (metaQuery.data.resolution === "minute_only" || metaQuery.data.spans.length === 0);
 
   const replayDayQuery = useBookReplayDay(code, activeDate, { enabled: needsMinuteFallback });
+  const isArchive =
+    metaQuery.data?.venueScope === "krx_archive" ||
+    replayDayQuery.data?.venueScope === "krx_archive" ||
+    (activeDate !== null && archiveDays.has(activeDate));
+  const nativeLoadEnabled = loadEnabled && !isArchive;
   const symbolInfo = useSymbolInfo(code).data;
 
   const dailyBarsQuery = useQuery({
     queryKey: ["replay", "daily-ref", code],
     queryFn: ({ signal }) => fetchBarsPage({ symbol: code, venue: "combined", period: "D", limit: 120 }, signal),
-    enabled: loadEnabled,
+    enabled: nativeLoadEnabled,
     staleTime: Infinity,
     gcTime: GC_TIME_MS,
     retry: false,
@@ -71,7 +80,7 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
 
   const daySummary = useQuery({
     ...daySummaryQuery(code, "combined"),
-    enabled: loadEnabled && isToday,
+    enabled: nativeLoadEnabled && isToday,
   }).data;
 
   const bars1mQuery = useQuery({
@@ -84,7 +93,7 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
       const jumped = await fetchJumpPage({ symbol: code, venue: "combined", period: "1m", date: isoDate!, limit: 500 }, signal);
       return dayBars(jumpAsBarsPage(jumped).bars, activeDate!);
     },
-    enabled: loadEnabled && isoDate !== null,
+    enabled: nativeLoadEnabled && isoDate !== null,
     staleTime: isToday ? 60_000 : Infinity,
     gcTime: GC_TIME_MS,
     retry: false,
@@ -98,7 +107,7 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
         { from: isoDate!, to: isoDate! },
         signal,
       ),
-    enabled: loadEnabled && isoDate !== null,
+    enabled: nativeLoadEnabled && isoDate !== null,
     staleTime: isToday ? 60_000 : Infinity,
     gcTime: GC_TIME_MS,
     retry: false,
@@ -113,7 +122,7 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
         { from: dayStartUnix + REGULAR_START_MIN * 60, to: dayStartUnix + REGULAR_END_MIN * 60 },
         signal,
       ),
-    enabled: loadEnabled,
+    enabled: nativeLoadEnabled,
     staleTime: isToday ? 60_000 : Infinity,
     gcTime: GC_TIME_MS,
     retry: false,
@@ -123,15 +132,20 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
 
   const previousClose = useMemo(() => {
     if (activeDate === null) return null;
+    const fromMeta = metaQuery.data?.previousClose;
+    if (fromMeta !== null && fromMeta !== undefined && Number.isFinite(fromMeta) && fromMeta > 0) return fromMeta;
+    const fromDay = replayDayQuery.data?.previousClose;
+    if (fromDay !== null && fromDay !== undefined && Number.isFinite(fromDay) && fromDay > 0) return fromDay;
+    if (isArchive) return null;
     const fromDaily = resolvePreviousClose(dailyBarsQuery.data?.bars ?? EMPTY_BARS, activeDate);
     if (fromDaily !== null) return fromDaily;
     if (isToday && daySummary?.previousClose && daySummary.previousClose > 0) {
       return daySummary.previousClose;
     }
     return null;
-  }, [activeDate, dailyBarsQuery.data, isToday, daySummary]);
+  }, [activeDate, metaQuery.data?.previousClose, replayDayQuery.data?.previousClose, isArchive, dailyBarsQuery.data, isToday, daySummary]);
 
-  const bars1m = bars1mQuery.data ?? EMPTY_BARS;
+  const bars1m = isArchive ? EMPTY_BARS : (bars1mQuery.data ?? EMPTY_BARS);
 
   const session: ReplaySession | null = useMemo(() => {
     const meta = metaQuery.data;
@@ -168,6 +182,8 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
     accessPending: accessQuery.isPending,
     available,
     days,
+    archiveDays,
+    isArchive,
     daysPending: daysQuery.isPending,
     activeDate,
     isToday,

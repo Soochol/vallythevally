@@ -611,3 +611,191 @@ fn fnv1a_test_bucket(symbol: &str) -> u64 {
     }
     hash % 64
 }
+
+fn write_hogaplay_day(root: &Path, date: &str, symbol: &str, prev_close: u64, base_price: i64) {
+    let dir = root.join(date).join(symbol).join("hogaplay");
+    std::fs::create_dir_all(&dir).unwrap();
+    let conn = Connection::open_in_memory().unwrap();
+    let mut ask_cols = Vec::new();
+    let mut bid_cols = Vec::new();
+    for lvl in 1..=10 {
+        let ask_p = base_price + (lvl as i64) * 100;
+        let bid_p = base_price - (lvl as i64 - 1) * 100;
+        ask_cols.push(format!("{ask_p}::BIGINT AS ask_p{lvl}, {}::BIGINT AS ask_q{lvl}", 100 * lvl));
+        bid_cols.push(format!("{bid_p}::BIGINT AS bid_p{lvl}, {}::BIGINT AS bid_q{lvl}", 200 * lvl));
+    }
+    let snaps_sql = format!(
+        "SELECT 90005100::BIGINT AS ts_ms, 1::INTEGER AS seq, {}, {}, 5500::BIGINT AS tot_ask, 11000::BIGINT AS tot_bid \
+         UNION ALL \
+         SELECT 90130500::BIGINT AS ts_ms, 2::INTEGER AS seq, {}, {}, 5600::BIGINT AS tot_ask, 11200::BIGINT AS tot_bid",
+        ask_cols.join(", "),
+        bid_cols.join(", "),
+        ask_cols.join(", "),
+        bid_cols.join(", ")
+    );
+    conn.execute_batch(&format!(
+        "SET threads = 1; COPY ({snaps_sql}) TO '{}' (FORMAT parquet)",
+        dir.join("snapshots.parquet").display()
+    ))
+    .unwrap();
+    let trades_sql = format!(
+        "SELECT 90010250::BIGINT AS ts_ms, 1::INTEGER AS seq, {base_price}::BIGINT AS price, 150::BIGINT AS qty, 1::INTEGER AS side \
+         UNION ALL \
+         SELECT 90120500::BIGINT AS ts_ms, 2::INTEGER AS seq, {}::BIGINT AS price, 50::BIGINT AS qty, -1::INTEGER AS side",
+        base_price + 100
+    );
+    conn.execute_batch(&format!(
+        "SET threads = 1; COPY ({trades_sql}) TO '{}' (FORMAT parquet)",
+        dir.join("trades.parquet").display()
+    ))
+    .unwrap();
+    std::fs::write(
+        dir.join("meta.json"),
+        json!({"symbol": symbol, "date": date, "prev_close": prev_close}).to_string(),
+    )
+    .unwrap();
+}
+
+async fn start_harness_with_paths(paths: server::shared_data::CollectorPaths) -> (Router, PathBuf, PathBuf, tempfile::TempDir) {
+    let fake = ScriptedTransport::new();
+    let clock = Clock::fake(kst(KstDate::new(2026, 11, 24).unwrap(), 10, 0, 0));
+    let auth = KiwoomAuth::new(Secret::new("FAKE_KEY".into()), Secret::new("FAKE_SECRET".into()), None);
+    let rest = KiwoomRest::new(fake.transport(), auth, clock.clone());
+    let tmp = tempfile::tempdir().unwrap();
+    let db = crate::support::template_db::open_app_db(&tmp.path().join("db.sqlite")).await;
+    let (stream, _desired) = KiwoomStream::detached();
+    let (_events, events) = tokio::sync::mpsc::channel(1);
+    let store = crate::support::template_db::open_screener_store(&tmp.path().join("screener.duckdb"));
+    let symbols = Arc::new(SymbolDirectory::default());
+    let state = application(ApplicationInputs {
+        rest,
+        clock,
+        symbols,
+        db,
+        screener_store: store,
+        stream: (stream, events),
+        static_dir: tmp.path().to_owned(),
+        screener_update_on_connect: false,
+    });
+    let hoga = paths.hoga_dir().map(Path::to_path_buf).unwrap_or_else(|| tmp.path().join("hoga"));
+    let archive = paths.archive_dir().map(Path::to_path_buf).unwrap_or_else(|| tmp.path().join("archive"));
+    state.collector_paths.configure(paths);
+    (router(state), hoga, archive, tmp)
+}
+
+async fn app_get_json(app: &Router, path: &str) -> (u16, Value) {
+    let response = app.clone().oneshot(Request::get(path).body(Body::empty()).unwrap()).await.unwrap();
+    let status = response.status().as_u16();
+    (status, serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap())
+}
+
+async fn app_get_bytes(app: &Router, path: &str) -> (u16, Vec<u8>) {
+    let response = app.clone().oneshot(Request::get(path).body(Body::empty()).unwrap()).await.unwrap();
+    let status = response.status().as_u16();
+    (status, response.into_body().collect().await.unwrap().to_bytes().to_vec())
+}
+
+#[tokio::test]
+async fn hogaplay_archive_only_serves_catalog_days_meta_span_day_trades_and_program() {
+    let root = tempfile::tempdir().unwrap();
+    let archive_dir = root.path().join("parquet");
+    write_hogaplay_day(&archive_dir, "20240827", "005930", 75_000, 76_000);
+    let (app, _, _, _tmp) = start_harness_with_paths(server::shared_data::CollectorPaths::archive_only(archive_dir)).await;
+
+    assert_eq!(app_get_json(&app, "/api/book-replay/access").await, (200, json!({"available": true})));
+
+    let (status, catalog) = app_get_json(&app, "/api/book-replay/catalog").await;
+    assert_eq!(status, 200, "{catalog}");
+    assert_eq!(
+        catalog["items"],
+        json!([{"symbol": "005930", "nativeDays": 0, "archiveDays": 1, "totalDays": 1, "latestDate": "20240827"}])
+    );
+
+    let (status, days) = app_get_json(&app, "/api/symbols/005930/book-replay/days").await;
+    assert_eq!(status, 200, "{days}");
+    assert_eq!(days, json!({"symbol": "005930", "days": ["20240827"], "archiveDays": ["20240827"]}));
+
+    let (status, meta) = app_get_json(&app, "/api/symbols/005930/book-replay/meta?date=20240827").await;
+    assert_eq!(status, 200, "{meta}");
+    assert_eq!(
+        (&meta["coverage"], &meta["resolution"], &meta["previousClose"], &meta["venueScope"]),
+        (&json!("collected"), &json!("tick"), &json!(75_000), &json!("krx_archive"))
+    );
+    assert_eq!(meta["spans"][0]["startMinute"], json!(540));
+
+    let (status, raw_span) = app_get_bytes(&app, "/api/symbols/005930/book-replay/span?date=20240827&startMinute=540").await;
+    assert_eq!(status, 200);
+    let decoded = hoga_format::decode(&raw_span).unwrap();
+    let book_stream = decoded.stream(hoga_format::StreamKind::Book).unwrap();
+    let trade_stream = decoded.stream(hoga_format::StreamKind::Trades).unwrap();
+    assert_eq!(book_stream.rows(), 2);
+    assert_eq!(trade_stream.rows(), 2);
+    assert_eq!(trade_stream.column("venue").unwrap(), &[1, 1]);
+    assert_eq!(trade_stream.column("price").unwrap(), &[76_000, 76_100]);
+    assert_eq!(trade_stream.column("qty").unwrap(), &[150, -50]);
+
+    let (status, day) = app_get_json(&app, "/api/symbols/005930/book-replay?date=20240827").await;
+    assert_eq!(status, 200, "{day}");
+    assert_eq!((&day["coverage"], &day["previousClose"], &day["venueScope"]), (&json!("collected"), &json!(75_000), &json!("krx_archive")));
+    assert_eq!(day["books"].as_array().unwrap().len(), 2);
+    assert_eq!(day["trades"].as_array().unwrap().len(), 2);
+
+    let (status, trades) = app_get_json(&app, "/api/symbols/005930/book-replay/trades?date=20240827&untilSec=32520").await;
+    assert_eq!(status, 200, "{trades}");
+    assert_eq!(
+        (&trades["coverage"], &trades["venue"], &trades["venueScope"], &trades["previousClose"]),
+        (&json!("collected"), &json!("krx"), &json!("krx_archive"), &json!(75_000))
+    );
+    assert_eq!((&trades["cumVolume"], &trades["cumBuyQty"], &trades["cumSellQty"]), (&json!(200), &json!(150), &json!(50)));
+    assert_eq!(trades["trades"].as_array().unwrap().len(), 2);
+
+    let (status, program) = app_get_json(&app, "/api/symbols/005930/book-replay/program?date=20240827").await;
+    assert_eq!(status, 200, "{program}");
+    assert_eq!(
+        (&program["coverage"], &program["venueScope"], &program["previousClose"], &program["rows"]),
+        (&json!("collected"), &json!("krx_archive"), &json!(75_000), &json!([]))
+    );
+}
+
+#[tokio::test]
+async fn native_store_takes_priority_over_overlapping_hogaplay_archive_day() {
+    let root = tempfile::tempdir().unwrap();
+    let hoga_dir = root.path().join("hoga");
+    let archive_dir = root.path().join("parquet");
+    let folder = hoga_dir.join("store").join("20261123");
+    write_complete(&folder, 20_261_123, vec![stock("005930", true, json!([]))]);
+    write_parquet(
+        &folder.join("0D").join(SAMSUNG_BUCKET),
+        &[book_sql(&Book { symbol: "005930_AL", recv_ms: at(9, 0, 50), best_ask: 71_200, quantity: 30 })],
+    );
+    write_parquet(
+        &folder.join("0B").join(SAMSUNG_BUCKET),
+        &[trade_sql("005930_AL", at(9, 0, 50), "090050", 71_100, 15)],
+    );
+    write_hogaplay_day(&archive_dir, "20261123", "005930", 99_000, 99_500);
+    write_hogaplay_day(&archive_dir, "20240827", "005930", 75_000, 76_000);
+
+    let paths = server::shared_data::CollectorPaths::hoga_only(hoga_dir).with_archive(Some(archive_dir));
+    let (app, _, _, _tmp) = start_harness_with_paths(paths).await;
+
+    let (status, days) = app_get_json(&app, "/api/symbols/005930/book-replay/days").await;
+    assert_eq!(status, 200, "{days}");
+    assert_eq!(days, json!({"symbol": "005930", "days": ["20240827", "20261123"], "archiveDays": ["20240827"]}));
+
+    let (status, catalog) = app_get_json(&app, "/api/book-replay/catalog").await;
+    assert_eq!(status, 200, "{catalog}");
+    assert_eq!(
+        catalog["items"],
+        json!([{"symbol": "005930", "nativeDays": 1, "archiveDays": 1, "totalDays": 2, "latestDate": "20261123"}])
+    );
+
+    let (status, native_day) = app_get_json(&app, "/api/symbols/005930/book-replay?date=20261123").await;
+    assert_eq!(status, 200, "{native_day}");
+    assert_eq!(native_day["books"][0]["asks"][0][0], json!(71_200));
+    assert!(native_day.get("venueScope").is_none());
+
+    let (status, archive_day) = app_get_json(&app, "/api/symbols/005930/book-replay?date=20240827").await;
+    assert_eq!(status, 200, "{archive_day}");
+    assert_eq!(archive_day["venueScope"], json!("krx_archive"));
+    assert_eq!(archive_day["books"][0]["asks"][0][0], json!(76_100));
+}

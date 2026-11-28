@@ -310,3 +310,35 @@ test("당일 자료가 없으면 직전 마감일을 배지와 함께 바로 보
   await expect(window_(page).getByTestId("broker-buy-qty").first()).toHaveText("300");
   await expect(window_(page).getByTestId("brokers-fallback-date")).toHaveCount(0);
 });
+
+test("KRX 단독 아카이브 거래원 응답은 호가 복기 띠와 헤더에 KRX 단독 배지를 보인다", async ({ page, scenario }) => {
+  await page.addInitScript(installChartProbe);
+  const bars5m: Bar[] = [
+    { t: at("09:30:00", "2026-11-06"), o: 70_000, h: 70_600, l: 69_900, c: 70_500, v: 500 },
+    { t: at("09:25:00", "2026-11-09"), o: 71_000, h: 71_500, l: 70_900, c: 71_400, v: 700 },
+  ];
+  const archived = day({
+    date: PAST,
+    source: "store",
+    venueScope: "krx_archive",
+    live: false,
+    cursor: "s:1:1",
+    snapshots: [kiwoom(at("09:30:00", "2026-11-06"), 5_000)],
+  });
+  scenario.reply("/api/book-replay/access", { body: { available: true } });
+  scenario.on((url) => url.pathname === "/api/symbols/005930/brokers", (request) => {
+    const query = new URL(request.url()).searchParams;
+    if (query.get("date") === PAST) return { body: archived };
+    return { body: query.get("after") === null ? FLOW : day({ source: "flow", cursor: "f:1:2", reset: false }) };
+  });
+  seedSplitWithChart(scenario, "5m", bars5m);
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await replayToggle(page).click();
+
+  const pastPos = await barCoordinate(page, at("09:30:00", "2026-11-06"));
+  await page.mouse.move(pastPos.x, pastPos.y);
+  await expect(window_(page).getByTestId("brokers-archive-badge")).toHaveText("KRX 단독");
+  await expect(window_(page).getByTestId("replay-archive-badge")).toHaveText("KRX 단독");
+});

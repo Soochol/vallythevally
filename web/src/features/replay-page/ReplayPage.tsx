@@ -557,6 +557,7 @@ export function ReplayPage() {
                     <ReplayProgramPane
                       engine={engine}
                       previousClose={session.previousClose}
+                      isArchive={data.isArchive}
                       onJumpMs={jumpMs}
                     />
                   )}
@@ -567,6 +568,7 @@ export function ReplayPage() {
                       dayStartUnix={session.dayStartUnix}
                       activeSecond={control.activeSecond}
                       blindMode={blindMode}
+                      isArchive={data.isArchive}
                       onJumpMs={jumpMs}
                       brokerDay={data.brokerDay}
                       bars1m={data.bars1m}
@@ -602,6 +604,7 @@ export function ReplayPage() {
 
             <ReplayDatePicker
               days={data.days}
+              archiveDays={data.archiveDays}
               activeDate={data.activeDate}
               onSelect={updateDate}
             />
@@ -618,8 +621,22 @@ export function ReplayPage() {
             )}
 
             <div className="rp-context-right">
-              <span className="rp-badge-mini" data-testid="replay-resolution-badge" data-resolution={resolution}>
-                {resolution === "tick" ? "틱 복기" : "1분 요약"}
+              <span
+                className="rp-badge-mini"
+                data-testid="replay-resolution-badge"
+                data-resolution={resolution}
+                data-venue-scope={data.isArchive ? "krx_archive" : "combined"}
+                title={
+                  data.isArchive
+                    ? "hoga-ops 과거 수집본(KRX 단독·비수정주가)입니다. 2025년 3월 이후 NXT 거래분은 포함되지 않습니다."
+                    : undefined
+                }
+              >
+                {data.isArchive
+                  ? "KRX 단독 · 아카이브"
+                  : resolution === "tick"
+                    ? "틱 복기"
+                    : "1분 요약"}
               </span>
               {session && (
                 <button

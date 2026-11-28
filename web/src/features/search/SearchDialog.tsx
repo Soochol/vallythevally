@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Fragment, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router";
+import { useBookReplayCatalog } from "../../api/bookReplay";
+import type { BookReplayCatalogItem } from "../../api/generated/BookReplayCatalogItem";
 import type { LinkColor } from "../../api/generated/LinkColor";
 import type { Quote } from "../../api/generated/Quote";
 import type { SymbolInfo } from "../../api/generated/SymbolInfo";
@@ -66,6 +68,22 @@ const ROW_GRID = "grid min-h-[36px] cursor-pointer items-center gap-2 rounded-m 
 const SYMBOL_COLUMNS = "grid-cols-[20px_minmax(0,1fr)_56px_96px_72px] max-md:grid-cols-[20px_minmax(0,1fr)_96px_72px]";
 const COMMAND_COLUMNS = "grid-cols-[20px_minmax(0,1fr)_auto]";
 
+function catalogItemToSymbolInfo(item: BookReplayCatalogItem): SymbolInfo {
+  return {
+    code: item.symbol,
+    name: item.name ?? item.symbol,
+    kind: item.kind ?? "common",
+    market: item.market ?? "kospi",
+    nxtEnabled: false,
+  };
+}
+
+function matchesCatalogQuery(item: BookReplayCatalogItem, query: string): boolean {
+  if (query === "") return true;
+  const q = query.toLowerCase();
+  return item.symbol.toLowerCase().includes(q) || (item.name?.toLowerCase().includes(q) ?? false);
+}
+
 export function SearchDialog() {
   const dialog = useSelectionStore((s) => s.dialog);
   return dialog?.kind === "search" ? <SearchDialogBody purpose={dialog.purpose} /> : null;
@@ -87,7 +105,15 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const sendToLinkedChart = useSendSymbol();
   const [input, setInput] = useState("");
   const [market, setMarket] = useState<MarketFilter>("all");
+  const [collectedOnly, setCollectedOnly] = useState(true);
   const [active, setActive] = useState(0);
+  const replayCatalog = useBookReplayCatalog(purpose === "replay");
+  const catalogItems = replayCatalog.data?.items ?? [];
+  const catalogByCode = useMemo(
+    () => new Map(catalogItems.map((item) => [item.symbol, item])),
+    [catalogItems],
+  );
+  const replayHasCatalog = purpose === "replay" && catalogItems.length > 0;
   const layoutWindows = useLayoutStore((s) => s.layout.windows);
   const lastUsedLink = useLayoutStore((s) => s.lastUsedLink);
   const lockedWindows = useLayoutStore((s) => s.lockedWindows);
@@ -110,26 +136,58 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   const query = mode.query;
   const filters = SEARCH_FILTERS[market];
   const beforeConnect = useBeforeConnect();
-  const offline = beforeConnect !== null && mode.kind === "symbols";
-  const search = useSymbolSearch(mode.kind === "symbols" && !offline ? query : "", filters);
+  const offline = beforeConnect !== null && mode.kind === "symbols" && !replayHasCatalog;
+  const useLocalCatalogOnly = beforeConnect !== null && replayHasCatalog && mode.kind === "symbols";
+  const search = useSymbolSearch(mode.kind === "symbols" && beforeConnect === null ? query : "", filters);
   const ids = useId();
   const symbolList = searchList(query, { watch, recent }, search.data, filters);
+  const symbolRows: ResultRow[] = useMemo(() => {
+    if (mode.kind !== "symbols") return [];
+    if (useLocalCatalogOnly) {
+      return catalogItems
+        .filter((item) => {
+          if (!matchesCatalogQuery(item, query)) return false;
+          const info = catalogItemToSymbolInfo(item);
+          return market === "all" || matchesMarket(info, market);
+        })
+        .map((item): ResultRow => ({ kind: "symbol", info: catalogItemToSymbolInfo(item), group: query === "" ? "collected" : "result" }));
+    }
+    const base = symbolList.rows
+      .filter((row) => (purpose !== "replay" || !isIndexCode(row.info.code)) && (query !== "" || matchesMarket(row.info, market)))
+      .filter((row) => !replayHasCatalog || !collectedOnly || catalogByCode.has(row.info.code))
+      .map((row): ResultRow => ({ kind: "symbol", ...row }));
+    if (!replayHasCatalog) return base;
+    const seen = new Set(base.map((row) => (row.kind === "symbol" ? row.info.code : "")));
+    if (query === "") {
+      const extras = catalogItems
+        .filter((item) => !seen.has(item.symbol))
+        .map(catalogItemToSymbolInfo)
+        .filter((info) => market === "all" || matchesMarket(info, market))
+        .map((info): ResultRow => ({ kind: "symbol", info, group: "collected" }));
+      return [...base, ...extras];
+    }
+    if (collectedOnly) {
+      const extras = catalogItems
+        .filter((item) => !seen.has(item.symbol) && matchesCatalogQuery(item, query))
+        .map(catalogItemToSymbolInfo)
+        .filter((info) => market === "all" || matchesMarket(info, market))
+        .map((info): ResultRow => ({ kind: "symbol", info, group: "result" }));
+      return [...base, ...extras];
+    }
+    return base;
+  }, [mode.kind, useLocalCatalogOnly, catalogItems, query, market, symbolList.rows, purpose, replayHasCatalog, collectedOnly, catalogByCode]);
   const rows: ResultRow[] = [
-    ...(mode.kind === "symbols"
-      ? symbolList.rows
-          .filter((row) => (purpose !== "replay" || !isIndexCode(row.info.code)) && (query !== "" || matchesMarket(row.info, market)))
-          .map((row): ResultRow => ({ kind: "symbol", ...row }))
-      : []),
+    ...symbolRows,
     ...(purpose !== "replay" && (query === "" || mode.kind === "commands") ? commandRowsOf(commands, query, mode.kind === "commands") : []),
   ];
-  const selectable = mode.kind === "commands" || (!offline && symbolList.selectable);
+  const selectable = mode.kind === "commands" || useLocalCatalogOnly || (!offline && symbolList.selectable);
   const activeIndex = selectable ? Math.min(active, rows.length - 1) : -1;
   const selected = rows[activeIndex];
   const contents = rows.map((row) => row.kind === "symbol" ? `${row.group}-${row.info.code}` : row.command.id).join("|");
-  const { list, quotes, bySymbol } = useSearchQuotes(selectable ? contents : "");
+  const { list, quotes, bySymbol } = useSearchQuotes(selectable && beforeConnect === null ? contents : "");
   const optionId = (i: number) => `${ids}-opt-${i}`;
 
-  useEffect(() => setActive(0), [input, market, search.data]);
+  useEffect(() => setActive(0), [input, market, collectedOnly, search.data]);
   useEffect(() => {
     document.getElementById(`${ids}-opt-${activeIndex}`)?.scrollIntoView({ block: "nearest" });
   }, [activeIndex, ids, contents]);
@@ -237,6 +295,32 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
   return <CommandFrame solid labelledBy={`${ids}-title`} onClose={close} width="h-[min(640px,80dvh)] w-[min(840px,calc(100vw-32px))] max-md:h-[80dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
       <h2 id={`${ids}-title`} className="sr-only">{purpose === "watch" ? "관심종목에 넣을 종목 검색" : "종목 검색"}</h2>
+      {purpose === "replay" && mode.kind === "symbols" && replayHasCatalog && (
+        <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2 text-xs" data-testid="search-replay-filter-bar">
+          <span className="text-text-3">복기 대상</span>
+          <div role="group" aria-label="수집 종목 필터" className="ui-seg" data-size="sm">
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-pressed={collectedOnly}
+              onClick={() => { setCollectedOnly(true); inputRef.current?.focus(); }}
+              className="ui-seg-item text-xs"
+            >
+              {`수집 종목만 (${catalogItems.length})`}
+            </button>
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-pressed={!collectedOnly}
+              disabled={beforeConnect !== null}
+              onClick={() => { setCollectedOnly(false); inputRef.current?.focus(); }}
+              className="ui-seg-item text-xs"
+            >
+              전체
+            </button>
+          </div>
+        </div>
+      )}
       {purpose === "open" && mode.kind === "symbols" && (
         <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2 text-xs" data-testid="search-target-bar">
           <span className="text-text-3">변경 대상</span>
@@ -304,6 +388,24 @@ function SearchDialogBody({ purpose }: { purpose: SearchPurpose }) {
                 <span className="flex min-w-0 items-baseline gap-2">
                   <span className="min-w-0 truncate"><Marked text={row.info.name} query={query} strong /></span>
                   <span className="flex-none whitespace-nowrap text-xs text-text-3"><Marked text={row.info.code} query={query} /></span>
+                  {purpose === "replay" && (() => {
+                    const item = catalogByCode.get(row.info.code);
+                    if (!item) return null;
+                    const archiveOnly = item.nativeDays === 0 && item.archiveDays > 0;
+                    return (
+                      <span
+                        data-testid="search-catalog-days"
+                        data-source={archiveOnly ? "archive" : "native"}
+                        className={
+                          archiveOnly
+                            ? "flex-none whitespace-nowrap rounded-s border border-[color-mix(in_srgb,var(--warning)_45%,transparent)] bg-[var(--warning-soft)] px-1 text-xs font-semibold text-warning"
+                            : "flex-none whitespace-nowrap rounded-s border border-line bg-surface px-1 text-xs font-medium text-text-2"
+                        }
+                      >
+                        {archiveOnly ? `KRX ${item.totalDays}일` : `${item.totalDays}일`}
+                      </span>
+                    );
+                  })()}
                   {putGroup?.symbols.includes(row.info.code) && <span className="max-w-[9rem] flex-none truncate text-xs text-text-2">✓ {putGroup.name}에 있음</span>}
                 </span>
                 <span data-cell="market" className="justify-self-start whitespace-nowrap rounded-s border border-line bg-surface px-1 text-xs text-text-2 max-md:hidden">{row.info.kind === "etf" || row.info.kind === "etn" ? KIND_LABEL[row.info.kind] : MARKET_LABEL[row.info.market]}</span>

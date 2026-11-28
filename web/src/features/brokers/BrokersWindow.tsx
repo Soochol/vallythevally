@@ -6,7 +6,7 @@ import type { WindowId } from "../../layout/kinds";
 import { formatPrice } from "../../lib/format";
 import { type BrokerCards, type BrokerView, useLayoutStore } from "../../stores/layout";
 import { serverNow, useServerClock } from "../../stores/serverClock";
-import { ReplayStrip, type ReplayStripView } from "../book-replay/ReplayStrip";
+import { REPLAY_ARCHIVE_TITLE, ReplayStrip, type ReplayStripView } from "../book-replay/ReplayStrip";
 import { REPLAY_REASON } from "../book-replay/replay";
 import { useBookReplayEnabled, useWorkspaceReplayCursor } from "../book-replay/useWorkspaceReplayCursor";
 import { MarketSymbolName } from "../market-window/MarketHead";
@@ -159,7 +159,7 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
     if (day.failed) return { kind: "none", reason: REPLAY_REASON.failed };
     if (day.source === "none") return { kind: "none", reason: uncollectedReason };
     if (activeGap !== null) return { kind: "none", reason: REPLAY_REASON.gap };
-    return { kind: "past", at: replayCursor.at };
+    return { kind: "past", at: replayCursor.at, venueScope: day.venueScope };
   })();
 
   const dataReplay =
@@ -220,6 +220,11 @@ function BrokersBody({ id, code }: { id: WindowId; code: SymbolCode }) {
           </>
         )}
         <span className="br-now">
+          {day.venueScope === "krx_archive" && (
+            <span className="mw-replay-archive" data-testid="brokers-archive-badge" title={REPLAY_ARCHIVE_TITLE}>
+              KRX 단독
+            </span>
+          )}
           {replayPointed ? (
             <span className="br-sync-date" data-testid="brokers-sync-date">{formatMonthDay(activeDate)}</span>
           ) : isFallback ? (

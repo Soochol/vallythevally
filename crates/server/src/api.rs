@@ -783,6 +783,9 @@ pub struct BrokerDay {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub coverage: Option<BookReplayCoverage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub venue_scope: Option<ReplayVenueScope>,
     pub snapshots: Vec<FeedBrokers>,
     #[ts(type = "[number, number][]")]
     pub gaps: Vec<[i64; 2]>,
@@ -797,6 +800,9 @@ pub struct BrokerDay {
 pub struct BrokerDays {
     pub symbol: SymbolCode,
     pub days: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub archive_days: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1491,12 +1497,51 @@ pub struct BookReplayAccess {
     pub available: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReplayVenueScope {
+    #[default]
+    Combined,
+    KrxArchive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayCatalogItem {
+    pub symbol: SymbolCode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub market: Option<Market>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub kind: Option<SymbolKind>,
+    pub native_days: u32,
+    pub archive_days: u32,
+    pub total_days: u32,
+    pub latest_date: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BookReplayCatalog {
+    pub items: Vec<BookReplayCatalogItem>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct BookReplayDays {
     pub symbol: SymbolCode,
     pub days: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub archive_days: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1590,6 +1635,13 @@ pub struct BookReplayMeta {
     pub coverage: BookReplayCoverage,
     pub resolution: BookReplayResolution,
     pub span_minutes: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    #[ts(type = "number | null")]
+    pub previous_close: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub venue_scope: Option<ReplayVenueScope>,
     #[ts(type = "[number, number][]")]
     pub covered: Vec<[u32; 2]>,
     #[ts(type = "[number, number][]")]
@@ -1607,6 +1659,9 @@ pub struct BookReplayDay {
     pub coverage: BookReplayCoverage,
     #[ts(type = "number | null")]
     pub previous_close: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub venue_scope: Option<ReplayVenueScope>,
     #[ts(type = "[number, number][]")]
     pub covered: Vec<[u32; 2]>,
     pub books: Vec<BookReplayBook>,
@@ -1646,6 +1701,9 @@ pub struct BookReplayTrades {
     #[ts(type = "number | null")]
     pub previous_close: Option<u64>,
     pub venue: Venue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub venue_scope: Option<ReplayVenueScope>,
     #[ts(type = "[number, number][]")]
     pub gaps: Vec<[i64; 2]>,
     #[ts(type = "number")]
@@ -1686,6 +1744,9 @@ pub struct BookReplayProgramDay {
     pub coverage: BookReplayCoverage,
     #[ts(type = "number | null")]
     pub previous_close: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub venue_scope: Option<ReplayVenueScope>,
     #[ts(type = "[number, number][]")]
     pub gaps: Vec<[i64; 2]>,
     pub rows: Vec<BookReplayProgramRow>,
