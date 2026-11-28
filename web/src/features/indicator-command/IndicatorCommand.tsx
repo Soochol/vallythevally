@@ -3,7 +3,7 @@ import { colorLine, indicatorCssColor, KINDS, shownColor, specName, type Indicat
 import type { IndicatorConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
 import { symbolSub } from "../../lib/symbol";
-import { chartWindow, useLayoutStore } from "../../stores/layout";
+import { chartWindow, findChartCell, useLayoutStore } from "../../stores/layout";
 import { defaultIndicatorMode, useSelectionStore, type ChartPanelMode } from "../../stores/selection";
 import { useUiStore } from "../../stores/ui";
 import { ChartSettingsSections } from "../chart-settings/ChartSettingsDialog";
@@ -42,7 +42,7 @@ export function IndicatorCommand() {
 
 export function IndicatorCommandBody({ cellId, initialMode, initialIndicator = null }: { cellId: WindowId; initialMode: ChartPanelMode; initialIndicator?: string | null }) {
   const close = useSelectionStore((s) => s.closeDialog);
-  const [initialSettings] = useState(() => chartWindow(useLayoutStore.getState().layout, cellId).chartSettings);
+  const [initialSettings] = useState(() => (findChartCell(useLayoutStore.getState(), cellId) ?? chartWindow(useLayoutStore.getState().layout, cellId)).chartSettings);
   const [initialIndicatorWindow] = useState(() => useUiStore.getState().prefs.indicatorWindow);
   const [panelSection, setPanelSection] = useState<"indicators" | "settings" | "compare">(
     initialMode === "settings" ? "settings" : initialMode === "compare" ? "compare" : "indicators"
@@ -317,7 +317,7 @@ function CurrentIndicatorEditor({ config, instanceIndex, cellId, actionRef }: { 
   const [initial] = useState(config);
   const focus = () => controls.current?.querySelector<HTMLElement>("button:not(:disabled),input:not(:disabled)")?.focus();
   const { draft, setDraft, validator, check, color } = useLiveIndicatorDraft(cellId, initial);
-  const panels = useLayoutStore((s) => chartWindow(s.layout, cellId).chartSettings.panels);
+  const panels = useLayoutStore((s) => (findChartCell(s, cellId) ?? chartWindow(s.layout, cellId)).chartSettings.panels);
   const kind = KINDS[draft.form.kind];
   const place = draft.placement === "price" ? PRICE_GROUP : config.panel !== "price" ? panelLabel(panels, config.panel) : BELOW_GROUP;
 

@@ -167,6 +167,7 @@ export interface ControllerDeps {
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
   onCompareRemove?: (code: SymbolCode) => void;
   onCorner?: (corner: { width: number; height: number }) => void;
+  externalBars?: boolean;
 }
 
 /** 칸 하나의 차트 엔진 래퍼(frontend.md §5.4). React 밖의 명령형 객체다. */
@@ -241,6 +242,7 @@ export class ChartController {
   private lastAxisCeil: number | null = null;
   private lastAxisFontSize: number | null = null;
   private readonly onCorner: ControllerDeps["onCorner"];
+  private readonly externalBars: boolean;
   private readonly onNarrowChange = (): void => {
     this.narrow = this.narrowMedia.matches;
     this.paneLayoutDirty = true;
@@ -252,6 +254,7 @@ export class ChartController {
     this.el = el;
     this.socket = deps.socket;
     this.onCorner = deps.onCorner;
+    this.externalBars = deps.externalBars ?? false;
     this.tokens = deps.tokens;
     this.onStatus = deps.onStatus;
     this.elVisible = crosshairVisible(el);
@@ -463,8 +466,10 @@ export class ChartController {
       this.indicators.clear();
       this.onStatus({ kind: "loading" });
       this.pendingEnd = null;
-      this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
-      this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
+      if (!this.externalBars) {
+        this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
+        this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
+      }
     }
     const configsChanged = prev?.period !== next.period || (prev !== null && isIndexCode(prev.symbol) !== isIndex) || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels;
     const targetChanged = prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period;
@@ -496,6 +501,58 @@ export class ChartController {
     this.legend.setDisplay(next.settings);
     this.requestLegendSources("base", "indicators", "compare");
     this.renderLegend();
+  }
+
+  setExternalHistory(raw: History, options?: { fit?: boolean; preserveRange?: boolean }): void {
+    if (this.disposed) return;
+    this.pendingEnd = null;
+    this.rawHistory = raw;
+    const h = this.deriveHistory(raw);
+    this.history = h;
+    this.hoverIndex = null;
+    this.financialHoverTime = null;
+    this.realtimeSeen = false;
+    this.stalledAt = null;
+    const bars = displayBars(h);
+    const shouldPreserve = options?.preserveRange === true && this.bars.length > 0;
+    const shouldFit = options?.fit ?? !shouldPreserve;
+    this.withDataGuard(() => {
+      if (shouldPreserve) {
+        preserveTimeRange(this.chart.timeScale(), this.period(), this.pendingScroll, () => {
+          this.setBars(bars);
+          this.indicators.reset(h);
+        });
+      } else {
+        this.setBars(bars);
+        this.indicators.reset(h);
+        if (shouldFit && bars.length > 0) this.fitInitialRange();
+      }
+    });
+    this.compare.coverFrom(this.leftT());
+    this.renderLegend();
+    const latest = bars[bars.length - 1];
+    if (latest) {
+      this.ready = {
+        kind: "ready",
+        latest,
+        prev: bars[bars.length - 2] ?? null,
+        isCurrent: h.current !== null && latest.t === h.current.t,
+        olderError: null,
+        olderLoading: false,
+        intradayEnd: false,
+      };
+      this.onStatus(this.ready);
+    }
+  }
+
+  updateExternalBar(raw: History, bar: Bar): void {
+    if (this.disposed) return;
+    this.onRealtime(raw, bar, "live");
+  }
+
+  fitRange(): void {
+    if (this.disposed || this.bars.length === 0) return;
+    this.fitInitialRange();
   }
 
   subscribePointedBar(listener: (bar: PointedBar, close: number | null) => void): () => void {

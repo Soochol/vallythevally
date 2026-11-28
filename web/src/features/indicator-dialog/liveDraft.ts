@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { colorsFrom, specLines } from "../../chart/indicators/kinds";
 import { type IndicatorConfig, barOpacityOf, DEFAULT_PANEL_STRETCH, ichimokuStyleOf, placementOfConfig, sameIchimokuStyle } from "../../chart/settings";
-import { chartWindows, useLayoutStore } from "../../stores/layout";
+import { findChartCell, useLayoutStore } from "../../stores/layout";
 import { checkForm, draftStyle, startDraft } from "./indicatorForm";
 import { useValidator } from "./IndicatorSettingsForm";
 import type { WindowId } from "../../layout/kinds";
@@ -13,7 +13,7 @@ export function useLiveIndicatorDraft(cellId: WindowId, initial: IndicatorConfig
   const color = draft.color === "auto" ? initial.style.colors[0] ?? "ind-1" : draft.color;
   const originalColor = startDraft(initial, initial.spec.kind).color;
   const [opened] = useState(() => {
-    const panels = chartWindows(useLayoutStore.getState().layout).find((cell) => cell.id === cellId)?.chartSettings.panels ?? [];
+    const panels = findChartCell(useLayoutStore.getState(), cellId)?.chartSettings.panels ?? [];
     const at = panels.findIndex((p) => p.id === initial.panel);
     return { panel: panels[at] ?? { id: crypto.randomUUID(), stretch: DEFAULT_PANEL_STRETCH }, at: Math.max(0, at) };
   });
@@ -21,7 +21,7 @@ export function useLiveIndicatorDraft(cellId: WindowId, initial: IndicatorConfig
 
   useEffect(() => {
     const store = useLayoutStore.getState();
-    const current = chartWindows(store.layout).find((cell) => cell.id === cellId)?.chartSettings.indicators.find((i) => i.id === initial.id);
+    const current = findChartCell(store, cellId)?.chartSettings.indicators.find((i) => i.id === initial.id);
     if (!current) return;
     if (placementOfConfig(current) !== draft.placement) {
       placementChanged.current = true;

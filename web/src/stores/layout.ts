@@ -73,6 +73,12 @@ export const chartWindows = (layout: EditableLayout): ChartWindowState[] => layo
 export const chartWindow = (layout: EditableLayout, id: WindowId): ChartWindowState =>
   chartWindows(layout).find((w) => w.id === id) ?? chartWindows(layout)[0]!;
 
+export const findChartCell = (
+  state: Pick<LayoutState, "layout" | "standaloneCharts">,
+  id: WindowId,
+): ChartWindowState | undefined =>
+  state.standaloneCharts[id] ?? chartWindows(state.layout).find((w) => w.id === id);
+
 export const chartNumber = (layout: EditableLayout, id: WindowId): number => chartWindows(layout).findIndex((w) => w.id === id) + 1;
 
 export function windowName(windows: readonly WindowIdentity[], window: WindowIdentity): string {
@@ -255,6 +261,9 @@ interface LayoutState {
   lastUsedLink: LinkColor | null;
   groupSymbols: GroupSymbols;
   lockedWindows: readonly WindowId[];
+  standaloneCharts: Partial<Record<WindowId, ChartWindowState>>;
+  setStandaloneChart(cell: ChartWindowState): void;
+  removeStandaloneChart(cellId: WindowId): void;
   commitDock(edit: { session: number; expected: DockPlacement | null; next: DockPlacement }): boolean;
   attachFloat(window: WindowId): void;
   workspaceArea: Size | null;
@@ -383,8 +392,17 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
       if (windows.every((w, i) => w === s.layout.windows[i])) return s;
       return { layout: { ...s.layout, windows }, revision: s.revision + 1 };
     });
-  const patchCell = (cellId: WindowId, f: (c: ChartWindowState) => ChartWindowState) =>
+  const patchCell = (cellId: WindowId, f: (c: ChartWindowState) => ChartWindowState) => {
+    const standalone = get().standaloneCharts[cellId];
+    if (standalone) {
+      const next = f(standalone);
+      if (next !== standalone) {
+        set((s) => ({ standaloneCharts: { ...s.standaloneCharts, [cellId]: next } }));
+      }
+      return;
+    }
     patchWindows((w) => (isChartWindow(w) && w.id === cellId ? f(w) : w));
+  };
   const openIn = (charts: readonly ChartWindowState[], target: SymbolTarget): SymbolChange => {
     const ids = new Set<WindowId>(charts.map((c) => c.id));
     const changed = charts.filter((c) => c.symbol !== target.code).map((c) => c.id);
@@ -411,6 +429,22 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
     lastUsedLink: null,
     groupSymbols: seedGroupSymbols(DEFAULT_LAYOUT),
     lockedWindows: [],
+    standaloneCharts: {},
+    setStandaloneChart: (cell) =>
+      set((s) => {
+        const prev = s.standaloneCharts[cell.id];
+        if (prev && prev.symbol === cell.symbol && prev.period === cell.period && prev.chartSettings === cell.chartSettings) {
+          return s;
+        }
+        return { standaloneCharts: { ...s.standaloneCharts, [cell.id]: cell } };
+      }),
+    removeStandaloneChart: (cellId) =>
+      set((s) => {
+        if (!(cellId in s.standaloneCharts)) return s;
+        const next = { ...s.standaloneCharts };
+        delete next[cellId];
+        return { standaloneCharts: next };
+      }),
     commitDock: ({ session, expected, next }) => {
       const state = get();
       if (useUiStore.getState().prefs.layoutMode !== "dock" || session !== state.session || expected !== state.layout.placement.dock) return false;
@@ -746,7 +780,8 @@ export const useLayoutStore = create<LayoutState>()((set, get) => {
   };
 });
 
-export const useCell = (cellId: WindowId): ChartWindowState => useLayoutStore((s) => chartWindow(s.layout, cellId));
+export const useCell = (cellId: WindowId): ChartWindowState =>
+  useLayoutStore((s) => s.standaloneCharts[cellId] ?? chartWindow(s.layout, cellId));
 
 useLayoutStore.subscribe((state, previous) => {
   if (state.layout !== previous.layout || state.dockOrigins !== previous.dockOrigins) writeDockOrigins(state.layout, state.dockOrigins);

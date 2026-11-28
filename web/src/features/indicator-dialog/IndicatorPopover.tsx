@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { KINDS, specName } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
-import { chartWindows, useLayoutStore } from "../../stores/layout";
+import { findChartCell, useLayoutStore } from "../../stores/layout";
 import { CloseIcon, DRAWING_ICONS, EyeIcon, Icon } from "../icons";
 import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { Popover } from "../overlay/Popover";
@@ -20,7 +20,7 @@ export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }:
 }) {
   const trigger = useRef(anchor);
   const { draft, setDraft, validator, check, color, revert } = useLiveIndicatorDraft(cellId, initial);
-  const shown = useLayoutStore((s) => chartWindows(s.layout).find((cell) => cell.id === cellId)?.chartSettings.indicators.find((i) => i.id === initial.id)?.visible ?? true);
+  const shown = useLayoutStore((s) => findChartCell(s, cellId)?.chartSettings.indicators.find((i) => i.id === initial.id)?.visible ?? true);
 
   const close = (reason?: "escape" | "outside") => {
     if (reason === "escape") revert();

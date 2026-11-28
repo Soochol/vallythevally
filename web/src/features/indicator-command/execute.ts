@@ -1,6 +1,6 @@
 import type { IndicatorSpec, Placement } from "../../chart/indicators/kinds";
 import { compareRefusal, type IndicatorConfig } from "../../chart/settings";
-import { chartWindows, useLayoutStore } from "../../stores/layout";
+import { findChartCell, useLayoutStore } from "../../stores/layout";
 import type { WindowId } from "../../layout/kinds";
 
 type Command = { kind: "indicator"; id: string | null; spec: IndicatorSpec; style: IndicatorConfig["style"]; placement: Placement }
@@ -8,14 +8,14 @@ type Command = { kind: "indicator"; id: string | null; spec: IndicatorSpec; styl
 
 export function addIndicatorCommand(cellId: WindowId, spec: IndicatorSpec, style: IndicatorConfig["style"], placement: Placement): string | null {
   const store = useLayoutStore.getState();
-  const cell = chartWindows(store.layout).find((cell) => cell.id === cellId);
+  const cell = findChartCell(store, cellId);
   if (!cell) return null;
   return store.addIndicator(cellId, spec, style, placement);
 }
 
 export function executeCommand(cellId: WindowId, command: Command): boolean {
   const store = useLayoutStore.getState();
-  const cell = chartWindows(store.layout).find((cell) => cell.id === cellId);
+  const cell = findChartCell(store, cellId);
   if (!cell) return false;
   if (command.kind === "compare") {
     if (compareRefusal(cell.chartSettings, command.code, cell.symbol)) return false;
