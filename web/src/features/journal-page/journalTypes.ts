@@ -91,6 +91,31 @@ export interface JournalNote {
   readonly tags: readonly string[];
 }
 
+export interface JournalSymbolGroup {
+  readonly key: string;
+  readonly day: string;
+  readonly code: string;
+  readonly name: string;
+  readonly trades: readonly JournalTrade[];
+  readonly net: number;
+  readonly buyAmt: number;
+  readonly sellAmt: number;
+  readonly cost: number;
+  readonly qty: number;
+  readonly retPct: number;
+  readonly wins: number;
+  readonly losses: number;
+  readonly latestExitOrd: number;
+  readonly earliestEntryMin: number;
+  readonly latestExitMin: number;
+  readonly hasSwing: boolean;
+  readonly hasNxt: boolean;
+}
+
+export type JournalSelection =
+  | { readonly kind: "group"; readonly key: string }
+  | { readonly kind: "trade"; readonly id: string };
+
 export interface JournalSummary {
   readonly count: number;
   readonly buyAmt: number;

@@ -14,7 +14,9 @@ import {
   type JournalMetric,
   type JournalNote,
   type JournalPeriod,
+  type JournalSort,
   type JournalSummary,
+  type JournalSymbolGroup,
   type JournalTf,
   type JournalTrade,
   type StoredDayExecutions,
@@ -171,6 +173,108 @@ export function autoTfOf(trade: JournalTrade): JournalTf {
   if (trade.holdMin <= 40) return "3";
   if (trade.holdMin <= 120) return "5";
   return "10";
+}
+
+export function autoTfForTrades(trades: readonly JournalTrade[]): JournalTf {
+  if (trades.length === 0) return "1";
+  if (trades.length === 1) return autoTfOf(trades[0]!);
+  if (trades.some((t) => t.swing)) return "D";
+  let minEntry = Infinity;
+  let maxExit = -Infinity;
+  for (const t of trades) {
+    if (t.entryMin < minEntry) minEntry = t.entryMin;
+    if (t.exitMin > maxExit) maxExit = t.exitMin;
+  }
+  const span = Math.max(1, maxExit - minEntry);
+  if (span <= 15) return "1";
+  if (span <= 40) return "3";
+  if (span <= 120) return "5";
+  return "10";
+}
+
+export function buildDaySymbolGroups(
+  trades: readonly JournalTrade[],
+  sort: JournalSort,
+  sortDir: 1 | -1,
+  afterCost: boolean,
+): readonly JournalSymbolGroup[] {
+  const byKey = new Map<string, JournalTrade[]>();
+  for (const trade of trades) {
+    const key = `${trade.exitDay}|${trade.code}`;
+    const list = byKey.get(key);
+    if (list !== undefined) list.push(trade);
+    else byKey.set(key, [trade]);
+  }
+
+  const groups: JournalSymbolGroup[] = [];
+  for (const [key, list] of byKey.entries()) {
+    const ordered = list.slice().sort((a, b) => a.entryOrd - b.entryOrd || a.exitOrd - b.exitOrd);
+    const first = ordered[0]!;
+    let net = 0;
+    let buyAmt = 0;
+    let sellAmt = 0;
+    let cost = 0;
+    let qty = 0;
+    let wins = 0;
+    let losses = 0;
+    let latestExitOrd = -Infinity;
+    let earliestEntryMin = Infinity;
+    let latestExitMin = -Infinity;
+    let hasSwing = false;
+    let hasNxt = false;
+
+    for (const t of ordered) {
+      const p = tradePnl(t, afterCost);
+      net += p;
+      buyAmt += t.buyAmt;
+      sellAmt += t.sellAmt;
+      cost += t.cost;
+      qty += t.qty;
+      if (p > 0) wins += 1;
+      else if (p < 0) losses += 1;
+      if (t.exitOrd > latestExitOrd) latestExitOrd = t.exitOrd;
+      if (t.entryMin < earliestEntryMin) earliestEntryMin = t.entryMin;
+      if (t.exitMin > latestExitMin) latestExitMin = t.exitMin;
+      if (t.swing) hasSwing = true;
+      if (t.venue === "nxt") hasNxt = true;
+    }
+
+    groups.push({
+      key,
+      day: first.exitDay,
+      code: first.code,
+      name: first.name,
+      trades: ordered,
+      net,
+      buyAmt,
+      sellAmt,
+      cost,
+      qty,
+      retPct: buyAmt > 0 ? (net / buyAmt) * 100 : 0,
+      wins,
+      losses,
+      latestExitOrd,
+      earliestEntryMin,
+      latestExitMin,
+      hasSwing,
+      hasNxt,
+    });
+  }
+
+  const keyVal =
+    sort === "time"
+      ? (g: JournalSymbolGroup) => g.latestExitOrd
+      : sort === "pnl"
+        ? (g: JournalSymbolGroup) => g.net
+        : (g: JournalSymbolGroup) => g.retPct;
+
+  groups.sort(
+    (a, b) =>
+      (keyVal(a) - keyVal(b)) * sortDir ||
+      (a.latestExitOrd - b.latestExitOrd) * sortDir ||
+      a.key.localeCompare(b.key),
+  );
+  return groups;
 }
 
 export function formatHoldDuration(trade: JournalTrade): string {

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { findBarIndexForFill } from "./journalChartOverlay";
+import { buildBarFillClusters, findBarIndexForFill } from "./journalChartOverlay";
 import {
   aggregateSummary,
+  autoTfForTrades,
   autoTfOf,
   buildCalendarWeeks,
+  buildDaySymbolGroups,
   buildRoundTrips,
   buildTableGroups,
   computeHistoryQueryRange,
@@ -285,5 +287,94 @@ describe("journalEngine", () => {
         expect(bars[1]!.t - bars[0]!.t).toBe(tfStepMinutes(tf) * 60);
       }
     }
+  });
+
+  it("같은 날짜 내 같은 종목 거래를 묶고 손익·수익률 정렬과 같은 날 청산 스윙까지 유지한다", () => {
+    const trades = buildRoundTrips([
+      {
+        day: "2026-11-26",
+        executions: [
+          { orderNo: "L0B1", code: "328130", name: "루닛", side: "buy", quantity: 10, price: 50_000, time: "09:10:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "L0S1", code: "328130", name: "루닛", side: "sell", quantity: 10, price: 51_000, time: "09:30:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "SWB1", code: "328130", name: "루닛", side: "buy", quantity: 10, price: 52_000, time: "14:50:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+        ],
+      },
+      {
+        day: "2026-11-27",
+        executions: [
+          { orderNo: "SWS1", code: "328130", name: "루닛", side: "sell", quantity: 10, price: 55_000, time: "09:05:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "L1B1", code: "328130", name: "루닛", side: "buy", quantity: 10, price: 56_000, time: "13:10:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "L1S1", code: "328130", name: "루닛", side: "sell", quantity: 10, price: 55_000, time: "13:30:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "S1B1", code: "005930", name: "삼성전자", side: "buy", quantity: 10, price: 70_000, time: "10:00:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "S1S1", code: "005930", name: "삼성전자", side: "sell", quantity: 10, price: 74_000, time: "10:20:00", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+        ],
+      },
+    ]);
+
+    const byTime = buildDaySymbolGroups(trades, "time", -1, false);
+    expect(byTime.map((g) => g.key)).toEqual(["2026-11-27|328130", "2026-11-27|005930", "2026-11-26|328130"]);
+
+    const lunit27 = byTime[0]!;
+    expect(lunit27.trades).toHaveLength(2);
+    expect(lunit27.hasSwing).toBe(true);
+    expect(lunit27.wins).toBe(1);
+    expect(lunit27.losses).toBe(1);
+    expect(lunit27.net).toBe(20_000);
+    expect(autoTfForTrades(lunit27.trades)).toBe("D");
+
+    const byPnl = buildDaySymbolGroups(trades, "pnl", -1, false);
+    expect(byPnl.map((g) => g.key)).toEqual(["2026-11-27|005930", "2026-11-27|328130", "2026-11-26|328130"]);
+
+    const byRet = buildDaySymbolGroups(trades, "ret", -1, false);
+    expect(byRet[0]!.key).toBe("2026-11-27|005930");
+    expect(byRet[0]!.trades).toHaveLength(1);
+    expect(byRet.find((g) => g.key === "2026-11-27|328130")?.trades).toHaveLength(2);
+  });
+
+  it("봉별 체결 클러스터는 같은 봉의 분할 체결을 건수·총수량·VWAP으로 합산하고 분봉 변경 시 재합산한다", () => {
+    const trades = buildRoundTrips([
+      {
+        day: "2026-11-27",
+        executions: [
+          { orderNo: "B1", code: "328130", name: "루닛", side: "buy", quantity: 10, price: 54_000, time: "09:06:05", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "B2", code: "328130", name: "루닛", side: "buy", quantity: 20, price: 54_300, time: "09:06:25", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "B3", code: "328130", name: "루닛", side: "buy", quantity: 10, price: 54_600, time: "09:08:10", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "S1", code: "328130", name: "루닛", side: "sell", quantity: 20, price: 56_000, time: "09:12:10", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+          { orderNo: "S2", code: "328130", name: "루닛", side: "sell", quantity: 20, price: 56_400, time: "09:12:40", venue: "krx", mfePct: null, maePct: null, fillAt: null },
+        ],
+      },
+    ]);
+
+    const bars1m: JournalBar[] = [546, 547, 548, 552].map((minutes, i) => ({
+      t: 1_795_737_960 + i * 60,
+      o: 54_000,
+      h: 56_500,
+      l: 53_800,
+      c: 55_000,
+      v: 1000,
+      day: "2026-11-27",
+      minutes,
+    }));
+
+    const clusters1m = buildBarFillClusters(bars1m, trades, "1");
+    expect(clusters1m).toHaveLength(3);
+    expect(clusters1m[0]).toMatchObject({ barIdx: 0, side: "buy", count: 2, totalQty: 30, vwap: 54_200 });
+    expect(clusters1m[1]).toMatchObject({ barIdx: 2, side: "buy", count: 1, totalQty: 10, vwap: 54_600 });
+    expect(clusters1m[2]).toMatchObject({ barIdx: 3, side: "sell", count: 2, totalQty: 40, vwap: 56_200 });
+
+    const bars5m: JournalBar[] = [545, 550].map((minutes, i) => ({
+      t: 1_795_737_900 + i * 300,
+      o: 54_000,
+      h: 56_500,
+      l: 53_800,
+      c: 55_000,
+      v: 5000,
+      day: "2026-11-27",
+      minutes,
+    }));
+    const clusters5m = buildBarFillClusters(bars5m, trades, "5");
+    expect(clusters5m).toHaveLength(2);
+    expect(clusters5m[0]).toMatchObject({ barIdx: 0, side: "buy", count: 3, totalQty: 40, vwap: 54_300 });
+    expect(clusters5m[1]).toMatchObject({ barIdx: 1, side: "sell", count: 2, totalQty: 40, vwap: 56_200 });
   });
 });
