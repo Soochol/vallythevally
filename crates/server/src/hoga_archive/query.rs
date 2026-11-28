@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -10,6 +11,7 @@ use crate::clock::kst;
 use crate::collected::kind::CollectedTradeTick;
 use crate::collected_store::{file_exists, open_connection, path_str};
 use crate::market_source::stream::{Exchange, TradeSide};
+use crate::shared_data::{Ladder, LevelQty, QuoteDay, QuoteMinute, VenueQuote};
 
 use super::{
     SNAPSHOTS_FILE, TRADES_FILE, day_minute_to_hhmmss_mmm, hhmmss_mmm_to_day_ms, hhmmss_mmm_to_sec,
@@ -601,6 +603,201 @@ fn contiguous_covered(first: Option<u32>, last: Option<u32>) -> Vec<[u32; 2]> {
     }
 }
 
+const QUOTE_MINUTES_QUERY: &str = "
+WITH parsed AS (
+    SELECT
+        CAST((ts_ms // 10000000) * 60 + ((ts_ms // 100000) % 100) AS INTEGER) AS minute,
+        CAST((ts_ms // 10000000) * 3600 + ((ts_ms // 100000) % 100) * 60 + ((ts_ms // 1000) % 100) AS INTEGER) AS sec,
+        ts_ms, seq,
+        ask_p1, ask_q1, ask_p2, ask_q2, ask_p3, ask_q3, ask_p4, ask_q4, ask_p5, ask_q5,
+        ask_p6, ask_q6, ask_p7, ask_q7, ask_p8, ask_q8, ask_p9, ask_q9, ask_p10, ask_q10,
+        bid_p1, bid_q1, bid_p2, bid_q2, bid_p3, bid_q3, bid_p4, bid_q4, bid_p5, bid_q5,
+        bid_p6, bid_q6, bid_p7, bid_q7, bid_p8, bid_q8, bid_p9, bid_q9, bid_p10, bid_q10,
+        (CASE WHEN ask_p1 IS NOT NULL AND ask_p1 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN ask_p2 IS NOT NULL AND ask_p2 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN ask_p3 IS NOT NULL AND ask_p3 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN ask_p4 IS NOT NULL AND ask_p4 > 0 THEN 1 ELSE 0 END) AS ask_cnt,
+        (CASE WHEN bid_p1 IS NOT NULL AND bid_p1 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN bid_p2 IS NOT NULL AND bid_p2 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN bid_p3 IS NOT NULL AND bid_p3 > 0 THEN 1 ELSE 0 END
+         + CASE WHEN bid_p4 IS NOT NULL AND bid_p4 > 0 THEN 1 ELSE 0 END) AS bid_cnt,
+        (CASE WHEN ask_p1 IS NOT NULL AND ask_p1 > 0 AND ask_q1 IS NOT NULL AND ask_q1 > 0 THEN CAST(ask_q1 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p2 IS NOT NULL AND ask_p2 > 0 AND ask_q2 IS NOT NULL AND ask_q2 > 0 THEN CAST(ask_q2 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p3 IS NOT NULL AND ask_p3 > 0 AND ask_q3 IS NOT NULL AND ask_q3 > 0 THEN CAST(ask_q3 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p4 IS NOT NULL AND ask_p4 > 0 AND ask_q4 IS NOT NULL AND ask_q4 > 0 THEN CAST(ask_q4 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p5 IS NOT NULL AND ask_p5 > 0 AND ask_q5 IS NOT NULL AND ask_q5 > 0 THEN CAST(ask_q5 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p6 IS NOT NULL AND ask_p6 > 0 AND ask_q6 IS NOT NULL AND ask_q6 > 0 THEN CAST(ask_q6 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p7 IS NOT NULL AND ask_p7 > 0 AND ask_q7 IS NOT NULL AND ask_q7 > 0 THEN CAST(ask_q7 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p8 IS NOT NULL AND ask_p8 > 0 AND ask_q8 IS NOT NULL AND ask_q8 > 0 THEN CAST(ask_q8 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p9 IS NOT NULL AND ask_p9 > 0 AND ask_q9 IS NOT NULL AND ask_q9 > 0 THEN CAST(ask_q9 AS BIGINT) ELSE 0 END
+         + CASE WHEN ask_p10 IS NOT NULL AND ask_p10 > 0 AND ask_q10 IS NOT NULL AND ask_q10 > 0 THEN CAST(ask_q10 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p1 IS NOT NULL AND bid_p1 > 0 AND bid_q1 IS NOT NULL AND bid_q1 > 0 THEN CAST(bid_q1 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p2 IS NOT NULL AND bid_p2 > 0 AND bid_q2 IS NOT NULL AND bid_q2 > 0 THEN CAST(bid_q2 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p3 IS NOT NULL AND bid_p3 > 0 AND bid_q3 IS NOT NULL AND bid_q3 > 0 THEN CAST(bid_q3 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p4 IS NOT NULL AND bid_p4 > 0 AND bid_q4 IS NOT NULL AND bid_q4 > 0 THEN CAST(bid_q4 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p5 IS NOT NULL AND bid_p5 > 0 AND bid_q5 IS NOT NULL AND bid_q5 > 0 THEN CAST(bid_q5 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p6 IS NOT NULL AND bid_p6 > 0 AND bid_q6 IS NOT NULL AND bid_q6 > 0 THEN CAST(bid_q6 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p7 IS NOT NULL AND bid_p7 > 0 AND bid_q7 IS NOT NULL AND bid_q7 > 0 THEN CAST(bid_q7 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p8 IS NOT NULL AND bid_p8 > 0 AND bid_q8 IS NOT NULL AND bid_q8 > 0 THEN CAST(bid_q8 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p9 IS NOT NULL AND bid_p9 > 0 AND bid_q9 IS NOT NULL AND bid_q9 > 0 THEN CAST(bid_q9 AS BIGINT) ELSE 0 END
+         + CASE WHEN bid_p10 IS NOT NULL AND bid_p10 > 0 AND bid_q10 IS NOT NULL AND bid_q10 > 0 THEN CAST(bid_q10 AS BIGINT) ELSE 0 END) AS level_total
+    FROM read_parquet($1)
+    WHERE ts_ms >= 0
+      AND (ts_ms // 10000000) < 24
+      AND ((ts_ms // 100000) % 100) < 60
+      AND ((ts_ms // 1000) % 100) < 60
+),
+ranked AS (
+    SELECT
+        minute, sec, ask_cnt, bid_cnt, level_total,
+        ask_p1, ask_q1, ask_p2, ask_q2, ask_p3, ask_q3, ask_p4, ask_q4, ask_p5, ask_q5,
+        ask_p6, ask_q6, ask_p7, ask_q7, ask_p8, ask_q8, ask_p9, ask_q9, ask_p10, ask_q10,
+        bid_p1, bid_q1, bid_p2, bid_q2, bid_p3, bid_q3, bid_p4, bid_q4, bid_p5, bid_q5,
+        bid_p6, bid_q6, bid_p7, bid_q7, bid_p8, bid_q8, bid_p9, bid_q9, bid_p10, bid_q10,
+        row_number() OVER (PARTITION BY minute ORDER BY ts_ms DESC, seq DESC) AS rn_close,
+        row_number() OVER (
+            PARTITION BY minute
+            ORDER BY (CASE WHEN ask_cnt <= 3 AND bid_cnt <= 3 THEN -1 ELSE level_total END) DESC, ts_ms ASC, seq ASC
+        ) AS rn_peak
+    FROM parsed
+)
+SELECT
+    minute, sec, rn_close, rn_peak, ask_cnt, bid_cnt, level_total,
+    ask_p1, ask_q1, ask_p2, ask_q2, ask_p3, ask_q3, ask_p4, ask_q4, ask_p5, ask_q5,
+    ask_p6, ask_q6, ask_p7, ask_q7, ask_p8, ask_q8, ask_p9, ask_q9, ask_p10, ask_q10,
+    bid_p1, bid_q1, bid_p2, bid_q2, bid_p3, bid_q3, bid_p4, bid_q4, bid_p5, bid_q5,
+    bid_p6, bid_q6, bid_p7, bid_q7, bid_p8, bid_q8, bid_p9, bid_q9, bid_p10, bid_q10
+FROM ranked
+WHERE rn_close = 1 OR rn_peak = 1
+ORDER BY minute ASC
+";
+
+const SESSION_CLOSE_SEC: u32 = 20 * 3600;
+
+struct ArchiveMinuteAcc {
+    close_sec: u32,
+    single_price: bool,
+    close: Ladder,
+    peak: Ladder,
+}
+
+pub fn read_quote_day(hogaplay_dir: &Path) -> Result<Option<QuoteDay>, String> {
+    let snaps_path = hogaplay_dir.join(SNAPSHOTS_FILE);
+    if !file_exists(&snaps_path)? {
+        return Ok(None);
+    }
+    let path_s = path_str(&snaps_path)?;
+    let conn = open_connection()?;
+    let mut stmt = conn
+        .prepare(QUOTE_MINUTES_QUERY)
+        .map_err(|e| format!("아카이브 분 호가 조회 준비 실패({path_s}): {e}"))?;
+    let mut rows = stmt
+        .query(params![path_s])
+        .map_err(|e| format!("아카이브 분 호가 조회 실행 실패({path_s}): {e}"))?;
+
+    let mut by_minute: BTreeMap<u16, ArchiveMinuteAcc> = BTreeMap::new();
+    while let Some(row) = rows.next().map_err(|e| format!("아카이브 분 호가 행 읽기 실패({path_s}): {e}"))? {
+        let minute_raw = row.get::<_, i32>(0).map_err(|e| format!("minute 읽기 실패({path_s}): {e}"))?;
+        let Ok(minute) = u16::try_from(minute_raw) else { continue };
+        let sec = row.get::<_, i32>(1).map_err(|e| format!("sec 읽기 실패({path_s}): {e}"))?.max(0) as u32;
+        let rn_close = row.get::<_, i64>(2).map_err(|e| format!("rn_close 읽기 실패({path_s}): {e}"))?;
+        let rn_peak = row.get::<_, i64>(3).map_err(|e| format!("rn_peak 읽기 실패({path_s}): {e}"))?;
+        let ask_cnt = row.get::<_, i64>(4).map_err(|e| format!("ask_cnt 읽기 실패({path_s}): {e}"))?;
+        let bid_cnt = row.get::<_, i64>(5).map_err(|e| format!("bid_cnt 읽기 실패({path_s}): {e}"))?;
+        let level_total = row.get::<_, i64>(6).map_err(|e| format!("level_total 읽기 실패({path_s}): {e}"))?;
+        let single_price = ask_cnt <= 3 && bid_cnt <= 3;
+
+        let mut asks = Vec::with_capacity(10);
+        for level in 0..10 {
+            let price = row.get::<_, Option<i64>>(7 + level * 2).map_err(|e| format!("ask_p 읽기 실패({path_s}): {e}"))?.unwrap_or(0).abs();
+            let qty = row.get::<_, Option<i64>>(8 + level * 2).map_err(|e| format!("ask_q 읽기 실패({path_s}): {e}"))?.unwrap_or(0).max(0);
+            if price > 0 && qty > 0 {
+                asks.push(LevelQty(price, qty));
+            }
+        }
+        asks.sort_unstable_by_key(|level| level.0);
+
+        let mut bids = Vec::with_capacity(10);
+        for level in 0..10 {
+            let price = row.get::<_, Option<i64>>(27 + level * 2).map_err(|e| format!("bid_p 읽기 실패({path_s}): {e}"))?.unwrap_or(0).abs();
+            let qty = row.get::<_, Option<i64>>(28 + level * 2).map_err(|e| format!("bid_q 읽기 실패({path_s}): {e}"))?.unwrap_or(0).max(0);
+            if price > 0 && qty > 0 {
+                bids.push(LevelQty(price, qty));
+            }
+        }
+        bids.sort_unstable_by_key(|level| Reverse(level.0));
+
+        let ladder = Ladder { asks, bids };
+        let entry = by_minute.entry(minute).or_insert_with(|| ArchiveMinuteAcc {
+            close_sec: sec,
+            single_price,
+            close: Ladder::default(),
+            peak: Ladder::default(),
+        });
+        if rn_close == 1 {
+            entry.close_sec = sec;
+            entry.single_price = single_price;
+            entry.close = ladder.clone();
+        }
+        if rn_peak == 1 && !single_price && level_total > 0 {
+            entry.peak = ladder;
+        }
+    }
+
+    if by_minute.is_empty() {
+        return Ok(None);
+    }
+
+    let mut minutes = Vec::with_capacity(by_minute.len());
+    let mut last_minute = 0u16;
+    for (minute, acc) in by_minute {
+        last_minute = minute;
+        let price_max = merge_price_max_ladders(
+            if acc.single_price { None } else { Some(&acc.close) },
+            (!acc.peak.is_empty()).then_some(&acc.peak),
+        );
+        minutes.push(QuoteMinute {
+            minute,
+            close_sec: acc.close_sec,
+            single_price: acc.single_price,
+            combined: VenueQuote { close: acc.close, peak: acc.peak, price_max },
+            krx: VenueQuote::default(),
+            nxt: VenueQuote::default(),
+        });
+    }
+
+    let mut gaps = Vec::new();
+    let after_last = (u32::from(last_minute) + 1) * 60;
+    if after_last < SESSION_CLOSE_SEC {
+        gaps.push((after_last, SESSION_CLOSE_SEC));
+    }
+
+    Ok(Some(QuoteDay { closed: true, minutes, gaps }))
+}
+
+fn merge_price_max_ladders(first: Option<&Ladder>, second: Option<&Ladder>) -> Ladder {
+    let mut asks = BTreeMap::<i64, i64>::new();
+    let mut bids = BTreeMap::<i64, i64>::new();
+    for ladder in [first, second].into_iter().flatten() {
+        for &LevelQty(price, qty) in &ladder.asks {
+            let entry = asks.entry(price).or_insert(0);
+            if qty > *entry {
+                *entry = qty;
+            }
+        }
+        for &LevelQty(price, qty) in &ladder.bids {
+            let entry = bids.entry(price).or_insert(0);
+            if qty > *entry {
+                *entry = qty;
+            }
+        }
+    }
+    Ladder {
+        asks: asks.into_iter().map(|(price, qty)| LevelQty(price, qty)).collect(),
+        bids: bids.into_iter().rev().map(|(price, qty)| LevelQty(price, qty)).collect(),
+    }
+}
+
 fn clamp_i32(value: i64) -> i64 {
     value.clamp(i64::from(i32::MIN), i64::from(i32::MAX))
 }
@@ -704,5 +901,19 @@ mod tests {
         assert_eq!(ticks[0].exchange, Some(Exchange::Krx));
         assert_eq!(ticks[0].side, Some(TradeSide::Buy));
         assert_eq!(ticks[2].side, Some(TradeSide::Sell));
+
+        let quote_day = read_quote_day(&hp).unwrap().unwrap();
+        assert!(quote_day.closed);
+        assert_eq!(quote_day.minutes.len(), 2);
+        assert_eq!(quote_day.minutes[0].minute, 540);
+        assert!(!quote_day.minutes[0].single_price);
+        assert_eq!(quote_day.minutes[0].combined.close.ask_total(), 400);
+        assert_eq!(quote_day.minutes[0].combined.close.bid_total(), 400);
+        assert!(quote_day.minutes[0].krx.close.is_empty());
+        assert!(quote_day.minutes[0].nxt.close.is_empty());
+        assert_eq!(quote_day.minutes[1].minute, 545);
+        assert_eq!(quote_day.minutes[1].combined.close.ask_total(), 720);
+        assert_eq!(quote_day.minutes[1].combined.peak.ask_total(), 1_000);
+        assert_eq!(quote_day.gaps, vec![(546 * 60, 20 * 3600)]);
     }
 }

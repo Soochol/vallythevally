@@ -7,9 +7,11 @@ use domain::{KstDate, KstTime};
 
 use super::QuoteDayState;
 use crate::clock::Clock;
+use crate::hoga_archive::{ArchiveDayLookup, HogaArchive};
 use crate::shared_data::{QuoteDay, quote_days, read_quote_day};
 
 pub const CLOSED_CAPACITY: usize = 64;
+pub const ARCHIVE_CLOSED_CAPACITY: usize = 128;
 pub const LIVE_TTL_SECS: i64 = 2;
 pub const DAYS_TTL_SECS: i64 = 2;
 
@@ -44,14 +46,22 @@ impl LruClosed {
         Some(entry.day.clone())
     }
 
-    fn insert(&mut self, date: KstDate, code: String, day: Arc<QuoteDay>) {
+    fn insert_with_capacity(&mut self, date: KstDate, code: String, day: Arc<QuoteDay>, capacity: usize) {
         self.tick += 1;
         self.entries.insert((date, code), ClosedEntry { day, used: self.tick });
-        if self.entries.len() > CLOSED_CAPACITY
+        if self.entries.len() > capacity
             && let Some(oldest) = self.entries.iter().min_by_key(|(_, entry)| entry.used).map(|(key, _)| key.clone())
         {
             self.entries.remove(&oldest);
         }
+    }
+
+    fn insert(&mut self, date: KstDate, code: String, day: Arc<QuoteDay>) {
+        self.insert_with_capacity(date, code, day, CLOSED_CAPACITY);
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
     }
 }
 
@@ -65,9 +75,17 @@ struct CacheState {
     days: Option<CachedDays>,
     closed: LruClosed,
     live: HashMap<(KstDate, String), LiveEntry>,
+    archive_root: Option<PathBuf>,
+    archive_closed: LruClosed,
 }
 
 impl CacheState {
+    fn sync_archive_root(&mut self, root: &Path) {
+        if self.archive_root.as_deref() != Some(root) {
+            self.archive_root = Some(root.to_path_buf());
+            self.archive_closed.clear();
+        }
+    }
     fn fresh_days(&self, dir: &Path, now: KstTime) -> Option<Arc<HashSet<KstDate>>> {
         let cached = self.days.as_ref()?;
         (cached.dir == dir && is_fresh(cached.fetched_at, now, DAYS_TTL_SECS)).then(|| cached.days.clone())
@@ -92,6 +110,7 @@ fn is_fresh(fetched_at: KstTime, now: KstTime, ttl_secs: i64) -> bool {
 #[derive(Default)]
 pub struct QuoteCache {
     state: Mutex<CacheState>,
+    archive: Arc<HogaArchive>,
 }
 
 impl QuoteCache {
@@ -99,7 +118,81 @@ impl QuoteCache {
         Self::default()
     }
 
+    pub fn with_archive(archive: Arc<HogaArchive>) -> Self {
+        Self { state: Mutex::new(CacheState::default()), archive }
+    }
+
     pub async fn load_range(&self, dir: &Path, code: &str, dates: &[KstDate], clock: &Clock) -> io::Result<Vec<LoadedDay>> {
+        self.load_range_with_archive(Some(dir), None, code, dates, clock).await
+    }
+
+    pub async fn load_range_with_archive(
+        &self,
+        shared_dir: Option<&Path>,
+        archive_dir: Option<&Path>,
+        code: &str,
+        dates: &[KstDate],
+        clock: &Clock,
+    ) -> io::Result<Vec<LoadedDay>> {
+        let mut results = match shared_dir {
+            Some(dir) => self.load_native_range(dir, code, dates, clock).await?,
+            None => dates.iter().map(|&date| LoadedDay { date, state: QuoteDayState::None, day: None }).collect(),
+        };
+        let Some(archive_root) = archive_dir else {
+            return Ok(results);
+        };
+        let mut archive_misses: Vec<(usize, KstDate)> = Vec::new();
+        {
+            let mut state = self.state.lock().unwrap();
+            state.sync_archive_root(archive_root);
+            for (index, item) in results.iter_mut().enumerate() {
+                if item.day.is_some() {
+                    continue;
+                }
+                if let Some(day) = state.archive_closed.get(item.date, code) {
+                    item.state = QuoteDayState::Closed;
+                    item.day = Some(day);
+                } else {
+                    archive_misses.push((index, item.date));
+                }
+            }
+        }
+        if !archive_misses.is_empty() {
+            let tasks = archive_misses.iter().map(|&(_, date)| {
+                let archive = Arc::clone(&self.archive);
+                let root = archive_root.to_path_buf();
+                let date_str = date.yyyymmdd();
+                let code = code.to_owned();
+                tokio::task::spawn_blocking(move || load_archive_quote_day(&archive, &root, &date_str, &code))
+            });
+            let joined = futures::future::join_all(tasks).await;
+            let mut fetched = Vec::with_capacity(joined.len());
+            for ((index, date), outcome) in archive_misses.into_iter().zip(joined) {
+                let loaded = outcome.map_err(|e| io::Error::other(e.to_string()))?.map_err(io::Error::other)?;
+                fetched.push((index, date, loaded));
+            }
+            let mut state = self.state.lock().unwrap();
+            state.sync_archive_root(archive_root);
+            for (index, date, outcome) in fetched {
+                match outcome {
+                    ArchiveQuoteOutcome::Found(day) => {
+                        let day = Arc::new(day);
+                        state.archive_closed.insert_with_capacity(date, code.to_owned(), day.clone(), ARCHIVE_CLOSED_CAPACITY);
+                        results[index] = LoadedDay { date, state: QuoteDayState::Closed, day: Some(day) };
+                    }
+                    ArchiveQuoteOutcome::MissingStock => {
+                        if results[index].state == QuoteDayState::None {
+                            results[index].state = QuoteDayState::NotCollected;
+                        }
+                    }
+                    ArchiveQuoteOutcome::MissingDay => {}
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    async fn load_native_range(&self, dir: &Path, code: &str, dates: &[KstDate], clock: &Clock) -> io::Result<Vec<LoadedDay>> {
         let now = clock.now();
         let available = self.available_days(dir, now).await?;
         let mut results: Vec<Option<LoadedDay>> = (0..dates.len()).map(|_| None).collect();
@@ -172,6 +265,23 @@ impl QuoteCache {
         let days: Arc<HashSet<KstDate>> = Arc::new(listed.into_iter().collect());
         self.state.lock().unwrap().days = Some(CachedDays { dir: dir.to_path_buf(), fetched_at: now, days: days.clone() });
         Ok(days)
+    }
+}
+
+enum ArchiveQuoteOutcome {
+    MissingDay,
+    MissingStock,
+    Found(QuoteDay),
+}
+
+fn load_archive_quote_day(archive: &HogaArchive, root: &Path, date_str: &str, code: &str) -> Result<ArchiveQuoteOutcome, String> {
+    match archive.lookup_day(root, date_str, code)? {
+        ArchiveDayLookup::MissingDay => Ok(ArchiveQuoteOutcome::MissingDay),
+        ArchiveDayLookup::MissingStock => Ok(ArchiveQuoteOutcome::MissingStock),
+        ArchiveDayLookup::Found { hogaplay_dir, .. } => match crate::hoga_archive::query::read_quote_day(&hogaplay_dir)? {
+            Some(day) => Ok(ArchiveQuoteOutcome::Found(day)),
+            None => Ok(ArchiveQuoteOutcome::MissingStock),
+        },
     }
 }
 

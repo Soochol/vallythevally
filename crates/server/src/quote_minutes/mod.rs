@@ -181,12 +181,14 @@ struct PreparedDays {
 
 async fn load_days(st: &AppState, cache: &QuoteCache, params: &CommonParams) -> Result<PreparedDays, ApiFailure> {
     let venue = resolve_venue(st, params.code, params.requested_venue);
-    let Some(dir) = st.collector_paths.shared_dir() else {
+    let shared_dir = st.collector_paths.shared_dir();
+    let archive_dir = st.collector_paths.archive_dir();
+    if shared_dir.is_none() && archive_dir.is_none() {
         let days = params.dates.iter().map(|&date| QuoteDayInfo { date: KstDate(date), state: QuoteDayState::None }).collect();
         return Ok(PreparedDays { available: false, venue, days, inputs: Vec::new() });
-    };
+    }
     let loaded = cache
-        .load_range(dir, params.code.as_str(), &params.dates, &st.clock)
+        .load_range_with_archive(shared_dir, archive_dir, params.code.as_str(), &params.dates, &st.clock)
         .await
         .map_err(|e| internal_error("분 호가를 읽지 못했습니다", e))?;
     let mut days = Vec::with_capacity(loaded.len());
