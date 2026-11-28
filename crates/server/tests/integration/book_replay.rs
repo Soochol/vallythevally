@@ -531,6 +531,78 @@ async fn brokers_day_reports_coverage_for_collected_missing_symbol_and_missing_d
     assert_eq!((&missing_day["source"], &missing_day["coverage"]), (&json!("none"), &json!("day_not_collected")));
 }
 
+#[tokio::test]
+async fn closed_day_replay_resolves_previous_close_from_0b_0h_and_0g_and_returns_null_when_absent() {
+    let harness = Harness::start(true).await;
+
+    let day_0b = harness.day_folder("20261123");
+    write_complete(&day_0b, 20_261_123, vec![stock("005930", true, json!([]))]);
+    write_parquet(&day_0b.join("0D").join(SAMSUNG_BUCKET), &[book_sql(&Book { symbol: "005930_AL", recv_ms: at(9, 0, 10), best_ask: 71_300, quantity: 10 })]);
+    write_parquet(
+        &day_0b.join("0B").join(SAMSUNG_BUCKET),
+        &[format!(
+            "SELECT '005930_AL' AS symbol, {}::BIGINT AS recv_ms, '090010' AS f20, (-71200)::BIGINT AS f10, (-800)::BIGINT AS f11, 10::BIGINT AS f15, true::BOOLEAN AS f15_plus, 'KRX' AS f9081",
+            at(9, 0, 10)
+        )],
+    );
+    write_parquet(
+        &day_0b.join("0w").join(SAMSUNG_BUCKET),
+        &[format!(
+            "SELECT '005930_AL' AS symbol, {}::BIGINT AS recv_ms, '090010' AS f20, (-71200)::BIGINT AS f10, 100::BIGINT AS f202, 200::BIGINT AS f204, 100::BIGINT AS f206, 100::BIGINT AS f208, 7::BIGINT AS f210",
+            at(9, 0, 10)
+        )],
+    );
+
+    let (status, book) = harness.get("/api/symbols/005930/book-replay?date=20261123").await;
+    assert_eq!(status, 200, "{book}");
+    assert_eq!(book["previousClose"], json!(72_000));
+    let (status, trades) = harness.get("/api/symbols/005930/book-replay/trades?date=20261123&untilSec=32460").await;
+    assert_eq!(status, 200, "{trades}");
+    assert_eq!(trades["previousClose"], json!(72_000));
+    let (status, program) = harness.get("/api/symbols/005930/book-replay/program?date=20261123").await;
+    assert_eq!(status, 200, "{program}");
+    assert_eq!(program["previousClose"], json!(72_000));
+
+    let t24 = kst(KstDate::new(2026, 11, 24).unwrap(), 9, 0, 10).unix() * 1000;
+    let day_0h = harness.day_folder("20261124");
+    write_complete(&day_0h, 20_261_124, vec![stock("005930", true, json!([]))]);
+    write_parquet(&day_0h.join("0D").join(SAMSUNG_BUCKET), &[book_sql(&Book { symbol: "005930_AL", recv_ms: t24, best_ask: 73_600, quantity: 10 })]);
+    write_parquet(&day_0h.join("0B").join(SAMSUNG_BUCKET), &[trade_sql("005930_AL", t24, "090010", 73_500, 10)]);
+    write_parquet(
+        &day_0h.join("0H").join(SAMSUNG_BUCKET),
+        &[format!(
+            "SELECT '005930_AL' AS symbol, {}::BIGINT AS recv_ms, '085500' AS f20, 73500::BIGINT AS f10, 500::BIGINT AS f11",
+            t24 - 300_000
+        )],
+    );
+    let (status, book_0h) = harness.get("/api/symbols/005930/book-replay?date=20261124").await;
+    assert_eq!(status, 200, "{book_0h}");
+    assert_eq!(book_0h["previousClose"], json!(73_000));
+    let (status, trades_0h) = harness.get("/api/symbols/005930/book-replay/trades?date=20261124&untilSec=32460").await;
+    assert_eq!(status, 200, "{trades_0h}");
+    assert_eq!(trades_0h["previousClose"], json!(73_000));
+
+    let t25 = kst(KstDate::new(2026, 11, 25).unwrap(), 9, 0, 10).unix() * 1000;
+    let day_0g = harness.day_folder("20261125");
+    write_complete(&day_0g, 20_261_125, vec![stock("005930", true, json!([]))]);
+    write_parquet(&day_0g.join("0D").join(SAMSUNG_BUCKET), &[book_sql(&Book { symbol: "005930_AL", recv_ms: t25, best_ask: 74_100, quantity: 10 })]);
+    write_parquet(
+        &day_0g.join("0g").join(SAMSUNG_BUCKET),
+        &[format!("SELECT '005930_AL' AS symbol, {t25}::BIGINT AS recv_ms, 74000::BIGINT AS f307")],
+    );
+    let (status, book_0g) = harness.get("/api/symbols/005930/book-replay?date=20261125").await;
+    assert_eq!(status, 200, "{book_0g}");
+    assert_eq!(book_0g["previousClose"], json!(74_000));
+
+    let t26 = kst(KstDate::new(2026, 11, 26).unwrap(), 9, 0, 10).unix() * 1000;
+    let day_none = harness.day_folder("20261126");
+    write_complete(&day_none, 20_261_126, vec![stock("005930", true, json!([]))]);
+    write_parquet(&day_none.join("0D").join(SAMSUNG_BUCKET), &[book_sql(&Book { symbol: "005930_AL", recv_ms: t26, best_ask: 75_100, quantity: 10 })]);
+    let (status, book_none) = harness.get("/api/symbols/005930/book-replay?date=20261126").await;
+    assert_eq!(status, 200, "{book_none}");
+    assert_eq!(book_none["previousClose"], json!(null));
+}
+
 fn fnv1a_test_bucket(symbol: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in symbol.as_bytes() {

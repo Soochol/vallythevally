@@ -68,7 +68,7 @@ impl<B: DeserializeOwned> Board<B> {
     }
 }
 
-fn read_snapshot<B: DeserializeOwned>(path: &Path, kind: DataKind) -> Result<Loaded<B>, String> {
+pub fn read_snapshot<B: DeserializeOwned>(path: &Path, kind: DataKind) -> Result<Loaded<B>, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let peek: HeaderOnly = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     if peek.header.format_version != FORMAT_VERSION {

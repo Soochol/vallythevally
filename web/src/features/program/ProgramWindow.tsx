@@ -10,6 +10,7 @@ import { useMarketSourceRevision } from "../../stores/kiwoomLink";
 import { marketSocket } from "../../stores/realtime";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { ReplayStrip } from "../book-replay/ReplayStrip";
+import { resolveReplayPreviousClose } from "../book-replay/replay";
 import { useProgramReplay } from "../book-replay/useProgramReplay";
 import { useBookReplayEnabled, useWorkspaceReplayCursor } from "../book-replay/useWorkspaceReplayCursor";
 import { formatMonthDay, kstDateOf } from "../brokers/history";
@@ -214,7 +215,10 @@ function ProgramBody({ code }: { code: SymbolCode }) {
   );
   const latest = historyAheadOfLive ? keptHistory.at(-1) : (live.latest ?? keptHistory.at(-1));
   const { previousClose: livePreviousClose } = useDayQuote(code, "combined");
-  const effectivePreviousClose = cursor.kind === "pointed" && !cursor.isToday ? null : livePreviousClose;
+  const effectivePreviousClose =
+    replay.kind === "past"
+      ? resolveReplayPreviousClose(replay.previousClose, cursor.kind === "pointed" && cursor.isToday, livePreviousClose)
+      : livePreviousClose;
 
   if (replay.kind === "none") {
     return (

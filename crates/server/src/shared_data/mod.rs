@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-pub use board::Board;
+pub use board::{Board, read_snapshot};
 pub use feed::Feed;
 pub use format::{Broker, DataKind, FORMAT_VERSION, Header, Loaded, Probe, ProbeBody, ProbeItem, SNAPSHOT_EXTENSION, SourceKey, data_path};
 pub use minute::{CELL_MINUTES, MinuteBar, MinuteBarKey, MinuteBook, MinuteCell, MinuteCells, MinuteInstrument, MinuteSeries, MinuteTrade, MinuteVenue, minute_path};

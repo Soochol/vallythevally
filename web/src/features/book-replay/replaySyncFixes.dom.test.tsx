@@ -90,6 +90,7 @@ test("useProgramReplay refetches today after TODAY_REFETCH_MS when hovering a ne
         symbol: CODE,
         date: TODAY,
         coverage: "collected",
+        previousClose: 70_000,
         gaps: [],
         rows:
           fetchCount === 1
@@ -141,6 +142,7 @@ test("useProgramReplay refetches today after TODAY_REFETCH_MS when hovered bar i
         symbol: CODE,
         date: TODAY,
         coverage: "collected",
+        previousClose: 70_000,
         gaps: fetchCount === 1 ? [[unixKst("2026-11-23", "09:10:00"), unixKst("2026-11-23", "09:16:00")]] : [],
         rows: [
           { secondOfDay: secAt(9, 12, 0), price: 71_400, buyQty: 300, sellQty: 50, netQty: 250, netQtyChange: 250, netAmountMillionWon: 1700 },
@@ -180,6 +182,7 @@ test("useTradesReplay refetches today after TODAY_REFETCH_MS when hovered bar is
         symbol: CODE,
         date: TODAY,
         coverage: "collected",
+        previousClose: 70_000,
         venue: "combined",
         gaps: fetchCount === 1 ? [[unixKst("2026-11-23", "09:10:00"), unixKst("2026-11-23", "09:16:00")]] : [],
         cumVolume: 500,
@@ -357,6 +360,7 @@ test("BookWindow renders ErrorState instead of stale pre-replay OrderBook when r
     symbol: CODE,
     date: "20261109",
     coverage: "collected",
+    previousClose: BASE,
     covered: [[540, 545]],
     books: [
       {

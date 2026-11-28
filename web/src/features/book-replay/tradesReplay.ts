@@ -14,6 +14,7 @@ export type TradesReplayView =
       readonly kind: "past";
       readonly at: UnixSeconds;
       readonly venue: Venue;
+      readonly previousClose: number | null;
       readonly cumVolume: number;
       readonly strength: number | null;
       readonly entries: readonly TapeEntry[];
@@ -106,6 +107,7 @@ export function projectTradesReplay(
     kind: "past",
     at: cursor.at,
     venue: data.venue,
+    previousClose: data.previousClose ?? null,
     cumVolume: data.cumVolume,
     strength: data.strength,
     entries: buildReplayEntries(data.trades, data.gaps, cursor.date, cursor.at),

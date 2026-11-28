@@ -28,6 +28,7 @@ const SAMPLE_DATA: BookReplayTrades = {
   symbol: CODE,
   date: DATE,
   coverage: "collected",
+  previousClose: 71_000,
   venue: "combined",
   gaps: [[unixAt(9, 5, 0), unixAt(9, 9, 0)]],
   cumVolume: 4_500,

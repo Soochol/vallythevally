@@ -40,6 +40,7 @@ const REPLAY_BOOK_DAY: BookReplayDay = {
   symbol: CODE,
   date: DATE,
   coverage: "collected",
+  previousClose: 71_000,
   covered: [[540, 559], [567, 575]],
   books: [
     {
@@ -57,6 +58,7 @@ const REPLAY_TRADES_ALL: BookReplayTrades = {
   symbol: CODE,
   date: DATE,
   coverage: "collected",
+  previousClose: 71_000,
   venue: "combined",
   gaps: [GAP_RANGE],
   cumVolume: 3_500,
@@ -74,6 +76,7 @@ const REPLAY_PROGRAM_DAY: BookReplayProgramDay = {
   symbol: CODE,
   date: DATE,
   coverage: "collected",
+  previousClose: 71_000,
   gaps: [GAP_RANGE],
   rows: [
     { secondOfDay: secOf(9, 0, 30), price: 71_000, buyQty: 1_000, sellQty: 200, netQty: 800, netQtyChange: 800, netAmountMillionWon: 560 },
@@ -468,17 +471,17 @@ test("진행 중 봉, 수집 끊김, 미수집 종목 상태에서 4창이 일�
   });
   scenario.on((url) => url.pathname === `/api/symbols/${CODE}/book-replay`, () => ({
     body: uncollectedState.active
-      ? { symbol: CODE, date: DATE, coverage: "symbol_not_collected", covered: [], books: [], trades: [] }
+      ? { symbol: CODE, date: DATE, coverage: "symbol_not_collected", previousClose: null, covered: [], books: [], trades: [] }
       : REPLAY_BOOK_DAY,
   }));
   scenario.on((url) => url.pathname === `/api/symbols/${CODE}/book-replay/trades`, () => ({
     body: uncollectedState.active
-      ? { symbol: CODE, date: DATE, coverage: "symbol_not_collected", venue: "combined", gaps: [], cumVolume: 0, cumBuyQty: 0, cumSellQty: 0, strength: null, trades: [] }
+      ? { symbol: CODE, date: DATE, coverage: "symbol_not_collected", previousClose: null, venue: "combined", gaps: [], cumVolume: 0, cumBuyQty: 0, cumSellQty: 0, strength: null, trades: [] }
       : REPLAY_TRADES_ALL,
   }));
   scenario.on((url) => url.pathname === `/api/symbols/${CODE}/book-replay/program`, () => ({
     body: uncollectedState.active
-      ? { symbol: CODE, date: DATE, coverage: "symbol_not_collected", gaps: [], rows: [] }
+      ? { symbol: CODE, date: DATE, coverage: "symbol_not_collected", previousClose: null, gaps: [], rows: [] }
       : REPLAY_PROGRAM_DAY,
   }));
 
@@ -578,4 +581,61 @@ test("복기 중 체결창 최소 금액 필터와 거래소 전환이 쿼리 �
   await expect(tradesWin(page).getByTestId("trade-row")).toHaveCount(3);
   await pollSaved(() => queries.some((q) => q.venue === "nxt")).toBe(true);
   await pollSaved(() => activeFeedSubs(scenario, "trades")).toHaveLength(0);
+});
+
+test("과거일 복기에서 체결창과 프로그램 체결창이 수집 기준가로 가격 색상을 적용한다", async ({ page, scenario }) => {
+  const prevMidnight = MIDNIGHT - 86_400;
+  const prevAt = (hour: number, minute: number) => prevMidnight + hour * 3600 + minute * 60;
+  const prevBars: Bar[] = Array.from({ length: 13 }, (_, i) => ({
+    t: prevAt(8, 30 + i * 5),
+    o: 120_000,
+    h: 120_300,
+    l: 119_700,
+    c: 120_100,
+    v: 1_000,
+  }));
+  seedFourWindowLayout(scenario);
+  seedBaseMarket(scenario);
+  scenario.reply((url) => url.pathname === "/api/bars", {
+    body: { symbol: CODE, venue: "combined", period: "5m", bars: prevBars, current: null, nextBefore: prevAt(8, 25), seq: null },
+  });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/book-replay`, {
+    body: { ...REPLAY_BOOK_DAY, date: "20261122", previousClose: 120_000 },
+  });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/book-replay/trades`, {
+    body: {
+      ...REPLAY_TRADES_ALL,
+      date: "20261122",
+      previousClose: 120_000,
+      gaps: [],
+      trades: [
+        { secondOfDay: secOf(9, 4, 20), price: 120_200, quantity: 100, side: "buy", venue: "krx" },
+        { secondOfDay: secOf(9, 3, 10), price: 119_800, quantity: 100, side: "sell", venue: "krx" },
+      ],
+    },
+  });
+  scenario.reply((url) => url.pathname === `/api/symbols/${CODE}/book-replay/program`, {
+    body: {
+      ...REPLAY_PROGRAM_DAY,
+      date: "20261122",
+      previousClose: 120_000,
+      gaps: [],
+      rows: [
+        { secondOfDay: secOf(9, 0, 30), price: 119_800, buyQty: 100, sellQty: 200, netQty: -100, netQtyChange: -100, netAmountMillionWon: -12 },
+        { secondOfDay: secOf(9, 3, 0), price: 120_200, buyQty: 300, sellQty: 200, netQty: 100, netQtyChange: 200, netAmountMillionWon: 12 },
+      ],
+    },
+  });
+
+  await page.goto("/");
+  await expect(cell(page)).toHaveAttribute("aria-busy", "false");
+  await replayToggle(page).click();
+  await hoverBar(page, prevAt(9, 0));
+
+  await expect(tradesWin(page)).toHaveAttribute("data-replay", "past");
+  await expect(tradesWin(page).locator(".tr-price[data-dir='up']")).toContainText("120,200");
+  await expect(tradesWin(page).locator(".tr-price[data-dir='down']")).toContainText("119,800");
+  await expect(programWin(page)).toHaveAttribute("data-replay", "past");
+  await expect(programWin(page).locator(".pg-price.mw-up")).toContainText("120,200");
+  await expect(programWin(page).locator(".pg-price.mw-down")).toContainText("119,800");
 });

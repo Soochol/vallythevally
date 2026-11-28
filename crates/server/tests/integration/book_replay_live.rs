@@ -15,8 +15,8 @@ use server::kiwoom::auth::KiwoomAuth;
 use server::kiwoom::rest::KiwoomRest;
 use server::kiwoom::stream::KiwoomStream;
 use server::shared_data::{
-    CollectorPaths, CurrentQuotes, DataKind, FeedWriter, FlowDescription, FlowRow, FlowWriter, Header, Ladder, LevelQty, LiveQuoteWriter, QuoteMinute, TradeMinuteLine, VenueQuote, flow_links_path,
-    flow_path, trade_minute_path,
+    CollectorPaths, CurrentQuotes, DataKind, FeedWriter, FlowDescription, FlowRow, FlowWriter, Header, Ladder, LevelQty, LiveQuoteWriter, QuoteMinute, SnapshotBody, SnapshotRow, TradeMinuteLine,
+    VenueQuote, flow_links_path, flow_path, trade_minute_path, write_snapshot,
 };
 use server::symbols::SymbolDirectory;
 use support::ScriptedTransport;
@@ -450,4 +450,87 @@ async fn live_program_replay_orders_rows_monotonically_by_second_of_day() {
             {"secondOfDay": 32_431, "price": 71_200, "buyQty": 250, "sellQty": 100, "netQty": 150, "netQtyChange": 50, "netAmountMillionWon": 10},
         ])
     );
+}
+
+#[tokio::test]
+async fn live_day_replay_resolves_previous_close_from_0h_flow_and_snapshot_combined() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (app, data) = start(tmp.path()).await;
+    let shared = data.join("shared");
+
+    let mut quotes = LiveQuoteWriter::open(&shared, DATE, "collect-01", 1).unwrap();
+    quotes.append_minute("005930", &quote(540, 71_000)).unwrap();
+    quotes.append_minute("000660", &quote(540, 201_000)).unwrap();
+    quotes.append_minute("035420", &quote(540, 151_000)).unwrap();
+    write_links(&shared, "collect-01", &[(at(8, 55, 0), "live"), (at(9, 2, 0), "alive")]);
+
+    let mut expected_writer = FlowWriter::open(
+        &flow_path(&shared, DATE, "0H", "005930", "collect-01"),
+        FlowDescription::new("0H", "005930", DATE, "collect-01", &[20, 10, 11, 12, 15, 13, 25]),
+    )
+    .unwrap();
+    expected_writer
+        .append(&[FlowRow {
+            recv_ms: at(8, 55, 10),
+            values: vec![
+                Some("085510".into()),
+                Some("+71200".into()),
+                Some("+700".into()),
+                Some("+0.99".into()),
+                Some("10".into()),
+                Some("100".into()),
+                Some("2".into()),
+            ],
+        }])
+        .unwrap();
+
+    write_snapshot(
+        &shared,
+        Header::new(DataKind::SnapshotCombined, today(), at(9, 0, 0) / 1000, at(9, 0, 0) / 1000, Vec::new()),
+        &SnapshotBody {
+            closing: false,
+            requested: 2,
+            missing: 0,
+            stocks: vec![
+                SnapshotRow {
+                    code: "005930".into(),
+                    day: DATE.into(),
+                    current_won: 71_000,
+                    base_won: 70_000,
+                    open_won: 71_000,
+                    high_won: 71_200,
+                    low_won: 70_900,
+                    volume: 100,
+                    traded_million_won: 7,
+                    traded_at: Some(at(9, 0, 10) / 1000),
+                },
+                SnapshotRow {
+                    code: "000660".into(),
+                    day: DATE.into(),
+                    current_won: 201_000,
+                    base_won: 200_000,
+                    open_won: 201_000,
+                    high_won: 201_500,
+                    low_won: 200_500,
+                    volume: 50,
+                    traded_million_won: 10,
+                    traded_at: Some(at(9, 0, 10) / 1000),
+                },
+            ],
+            indices: Vec::new(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(day_of(&app, "005930").await["previousClose"], json!(70_500));
+    assert_eq!(day_of(&app, "000660").await["previousClose"], json!(200_000));
+    assert_eq!(day_of(&app, "035420").await["previousClose"], json!(null));
+
+    let (status, trades) = get(&app, &format!("/api/symbols/000660/book-replay/trades?date={DATE}&untilSec=32460")).await;
+    assert_eq!(status, 200, "{trades}");
+    assert_eq!(trades["previousClose"], json!(200_000));
+
+    let (status, prog) = get(&app, &format!("/api/symbols/000660/book-replay/program?date={DATE}")).await;
+    assert_eq!(status, 200, "{prog}");
+    assert_eq!(prog["previousClose"], json!(200_000));
 }

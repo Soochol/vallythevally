@@ -4,4 +4,4 @@ import type { BookReplayTradeRow } from "./BookReplayTradeRow";
 import type { SymbolCode } from "./SymbolCode";
 import type { Venue } from "./Venue";
 
-export type BookReplayTrades = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, venue: Venue, gaps: [number, number][], cumVolume: number, cumBuyQty: number, cumSellQty: number, strength: number | null, trades: Array<BookReplayTradeRow>, };
+export type BookReplayTrades = { symbol: SymbolCode, date: string, coverage: BookReplayCoverage, previousClose: number | null, venue: Venue, gaps: [number, number][], cumVolume: number, cumBuyQty: number, cumSellQty: number, strength: number | null, trades: Array<BookReplayTradeRow>, };

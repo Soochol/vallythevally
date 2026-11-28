@@ -14,6 +14,7 @@ export type ProgramReplayView =
   | {
       readonly kind: "past";
       readonly at: UnixSeconds;
+      readonly previousClose: number | null;
       readonly latest: ProgramRow | undefined;
       readonly lines: readonly ProgramLine[];
       readonly trend: readonly number[];
@@ -71,6 +72,7 @@ export function useProgramReplay(code: SymbolCode, cursor: WorkspaceReplayCursor
     return {
       kind: "past",
       at: cursor.at,
+      previousClose: data.previousClose ?? null,
       ...slice,
     };
   }, [cursor, query.data, query.isPending, query.isError]);

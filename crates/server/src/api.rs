@@ -1605,6 +1605,8 @@ pub struct BookReplayDay {
     pub symbol: SymbolCode,
     pub date: String,
     pub coverage: BookReplayCoverage,
+    #[ts(type = "number | null")]
+    pub previous_close: Option<u64>,
     #[ts(type = "[number, number][]")]
     pub covered: Vec<[u32; 2]>,
     pub books: Vec<BookReplayBook>,
@@ -1641,6 +1643,8 @@ pub struct BookReplayTrades {
     pub symbol: SymbolCode,
     pub date: String,
     pub coverage: BookReplayCoverage,
+    #[ts(type = "number | null")]
+    pub previous_close: Option<u64>,
     pub venue: Venue,
     #[ts(type = "[number, number][]")]
     pub gaps: Vec<[i64; 2]>,
@@ -1680,6 +1684,8 @@ pub struct BookReplayProgramDay {
     pub symbol: SymbolCode,
     pub date: String,
     pub coverage: BookReplayCoverage,
+    #[ts(type = "number | null")]
+    pub previous_close: Option<u64>,
     #[ts(type = "[number, number][]")]
     pub gaps: Vec<[i64; 2]>,
     pub rows: Vec<BookReplayProgramRow>,

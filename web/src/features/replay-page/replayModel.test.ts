@@ -20,6 +20,7 @@ const SAMPLE_DAY: BookReplayDay = {
   symbol: "042700",
   date: DATE,
   coverage: "collected",
+  previousClose: 112_000,
   covered: [[540, 542], [544, 545]],
   books: [
     {
