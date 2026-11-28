@@ -470,12 +470,13 @@ export class DrawingSurface implements ChartExtension {
     if (e.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
     if (ownsChartKeyboard(e) || !this.editable || isTypingTarget(e.target) || e.isComposing || this.cell().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
-    const session = useDrawingSession.getState(); const selected = this.cell().selected; const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
+    const cell = this.cell();
+    const session = useDrawingSession.getState(); const selected = cell.selected; const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
     const ctrl = e.ctrlKey || e.metaKey;
     const hotkey = matchDrawingHotkey(e, currentActionKeys());
     let handled = true;
     if (hotkey) this.runHotkey(hotkey);
-    else if (e.code === "Escape" && (this.state.kind !== "idle" || session.tool !== null || session.mode !== null || this.keepsDrawing())) this.endDrawingRun();
+    else if (e.code === "Escape" && (this.state.kind !== "idle" || session.tool !== null || session.mode !== null || this.keepsDrawing() || selected.length > 0 || cell.popup !== null)) this.endDrawingRun();
     else if ((e.code === "Delete" || e.code === "Backspace") && selected.length) this.remove();
     else if (ctrl && e.code === "KeyC" && selected.length) this.copy();
     else if (ctrl && e.code === "KeyV" && session.clip) this.paste();
