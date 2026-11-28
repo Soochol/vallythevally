@@ -8,6 +8,7 @@ import { ChartRoute } from "./App";
 import { CollectorPage } from "./features/collector-board/CollectorPage";
 import { takeLoginFailure } from "./features/account/loginFailure";
 import { ALL_PAGES, JOURNAL_ANALYTICS_PATH } from "./features/page-rail/pages";
+import { installBrowserContextMenuGuard } from "./features/shell/browserContextMenu";
 import { ShellErrorBoundary } from "./features/shell/ShellErrorBoundary";
 import { start } from "./persist/start";
 import { useAccountStore } from "./stores/account";
@@ -31,6 +32,8 @@ if (loginFailure) {
 }
 
 const serverMode = await serverModeProbe;
+
+installBrowserContextMenuGuard();
 
 // React 밖에서 한 번만 되살린다. StrictMode가 효과를 두 번 부르더라도 복원은 한 번이다.
 void start();
