@@ -5,11 +5,10 @@ import { PERIOD_LABEL } from "../../lib/symbol";
 import { useCell, useLayoutStore } from "../../stores/layout";
 import { AXIS_LOCKED, LOG_LOCKED, pressScale, stepIndex } from "../indicator-dialog/compareForm";
 import { CloseIcon } from "../icons";
-import { Badge } from "../ui/Badge";
 import { Segmented, type SegmentedOption } from "../ui/Segmented";
 import { Switch } from "../ui/Switch";
 import type { WindowId } from "../../layout/kinds";
-import { CHART_SETTINGS_SECTIONS, type ChartSettingsSectionId, SCOPE_LABEL, scopeTitle } from "./menus";
+import { CHART_SETTINGS_SECTIONS, type ChartSettingsSectionId } from "./menus";
 
 const BAR_PRESETS = [null, 60, 120, 240, 480] as const;
 const STYLE_OPTIONS = (Object.entries(CHART_STYLE_LABEL) as [ChartStyle, string][]).map(([value, label]): SegmentedOption<ChartStyle> => ({ value, label }));
@@ -193,9 +192,6 @@ export function ChartSettingsSections({ cellId, onClose }: { cellId: WindowId; o
               <h3 id={`${id}-${activeSection}`} className="cs-pane-title">{currentMeta.label}</h3>
               <p className="cs-pane-desc">{currentMeta.description}</p>
             </div>
-            <span title={scopeTitle(currentMeta.scope, cellName)}>
-              <Badge tone="neutral">{SCOPE_LABEL[currentMeta.scope]}</Badge>
-            </span>
           </header>
           {renderForm()}
         </div>

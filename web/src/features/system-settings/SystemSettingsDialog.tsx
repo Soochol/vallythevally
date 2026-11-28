@@ -67,7 +67,7 @@ function SystemSettingsBody({ menu }: { menu: SystemMenuId | null }) {
   };
 
   return (
-    <DialogFrame solid labelledBy={`${ids}-title`} width="h-[min(680px,calc(100dvh-48px))] w-[min(940px,calc(100vw-48px))] max-md:h-[85dvh]" onClose={(reason) => { if (reason !== "outside" && cancelHotkeyRecording()) return; close(); }}>
+    <DialogFrame solid panelClassName="dialog-raised" labelledBy={`${ids}-title`} width="h-[min(680px,calc(100dvh-48px))] w-[min(940px,calc(100vw-48px))] max-md:h-[85dvh]" onClose={(reason) => { if (reason !== "outside" && cancelHotkeyRecording()) return; close(); }}>
       <div className="sys-dialog flex min-h-0 flex-1 max-md:flex-col">
         <h2 id={`${ids}-title`} className="sr-only">시스템 설정</h2>
         {showList && (

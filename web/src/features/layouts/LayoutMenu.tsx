@@ -43,7 +43,7 @@ export function LayoutMenu() {
   return (
     <div ref={root} className="contents">
       <button ref={trigger} data-layout-trigger="" type="button" className="tb-btn max-w-[104px] max-lg:max-w-14 disabled:opacity-60 aria-expanded:bg-accent-soft aria-expanded:text-accent" aria-label={`레이아웃: ${layout.name}`} title={`레이아웃: ${layout.name}`} aria-haspopup="menu" aria-expanded={surface.kind === "menu"} disabled={offline || busy} onClick={() => { void layoutMenu.toggle(); }}><span className="truncate">{layout.name}</span><ChevronIcon /></button>
-      {surface.kind === "menu" && !busy && <Menu label="레이아웃" root={root} items={items} onClose={layoutMenu.dismissMenu} />}
+      {surface.kind === "menu" && !busy && <Menu label="레이아웃" root={root} items={items} className="topbar-popover" onClose={layoutMenu.dismissMenu} />}
       {surface.kind === "naming" && <NameDialog naming={surface} input={nameInput} />}
     </div>
   );

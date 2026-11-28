@@ -19,7 +19,7 @@ function HotkeySheetBody() {
   const [query, setQuery] = useState("");
   const titleId = useId();
   const sections = sheetSections(keys, query);
-  return <DialogFrame solid labelledBy={titleId} onClose={close} width="h-[min(640px,80dvh)] w-[min(720px,calc(100vw-32px))] max-md:h-[85dvh]">
+  return <DialogFrame solid panelClassName="dialog-raised" labelledBy={titleId} onClose={close} width="h-[min(640px,80dvh)] w-[min(720px,calc(100vw-32px))] max-md:h-[85dvh]">
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-none items-center gap-3 border-b border-line px-4 py-3 focus-within:border-accent">
         <h2 id={titleId} className="text-l font-semibold">단축키</h2>
