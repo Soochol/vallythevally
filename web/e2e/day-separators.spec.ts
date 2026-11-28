@@ -38,7 +38,7 @@ async function open(page: Page) {
 }
 
 async function setSwitch(page: Page, on: boolean) {
-  await openChartSettings(page, "격자 · 구분선");
+  await openChartSettings(page, "시간");
   if (await daySwitch(page).getAttribute("aria-checked") !== String(on)) await daySwitch(page).click();
   await expect(daySwitch(page)).toHaveAttribute("aria-checked", String(on));
   await afterPaint(page);
@@ -166,7 +166,7 @@ test("1024x768에서 날짜 구분선 스위치를 포함한 차트 설정 창�
   await open(page);
   await setSwitch(page, true);
   await expect(daySwitch(page)).toHaveAttribute("title", "분봉에서 날짜가 바뀌는 자리에 세로선");
-  for (const menu of ["봉·축", "표시", "격자 · 구분선"] as const) {
+  for (const menu of ["봉 · 선", "축 · 눈금", "시간"] as const) {
     await chooseSettingsMenu(page, menu);
     for (const control of await popover(page).locator("button, input").all()) {
       const box = (await control.boundingBox())!;

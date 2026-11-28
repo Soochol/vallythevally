@@ -26,30 +26,34 @@ const BAR_PRESET_OPTIONS = BAR_PRESETS.map((bars): SegmentedOption<string> => ({
 function isSectionModified(sectionId: ChartSettingsSectionId, settings: ChartSettings): boolean {
   if (sectionId === "bars") {
     return settings.style !== DEFAULT_CHART_SETTINGS.style
-      || settings.scale !== DEFAULT_CHART_SETTINGS.scale
-      || settings.visibleBars !== DEFAULT_CHART_SETTINGS.visibleBars
-      || settings.regularHoursOnly !== DEFAULT_CHART_SETTINGS.regularHoursOnly
-      || settings.scalePriceOnly !== DEFAULT_CHART_SETTINGS.scalePriceOnly;
-  }
-  if (sectionId === "display") {
-    return settings.showLegend !== DEFAULT_CHART_SETTINGS.showLegend
+      || settings.candlesOnTop !== DEFAULT_CHART_SETTINGS.candlesOnTop
+      || settings.showLegend !== DEFAULT_CHART_SETTINGS.showLegend
       || settings.showOhlcChange !== DEFAULT_CHART_SETTINGS.showOhlcChange
       || settings.showExtremes !== DEFAULT_CHART_SETTINGS.showExtremes
-      || settings.extremeBasis !== DEFAULT_CHART_SETTINGS.extremeBasis
-      || settings.candlesOnTop !== DEFAULT_CHART_SETTINGS.candlesOnTop;
+      || settings.extremeBasis !== DEFAULT_CHART_SETTINGS.extremeBasis;
   }
-  return settings.showHorzGrid !== DEFAULT_CHART_SETTINGS.showHorzGrid
-    || settings.showVertGrid !== DEFAULT_CHART_SETTINGS.showVertGrid
+  if (sectionId === "axes") {
+    return settings.scale !== DEFAULT_CHART_SETTINGS.scale
+      || settings.scalePriceOnly !== DEFAULT_CHART_SETTINGS.scalePriceOnly
+      || settings.showHorzGrid !== DEFAULT_CHART_SETTINGS.showHorzGrid
+      || settings.showVertGrid !== DEFAULT_CHART_SETTINGS.showVertGrid;
+  }
+  return settings.visibleBars !== DEFAULT_CHART_SETTINGS.visibleBars
+    || settings.regularHoursOnly !== DEFAULT_CHART_SETTINGS.regularHoursOnly
     || settings.showDaySeparators !== DEFAULT_CHART_SETTINGS.showDaySeparators;
 }
 
+export function isChartSettingsModified(settings: ChartSettings): boolean {
+  return CHART_SETTINGS_SECTIONS.some((section) => isSectionModified(section.id, settings));
+}
+
 const SHORT_SECTION_LABEL: Record<ChartSettingsSectionId, string> = {
-  bars: "봉·축",
-  display: "범례",
-  grid: "격자",
+  bars: "봉·선",
+  axes: "축·눈금",
+  time: "시간",
 };
 
-export function ChartSettingsSections({ cellId, onClose }: { cellId: WindowId; onClose(): void }) {
+export function ChartSettingsSections({ cellId, onClose, embedded = false }: { cellId: WindowId; onClose?: () => void; embedded?: boolean }) {
   const cell = useCell(cellId);
   const settings = cell.chartSettings;
   const name = useSymbolInfo(cell.symbol).data?.name ?? cell.symbol;
@@ -60,7 +64,7 @@ export function ChartSettingsSections({ cellId, onClose }: { cellId: WindowId; o
   const id = useId();
   const shown = shownScale(settings);
   const locked = settings.compare.length > 0;
-  const anyModified = CHART_SETTINGS_SECTIONS.some((s) => isSectionModified(s.id, settings));
+  const anyModified = isChartSettingsModified(settings);
   const currentMeta = CHART_SETTINGS_SECTIONS.find((s) => s.id === activeSection)!;
 
   const commitDraft = () => {
@@ -99,32 +103,8 @@ export function ChartSettingsSections({ cellId, onClose }: { cellId: WindowId; o
       return (
         <div className="cs-group">
           <div className="cs-row"><span className="cs-name">봉 모양</span><Segmented mode="pressed" label="봉 모양" options={STYLE_OPTIONS} value={settings.style} onChange={(style) => setStyle(cellId, style)} /></div>
-          <div className="cs-row">
-            <span className="cs-name">가격 축</span>
-            <Segmented mode="pressed" label="가격 축" value={shown} onChange={pickScale}
-              options={SCALES.map(({ value, label, title }): SegmentedOption<PriceScale> => ({ value, label, disabled: locked, title: locked ? (value === "log" ? LOG_LOCKED : AXIS_LOCKED) : title }))} />
-          </div>
-          {locked && <p className="cs-note">{AXIS_LOCKED}</p>}
-          <SettingSwitch label="가격만 축에 맞춤" detail="가격 패널 지표를 제외하고 캔들 가격만으로 Y축 자동 범위를 맞춤" checked={settings.scalePriceOnly} onChange={(on) => setScalePriceOnly(cellId, on)} />
+          <SettingSwitch label="캔들을 지표 위에" detail="이동평균·볼린저·일목 등 가격 패널 지표 위에 캔들을 그림" checked={settings.candlesOnTop} onChange={(on) => setCandlesOnTop(cellId, on)} />
           <div className="cs-divider" />
-          <div className="cs-row">
-            <span className="cs-name">화면에 보이는 봉</span>
-            <input type="number" inputMode="numeric" min={VISIBLE_BARS_MIN} max={VISIBLE_BARS_MAX} step={1} aria-label="보이는 봉 수 직접 입력" placeholder="자동"
-              className="ui-field cs-input" value={draft ?? settings.visibleBars ?? ""}
-              onChange={(e) => setDraft(e.currentTarget.value)} onBlur={commitDraft}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(); } }} />
-            <span className="cs-unit">봉</span>
-          </div>
-          <Segmented mode="pressed" label="화면에 보이는 봉" options={BAR_PRESET_OPTIONS} value={String(settings.visibleBars)} className="cs-presets"
-            onChange={(bars) => { setDraft(null); setVisibleBars(cellId, bars === "null" ? null : Number(bars)); }} />
-          <div className="cs-divider" />
-          <SettingSwitch label="정규장만 보기" detail="분봉에서 정규장(09:00~15:30) 봉만 표시" checked={settings.regularHoursOnly} onChange={(on) => setRegularHoursOnly(cellId, on)} />
-        </div>
-      );
-    }
-    if (activeSection === "display") {
-      return (
-        <div className="cs-group">
           <SettingSwitch label="범례" detail="종목·현재가·지표·비교 종목 범례를 표시. 봉 값(시·고·저·종)은 항상 보임" checked={settings.showLegend} onChange={(on) => setShowLegend(cellId, on)} />
           <SettingSwitch label="봉 값 등락률" detail="시·고·저·종 옆에 직전 봉 종가 대비 %" checked={settings.showOhlcChange} onChange={(on) => setShowOhlcChange(cellId, on)} />
           <div className="cs-divider" />
@@ -133,18 +113,41 @@ export function ChartSettingsSections({ cellId, onClose }: { cellId: WindowId; o
             <span className="cs-name">최고·최저 등락률</span>
             <Segmented mode="pressed" label="최고·최저 등락률" options={EXTREME_BASES.map((option): SegmentedOption<ExtremeBasis> => ({ ...option, disabled: !settings.showExtremes }))} value={settings.extremeBasis} onChange={(basis) => setExtremeBasis(cellId, basis)} />
           </div>
+        </div>
+      );
+    }
+    if (activeSection === "axes") {
+      return (
+        <div className="cs-group">
+          <div className="cs-row">
+            <span className="cs-name">가격 축</span>
+            <Segmented mode="pressed" label="가격 축" value={shown} onChange={pickScale}
+              options={SCALES.map(({ value, label, title }): SegmentedOption<PriceScale> => ({ value, label, disabled: locked, title: locked ? (value === "log" ? LOG_LOCKED : AXIS_LOCKED) : title }))} />
+          </div>
+          {locked && <p className="cs-note">{AXIS_LOCKED}</p>}
+          <SettingSwitch label="가격만 축에 맞춤" detail="가격 패널 지표를 제외하고 캔들 가격만으로 Y축 자동 범위를 맞춤" checked={settings.scalePriceOnly} onChange={(on) => setScalePriceOnly(cellId, on)} />
           <div className="cs-divider" />
-          <SettingSwitch label="캔들을 지표 위에" detail="이동평균·볼린저·일목 등 가격 패널 지표 위에 캔들을 그림" checked={settings.candlesOnTop} onChange={(on) => setCandlesOnTop(cellId, on)} />
+          <SettingSwitch label="가로 격자선" detail="가격 축 눈금에 맞춰 가로선을 표시" checked={settings.showHorzGrid} onChange={(on) => setShowHorzGrid(cellId, on)} />
+          <SettingSwitch label="세로 격자선" detail="시간 축 눈금에 맞춰 세로선을 표시" checked={settings.showVertGrid} onChange={(on) => setShowVertGrid(cellId, on)} />
         </div>
       );
     }
     return (
-        <div className="cs-group">
-          <SettingSwitch label="가로 격자선" detail="가격 축 눈금에 맞춰 가로선을 표시" checked={settings.showHorzGrid} onChange={(on) => setShowHorzGrid(cellId, on)} />
-          <SettingSwitch label="세로 격자선" detail="시간 축 눈금에 맞춰 세로선을 표시" checked={settings.showVertGrid} onChange={(on) => setShowVertGrid(cellId, on)} />
-          <div className="cs-divider" />
-          <SettingSwitch label="날짜 구분선" detail="분봉에서 날짜가 바뀌는 자리에 세로선" checked={settings.showDaySeparators} onChange={(on) => setShowDaySeparators(cellId, on)} />
+      <div className="cs-group">
+        <div className="cs-row">
+          <span className="cs-name">화면에 보이는 봉</span>
+          <input type="number" inputMode="numeric" min={VISIBLE_BARS_MIN} max={VISIBLE_BARS_MAX} step={1} aria-label="보이는 봉 수 직접 입력" placeholder="자동"
+            className="ui-field cs-input" value={draft ?? settings.visibleBars ?? ""}
+            onChange={(e) => setDraft(e.currentTarget.value)} onBlur={commitDraft}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitDraft(); } }} />
+          <span className="cs-unit">봉</span>
         </div>
+        <Segmented mode="pressed" label="화면에 보이는 봉" options={BAR_PRESET_OPTIONS} value={String(settings.visibleBars)} className="cs-presets"
+          onChange={(bars) => { setDraft(null); setVisibleBars(cellId, bars === "null" ? null : Number(bars)); }} />
+        <div className="cs-divider" />
+        <SettingSwitch label="정규장만 보기" detail="분봉에서 정규장(09:00~15:30) 봉만 표시" checked={settings.regularHoursOnly} onChange={(on) => setRegularHoursOnly(cellId, on)} />
+        <SettingSwitch label="날짜 구분선" detail="분봉에서 날짜가 바뀌는 자리에 세로선" checked={settings.showDaySeparators} onChange={(on) => setShowDaySeparators(cellId, on)} />
+      </div>
     );
   };
 
@@ -161,11 +164,13 @@ export function ChartSettingsSections({ cellId, onClose }: { cellId: WindowId; o
 
   return (
     <div className="cs-compact-layout">
-      <header className="cs-pop-head">
-        <h2 className="cs-pop-title">차트 설정</h2>
-        <span className="cs-pop-cell">{cellName}</span>
-        <button type="button" className="icon-btn cs-pop-close" aria-label="닫기" title="닫기 (Esc)" onClick={onClose}><CloseIcon size={14} /></button>
-      </header>
+      {!embedded && (
+        <header className="cs-pop-head">
+          <h2 className="cs-pop-title">차트 설정</h2>
+          <span className="cs-pop-cell">{cellName}</span>
+          {onClose && <button type="button" className="icon-btn cs-pop-close" aria-label="닫기" title="닫기 (Esc)" onClick={onClose}><CloseIcon size={14} /></button>}
+        </header>
+      )}
       <nav className="cs-dock-pills" role="tablist" aria-label="차트 설정 메뉴" onKeyDown={handleNavKeyDown}>
         {CHART_SETTINGS_SECTIONS.map((s) => (
           <button

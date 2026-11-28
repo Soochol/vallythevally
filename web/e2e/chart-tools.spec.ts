@@ -45,7 +45,7 @@ test("1280x600에서 차트 설정 창은 단추 아래에 화면 안으로 다 
   expect(popover.x + popover.width).toBeLessThanOrEqual(1280);
   expect(popover.y).toBeGreaterThanOrEqual(button.y + button.height);
   expect(popover.y + popover.height).toBeLessThanOrEqual(600);
-  for (const groupName of ["봉 모양", "가격 축"] as const) {
+  const expectSegmentInside = async (groupName: "봉 모양" | "가격 축") => {
     const group = settingsPopover(page).getByRole("group", { name: groupName, exact: true });
     const selected = group.locator("[aria-pressed=true]");
     const groupBox = (await group.boundingBox())!;
@@ -55,9 +55,12 @@ test("1280x600에서 차트 설정 창은 단추 아래에 화면 안으로 다 
     expect(Math.abs(itemBox.y - groupBox.y)).toBeLessThanOrEqual(1);
     await expect(selected).toHaveCSS("border-bottom-width", "2px");
     await expect(selected).toHaveCSS("border-bottom-color", "rgb(243, 241, 236)");
-  }
-  await settingsPopover(page).getByRole("tab", { name: "격자 · 구분선", exact: true }).click();
-  await expect(settingsPopover(page).getByRole("region", { name: "격자 · 구분선", exact: true })).toBeInViewport();
+  };
+  await expectSegmentInside("봉 모양");
+  await settingsPopover(page).getByRole("tab", { name: "축 · 눈금", exact: true }).click();
+  await expectSegmentInside("가격 축");
+  await settingsPopover(page).getByRole("tab", { name: "시간", exact: true }).click();
+  await expect(settingsPopover(page).getByRole("region", { name: "시간", exact: true })).toBeInViewport();
 });
 
 test("차트 설정 창은 창 너비가 바뀌어도 단추 아래에서 화면 안에 머문다", async ({ page }) => {

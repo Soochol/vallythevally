@@ -179,7 +179,6 @@ export interface ControllerDeps {
   indicators?: OpenPort;
   onIndicatorCommand?: (id: string, command: IndicatorCommand, anchor: HTMLElement, field?: string) => void;
   onIndicatorAdd?: (anchor: HTMLElement) => void;
-  onChartSettings?: (anchor: HTMLElement) => void;
   onIndicatorMerge?: (indicatorId: string, targetPanelId: "price" | Panel["id"]) => void;
   onIndicatorSplit?: (indicatorId: string, insertAt: number) => void;
   onPanelStretch?: (stretches: Panel["stretch"][]) => void;
@@ -296,7 +295,6 @@ export class ChartController {
     el.addEventListener("pointerleave", this.clearPointedBar);
     this.legend = new Legend(el, {
       projectRows: () => [this.indicatorLegend.projection(), this.compareLegend.projection(), this.indicatorLegend.addProjection()],
-      openSettings: (anchor) => deps.onChartSettings?.(anchor),
       readViewport: () => ({
         pricePane: this.paneBounds()[0] ?? null,
         axisWidth: this.chart.priceScale("right").width() + this.leftAxisWidth(),

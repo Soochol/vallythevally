@@ -1,7 +1,7 @@
 import type { WindowId } from "../../layout/kinds";
 import { useSelectionStore, type AddSection } from "../../stores/selection";
 
-export const CHART_POP_TRIGGERS = "[data-indicator-edit],[data-indicator-token],[data-indicator-add],[data-chart-settings-open],[data-chart-pop-opener]";
+export const CHART_POP_TRIGGERS = "[data-indicator-edit],[data-indicator-token],[data-indicator-add],[data-chart-pop-opener]";
 
 const shown = (element: HTMLElement | null): element is HTMLElement => element !== null && element.getClientRects().length > 0;
 
@@ -26,6 +26,10 @@ export function openIndicatorBubble(cellId: WindowId, indicatorId: string, ancho
 
 export function toggleIndicatorAdd(cellId: WindowId, anchor: HTMLElement, section: AddSection = "indicators"): void {
   const selection = useSelectionStore.getState();
+  if (selection.chartRightPanels[cellId] !== undefined) {
+    selection.openChartRightPanel(cellId, "indicators", section);
+    return;
+  }
   const current = selection.chartPop;
   if (current?.kind === "add" && current.cellId === cellId && current.anchor === anchor) return selection.closeChartPop();
   selection.openChartPop({ kind: "add", cellId, section, anchor });
@@ -33,12 +37,21 @@ export function toggleIndicatorAdd(cellId: WindowId, anchor: HTMLElement, sectio
 
 export function toggleChartSettings(cellId: WindowId, anchor: HTMLElement): void {
   const selection = useSelectionStore.getState();
+  if (selection.chartRightPanels[cellId] !== undefined) {
+    selection.openChartRightPanel(cellId, "settings");
+    return;
+  }
   const current = selection.chartPop;
   if (current?.kind === "settings" && current.cellId === cellId && current.anchor === anchor) return selection.closeChartPop();
   selection.openChartPop({ kind: "settings", cellId, anchor });
 }
 
 export function openIndicatorAdd(cellId: WindowId, section: AddSection = "indicators"): void {
+  const selection = useSelectionStore.getState();
+  if (selection.chartRightPanels[cellId] !== undefined) {
+    selection.openChartRightPanel(cellId, "indicators", section);
+    return;
+  }
   const anchor = addAnchorOf(cellId);
-  if (anchor) useSelectionStore.getState().openChartPop({ kind: "add", cellId, section, anchor });
+  if (anchor) selection.openChartPop({ kind: "add", cellId, section, anchor });
 }

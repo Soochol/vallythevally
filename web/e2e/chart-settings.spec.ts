@@ -49,11 +49,11 @@ test("위 막대의 차트 설정 버튼은 그 아래에 차트 설정 창을 �
   await expect(settingsButton(page)).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("dialog", { name: "지표 더하기" })).toHaveCount(0);
   await expect(popover(page).getByRole("tablist", { name: "차트 설정 메뉴" })).toBeVisible();
-  for (const name of ["봉 · 축", "범례 · 표시", "격자 · 구분선"]) {
+  for (const name of ["봉 · 선", "축 · 눈금", "시간"]) {
     await expect(popover(page).getByRole("tab", { name, exact: true })).toBeVisible();
   }
   await expect(popover(page).getByRole("tab")).toHaveCount(3);
-  await expect(section(page, "봉 · 축")).toBeVisible();
+  await expect(section(page, "봉 · 선")).toBeVisible();
   const pillButtons = page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("group", { name: "차트 개별 설정", exact: true }).locator("button");
   await expect(pillButtons).toHaveCount(2);
   expect(await pillButtons.evaluateAll((buttons) => buttons.map((button) => button.querySelector(".topbar-label-lg")?.textContent))).toEqual(["지표", "차트"]);
@@ -98,9 +98,9 @@ test("메뉴 탭이 위에, 내용이 아래에 놓이고 각 구역에 이 칸 
   await open(page);
   await openSettings(page);
   const navBox = (await popover(page).getByRole("tablist", { name: "차트 설정 메뉴" }).boundingBox())!;
-  const paneBox = (await section(page, "봉 · 축").boundingBox())!;
+  const paneBox = (await section(page, "봉 · 선").boundingBox())!;
   expect(navBox.y).toBeLessThan(paneBox.y);
-  for (const name of ["봉 · 축", "범례 · 표시", "격자 · 구분선"] as const) {
+  for (const name of ["봉 · 선", "축 · 눈금", "시간"] as const) {
     await chooseSettingsMenu(page, name);
     await expect(section(page, name).getByText("이 칸", { exact: true })).toHaveCount(0);
   }
@@ -108,28 +108,29 @@ test("메뉴 탭이 위에, 내용이 아래에 놓이고 각 구역에 이 칸 
   await expect(popover(page)).toBeHidden();
   await reload(page);
   await settingsButton(page).click();
-  await expect(section(page, "봉 · 축")).toBeVisible();
+  await expect(section(page, "봉 · 선")).toBeVisible();
 });
 
 test("구역마다 그 구역의 항목이 한 열에 함께 보인다", async ({ page }) => {
   await open(page);
-  await openSettings(page, "봉 · 축");
-  const bars = section(page, "봉 · 축");
-  for (const name of ["봉 모양", "가격 축", "화면에 보이는 봉"]) await expect(bars.getByRole("group", { name })).toBeVisible();
-  await expect(bars.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
-  await expect(bars.getByRole("switch", { name: /^가격만 축에 맞춤/ })).toBeVisible();
-  await expect(bars.getByRole("switch", { name: /^정규장만 보기/ })).toBeVisible();
+  await openSettings(page, "봉 · 선");
+  const bars = section(page, "봉 · 선");
+  for (const name of ["봉 모양", "최고·최저 등락률"]) await expect(bars.getByRole("group", { name })).toBeVisible();
+  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "캔들을 지표 위에"]) await expect(bars.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+  await expect(bars.getByRole("group", { name: "가격 축" })).toHaveCount(0);
 
-  await chooseSettingsMenu(page, "범례 · 표시");
-  const display = section(page, "범례 · 표시");
-  for (const name of ["범례", "봉 값 등락률", "화면 내 최고·최저", "캔들을 지표 위에"]) await expect(display.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
-  await expect(display.getByRole("group", { name: "최고·최저 등락률" })).toBeVisible();
-  await expect(display.getByRole("group", { name: "봉 모양" })).toHaveCount(0);
+  await chooseSettingsMenu(page, "축 · 눈금");
+  const axes = section(page, "축 · 눈금");
+  await expect(axes.getByRole("group", { name: "가격 축" })).toBeVisible();
+  for (const name of ["가격만 축에 맞춤", "가로 격자선", "세로 격자선"]) await expect(axes.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+  await expect(axes.getByRole("group", { name: "봉 모양" })).toHaveCount(0);
 
-  await chooseSettingsMenu(page, "격자 · 구분선");
-  const grid = section(page, "격자 · 구분선");
-  for (const name of ["가로 격자선", "세로 격자선", "날짜 구분선"]) await expect(grid.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
-  await expect(grid.getByRole("group", { name: "가격 축" })).toHaveCount(0);
+  await chooseSettingsMenu(page, "시간");
+  const time = section(page, "시간");
+  await expect(time.getByRole("group", { name: "화면에 보이는 봉" })).toBeVisible();
+  await expect(time.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" })).toBeVisible();
+  for (const name of ["정규장만 보기", "날짜 구분선"]) await expect(time.getByRole("switch", { name: new RegExp(`^${name}`) })).toBeVisible();
+  await expect(time.getByRole("group", { name: "가격 축" })).toHaveCount(0);
 });
 
 test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자선을 켜고 끄며 저장·복원되고 Esc로 닫아도 남는다", async ({ page, scenario }) => {
@@ -140,7 +141,7 @@ test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자
   });
   await expect.poll(gridVisible).toEqual({ horz: true, vert: true });
 
-  const settings = await openSettings(page, "격자 · 구분선");
+  const settings = await openSettings(page, "축 · 눈금");
   const horzSwitch = settings.getByRole("switch", { name: /^가로 격자선/ });
   const vertSwitch = settings.getByRole("switch", { name: /^세로 격자선/ });
   await expect(horzSwitch).toHaveAttribute("aria-checked", "true");
@@ -158,7 +159,7 @@ test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect.poll(gridVisible).toEqual({ horz: false, vert: true });
 
-  await openSettings(page, "격자 · 구분선");
+  await openSettings(page, "축 · 눈금");
   await vertSwitch.click();
   await expect.poll(gridVisible).toEqual({ horz: false, vert: false });
   await page.keyboard.press("Escape");
@@ -170,7 +171,7 @@ test("가로·세로 격자선 스위치는 각각 독립적으로 차트 격자
 test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유지하며, 새로고침 뒤 복원한다", async ({ page, scenario }) => {
   await open(page);
   await expectShownBars(page, 130);
-  const settings = await openSettings(page);
+  const settings = await openSettings(page, "시간");
   await expect(barsGroup(page).getByRole("button", { name: "자동", exact: true })).toHaveAttribute("aria-pressed", "true");
 
   await barsGroup(page).getByRole("button", { name: "240", exact: true }).click();
@@ -183,7 +184,7 @@ test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유�
   await choosePeriod(page, "일");
   await expectShownBars(page, 240);
 
-  await openSettings(page);
+  await openSettings(page, "시간");
   const input = settings.getByRole("spinbutton", { name: "보이는 봉 수 직접 입력" });
   await input.fill("800");
   await input.press("Enter");
@@ -195,7 +196,7 @@ test("보이는 봉 수는 고른 대로 맞추고, 봉 주기를 바꿔도 유�
   await page.reload();
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expectShownBars(page, 800);
-  await openSettings(page);
+  await openSettings(page, "시간");
   await expect(input).toHaveValue("800");
   await expect(popover(page).locator(":focus")).toHaveCount(1);
 
@@ -217,10 +218,10 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
   await expect(high).toBeHidden();
   await expect(low).toBeHidden();
 
-  const settings = await openSettings(page);
+  const settings = await openSettings(page, "시간");
   await barsGroup(page).getByRole("button", { name: "60", exact: true }).click();
   await expectShownBars(page, 60);
-  await chooseSettingsMenu(page, "표시");
+  await chooseSettingsMenu(page, "봉 · 선");
   const toggle = settings.getByRole("switch", { name: /화면 내 최고·최저/ });
   await expect(toggle).toHaveAttribute("aria-checked", "false");
   await toggle.click();
@@ -274,7 +275,7 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
   await expect(cell(page)).toHaveAttribute("aria-busy", "false");
   await expect(high).toBeVisible();
   await expect(low).toBeVisible();
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await toggle.click();
   await expect(high).toBeHidden();
@@ -284,15 +285,16 @@ test("화면 내 최고·최저 스위치는 보이는 봉의 최고가·최저�
 
 test("팝오버의 봉 모양과 가격 축은 활성 칸에 바로 반영한다", async ({ page, scenario }) => {
   await open(page);
-  const settings = await openSettings(page);
+  const settings = await openSettings(page, "봉 · 선");
   const style = settings.getByRole("group", { name: "봉 모양" });
-  const scale = settings.getByRole("group", { name: "가격 축" });
   await style.getByRole("button", { name: "라인", exact: true }).click();
   await expect(style.getByRole("button", { name: "라인", exact: true })).toHaveAttribute("aria-pressed", "true");
   await pollSaved(() => saved(scenario).style).toBe("line");
   await style.getByRole("button", { name: "캔들", exact: true }).click();
   await pollSaved(() => saved(scenario).style).toBe("candle");
 
+  await chooseSettingsMenu(page, "축 · 눈금");
+  const scale = settings.getByRole("group", { name: "가격 축" });
   await scale.getByRole("button", { name: "로그", exact: true }).click();
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", "log");
   await scale.getByRole("button", { name: "일반", exact: true }).click();
@@ -304,7 +306,7 @@ test("비교 종목이 있으면 팝오버의 가격 축은 %로 고정한다", 
   const layout = scenario.documents.layout(DEFAULT_LAYOUT_ID);
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { symbol: "005930", venue: "combined", chartSettings: { ...saved(scenario), compare: ["000660"] } }) });
   await open(page);
-  const settings = await openSettings(page);
+  const settings = await openSettings(page, "축 · 눈금");
   const scale = settings.getByRole("group", { name: "가격 축" });
   for (const name of ["일반", "로그", "%"]) await expect(scale.getByRole("button", { name, exact: true })).toBeDisabled();
   await expect(scale.getByRole("button", { name: "%", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -366,7 +368,7 @@ test("화면 가장자리에 반쯤 잘린 봉은 최고·최저에서 빼고, �
   await expect(low).toHaveText(lowText(edge.lastShown));
   if (process.env.VALLY_E2E_SCREENSHOTS === "1") await page.screenshot({ path: testInfo.outputPath("historical-visible-close.png") });
   for (const basis of ["last", "extreme"] as const) {
-    await openSettings(page, "표시");
+    await openSettings(page, "봉 · 선");
     await basisGroup(page).getByRole("button", { name: basis === "last" ? "현재가 대비" : "고가·저가 대비", exact: true }).click();
     await closeSettings(page);
     for (const range of [{ from: 238.6, to: 298.6 }, { from: 0.3, to: 60.3 }, { from: 79.2, to: 109.2 }, { from: 20.3, to: 180.3 }]) {
@@ -402,7 +404,7 @@ test("봉이 없는 화면은 두 등락률 기준 모두 최고·최저 꼬리�
   openWith(scenario, { showExtremes: true }, []);
   await open(page);
   for (const basis of ["현재가 대비", "고가·저가 대비"]) {
-    await openSettings(page, "표시");
+    await openSettings(page, "봉 · 선");
     const button = basisGroup(page).getByRole("button", { name: basis, exact: true });
     await button.click();
     await expect(button).toHaveAttribute("aria-pressed", "true");
@@ -416,7 +418,7 @@ test("비교 종목이 있어 축 고정 안내가 붙어도 1280x600에서 팝�
   scenario.documents.saveLayout({ ...layout, revision: layout.revision + 1, windows: withFirstChart(layout, { chartSettings: { ...saved(scenario), compare: ["000660"] } }) });
   await page.setViewportSize({ width: 1280, height: 600 });
   await open(page);
-  const settings = await openSettings(page);
+  const settings = await openSettings(page, "축 · 눈금");
   const box = (await settings.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(600);
@@ -503,7 +505,7 @@ test("범례 스위치를 끄면 통합 표시와 봉 값 줄만 한 줄로 남�
   await open(page);
   const rows = legendRows(page);
   for (const row of [...Object.values(rows), ohlc(page)]) await expect(row).toBeVisible();
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "true");
 
   await legendSwitch(page).click();
@@ -531,7 +533,7 @@ test("범례 스위치를 끄면 통합 표시와 봉 값 줄만 한 줄로 남�
   await expectLegendOff(page);
   expect(saved(scenario)).toMatchObject({ showLegend: false, showOhlcChange: true });
   expect(saved(scenario)).not.toHaveProperty("showOhlc");
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "false");
 
   await legendSwitch(page).click();
@@ -562,7 +564,7 @@ test("showOhlc: false가 든 옛 설정은 봉 값 줄과 범례를 모두 보�
   openWithRaw(scenario, { ...current, indicators: [...current.indicators, PRICE_MA], showOhlc: false });
   await open(page);
   for (const row of [legendRows(page).name, legendRows(page).priceRow, legendRows(page).maRow, ohlc(page)]) await expect(row).toBeVisible();
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await expect(legendSwitch(page)).toHaveAttribute("aria-checked", "true");
   await ohlcChangeSwitch(page).click();
   await pollSaved(() => saved(scenario).showOhlcChange).toBe(true);
@@ -648,7 +650,7 @@ test("가격 패널에 겹친 거래량의 범례 줄도 범례를 끄면 숨는
   await open(page);
   const volumeRow = cell(page).locator(`[data-indicator-row="${volume.id}"]`);
   await expect(volumeRow).toBeVisible();
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await legendSwitch(page).click();
   await expect(volumeRow).toBeHidden();
   await expect(ohlc(page)).toBeVisible();
@@ -657,7 +659,7 @@ test("가격 패널에 겹친 거래량의 범례 줄도 범례를 끄면 숨는
 test("390x844에서 범례를 끄면 봉 값 줄만 남고 휴대폰 머리의 거래소는 그대로다", async ({ page, scenario }) => {
   openWith(scenario, { indicators: [...DEFAULT_CHART_SETTINGS.indicators, PRICE_MA], compare: ["000660"] });
   await open(page);
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await legendSwitch(page).click();
   await pollSaved(() => saved(scenario).showLegend).toBe(false);
   await closeSettings(page);
@@ -677,7 +679,7 @@ test("봉 값 등락률 스위치는 시·고·저·종 옆에 직전 봉 종가
   await settingsButton(page).hover();
   await expect.poll(texts).toEqual(ohlcCells(zigzagBars[last]!, null).map((x, i) => i < 4 ? (x as string).replace(/ \(.*\)$/, "") : x));
 
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await expect(ohlcChangeSwitch(page)).toHaveAttribute("aria-checked", "false");
   await ohlcChangeSwitch(page).click();
   await expect(ohlcChangeSwitch(page)).toHaveAttribute("aria-checked", "true");
@@ -743,7 +745,7 @@ test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표�
   await expect(high).toHaveText(`최고 ${won(highBar.h)} (${pct(lastClose, highBar.h)})`);
   await expect(low).toHaveText(`최저 ${won(lowBar.l)} (${pct(lastClose, lowBar.l)})`);
 
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   const current = basisGroup(page).getByRole("button", { name: "현재가 대비", exact: true });
   const extreme = basisGroup(page).getByRole("button", { name: "고가·저가 대비", exact: true });
   await expect(current).toHaveAttribute("aria-pressed", "true");
@@ -761,7 +763,7 @@ test("최고·최저 등락률을 고가·저가 대비로 바꾸면 꼬리표�
   await reload(page);
   await expect(high).toHaveText(extremeTexts[0]!);
   await expect(low).toHaveText(extremeTexts[1]!);
-  await openSettings(page, "표시");
+  await openSettings(page, "봉 · 선");
   await expect(extreme).toHaveAttribute("aria-pressed", "true");
   await extremesSwitch(page).click();
   await expect(high).toBeHidden();
@@ -773,7 +775,7 @@ test("1024x768에서 차트 설정 팝오버의 세 구역 모든 조작이 화�
   await page.setViewportSize({ width: 1024, height: 768 });
   await open(page);
   const settings = await openSettings(page);
-  for (const menu of ["봉·축", "표시", "격자 · 구분선"] as const) {
+  for (const menu of ["봉 · 선", "축 · 눈금", "시간"] as const) {
     await chooseSettingsMenu(page, menu);
     const controls = settings.locator("button, input");
     expect(await controls.count()).toBeGreaterThan(4);
@@ -786,7 +788,7 @@ test("1024x768에서 차트 설정 팝오버의 세 구역 모든 조작이 화�
     }
   }
 
-  await chooseSettingsMenu(page, "표시");
+  await chooseSettingsMenu(page, "봉 · 선");
   await ohlcChangeSwitch(page).click();
   await expect(ohlc(page)).toContainText("(");
   const legend = (await cell(page).locator(".chart-legend").boundingBox())!;

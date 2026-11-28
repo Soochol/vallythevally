@@ -57,9 +57,7 @@
 .legend-add { display:inline-flex; align-items:center; align-self:flex-start; gap:var(--size-4); height:var(--size-24); padding:0 var(--size-8) 0 var(--size-6); border:var(--size-1) dashed var(--line-strong); border-radius:var(--r-s); background:color-mix(in srgb, var(--chart-bg) 78%, transparent); font-size:var(--fs-xs); color:var(--text-2); cursor:pointer; }
 .legend-add:hover { border-style:solid; background:var(--raised); color:var(--text); }
 .legend-add-icon { display:inline-grid; place-items:center; color:var(--accent); }
-.legend-settings { display:inline-grid; place-items:center; width:var(--size-24); height:var(--size-24); border-radius:var(--r-s); color:var(--text-3); cursor:pointer; }
-.legend-settings:hover { background:var(--raised); color:var(--text); }
-[data-legend-tier=minimal] :is(.legend-add, .legend-settings) { display:none; }
+[data-legend-tier=minimal] .legend-add { display:none; }
 @media (width < 48rem) { .legend-add { display:none; } }
 .pane-dnd-merge {
   position: absolute;

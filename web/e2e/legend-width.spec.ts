@@ -260,7 +260,7 @@ test("조회 값 제거, 과거 봉 추가, 비교 왼쪽 끝 이동, 멈춤, �
   const afterStall = await count();
   expect(afterStall).toBeGreaterThan(afterPrepend);
 
-  const settingsDialog = await openChartSettings(page, "표시");
+  const settingsDialog = await openChartSettings(page, "봉 · 선");
   await settingsDialog.getByRole("switch", { name: "봉 값 등락률" }).click();
   await frames(page, 12);
   const afterDisplay = await count();

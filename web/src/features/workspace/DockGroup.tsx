@@ -12,6 +12,7 @@ import { IntegratedBadge } from "../market-window/parts";
 import { ScreenerBadge } from "../screener/ScreenerPanel";
 import { Menu, type MenuItem } from "../menu/Menu";
 import { AddWindowMenu } from "./AddWindowMenu";
+import { ChartSettingsButton } from "./ChartSettingsButton";
 import type { DockInteraction } from "./dockInteraction";
 import { WINDOW_CONTENT } from "./contents";
 import { LinkDot } from "./LinkDot";
@@ -194,53 +195,56 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
     <div data-dock-group={group.id} data-kind={shown.kind} data-active-cell={shown.id === activeCell ? "" : undefined} data-symbol-drop-active={panelDropActive ? "" : undefined} className="dock-group"
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}>
       <div className="dock-tabs" onDoubleClick={(event) => { if (!(event.target instanceof Element) || !event.target.closest("button, .link-dot")) onToggleMaximize(); }}>
-        <div className="dock-tab-viewport" data-hidden-before={stripOverflow.hiddenBefore ? "" : undefined} data-hidden-after={stripOverflow.hiddenAfter ? "" : undefined}>
-          <div ref={strip} role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tab-scroll">
-            {group.tabs.map((tab) => {
-              const window = windows.find((w) => w.id === tab);
-              if (!window) return null;
-              const selected = tab === group.active;
-              const canDropTab = isSymbolDropKind(window.kind);
-              const tabDropActive = dragPayload !== null && dragTarget?.surface === "tab" && dragTarget.windowId === tab;
-              return (
-                <span key={tab} className="dock-tab-group" data-selected={selected ? "" : undefined} data-active-cell={tab === activeCell ? "" : undefined} data-grabbed={tab === interaction.grabbed ? "" : undefined}
-                  data-symbol-drop-target={tabDropActive ? "" : undefined}
-                  onDragOver={canDropTab ? (event) => {
-                    if (!hasDraggedSymbol(event.dataTransfer)) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    event.dataTransfer.dropEffect = "copy";
-                    useSymbolDragStore.getState().setTarget({ windowId: tab, kind: window.kind, surface: "tab" });
-                  } : undefined}
-                  onDragLeave={canDropTab ? (event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                      const current = useSymbolDragStore.getState().target;
-                      if (current?.windowId === tab && current.surface === "tab") useSymbolDragStore.getState().setTarget(null);
-                    }
-                  } : undefined}
-                  onDrop={canDropTab ? (event) => {
-                    const payload = readDraggedSymbol(event.dataTransfer);
-                    if (!payload) return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    applySymbolDrop(tab, window.kind, payload, "tab");
-                  } : undefined}>
-                  <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
-                    aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
-                    className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}
-                    onPointerDown={(event) => interaction.pressTab(event, tab)} onContextMenu={(event) => interaction.contextTab(event, tab)} onDragStart={(event) => event.preventDefault()}>
-                    <TabLabel window={window} />
-                  </button>
-                  <LinkDot window={window} selected={selected} />
-                  <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
-                </span>
-              );
-            })}
+        <div className="dock-tabs-lead">
+          <div className="dock-tab-viewport" data-hidden-before={stripOverflow.hiddenBefore ? "" : undefined} data-hidden-after={stripOverflow.hiddenAfter ? "" : undefined}>
+            <div ref={strip} role="tablist" aria-label={`창 묶음 ${number}`} className="dock-tab-scroll">
+              {group.tabs.map((tab) => {
+                const window = windows.find((w) => w.id === tab);
+                if (!window) return null;
+                const selected = tab === group.active;
+                const canDropTab = isSymbolDropKind(window.kind);
+                const tabDropActive = dragPayload !== null && dragTarget?.surface === "tab" && dragTarget.windowId === tab;
+                return (
+                  <span key={tab} className="dock-tab-group" data-selected={selected ? "" : undefined} data-active-cell={tab === activeCell ? "" : undefined} data-grabbed={tab === interaction.grabbed ? "" : undefined}
+                    data-symbol-drop-target={tabDropActive ? "" : undefined}
+                    onDragOver={canDropTab ? (event) => {
+                      if (!hasDraggedSymbol(event.dataTransfer)) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = "copy";
+                      useSymbolDragStore.getState().setTarget({ windowId: tab, kind: window.kind, surface: "tab" });
+                    } : undefined}
+                    onDragLeave={canDropTab ? (event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        const current = useSymbolDragStore.getState().target;
+                        if (current?.windowId === tab && current.surface === "tab") useSymbolDragStore.getState().setTarget(null);
+                      }
+                    } : undefined}
+                    onDrop={canDropTab ? (event) => {
+                      const payload = readDraggedSymbol(event.dataTransfer);
+                      if (!payload) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      applySymbolDrop(tab, window.kind, payload, "tab");
+                    } : undefined}>
+                    <button id={tabId(tab)} type="button" role="tab" data-window-id={tab} data-active-cell={tab === activeCell ? "" : undefined}
+                      aria-selected={selected} aria-controls={selected ? panelId(group.id) : undefined} tabIndex={selected ? 0 : -1}
+                      className="dock-tab" onClick={() => select(tab)} onKeyDown={(event) => move(event, tab)}
+                      onPointerDown={(event) => interaction.pressTab(event, tab)} onContextMenu={(event) => interaction.contextTab(event, tab)} onDragStart={(event) => event.preventDefault()}>
+                      <TabLabel window={window} />
+                    </button>
+                    <LinkDot window={window} selected={selected} />
+                    <CloseTab window={window} selected={selected} onClosed={() => focusShownTab(group.id)} />
+                  </span>
+                );
+              })}
+            </div>
           </div>
+          <AddWindowMenu targetGroup={group.id} />
         </div>
         <span className="dock-tab-actions">
           {stripOverflow.overflowing && <TabListMenu group={group} onSelect={select} />}
-          <AddWindowMenu targetGroup={group.id} />
+          {shown.kind === "chart" && <ChartSettingsButton cellId={shown.id} variant="dock" />}
           {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}><CollapseIcon size={14} /></button>}
         </span>
       </div>

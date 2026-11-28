@@ -22,6 +22,8 @@ const isUndo = (value: ToastUndo | ToastOptions): value is ToastUndo => "run" in
 export type SearchPurpose = "open" | "watch" | "page" | "replay";
 export interface PutTarget { listId: string; groupId: string | null }
 export type AddSection = "indicators" | "compare";
+export type ChartRightPanelTab = "indicators" | "settings";
+export type ChartRightPanelState = { tab: ChartRightPanelTab; addSection: AddSection; focusNonce: number };
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
   | { kind: "screen"; window: WindowId | null }
@@ -38,6 +40,7 @@ interface SelectionState {
   activeCell: WindowId;
   dialog: null | Dialog;
   chartPop: ChartPop | null;
+  chartRightPanels: Readonly<Partial<Record<WindowId, ChartRightPanelState>>>;
   phoneTab: PhoneTab;
   toast: ToastEntry | null;
   toasts: readonly ToastEntry[];
@@ -47,6 +50,10 @@ interface SelectionState {
   setPutTarget(putTarget: PutTarget | null): void;
   openChartPop(pop: ChartPop): void;
   closeChartPop(): void;
+  toggleChartRightPanel(cellId: WindowId, tab?: ChartRightPanelTab): void;
+  openChartRightPanel(cellId: WindowId, tab: ChartRightPanelTab, addSection?: AddSection): void;
+  setChartRightPanelAddSection(cellId: WindowId, section: AddSection): void;
+  closeChartRightPanel(cellId: WindowId): void;
   openScreenEditor(window: WindowId | null): void;
   openHotkeySheet(): void;
   openSystemSettings(menu: SystemMenuId | null): void;
@@ -63,6 +70,7 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   activeCell: chartWindows(DEFAULT_LAYOUT)[0]!.id,
   dialog: null,
   chartPop: null,
+  chartRightPanels: {},
   phoneTab: "chart",
   toast: null,
   toasts: [],
@@ -72,6 +80,41 @@ export const useSelectionStore = create<SelectionState>()((set) => ({
   setPutTarget: (putTarget) => set({ putTarget }),
   openChartPop: (chartPop) => set({ chartPop, activeCell: chartPop.cellId }),
   closeChartPop: () => set((s) => (s.chartPop === null ? s : { chartPop: null })),
+  toggleChartRightPanel: (cellId, tab = "indicators") => set((s) => {
+    const existing = s.chartRightPanels[cellId];
+    if (existing !== undefined) {
+      const next = { ...s.chartRightPanels };
+      delete next[cellId];
+      return { chartRightPanels: next };
+    }
+    const clearPop = s.chartPop !== null && s.chartPop.cellId === cellId && s.chartPop.kind !== "indicator";
+    return {
+      chartRightPanels: { ...s.chartRightPanels, [cellId]: { tab, addSection: "indicators", focusNonce: 1 } },
+      activeCell: cellId,
+      ...(clearPop ? { chartPop: null } : {}),
+    };
+  }),
+  openChartRightPanel: (cellId, tab, addSection) => set((s) => {
+    const prev = s.chartRightPanels[cellId];
+    const nextSection = addSection ?? prev?.addSection ?? "indicators";
+    const clearPop = s.chartPop !== null && s.chartPop.cellId === cellId && s.chartPop.kind !== "indicator";
+    return {
+      chartRightPanels: { ...s.chartRightPanels, [cellId]: { tab, addSection: nextSection, focusNonce: (prev?.focusNonce ?? 0) + 1 } },
+      activeCell: cellId,
+      ...(clearPop ? { chartPop: null } : {}),
+    };
+  }),
+  setChartRightPanelAddSection: (cellId, addSection) => set((s) => {
+    const prev = s.chartRightPanels[cellId];
+    if (!prev || prev.addSection === addSection) return s;
+    return { chartRightPanels: { ...s.chartRightPanels, [cellId]: { ...prev, addSection } } };
+  }),
+  closeChartRightPanel: (cellId) => set((s) => {
+    if (s.chartRightPanels[cellId] === undefined) return s;
+    const next = { ...s.chartRightPanels };
+    delete next[cellId];
+    return { chartRightPanels: next };
+  }),
   openScreenEditor: (window) => set({ dialog: { kind: "screen", window } }),
   openHotkeySheet: () => set({ dialog: { kind: "hotkey-sheet" } }),
   openSystemSettings: (menu) => set({ dialog: { kind: "system-settings", menu } }),

@@ -153,16 +153,24 @@ test("위 막대의 지표 단추는 범례의 ＋지표와 같은 창을 열고
   await expect(page.getByRole("dialog", { name: "이동평균 단순 20 설정", exact: true })).toBeVisible();
 });
 
-test("범례 머리의 톱니와 위 막대의 차트 단추가 같은 차트 설정을 열고 Esc는 바꾼 값을 남긴다", async ({ page, scenario }) => {
+test("차트 헤더 톱니가 우측 고정 패널을 열고, 열린 동안 위 막대 차트 단추는 같은 패널의 차트 설정 탭으로 전환한다", async ({ page, scenario }) => {
   seed(scenario, [MA20]);
   await open(page);
-  await cell(page).locator("[data-chart-settings-open]").click();
-  const dialog = page.getByRole("dialog", { name: "차트 설정", exact: true });
-  await dialog.getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "라인", exact: true }).click();
+  await expect(cell(page).locator("[data-chart-settings-open]")).toHaveCount(0);
+  const headerToggle = page.locator("[data-dock-group]").first().getByRole("button", { name: "차트 설정 패널", exact: true });
+  await headerToggle.click();
+  const panel = page.getByRole("complementary", { name: "차트 설정 패널", exact: true });
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("tab", { name: /^지표/ })).toHaveAttribute("aria-selected", "true");
+  await toolbar(page).getByRole("button", { name: "차트 설정", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "차트 설정", exact: true })).toHaveCount(0);
+  await expect(panel.getByRole("tab", { name: "차트 설정", exact: true })).toHaveAttribute("aria-selected", "true");
+  await panel.getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "라인", exact: true }).click();
   await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
+  await expect(panel).toBeHidden();
   await pollSaved(() => settings(scenario).style).toBe("line");
   await toolbar(page).getByRole("button", { name: "차트 설정", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "차트 설정", exact: true });
   await expect(dialog.getByRole("group", { name: "봉 모양" }).getByRole("button", { name: "라인", exact: true })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -195,7 +203,7 @@ test("차트 설정·지표·우측 상단 메뉴·단축키·시스템 설정 �
 
   const raised = await resolvedRaised();
 
-  await cell(page).locator("[data-chart-settings-open]").click();
+  await toolbar(page).getByRole("button", { name: "차트 설정", exact: true }).click();
   const cs = page.getByRole("dialog", { name: "차트 설정", exact: true });
   await expect(cs).toBeVisible();
   expect(await bg(cs)).toBe(raised);

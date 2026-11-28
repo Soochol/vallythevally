@@ -142,7 +142,7 @@ test("캔들을 지표 위에 스위치는 가격 패널 지표와 캔들의 그
 
   await expectMainBehindOverlays(7);
 
-  await openChartSettings(page, "범례 · 표시");
+  await openChartSettings(page, "봉 · 선");
   await expect(candlesOnTopSwitch(page)).toHaveAttribute("aria-checked", "false");
   await candlesOnTopSwitch(page).click();
   await expect(candlesOnTopSwitch(page)).toHaveAttribute("aria-checked", "true");
@@ -157,16 +157,14 @@ test("캔들을 지표 위에 스위치는 가격 패널 지표와 캔들의 그
   await addTyped(page, "이평 5");
   await pollSaved(() => saved(scenario).indicators.length).toBe(4);
   await closeAdd(page);
-  await openChartSettings(page, "범례 · 표시");
+  await openChartSettings(page, "봉 · 선");
   await expectMainAboveOverlays(8, "Candlestick");
-  await chooseSettingsMenu(page, "봉 · 축");
   const styleGroup = dialog(page).getByRole("group", { name: "봉 모양" });
   await styleGroup.getByRole("button", { name: "라인", exact: true }).click();
   await expectMainAboveOverlays(8, "Line");
   await styleGroup.getByRole("button", { name: "캔들", exact: true }).click();
   await expectMainAboveOverlays(8, "Candlestick");
 
-  await chooseSettingsMenu(page, "범례 · 표시");
   await candlesOnTopSwitch(page).click();
   await expect(candlesOnTopSwitch(page)).toHaveAttribute("aria-checked", "false");
   await pollSaved(() => saved(scenario).candlesOnTop).toBe(false);
@@ -209,7 +207,7 @@ test("가격만 축에 맞춤 스위치는 SMA 200을 Y축 자동 범위에서 �
 
   const rsiBefore = (await visiblePriceRange(page, 1))!;
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "축 · 눈금");
   await expect(scalePriceOnlySwitch(page)).toHaveAttribute("aria-checked", "false");
   await scalePriceOnlySwitch(page).click();
   await expect(scalePriceOnlySwitch(page)).toHaveAttribute("aria-checked", "true");
@@ -233,7 +231,7 @@ test("가격만 축에 맞춤 스위치는 SMA 200을 Y축 자동 범위에서 �
     return o !== null && o.loaded === 2 && r0 !== null && r0.to < 53_000 && r0.from > 47_000;
   }).toBe(true);
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "축 · 눈금");
   await expect(scalePriceOnlySwitch(page)).toHaveAttribute("aria-checked", "true");
   await scalePriceOnlySwitch(page).click();
   await expect(scalePriceOnlySwitch(page)).toHaveAttribute("aria-checked", "false");
@@ -275,7 +273,7 @@ test("가격만 축에 맞춤 스위치는 일목 구름만 켜져 있어도 구
     return o !== null && o.cloud !== null && o.loaded >= 2 && r0 !== null && r0.to > 55_000;
   }).toBe(true);
 
-  await openChartSettings(page, "봉 · 축");
+  await openChartSettings(page, "축 · 눈금");
   await scalePriceOnlySwitch(page).click();
   await pollSaved(() => saved(scenario).scalePriceOnly).toBe(true);
 
@@ -311,26 +309,26 @@ test("Esc로 닫아도 바꾼 값이 남고, 기본값 복원과 구역 수정 �
     return o !== null && o.loaded === 2 && o.main !== null && o.overlays.length === 1 && o.overlays[0]! > o.main && r0 !== null && r0.to > 55_000;
   }).toBe(true);
 
-  await openChartSettings(page, "봉 · 축");
-  const barsTab = dialog(page).getByRole("tab", { name: "봉 · 축", exact: true });
-  const displayTab = dialog(page).getByRole("tab", { name: "범례 · 표시", exact: true });
+  await openChartSettings(page, "축 · 눈금");
+  const axesTab = dialog(page).getByRole("tab", { name: "축 · 눈금", exact: true });
+  const barsTab = dialog(page).getByRole("tab", { name: "봉 · 선", exact: true });
   const resetBtn = dialog(page).getByRole("button", { name: "기본값 복원", exact: true });
 
+  await expect(axesTab).not.toHaveAttribute("data-modified", "true");
   await expect(barsTab).not.toHaveAttribute("data-modified", "true");
-  await expect(displayTab).not.toHaveAttribute("data-modified", "true");
   await expect(resetBtn).toBeDisabled();
 
   await scalePriceOnlySwitch(page).click();
-  await expect(barsTab).toHaveAttribute("data-modified", "true");
+  await expect(axesTab).toHaveAttribute("data-modified", "true");
   await expect(resetBtn).toBeEnabled();
   await expect.poll(async () => {
     const r0 = await visiblePriceRange(page, 0);
     return r0 !== null && r0.to < 53_000;
   }).toBe(true);
 
-  await chooseSettingsMenu(page, "범례 · 표시");
+  await chooseSettingsMenu(page, "봉 · 선");
   await candlesOnTopSwitch(page).click();
-  await expect(displayTab).toHaveAttribute("data-modified", "true");
+  await expect(barsTab).toHaveAttribute("data-modified", "true");
   await expect.poll(async () => {
     const o = await pane0Orders(page);
     return o !== null && o.main !== null && o.overlays.length === 1 && o.overlays[0]! < o.main;
@@ -345,17 +343,17 @@ test("Esc로 닫아도 바꾼 값이 남고, 기본값 복원과 구역 수정 �
     return o !== null && o.main !== null && o.overlays.length === 1 && o.overlays[0]! < o.main && r0 !== null && r0.to < 53_000;
   }).toBe(true);
 
-  await openChartSettings(page, "범례 · 표시");
+  await openChartSettings(page, "봉 · 선");
+  await expect(axesTab).toHaveAttribute("data-modified", "true");
   await expect(barsTab).toHaveAttribute("data-modified", "true");
-  await expect(displayTab).toHaveAttribute("data-modified", "true");
   await expect(resetBtn).toBeEnabled();
 
   await resetBtn.click();
   await expect(candlesOnTopSwitch(page)).toHaveAttribute("aria-checked", "false");
+  await expect(axesTab).not.toHaveAttribute("data-modified", "true");
   await expect(barsTab).not.toHaveAttribute("data-modified", "true");
-  await expect(displayTab).not.toHaveAttribute("data-modified", "true");
   await expect(resetBtn).toBeDisabled();
-  await chooseSettingsMenu(page, "봉 · 축");
+  await chooseSettingsMenu(page, "축 · 눈금");
   await expect(scalePriceOnlySwitch(page)).toHaveAttribute("aria-checked", "false");
   await pollSaved(() => ({ top: saved(scenario).candlesOnTop, scale: saved(scenario).scalePriceOnly })).toEqual({ top: false, scale: false });
   await expect.poll(async () => {
