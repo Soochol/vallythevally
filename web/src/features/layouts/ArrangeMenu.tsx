@@ -41,7 +41,7 @@ export function ArrangeMenu() {
         <DockIcon />
         {mode === "canvas" && overlaps > 0 && <Badge tone="warning">겹침 {overlaps}</Badge>}
       </button>
-      {open && <Menu label="배치" root={root} items={items} onClose={() => setOpen(false)}>
+      {open && <Menu label="배치" root={root} items={items} className="topbar-popover" onClose={() => setOpen(false)}>
         <div className="layout-mode-control" onKeyDown={(event) => event.stopPropagation()}>
           <span id="layout-mode-label">창 배치 방식</span>
           <div role="group" aria-labelledby="layout-mode-label" className="ui-seg layout-mode-segments" data-size="sm">

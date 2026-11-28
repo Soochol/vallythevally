@@ -94,7 +94,7 @@ test("차트 설정 창은 닫기 버튼·Esc·바깥 클릭 어느 것으로 �
   await pollSaved(() => saved(scenario).style).toBe("bar");
 });
 
-test("메뉴 탭이 위에, 내용이 아래에 놓이고 각 구역에 적용 범위가 붙으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
+test("메뉴 탭이 위에, 내용이 아래에 놓이고 각 구역에 이 칸 배지가 없으며 새로고침해도 처음 모양으로 열린다", async ({ page }) => {
   await open(page);
   await openSettings(page);
   const navBox = (await popover(page).getByRole("tablist", { name: "차트 설정 메뉴" }).boundingBox())!;
@@ -102,7 +102,7 @@ test("메뉴 탭이 위에, 내용이 아래에 놓이고 각 구역에 적용 �
   expect(navBox.y).toBeLessThan(paneBox.y);
   for (const name of ["봉 · 축", "범례 · 표시", "격자 · 구분선"] as const) {
     await chooseSettingsMenu(page, name);
-    await expect(section(page, name).getByText("이 칸", { exact: true })).toBeVisible();
+    await expect(section(page, name).getByText("이 칸", { exact: true })).toHaveCount(0);
   }
   await page.keyboard.press("Escape");
   await expect(popover(page)).toBeHidden();

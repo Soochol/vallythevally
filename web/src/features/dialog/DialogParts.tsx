@@ -32,6 +32,7 @@ interface FrameProps {
   onClose(reason?: "escape" | "outside"): void;
   panelRef?: Ref<HTMLDivElement>;
   panelStyle?: CSSProperties;
+  panelClassName?: string;
   variant?: "command" | "drawer";
   size?: "default" | "compact";
   solid?: boolean;
@@ -42,7 +43,7 @@ interface FrameProps {
 
 const OPEN_FRAME = ".ui-dialog-backdrop:not([data-command-frame])";
 
-export function DialogFrame({ labelledBy, width, onClose, panelRef, panelStyle, children, variant, size = "default", solid, scrim = true, placement = "center" }: FrameProps) {
+export function DialogFrame({ labelledBy, width, onClose, panelRef, panelStyle, panelClassName, children, variant, size = "default", solid, scrim = true, placement = "center" }: FrameProps) {
   const [nested] = useState(() => typeof document !== "undefined" && document.querySelector(OPEN_FRAME) !== null);
   return (
     <Popover backdrop data-command-frame={variant === "command" ? "" : undefined} data-drawer={variant === "drawer" ? "" : undefined} data-nested={nested ? "" : undefined} data-no-scrim={scrim ? undefined : ""} data-placement={placement === "center" ? undefined : placement} onClose={onClose}
@@ -61,7 +62,8 @@ export function DialogFrame({ labelledBy, width, onClose, panelRef, panelStyle, 
         onKeyDown={(e) => onDialogKeyDown(e, onClose)}
         className={
           `ui-dialog flex ${width} flex-col overflow-hidden rounded-l outline-none ` +
-          "max-md:max-h-[85dvh] max-md:w-screen max-md:rounded-b-none"
+          "max-md:max-h-[85dvh] max-md:w-screen max-md:rounded-b-none" +
+          (panelClassName ? ` ${panelClassName}` : "")
         }
       >
         {children}

@@ -179,3 +179,68 @@ test("말풍선의 자세히에서 패널을 합치고 나누고 Y축을 고른�
   await bubble.getByRole("group", { name: "패널 자리" }).getByRole("button", { name: "따로", exact: true }).click();
   await pollSaved(() => new Set(settings(scenario).indicators.map((item) => item.panel)).size).toBe(2);
 });
+
+test("차트 설정·지표·우측 상단 메뉴·단축키·시스템 설정 창은 모두 --raised 배경으로 통일한다", async ({ page, scenario }) => {
+  seed(scenario, [MA20]);
+  await open(page);
+  const resolvedRaised = () => page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--raised)";
+    document.body.append(probe);
+    const color = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return color;
+  });
+  const bg = (locator: ReturnType<Page["locator"]>) => locator.evaluate((el) => getComputedStyle(el).backgroundColor);
+
+  const raised = await resolvedRaised();
+
+  await cell(page).locator("[data-chart-settings-open]").click();
+  const cs = page.getByRole("dialog", { name: "차트 설정", exact: true });
+  await expect(cs).toBeVisible();
+  expect(await bg(cs)).toBe(raised);
+  expect(await bg(cs.locator(".cs-dock-pills"))).toBe("rgba(0, 0, 0, 0)");
+  expect(await bg(cs.locator(".cs-content"))).toBe("rgba(0, 0, 0, 0)");
+  expect(await bg(cs.locator(".cs-foot-bar"))).toBe("rgba(0, 0, 0, 0)");
+
+  await cell(page).locator("[data-indicator-add]").click();
+  const ia = addDialog(page);
+  await expect(ia).toBeVisible();
+  expect(await bg(ia)).toBe(raised);
+  expect(await bg(ia.locator(".ia-panel"))).toBe("rgba(0, 0, 0, 0)");
+
+  await row(page, "m20").locator("[data-indicator-edit]").click();
+  const ip = page.getByRole("dialog", { name: "이동평균 단순 20 설정", exact: true });
+  await expect(ip).toBeVisible();
+  expect(await bg(ip)).toBe(raised);
+  expect(await bg(ip.locator(".ip-sheet"))).toBe("rgba(0, 0, 0, 0)");
+  await page.keyboard.press("Escape");
+
+  for (const [buttonName, menuName] of [[/^레이아웃:/, "레이아웃"], ["배치", "배치"], ["창 더하기", "창 더하기"]] as const) {
+    const trigger = typeof buttonName === "string"
+      ? toolbar(page).getByRole("button", { name: buttonName, exact: true })
+      : toolbar(page).getByRole("button", { name: buttonName });
+    await trigger.click();
+    const menu = page.getByRole("menu", { name: menuName, exact: true });
+    await expect(menu).toBeVisible();
+    expect(await bg(menu)).toBe(raised);
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+  }
+
+  await page.evaluate(() => { document.documentElement.dataset.style = "glass"; });
+  const glassRaised = await resolvedRaised();
+
+  const rail = page.getByRole("navigation", { name: "페이지 메뉴" });
+  await rail.getByRole("button", { name: "단축키", exact: true }).click();
+  const hotkeys = page.getByRole("dialog", { name: "단축키", exact: true });
+  await expect(hotkeys).toBeVisible();
+  expect(await bg(hotkeys)).toBe(glassRaised);
+  await page.keyboard.press("Escape");
+  await expect(hotkeys).toBeHidden();
+
+  await rail.getByRole("button", { name: "시스템 설정", exact: true }).click();
+  const system = page.getByRole("dialog", { name: "시스템 설정", exact: true });
+  await expect(system).toBeVisible();
+  expect(await bg(system)).toBe(glassRaised);
+});

@@ -35,7 +35,7 @@ export function AddWindowMenu({ targetGroup }: { targetGroup?: string }) {
   return (
     <div ref={root} className="contents">
       <button type="button" className={`${targetGroup ? "dock-add" : "tb-btn"} aria-expanded:bg-accent-soft aria-expanded:font-semibold aria-expanded:text-accent`} aria-label={targetGroup ? "이 묶음에 창 더하기" : "창 더하기"} aria-haspopup="menu" aria-expanded={open} title="창 더하기" onClick={() => setOpen((now) => !now)}><PlusIcon />{!targetGroup && <span className="max-xl:hidden">창 더하기</span>}</button>
-      {open && <Menu label="창 더하기" root={root} items={items} onClose={() => setOpen(false)} />}
+      {open && <Menu label="창 더하기" root={root} items={items} className="topbar-popover" onClose={() => setOpen(false)} />}
     </div>
   );
 }

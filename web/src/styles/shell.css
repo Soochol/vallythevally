@@ -60,3 +60,5 @@
   .desktop-topbar .topbar-search-slot { min-width:var(--size-60); }
 }
 .status-bar { height:var(--size-28); }
+.topbar-popover { background:var(--raised); -webkit-backdrop-filter:none; backdrop-filter:none; }
+.ui-popover.ui-dialog-backdrop .ui-dialog.dialog-raised[data-solid] { background:var(--raised); -webkit-backdrop-filter:none; backdrop-filter:none; }

@@ -49,7 +49,7 @@ export function AutoGuardBadge() {
           role="dialog"
           aria-label="자동감시 종목 목록"
           onClose={() => setOpen(false)}
-          className="w-72 border border-line p-3"
+          className="topbar-popover w-72 border border-line p-3"
         >
           <div className="mb-2 flex items-center justify-between border-b border-line pb-2 text-s font-semibold">
             <span>자동 손절·익절 감시</span>
