@@ -14,12 +14,12 @@ import { serverNow, useServerClock } from "../../stores/serverClock";
 import { dayBars, kstDateOf } from "../brokers/history";
 import { useBrokerDay } from "../brokers/useBrokerDay";
 import {
+  AFTERMARKET_END_MIN,
   buildReplaySession,
   buildReplaySessionFromMeta,
   formatIsoDay,
   kstMidnightUnix,
-  REGULAR_END_MIN,
-  REGULAR_START_MIN,
+  PREMARKET_START_MIN,
   type ReplaySession,
   resolvePreviousClose,
 } from "./replayModel";
@@ -119,7 +119,7 @@ export function useReplayData(code: SymbolCode, requestedDate: string | null) {
       fetchProgramSeries(
         code,
         "1m",
-        { from: dayStartUnix + REGULAR_START_MIN * 60, to: dayStartUnix + REGULAR_END_MIN * 60 },
+        { from: dayStartUnix + PREMARKET_START_MIN * 60, to: dayStartUnix + AFTERMARKET_END_MIN * 60 },
         signal,
       ),
     enabled: nativeLoadEnabled,

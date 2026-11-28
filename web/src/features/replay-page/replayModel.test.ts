@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Bar } from "../../api/generated/Bar";
 import type { BookReplayDay } from "../../api/generated/BookReplayDay";
+import type { BookReplayMeta } from "../../api/generated/BookReplayMeta";
 import type { ProgramSeriesPoint } from "../../api/generated/ProgramSeriesPoint";
 import {
   buildReplaySession,
+  buildReplaySessionFromMeta,
   computeLadderSnapshot,
   filterRecentTrades,
   formatReplayClock,
   frameIndexAt,
   kstMidnightUnix,
+  PREMARKET_START_MIN,
   resolvePreviousClose,
   stepTickSec,
 } from "./replayModel";
@@ -130,5 +133,48 @@ describe("replayModel", () => {
     expect(stepTickSec(session.frames, 32_410, 1)).toBe(32_445);
     expect(stepTickSec(session.frames, 32_445, -1)).toBe(32_410);
     expect(formatReplayClock(32_410.5, true)).toBe("09:00:10.500");
+  });
+
+  it("NXT 08:00~20:00 및 장전 스팬을 세션 범위로 반영하고 데이터가 없으면 08:00으로 폴백한다", () => {
+    const nxtMeta: BookReplayMeta = {
+      symbol: "005930",
+      date: DATE,
+      coverage: "collected",
+      resolution: "tick",
+      spanMinutes: 5,
+      covered: [[540, 929]],
+      gapsMs: [],
+      spans: [
+        { startMinute: 480, bookRows: 2, tradeRows: 1, programRows: 0 },
+        { startMinute: 1195, bookRows: 2, tradeRows: 1, programRows: 0 },
+      ],
+      minutes: [],
+    };
+    const nxtSession = buildReplaySessionFromMeta({
+      meta: nxtMeta,
+      bars1m: [],
+      quoteTotals: [],
+      programPoints: [],
+      previousClose: 70_000,
+      symbolKind: "common",
+    });
+    expect(nxtSession.sessionStartSec).toBe(480 * 60);
+    expect(nxtSession.sessionEndSec).toBe(1200 * 60);
+
+    const emptyMeta: BookReplayMeta = {
+      ...nxtMeta,
+      covered: [],
+      spans: [],
+      minutes: [],
+    };
+    const emptySession = buildReplaySessionFromMeta({
+      meta: emptyMeta,
+      bars1m: [],
+      quoteTotals: [],
+      programPoints: [],
+      previousClose: null,
+      symbolKind: "common",
+    });
+    expect(emptySession.sessionStartSec).toBe(PREMARKET_START_MIN * 60);
   });
 });

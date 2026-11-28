@@ -3,7 +3,7 @@ import type { BookReplayDay } from "../../api/generated/BookReplayDay";
 import type { BookReplayMeta } from "../../api/generated/BookReplayMeta";
 import { encodeHogaSpan } from "./hogaDecode";
 import { ReplayEngine } from "./replayEngine";
-import { buildReplaySession } from "./replayModel";
+import { buildReplaySession, buildReplaySessionFromMeta } from "./replayModel";
 
 const DATE = "20261125";
 const M540 = 540 * 60_000;
@@ -597,5 +597,106 @@ describe("ReplayEngine", () => {
     expect(engine.getFrame().hasMoreTrades).toBe(false);
 
     engine.dispose();
+  });
+
+  it("snapToFirstTick이 켜지면 장전 첫 수집 틱(08:00/08:50 등) 시각에 맞춰 시작하고 수동 탐색 시 덮어쓰지 않는다", async () => {
+    const preMin = 530;
+    const firstTickMs = preMin * 60_000 + 5_250;
+    const preSpanBuf = encodeHogaSpan({
+      date: 20261125,
+      startMinute: preMin,
+      lengthMinutes: 5,
+      symbol: "005930_AL",
+      streams: [
+        {
+          kind: "book",
+          columns: {
+            recv_ms: [firstTickMs, firstTickMs + 2_000],
+            t_s: [preMin * 60 + 5, preMin * 60 + 7],
+            ask_px1: [71_000, 71_100],
+            ask_qty1: [400, 500],
+            bid_px1: [70_900, 71_000],
+            bid_qty1: [300, 450],
+            ask_total: [400, 500],
+            bid_total: [300, 450],
+          },
+        },
+      ],
+    });
+    const meta: BookReplayMeta = {
+      symbol: "005930",
+      date: DATE,
+      coverage: "collected",
+      resolution: "tick",
+      spanMinutes: 5,
+      covered: [[530, 1199]],
+      gapsMs: [],
+      spans: [{ startMinute: preMin, bookRows: 2, tradeRows: 0, programRows: 0 }],
+      minutes: [
+        {
+          minute: preMin,
+          open: null,
+          high: null,
+          low: null,
+          close: null,
+          volume: 0,
+          cumVol: 0,
+          cumVal: 0,
+          cumBuyQty: 0,
+          cumSellQty: 0,
+          dayOpen: null,
+          dayHigh: null,
+          dayLow: null,
+          totalAsk: 400,
+          totalBid: 300,
+          programNetQty: null,
+          programNetAmtMillion: null,
+          singlePrice: true,
+        },
+      ],
+    };
+    const session = buildReplaySessionFromMeta({
+      meta,
+      bars1m: [],
+      quoteTotals: [],
+      programPoints: [],
+      previousClose: 70_000,
+      symbolKind: "common",
+    });
+
+    expect(session.sessionStartSec).toBe(530 * 60);
+    expect(session.sessionEndSec).toBe(1200 * 60);
+
+    const engine = new ReplayEngine({
+      code: "005930",
+      session,
+      meta,
+      snapToFirstTick: true,
+      spanFetcher: async () => preSpanBuf.slice(0),
+      nowPerf: () => 1_000,
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(engine.getFrame().cursorMs).toBe(firstTickMs);
+    expect(engine.getFrame().ladder.totalAsk).toBe(400);
+    expect(engine.getFrame().singlePrice).toBe(true);
+    engine.dispose();
+
+    let resolveSpan!: (buf: ArrayBuffer) => void;
+    const delayed = new ReplayEngine({
+      code: "005930",
+      session,
+      meta,
+      snapToFirstTick: true,
+      spanFetcher: () => new Promise<ArrayBuffer>((r) => { resolveSpan = r; }),
+      nowPerf: () => 1_000,
+    });
+    const manualTargetMs = preMin * 60_000 + 20_000;
+    delayed.seekMs(manualTargetMs);
+    resolveSpan(preSpanBuf.slice(0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(delayed.getFrame().cursorMs).toBe(manualTargetMs);
+    delayed.dispose();
   });
 });

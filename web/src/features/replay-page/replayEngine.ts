@@ -382,6 +382,8 @@ export interface ReplayEngineOptions {
   readonly code: SymbolCode;
   readonly session: ReplaySession;
   readonly meta: BookReplayMeta | null;
+  readonly initialSec?: number;
+  readonly snapToFirstTick?: boolean;
   readonly spanFetcher?: SpanBufferFetcher;
   readonly nowPerf?: () => number;
 }
@@ -416,6 +418,7 @@ export class ReplayEngine {
   private activeSpanStart = -1;
   private eventCursor = -1;
   private activeSecond = -1;
+  private pendingFirstTickSpanStart: number | null = null;
 
   private currentBook: ReplayBookState = EMPTY_BOOK;
   private prevBook: ReplayBookState | null = null;
@@ -495,11 +498,18 @@ export class ReplayEngine {
     this.loader = new HogaSpanLoader({ fetcher: options.spanFetcher });
     this.loader.onUpdate = (key, span) => this.handleSpanLoaded(key, span);
 
-    const firstStartMs = this.initialCursorMs();
+    const snapToFirstTick =
+      options.snapToFirstTick === true && this.resolution === "tick" && this.availableSpans.length > 0;
+    const firstStartMs = options.initialSec !== undefined
+      ? options.initialSec * 1000
+      : snapToFirstTick
+        ? this.availableSpans[0]! * MS_PER_MINUTE
+        : this.initialCursorMs();
+    this.pendingFirstTickSpanStart = snapToFirstTick ? this.availableSpans[0]! : null;
     this.cursorMs = firstStartMs;
     this.lastEventMs = firstStartMs;
     this.cachedFrame = this.buildSnapshot(this.nowPerf());
-    this.seekMs(firstStartMs);
+    this.seekMsInternal(firstStartMs, false, true);
   }
 
   private initialCursorMs(): number {
@@ -654,11 +664,17 @@ export class ReplayEngine {
   }
 
   seekMs(targetMs: number, options?: { readonly fromLoop?: boolean }): void {
+    this.seekMsInternal(targetMs, options?.fromLoop === true, false);
+  }
+
+  private seekMsInternal(targetMs: number, fromLoop: boolean, preserveFirstTickSnap: boolean): void {
+    if (!preserveFirstTickSnap) {
+      this.pendingFirstTickSpanStart = null;
+    }
     const startMs = this.session.sessionStartSec * 1000;
     const endMs = Math.max(startMs, this.session.sessionEndSec * 1000 - 100);
-    const clamped = Math.max(startMs, Math.min(endMs, targetMs));
+    let clamped = Math.max(startMs, Math.min(endMs, targetMs));
     const previousMs = this.cursorMs;
-    const fromLoop = options?.fromLoop === true;
     this.cursorMs = clamped;
     this.tickBudget = 0;
     this.cellFlashes.clear();
@@ -690,6 +706,7 @@ export class ReplayEngine {
     const span = this.loader.get(this.spanKey(spanStart));
     if (!span) {
       if (this.loader.hasFailed(this.spanKey(spanStart)) || !this.hasSpanOnServer(spanStart)) {
+        this.pendingFirstTickSpanStart = null;
         this.buffering = false;
         this.activeSpanStart = spanStart;
         this.eventCursor = -1;
@@ -704,6 +721,15 @@ export class ReplayEngine {
       this.emitControl();
       this.emitFrame();
       return;
+    }
+
+    if (this.pendingFirstTickSpanStart === spanStart) {
+      this.pendingFirstTickSpanStart = null;
+      if (span.eventRecvMs.length > 0) {
+        clamped = Math.max(startMs, Math.min(endMs, span.eventRecvMs[0]!));
+        this.cursorMs = clamped;
+        this.lastEventMs = clamped;
+      }
     }
 
     this.buffering = false;
@@ -725,6 +751,7 @@ export class ReplayEngine {
   }
 
   stepTick(dir: -1 | 1): void {
+    this.pendingFirstTickSpanStart = null;
     if (this.playing) this.setPlaying(false);
     if (this.resolution === "minute_only") {
       const nextSec = stepTickSec(this.session.frames, this.cursorMs / 1000, dir);
@@ -1084,6 +1111,16 @@ export class ReplayEngine {
       const spanStart = this.spanStartOfMs(this.cursorMs);
       const span = this.loader.get(key) ?? loadedSpan;
       this.buffering = false;
+      if (this.pendingFirstTickSpanStart === spanStart) {
+        this.pendingFirstTickSpanStart = null;
+        if (span && span.eventRecvMs.length > 0) {
+          const startMs = this.session.sessionStartSec * 1000;
+          const endMs = Math.max(startMs, this.session.sessionEndSec * 1000 - 100);
+          const snapped = Math.max(startMs, Math.min(endMs, span.eventRecvMs[0]!));
+          this.cursorMs = snapped;
+          this.lastEventMs = snapped;
+        }
+      }
       if (span) {
         this.reconstructFromSpan(spanStart, span, this.cursorMs);
       } else {

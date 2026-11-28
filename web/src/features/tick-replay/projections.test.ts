@@ -36,7 +36,7 @@ function makeActive(overrides: Partial<ActiveTickReplayState> = {}): ActiveTickR
       symbol: CODE,
       link: "a",
       date: DATE,
-      initialSec: 540 * 60,
+      start: { kind: "atSec", sec: 540 * 60 },
       autoPlay: false,
     },
     load: { kind: "ready" },
