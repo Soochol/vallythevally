@@ -2,7 +2,8 @@
 .dock-group { position:absolute; box-sizing:border-box; display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; contain:layout paint; border:var(--size-1) solid var(--line); border-radius:var(--r-l); background:var(--bg); transition:border-color var(--dur) var(--ease); --strip-bg:var(--bg); }
 .dock-group[data-kind=chart] { background:var(--chart-bg); --strip-bg:var(--chart-bg); }
 .dock-group[data-active-cell] { border-color:var(--line-strong); }
-.dock-tabs { display:flex; flex:none; align-items:stretch; gap:var(--size-12); height:var(--size-34); padding:0 var(--size-10); border-bottom:var(--size-1) solid var(--line); }
+.dock-tabs { display:flex; flex:none; align-items:stretch; gap:var(--size-6); height:var(--size-34); padding:0 var(--size-8); border-bottom:var(--size-1) solid var(--line); }
+.dock-tab-actions { display:flex; flex:none; align-items:center; gap:var(--size-2); }
 .dock-tab-viewport { position:relative; display:flex; flex:0 1 auto; min-width:0; margin-right:auto; }
 .dock-tab-scroll { display:flex; align-items:stretch; gap:var(--size-6); min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; }
 .dock-tab-scroll::-webkit-scrollbar { display:none; }
@@ -122,6 +123,7 @@ html.dock-resizing-junction, html.dock-resizing-junction * { cursor:move !import
 .dock-add { display:grid; flex:none; place-items:center; align-self:center; width:var(--size-26); height:var(--size-26); border-radius:var(--r-m); color:var(--text-3); transition:background-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .dock-add:hover, .dock-add:focus-visible { background:var(--hover); color:var(--text); }
 .dock-indicator-toggle { display:inline-flex; flex:none; align-items:center; align-self:center; gap:var(--size-4); height:var(--size-24); padding:0 var(--size-8); border:var(--size-1) solid var(--line-strong); border-radius:var(--r-s); background:var(--surface); font-size:var(--fs-xs); font-weight:600; color:var(--text-2); white-space:nowrap; transition:background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.dock-indicator-toggle[data-compact=true] { justify-content:center; width:var(--size-24); padding:0; }
 .dock-indicator-toggle:hover { background:var(--hover); border-color:var(--text-3); color:var(--text); }
 .dock-indicator-toggle[aria-pressed=true] { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
 .dock-indicator-toggle:focus-visible { outline:none; box-shadow:inset 0 0 0 var(--size-2) var(--accent); }

@@ -239,10 +239,12 @@ export function DockGroup({ group, rect, number, interaction, maximized, onToggl
             })}
           </div>
         </div>
-        {stripOverflow.overflowing && <TabListMenu group={group} onSelect={select} />}
-        {shown.kind === "chart" && <ChartDockToggle id={shown.id} />}
-        <AddWindowMenu targetGroup={group.id} />
-        {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}><CollapseIcon size={14} /></button>}
+        <span className="dock-tab-actions">
+          {stripOverflow.overflowing && <TabListMenu group={group} onSelect={select} />}
+          {shown.kind === "chart" && <ChartDockToggle id={shown.id} compact={rect.w < 460} />}
+          <AddWindowMenu targetGroup={group.id} />
+          {maximized && <button type="button" className="dock-restore" aria-label="원래 크기로" title="원래 크기로" onClick={onToggleMaximize}><CollapseIcon size={14} /></button>}
+        </span>
       </div>
       <div ref={panelRef} id={panelId(group.id)} role="tabpanel" aria-labelledby={tabId(shown.id)} data-window-id={shown.id} className={`dock-panel ${overflow === "auto" ? "overflow-auto" : "overflow-hidden"}`} />
       {panelDropActive && dragPayload && <SymbolDropOverlay kind={shown.kind} payload={dragPayload} />}
