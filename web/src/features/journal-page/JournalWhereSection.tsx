@@ -234,13 +234,12 @@ export function JournalWhereSection({ periodTrades, filteredListCount, onScrollT
   const retReadout =
     activeRetIdx !== null && retBuckets.groups[activeRetIdx]
       ? `${RET_FULL[activeRetIdx]} · ${retBuckets.groups[activeRetIdx]!.n}건 · ${formatCompactWon(retBuckets.groups[activeRetIdx]!.p)}`
-      : "막대에 올리거나 눌러서 구간을 선택하세요";
+      : "";
 
   return (
     <section className="jrn-where" data-testid="journal-where-section" aria-label="매매 패턴 및 조건 분해">
       <div className="jrn-band-head">
         <h2 className="jrn-band-title">어디서 벌고 잃었나</h2>
-        <span className="jrn-band-cap">막대나 항목을 누르면 바로 위 타점 복기 목록·차트가 즉시 필터 연동됩니다</span>
         <span className="jrn-grow" />
         {hasAnyFilter && (
           <button
@@ -249,7 +248,7 @@ export function JournalWhereSection({ periodTrades, filteredListCount, onScrollT
             data-testid="journal-where-jump-top"
             onClick={onScrollTop}
           >
-            {`↑ 필터된 ${filteredListCount}건 타점 보기`}
+            {`↑ ${filteredListCount}건 보기`}
           </button>
         )}
         <div className="jrn-seg" role="group" aria-label="비교 기준">
@@ -311,10 +310,7 @@ export function JournalWhereSection({ periodTrades, filteredListCount, onScrollT
 
         <div>
           <div className="jrn-fc-head">
-            <span className="jrn-fc-title">진입 → 청산 시간대 패턴</span>
-            <span className="jrn-fc-meta">
-              {isCount ? "건수 기준" : metric === "ret" ? "0% 기준 평균 수익률" : "0원 기준 실현손익"}
-            </span>
+            <span className="jrn-fc-title">진입 → 청산 시간대</span>
           </div>
           <div className={`jrn-div-list${filters.pair !== null ? " jrn-has-sel" : ""}`} data-testid="journal-pair-list">
             {pairRows.visible.length === 0 ? (
@@ -347,7 +343,6 @@ export function JournalWhereSection({ periodTrades, filteredListCount, onScrollT
               <button type="button" aria-pressed={distMode === "hold"} onClick={() => setDistMode("hold")}>보유 기간</button>
               <button type="button" aria-pressed={distMode === "ret"} onClick={() => setDistMode("ret")}>수익률 구간</button>
             </div>
-            <span className="jrn-fc-meta">{distMode === "hold" ? "보유 시간 기준" : "거래별 수익률 분포"}</span>
           </div>
 
           {distMode === "hold" ? (
@@ -418,7 +413,6 @@ export function JournalWhereSection({ periodTrades, filteredListCount, onScrollT
         <div>
           <div className="jrn-fc-head">
             <span className="jrn-fc-title">진입 방식</span>
-            <span className="jrn-fc-meta">라운드트립 분할 단가 기준</span>
           </div>
           <div className={`jrn-div-list${filters.style !== null ? " jrn-has-sel" : ""}`}>
             {styleRows.groups.map((g) => (
@@ -439,8 +433,7 @@ export function JournalWhereSection({ periodTrades, filteredListCount, onScrollT
 
           <div className="jrn-tag-cloud-wrap">
             <div className="jrn-fc-head">
-              <span className="jrn-fc-title">복기 태그별 성과</span>
-              <span className="jrn-fc-meta">누르면 조건 적용</span>
+              <span className="jrn-fc-title">복기 태그</span>
             </div>
             <div className={`jrn-tag-cloud${filters.tag !== null ? " jrn-has-sel" : ""}`}>
               {tagStats.length === 0 ? (

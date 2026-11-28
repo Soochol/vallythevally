@@ -24,7 +24,7 @@ import { readThemeTokens, type ThemeTokens } from "../../chart/theme";
 import { formatBarTime, formatTickMark, fromChartTime, isIntraday, toChartTime } from "../../chart/time";
 import { PendingScroll } from "../../chart/timeAxis";
 import { subscribeTheme } from "../../persist/theme";
-import { findBarIndexForFill, JournalTradeOverlay } from "./journalChartOverlay";
+import { buildBarFillClusters, findBarIndexForFill, JournalTradeOverlay } from "./journalChartOverlay";
 import {
   dayShortLabel,
   formatMinutes,
@@ -41,10 +41,9 @@ const MAX_INITIAL_OLDER_PAGES = 10;
 const RIGHT_OFFSET_BARS = 12;
 
 interface Props {
-  readonly trade: JournalTrade;
+  readonly trades: readonly JournalTrade[];
   readonly tf: JournalTf;
   readonly today: string;
-  readonly isAutoTf: boolean;
   readonly afterCost: boolean;
   readonly highlightFill: JournalFill | null;
   readonly resetTick: number;
@@ -83,14 +82,25 @@ function findBarIndexByTime(bars: readonly JournalBar[], t: number): number {
   return -1;
 }
 
-function buildLegendState(bar: JournalBar, trade: JournalTrade, tf: JournalTf, bars: readonly JournalBar[], idx: number): LegendState {
+function buildLegendState(
+  bar: JournalBar,
+  trades: readonly JournalTrade[],
+  tf: JournalTf,
+  bars: readonly JournalBar[],
+  idx: number,
+): LegendState {
   const chgPct = bar.o > 0 ? ((bar.c - bar.o) / bar.o) * 100 : 0;
   const dateLabel = tf === "D" ? dayShortLabel(bar.day) : `${dayShortLabel(bar.day)} ${formatMinutes(bar.minutes)}`;
-  const hereB = trade.buys.filter((f) => findBarIndexForFill(bars, f, tf) === idx);
-  const hereS = trade.sells.filter((f) => findBarIndexForFill(bars, f, tf) === idx);
+  const clusters = buildBarFillClusters(bars, trades, tf).filter((c) => c.barIdx === idx);
   const notes: string[] = [];
-  if (hereB.length > 0) notes.push(`▲ 매수 ${hereB.map((f) => `${formatWon(f.price, false)}×${f.qty}`).join(", ")}`);
-  if (hereS.length > 0) notes.push(`▼ 매도 ${hereS.map((f) => `${formatWon(f.price, false)}×${f.qty}`).join(", ")}`);
+  for (const cl of clusters) {
+    const arrow = cl.side === "sell" ? "▼" : "▲";
+    if (cl.count === 1) {
+      notes.push(`${arrow} ${formatWon(cl.fills[0]!.price, false)}×${cl.totalQty}`);
+    } else {
+      notes.push(`${arrow} ${cl.count}건 · ${cl.totalQty}주 (${formatWon(cl.vwap, false)})`);
+    }
+  }
   return { dateLabel, o: bar.o, h: bar.h, l: bar.l, c: bar.c, chgPct, fillNote: notes.join("  ") };
 }
 
@@ -153,25 +163,39 @@ interface ChartNotice {
   readonly message: string;
 }
 
-function computeTradeFocusRange(bars: readonly JournalBar[], trade: JournalTrade, tf: JournalTf): { from: number; to: number } {
+function computeTradeFocusRange(
+  bars: readonly JournalBar[],
+  trades: readonly JournalTrade[],
+  tf: JournalTf,
+): { from: number; to: number } {
   const n = bars.length;
-  if (n === 0) return { from: 0, to: 1 };
-  const firstBuy = trade.buys[0];
-  const lastSell = trade.sells[trade.sells.length - 1];
-  const rawEntry = firstBuy ? findBarIndexForFill(bars, firstBuy, tf) : -1;
-  const rawExit = lastSell ? findBarIndexForFill(bars, lastSell, tf) : -1;
-  const entryIdx = rawEntry >= 0 ? rawEntry : rawExit >= 0 ? rawExit : 0;
-  const exitIdx = rawExit >= 0 ? rawExit : rawEntry >= 0 ? rawEntry : n - 1;
-  const lo = Math.max(0, Math.min(entryIdx, exitIdx));
-  const hi = Math.max(0, Math.max(entryIdx, exitIdx));
-  if (tf === "D") {
-    const pad = Math.max(18, Math.round((hi - lo) * 0.8));
-    return { from: lo - pad, to: hi + Math.max(10, Math.round(pad * 0.4)) };
+  if (n === 0 || trades.length === 0) return { from: 0, to: 1 };
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const trade of trades) {
+    const firstBuy = trade.buys[0];
+    const lastSell = trade.sells[trade.sells.length - 1];
+    const rawEntry = firstBuy ? findBarIndexForFill(bars, firstBuy, tf) : -1;
+    const rawExit = lastSell ? findBarIndexForFill(bars, lastSell, tf) : -1;
+    if (rawEntry >= 0) {
+      if (rawEntry < lo) lo = rawEntry;
+      if (rawEntry > hi) hi = rawEntry;
+    }
+    if (rawExit >= 0) {
+      if (rawExit < lo) lo = rawExit;
+      if (rawExit > hi) hi = rawExit;
+    }
   }
-  const span = hi - lo;
+  const safeLo = Number.isFinite(lo) ? Math.max(0, lo) : 0;
+  const safeHi = Number.isFinite(hi) ? Math.max(safeLo, hi) : n - 1;
+  if (tf === "D") {
+    const pad = Math.max(18, Math.round((safeHi - safeLo) * 0.8));
+    return { from: safeLo - pad, to: safeHi + Math.max(10, Math.round(pad * 0.4)) };
+  }
+  const span = safeHi - safeLo;
   const pad = Math.max(20, Math.round(span * 0.6));
-  let from = lo - pad;
-  let to = hi + pad + 1;
+  let from = safeLo - pad;
+  let to = safeHi + pad + 1;
   if (to - from < 60) {
     const mid = (from + to) / 2;
     from = mid - 30;
@@ -180,7 +204,14 @@ function computeTradeFocusRange(bars: readonly JournalBar[], trade: JournalTrade
   return { from, to };
 }
 
-export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, highlightFill, resetTick }: Props) {
+function defaultLegendIndex(bars: readonly JournalBar[], trades: readonly JournalTrade[], tf: JournalTf): number {
+  const lastTrade = trades[trades.length - 1];
+  const lastSell = lastTrade?.sells[lastTrade.sells.length - 1];
+  const idx = lastSell ? findBarIndexForFill(bars, lastSell, tf) : bars.length - 1;
+  return idx >= 0 ? idx : bars.length - 1;
+}
+
+export function JournalCandleChart({ trades, tf, today, afterCost, highlightFill, resetTick }: Props) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -194,25 +225,29 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
   const settingDataRef = useRef(false);
   const tokensRef = useRef<ThemeTokens>(readThemeTokens());
 
-  const propsRef = useRef({ trade, tf, today, afterCost, highlightFill });
-  propsRef.current = { trade, tf, today, afterCost, highlightFill };
+  const propsRef = useRef({ trades, tf, today, afterCost, highlightFill });
+  propsRef.current = { trades, tf, today, afterCost, highlightFill };
 
   const [legend, setLegend] = useState<LegendState | null>(null);
   const [chartNotice, setChartNotice] = useState<ChartNotice | null>(null);
   const [olderError, setOlderError] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
 
+  const primaryTrade = trades[0]!;
+  const tradesKey = trades.map((t) => t.id).join("|");
+  const minEntryDay = trades.reduce((min, t) => (t.entryDay < min ? t.entryDay : min), primaryTrade.entryDay);
+  const maxExitDay = trades.reduce((max, t) => (t.exitDay > max ? t.exitDay : max), primaryTrade.exitDay);
   const period = TF_TO_PERIOD[tf];
-  const venueParam: Venue = trade.venue;
-  const isDemo = trade.demoSeed !== null;
+  const venueParam: Venue = primaryTrade.venue;
+  const isDemo = trades.some((t) => t.demoSeed !== null);
 
   const updateLegendForIndex = (idx: number) => {
     const bars = barsRef.current;
     if (bars.length === 0) return;
     const clamped = Math.max(0, Math.min(bars.length - 1, idx));
     const bar = bars[clamped]!;
-    const { trade: curTrade, tf: curTf } = propsRef.current;
-    setLegend(buildLegendState(bar, curTrade, curTf, bars, clamped));
+    const { trades: curTrades, tf: curTf } = propsRef.current;
+    setLegend(buildLegendState(bar, curTrades, curTf, bars, clamped));
   };
 
   const clearChartData = () => {
@@ -230,8 +265,8 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
       }
     }
     if (overlay) {
-      const { trade: curTrade, tf: curTf, afterCost: curAfterCost, highlightFill: curHighlight } = propsRef.current;
-      overlay.setState({ trade: curTrade, tf: curTf, bars: [], afterCost: curAfterCost, highlightFill: curHighlight });
+      const { trades: curTrades, tf: curTf, afterCost: curAfterCost, highlightFill: curHighlight } = propsRef.current;
+      overlay.setState({ trades: curTrades, tf: curTf, bars: [], afterCost: curAfterCost, highlightFill: curHighlight });
     }
     daySepsRef.current?.sync();
     setLegend(null);
@@ -282,8 +317,8 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
       settingDataRef.current = false;
     }
 
-    const { trade: curTrade, tf: curTf, afterCost: curAfterCost, highlightFill: curHighlight } = propsRef.current;
-    overlay.setState({ trade: curTrade, tf: curTf, bars, afterCost: curAfterCost, highlightFill: curHighlight });
+    const { trades: curTrades, tf: curTf, afterCost: curAfterCost, highlightFill: curHighlight } = propsRef.current;
+    overlay.setState({ trades: curTrades, tf: curTf, bars, afterCost: curAfterCost, highlightFill: curHighlight });
     daySepsRef.current?.sync();
 
     const box = boxRef.current;
@@ -294,11 +329,9 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
     }
 
     if (shiftLogicalBy === null && bars.length > 0) {
-      const focus = computeTradeFocusRange(bars, curTrade, curTf);
+      const focus = computeTradeFocusRange(bars, curTrades, curTf);
       chart.timeScale().setVisibleLogicalRange(focus);
-      const lastSell = curTrade.sells[curTrade.sells.length - 1];
-      const idx = lastSell ? findBarIndexForFill(bars, lastSell, curTf) : bars.length - 1;
-      updateLegendForIndex(idx >= 0 ? idx : bars.length - 1);
+      updateLegendForIndex(defaultLegendIndex(bars, curTrades, curTf));
     }
   };
 
@@ -392,10 +425,8 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
           return;
         }
       }
-      const { trade: curTrade, tf: curTf } = propsRef.current;
-      const lastSell = curTrade.sells[curTrade.sells.length - 1];
-      const idx = lastSell ? findBarIndexForFill(bars, lastSell, curTf) : bars.length - 1;
-      updateLegendForIndex(idx >= 0 ? idx : bars.length - 1);
+      const { trades: curTrades, tf: curTf } = propsRef.current;
+      updateLegendForIndex(defaultLegendIndex(bars, curTrades, curTf));
     };
     chart.subscribeCrosshairMove(onCrosshair);
 
@@ -451,7 +482,7 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
     setOlderError(false);
 
     if (isDemo) {
-      applyBars(synthesizeDemoBars(trade, tf), null);
+      applyBars(synthesizeDemoBars(primaryTrade, tf), null);
       return;
     }
 
@@ -464,26 +495,26 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
         const list = displayBars(h);
         if (list.length === 0 || initialPages >= MAX_INITIAL_OLDER_PAGES) return true;
         const firstDay = toJournalBars([list[0]!])[0]!.day;
-        return firstDay <= trade.entryDay;
+        return firstDay <= minEntryDay;
       }).then(() => {
         if (!disposed && chartRef.current && barsRef.current.length > 0) {
           chartRef.current.timeScale().setVisibleLogicalRange(
-            computeTradeFocusRange(barsRef.current, propsRef.current.trade, propsRef.current.tf),
+            computeTradeFocusRange(barsRef.current, propsRef.current.trades, propsRef.current.tf),
           );
         }
       });
     };
 
     const jumpToExitDay = (feed: JumpableFeed) => {
-      void feed.enterMode(trade.exitDay).then((outcome) => {
+      void feed.enterMode(maxExitDay).then((outcome) => {
         if (disposed || outcome === "entered" || outcome === "cancelled") return;
         clearChartData();
         setChartNotice({
           kind: outcome === "failed" ? "error" : "empty",
           message:
             outcome === "failed"
-              ? `${trade.exitDay} 분봉을 불러오지 못했습니다`
-              : `${trade.exitDay} 분봉 데이터가 없습니다`,
+              ? `${maxExitDay} 분봉을 불러오지 못했습니다`
+              : `${maxExitDay} 분봉 데이터가 없습니다`,
         });
       });
     };
@@ -492,7 +523,7 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
       if (disposed) return;
       const raw = displayBars(history);
       if (raw.length === 0) {
-        if (mode === "reset" && tf !== "D" && trade.exitDay < today) {
+        if (mode === "reset" && tf !== "D" && maxExitDay < today) {
           jumpToExitDay(feed);
           return;
         }
@@ -500,7 +531,7 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
           clearChartData();
           setChartNotice({
             kind: "empty",
-            message: mode === "jump" ? `${trade.exitDay} 분봉 데이터가 없습니다` : "봉 데이터가 없습니다",
+            message: mode === "jump" ? `${maxExitDay} 분봉 데이터가 없습니다` : "봉 데이터가 없습니다",
           });
         }
         return;
@@ -512,14 +543,14 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
         return;
       }
       const earliestDay = converted[0]!.day;
-      if (mode === "reset" && tf !== "D" && trade.exitDay < earliestDay && trade.exitDay < today) {
+      if (mode === "reset" && tf !== "D" && maxExitDay < earliestDay && maxExitDay < today) {
         jumpToExitDay(feed);
         return;
       }
       setChartNotice(null);
       applyBars(converted, null);
 
-      if (trade.entryDay < earliestDay && history.nextBefore !== null) {
+      if (minEntryDay < earliestDay && history.nextBefore !== null) {
         loadOlderToEntry(feed);
       }
     };
@@ -546,25 +577,25 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
       },
     );
     feedRef.current = feed;
-    feed.open({ symbol: trade.code, venue: venueParam, period });
+    feed.open({ symbol: primaryTrade.code, venue: venueParam, period });
 
     return () => {
       disposed = true;
       feed.dispose();
       if (feedRef.current === feed) feedRef.current = null;
     };
-  }, [trade.id, trade.code, trade.exitDay, trade.entryDay, venueParam, period, tf, isDemo, today, reloadTick]);
+  }, [tradesKey, primaryTrade.code, maxExitDay, minEntryDay, venueParam, period, tf, isDemo, today, reloadTick]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay || barsRef.current.length === 0) return;
-    overlay.setState({ trade, tf, bars: barsRef.current, afterCost, highlightFill });
-  }, [trade, tf, afterCost, highlightFill]);
+    overlay.setState({ trades, tf, bars: barsRef.current, afterCost, highlightFill });
+  }, [trades, tf, afterCost, highlightFill]);
 
   useEffect(() => {
     if (resetTick === 0 || !chartRef.current || barsRef.current.length === 0) return;
-    chartRef.current.timeScale().setVisibleLogicalRange(computeTradeFocusRange(barsRef.current, trade, tf));
-  }, [resetTick, trade, tf]);
+    chartRef.current.timeScale().setVisibleLogicalRange(computeTradeFocusRange(barsRef.current, trades, tf));
+  }, [resetTick, trades, tf]);
 
   const tfName = JOURNAL_TFS.find((entry) => entry.tf === tf)?.label ?? tf;
 
@@ -575,15 +606,17 @@ export function JournalCandleChart({ trade, tf, today, isAutoTf, afterCost, high
       data-testid="journal-candle-chart"
       data-tf={tf}
       data-period={period}
+      data-trade-count={trades.length}
+      data-marker-mode="minimal"
       onDoubleClick={() => {
         if (!chartRef.current || barsRef.current.length === 0) return;
-        chartRef.current.timeScale().setVisibleLogicalRange(computeTradeFocusRange(barsRef.current, trade, tf));
+        chartRef.current.timeScale().setVisibleLogicalRange(computeTradeFocusRange(barsRef.current, trades, tf));
       }}
     >
       <div ref={hostRef} className="jrn-chart-host" />
       {legend !== null && (
         <div className="jrn-chart-legend">
-          <span>{`${tfName}${isAutoTf ? " (자동)" : ""}`}</span>
+          <span>{tfName}</span>
           <span className="jrn-mono">{legend.dateLabel}</span>
           <span>시<b>{formatWon(legend.o, false)}</b></span>
           <span>고<b className="jrn-up">{formatWon(legend.h, false)}</b></span>

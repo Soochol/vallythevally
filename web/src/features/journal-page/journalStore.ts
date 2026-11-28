@@ -12,6 +12,7 @@ import {
   type JournalPeriod,
   type JournalPeriodType,
   type JournalQuickFilter,
+  type JournalSelection,
   type JournalSort,
   type JournalTf,
 } from "./journalTypes";
@@ -28,7 +29,7 @@ interface JournalStoreState {
   sort: JournalSort;
   sortDir: 1 | -1;
   quick: JournalQuickFilter;
-  selectedId: string | null;
+  selection: JournalSelection | null;
   tf: JournalTf | null;
   demoMode: boolean;
   notes: Record<string, JournalNote>;
@@ -49,6 +50,7 @@ interface JournalStoreState {
   setSort: (sort: JournalSort) => void;
   setQuick: (quick: JournalQuickFilter) => void;
   selectTrade: (id: string | null) => void;
+  selectGroup: (key: string) => void;
   setTf: (tf: JournalTf | null) => void;
   setDemoMode: (on: boolean) => void;
   saveMemo: (tradeId: string, memo: string, fallbackTags: readonly string[]) => void;
@@ -70,7 +72,7 @@ export const useJournalStore = create<JournalStoreState>((set) => ({
   sort: "time",
   sortDir: -1,
   quick: "all",
-  selectedId: null,
+  selection: null,
   tf: null,
   demoMode: false,
   notes: loadJournalNotes(),
@@ -133,9 +135,10 @@ export const useJournalStore = create<JournalStoreState>((set) => ({
   setSort: (sort) =>
     set((s) => (s.sort === sort ? { sortDir: s.sortDir === -1 ? 1 : -1 } : { sort, sortDir: -1 })),
   setQuick: (quick) => set({ quick }),
-  selectTrade: (id) => set({ selectedId: id, tf: null }),
+  selectTrade: (id) => set({ selection: id === null ? null : { kind: "trade", id }, tf: null }),
+  selectGroup: (key) => set({ selection: { kind: "group", key }, tf: null }),
   setTf: (tf) => set({ tf }),
-  setDemoMode: (demoMode) => set({ demoMode, selectedId: null, tf: null }),
+  setDemoMode: (demoMode) => set({ demoMode, selection: null, tf: null }),
 
   saveMemo: (tradeId, memo, fallbackTags) =>
     set((s) => {

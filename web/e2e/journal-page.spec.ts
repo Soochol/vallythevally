@@ -408,3 +408,64 @@ test("과거일 분봉 점프가 비어 있으면 당일 봉이나 합성 봉을
   await expect(page.getByTestId("journal-chart-notice")).toContainText("2026-11-02 분봉 데이터가 없습니다");
   await expect(page.getByTestId("journal-candle-chart")).toHaveAttribute("data-bar-count", "0");
 });
+
+test("같은 날 같은 종목 다회 거래를 좌측 슬림 카드로 묶고 우측 회차 탭과 체결 행 스포트라이트로 복기한다", async ({ page, scenario }) => {
+  const groupedDays: readonly HistoryDayFixture[] = [
+    {
+      day: "2026-11-26",
+      executions: [
+        { orderNo: "L0B1", code: "328130", name: "루닛", side: "buy", quantity: 10, price: 51_000, time: "09:10:00", venue: "krx" },
+        { orderNo: "L0S1", code: "328130", name: "루닛", side: "sell", quantity: 10, price: 52_500, time: "09:30:00", venue: "krx" },
+      ],
+    },
+    {
+      day: "2026-11-27",
+      executions: [
+        { orderNo: "L1B1", code: "328130", name: "루닛", side: "buy", quantity: 10, price: 54_000, time: "09:06:05", venue: "krx" },
+        { orderNo: "L1B2", code: "328130", name: "루닛", side: "buy", quantity: 15, price: 54_200, time: "09:06:22", venue: "krx" },
+        { orderNo: "L1B3", code: "328130", name: "루닛", side: "buy", quantity: 15, price: 54_400, time: "09:06:48", venue: "krx" },
+        { orderNo: "L1S1", code: "328130", name: "루닛", side: "sell", quantity: 20, price: 56_000, time: "09:22:10", venue: "krx" },
+        { orderNo: "L1S2", code: "328130", name: "루닛", side: "sell", quantity: 20, price: 56_200, time: "09:22:42", venue: "krx" },
+        { orderNo: "L2B1", code: "328130", name: "루닛", side: "buy", quantity: 20, price: 55_600, time: "13:12:00", venue: "krx" },
+        { orderNo: "L2S1", code: "328130", name: "루닛", side: "sell", quantity: 20, price: 54_800, time: "13:40:00", venue: "krx" },
+        { orderNo: "S1B1", code: "005930", name: "삼성전자", side: "buy", quantity: 10, price: 70_000, time: "10:05:00", venue: "krx" },
+        { orderNo: "S1S1", code: "005930", name: "삼성전자", side: "sell", quantity: 10, price: 71_500, time: "10:25:00", venue: "krx" },
+      ],
+    },
+  ];
+  seedJournalHistory(scenario, groupedDays);
+  await page.goto("/journal");
+
+  await expect(page.getByTestId("journal-list-count")).toHaveText("거래 4건");
+  const lunitRows = page.getByTestId("journal-trade-row-328130");
+  await expect(lunitRows).toHaveCount(2);
+
+  const lunitTodayRow = page.locator('[data-group-key="2026-11-27|328130"]');
+  await expect(lunitTodayRow).toHaveAttribute("data-group-count", "2");
+  await expect(lunitTodayRow).toContainText("2건");
+  await expect(lunitTodayRow).toHaveAttribute("aria-selected", "true");
+
+  await expect(page.getByTestId("journal-rt-tabs")).toBeVisible();
+  await expect(page.getByTestId("journal-rt-tab-all")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("journal-candle-chart")).toHaveAttribute("data-trade-count", "2");
+  await expect(page.getByTestId("journal-candle-chart")).toHaveAttribute("data-marker-mode", "minimal");
+  await expect(page.getByTestId("journal-group-memos")).toBeVisible();
+
+  await page.getByTestId("journal-rt-tab-1").click();
+  await expect(page.getByTestId("journal-rt-tab-1")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("journal-candle-chart")).toHaveAttribute("data-trade-count", "1");
+  await page.getByTestId("journal-memo-input").fill("09:06 3분할 돌파 진입");
+  await expect(page.getByTestId("journal-memo-input")).toHaveValue("09:06 3분할 돌파 진입");
+
+  const firstFillRow = page.locator(".jrn-fills tbody tr").first();
+  await firstFillRow.hover();
+  await expect(firstFillRow).toHaveAttribute("data-fill-highlighted", "true");
+
+  await page.getByTestId("journal-rt-tab-all").click();
+  await expect(page.getByTestId("journal-group-memos")).toContainText("09:06 3분할 돌파 진입");
+
+  await page.getByRole("group", { name: "정렬" }).getByRole("button", { name: "손익", exact: true }).click();
+  await expect(page.locator('[data-group-key="2026-11-27|328130"]')).toHaveAttribute("data-group-count", "2");
+  await page.getByRole("group", { name: "정렬" }).getByRole("button", { name: "수익률", exact: true }).click();
+  await expect(page.locator('[data-group-key="2026-11-27|328130"]')).toHaveAttribute("data-group-count", "2");
+});

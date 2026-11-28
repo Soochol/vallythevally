@@ -212,7 +212,6 @@ export function JournalPage() {
           <JournalStudioView
             allTrades={allTrades}
             periodTrades={periodTrades}
-            filteredTrades={filteredTrades}
             visibleList={visibleList}
             summary={summary}
             range={range}

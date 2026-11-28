@@ -7,7 +7,8 @@ import { Segmented } from "../ui/Segmented";
 import { JournalCandleChart } from "./JournalCandleChart";
 import {
   activeFilterTokens,
-  autoTfOf,
+  autoTfForTrades,
+  buildDaySymbolGroups,
   clamp,
   DOW_KO,
   dayOfWeek,
@@ -28,10 +29,10 @@ import { useJournalStore } from "./journalStore";
 import {
   DEFAULT_TAGS,
   JOURNAL_TFS,
-  STYLE_LABELS,
   STYLE_SHORT,
   type JournalFill,
   type JournalSummary,
+  type JournalSymbolGroup,
   type JournalTrade,
 } from "./journalTypes";
 import { JournalWhereSection } from "./JournalWhereSection";
@@ -39,7 +40,6 @@ import { JournalWhereSection } from "./JournalWhereSection";
 interface Props {
   readonly allTrades: readonly JournalTrade[];
   readonly periodTrades: readonly JournalTrade[];
-  readonly filteredTrades: readonly JournalTrade[];
   readonly visibleList: readonly JournalTrade[];
   readonly summary: JournalSummary;
   readonly range: readonly [string, string];
@@ -51,10 +51,13 @@ interface Props {
   readonly onRetryHistory: () => void;
 }
 
+type ResolvedSelection =
+  | { readonly kind: "group"; readonly group: JournalSymbolGroup }
+  | { readonly kind: "trade"; readonly group: JournalSymbolGroup; readonly trade: JournalTrade };
+
 export function JournalStudioView({
   allTrades,
   periodTrades,
-  filteredTrades,
   visibleList,
   summary,
   range,
@@ -74,7 +77,7 @@ export function JournalStudioView({
   const sort = useJournalStore((s) => s.sort);
   const sortDir = useJournalStore((s) => s.sortDir);
   const quick = useJournalStore((s) => s.quick);
-  const selectedId = useJournalStore((s) => s.selectedId);
+  const selection = useJournalStore((s) => s.selection);
   const tfOverride = useJournalStore((s) => s.tf);
   const demoMode = useJournalStore((s) => s.demoMode);
   const notes = useJournalStore((s) => s.notes);
@@ -87,6 +90,7 @@ export function JournalStudioView({
   const setSort = useJournalStore((s) => s.setSort);
   const setQuick = useJournalStore((s) => s.setQuick);
   const selectTrade = useJournalStore((s) => s.selectTrade);
+  const selectGroup = useJournalStore((s) => s.selectGroup);
   const setTf = useJournalStore((s) => s.setTf);
   const setDemoMode = useJournalStore((s) => s.setDemoMode);
   const saveMemo = useJournalStore((s) => s.saveMemo);
@@ -111,45 +115,62 @@ export function JournalStudioView({
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1], "ko"));
   }, [periodTrades, filters.sym, symbolNames]);
 
-  const sortedList = useMemo(() => {
-    const copy = visibleList.slice();
-    const keyVal =
-      sort === "time"
-        ? (t: JournalTrade) => t.exitOrd
-        : sort === "pnl"
-          ? (t: JournalTrade) => tradePnl(t, afterCost)
-          : (t: JournalTrade) => tradeRetPct(t, afterCost);
-    copy.sort((a, b) => (keyVal(a) - keyVal(b)) * sortDir);
-    return copy;
-  }, [visibleList, sort, sortDir, afterCost]);
-
-  const selectedTrade = useMemo(
-    () => sortedList.find((t) => t.id === selectedId) ?? sortedList[0] ?? null,
-    [sortedList, selectedId],
+  const groups = useMemo(
+    () => buildDaySymbolGroups(visibleList, sort, sortDir, afterCost),
+    [visibleList, sort, sortDir, afterCost],
   );
 
-  const activeTf = selectedTrade ? tfOverride ?? autoTfOf(selectedTrade) : "1";
+  const resolved = useMemo<ResolvedSelection | null>(() => {
+    if (groups.length === 0) return null;
+    if (selection?.kind === "trade") {
+      for (const group of groups) {
+        const trade = group.trades.find((t) => t.id === selection.id);
+        if (trade !== undefined) return { kind: "trade", group, trade };
+      }
+    }
+    if (selection?.kind === "group") {
+      const group = groups.find((g) => g.key === selection.key);
+      if (group !== undefined) {
+        return group.trades.length > 1
+          ? { kind: "group", group }
+          : { kind: "trade", group, trade: group.trades[0]! };
+      }
+    }
+    const first = groups[0]!;
+    return first.trades.length > 1
+      ? { kind: "group", group: first }
+      : { kind: "trade", group: first, trade: first.trades[0]! };
+  }, [groups, selection]);
+
+  const activeGroup = resolved?.group ?? null;
+  const selectedTrade = resolved?.kind === "trade" ? resolved.trade : null;
+  const activeTrades = useMemo(
+    () => (resolved === null ? [] : resolved.kind === "group" ? resolved.group.trades : [resolved.trade]),
+    [resolved],
+  );
+  const activeTf = activeTrades.length > 0 ? tfOverride ?? autoTfForTrades(activeTrades) : "1";
 
   const glyphCap = useMemo(() => {
-    if (sortedList.length === 0) return 5;
-    const reaches = sortedList.map((t) => Math.max(t.mfe, -t.mae, Math.abs(t.exitRet))).sort((a, b) => a - b);
+    if (visibleList.length === 0) return 5;
+    const reaches = visibleList.map((t) => Math.max(t.mfe, -t.mae, Math.abs(t.exitRet))).sort((a, b) => a - b);
     return Math.max(1.2, reaches[Math.floor((reaches.length - 1) * 0.9)] ?? 5);
-  }, [sortedList]);
+  }, [visibleList]);
 
-  const grouped = sort === "time" && range[0] !== range[1];
+  const showDayHeaders = sort === "time" && range[0] !== range[1];
   const daySums = useMemo(() => {
     const map = new Map<string, number>();
-    if (!grouped) return map;
-    for (const t of sortedList) map.set(t.exitDay, (map.get(t.exitDay) ?? 0) + tradePnl(t, afterCost));
+    if (!showDayHeaders) return map;
+    for (const g of groups) map.set(g.day, (map.get(g.day) ?? 0) + g.net);
     return map;
-  }, [sortedList, grouped, afterCost]);
+  }, [groups, showDayHeaders]);
 
   const tokens = useMemo(() => activeFilterTokens(filters, symbolNames), [filters, symbolNames]);
   const extraTokens = useMemo(() => tokens.filter((t) => t.key !== "sym" && t.key !== "tag"), [tokens]);
 
+  const selectionIdentity = resolved === null ? "" : resolved.kind === "group" ? `g:${resolved.group.key}` : `t:${resolved.trade.id}`;
   useEffect(() => {
     setHighlightFill(null);
-  }, [selectedTrade?.id]);
+  }, [selectionIdentity]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -162,12 +183,20 @@ export function JournalStudioView({
         return;
       }
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      if ((e.key === "ArrowDown" || e.key === "j" || e.key === "ArrowUp" || e.key === "k") && sortedList.length > 0) {
+      if ((e.key === "ArrowDown" || e.key === "j" || e.key === "ArrowUp" || e.key === "k") && groups.length > 0) {
         e.preventDefault();
-        const curIdx = sortedList.findIndex((t) => t.id === selectedTrade?.id);
+        const curIdx = groups.findIndex((g) => g.key === activeGroup?.key);
         const delta = e.key === "ArrowDown" || e.key === "j" ? 1 : -1;
-        const nextIdx = clamp((curIdx < 0 ? 0 : curIdx) + delta, 0, sortedList.length - 1);
-        selectTrade(sortedList[nextIdx]!.id);
+        const nextIdx = clamp((curIdx < 0 ? 0 : curIdx) + delta, 0, groups.length - 1);
+        const nextGroup = groups[nextIdx]!;
+        if (nextGroup.trades.length > 1) selectGroup(nextGroup.key);
+        else selectTrade(nextGroup.trades[0]!.id);
+      } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && activeGroup !== null && activeGroup.trades.length > 1) {
+        e.preventDefault();
+        const curPos = resolved?.kind === "trade" ? activeGroup.trades.findIndex((t) => t.id === resolved.trade.id) + 1 : 0;
+        const nextPos = clamp(curPos + (e.key === "ArrowRight" ? 1 : -1), 0, activeGroup.trades.length);
+        if (nextPos === 0) selectGroup(activeGroup.key);
+        else selectTrade(activeGroup.trades[nextPos - 1]!.id);
       } else if (e.key === "1" || e.key === "3" || e.key === "5" || e.key.toLowerCase() === "d") {
         setTf(e.key.toUpperCase() as "1" | "3" | "5" | "D");
       } else if (e.key === "0") {
@@ -176,15 +205,52 @@ export function JournalStudioView({
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [sortedList, selectedTrade?.id, clearFilter, selectTrade, setTf]);
+  }, [groups, activeGroup, resolved, clearFilter, selectGroup, selectTrade, setTf]);
 
-  const fillsOfSelected = useMemo(() => {
-    if (selectedTrade === null) return [];
-    return [
-      ...selectedTrade.buys.map((f, i) => ({ fill: f, seq: i + 1, multi: selectedTrade.buys.length > 1 })),
-      ...selectedTrade.sells.map((f, i) => ({ fill: f, seq: i + 1, multi: selectedTrade.sells.length > 1 })),
-    ].sort((a, b) => a.fill.day.localeCompare(b.fill.day) || a.fill.minutes - b.fill.minutes);
-  }, [selectedTrade]);
+  const fillsOfActive = useMemo(() => {
+    const out: { readonly fill: JournalFill; readonly seq: number; readonly multi: boolean; readonly rtIdx: number }[] = [];
+    activeTrades.forEach((t, ti) => {
+      t.buys.forEach((f, i) => out.push({ fill: f, seq: i + 1, multi: t.buys.length > 1, rtIdx: ti + 1 }));
+      t.sells.forEach((f, i) => out.push({ fill: f, seq: i + 1, multi: t.sells.length > 1, rtIdx: ti + 1 }));
+    });
+    return out.sort(
+      (a, b) =>
+        a.fill.day.localeCompare(b.fill.day) ||
+        a.fill.minutes - b.fill.minutes ||
+        a.fill.orderNo.localeCompare(b.fill.orderNo, undefined, { numeric: true }),
+    );
+  }, [activeTrades]);
+
+  const activeTotals = useMemo(() => {
+    let net = 0;
+    let buyAmt = 0;
+    let sellAmt = 0;
+    let cost = 0;
+    let qty = 0;
+    let buyCount = 0;
+    let sellCount = 0;
+    for (const t of activeTrades) {
+      net += tradePnl(t, afterCost);
+      buyAmt += t.buyAmt;
+      sellAmt += t.sellAmt;
+      cost += t.cost;
+      qty += t.qty;
+      buyCount += t.buys.length;
+      sellCount += t.sells.length;
+    }
+    return {
+      net,
+      buyAmt,
+      sellAmt,
+      cost,
+      qty,
+      buyCount,
+      sellCount,
+      avgBuy: qty > 0 ? buyAmt / qty : 0,
+      avgSell: qty > 0 ? sellAmt / qty : 0,
+      retPct: buyAmt > 0 ? (net / buyAmt) * 100 : 0,
+    };
+  }, [activeTrades, afterCost]);
 
   const selectedNote = selectedTrade ? resolveNote(selectedTrade, notes) : null;
   const sumTone = toneClass(summary.net);
@@ -194,6 +260,21 @@ export function JournalStudioView({
     setSavedFlash(true);
     window.setTimeout(() => setSavedFlash(false), 1100);
   };
+
+  const detailMeta = useMemo(() => {
+    if (resolved === null) return "";
+    if (resolved.kind === "group") {
+      const g = resolved.group;
+      const venueTag = g.hasNxt ? "NXT · " : "";
+      return `${g.code} · ${venueTag}${dayShortLabel(g.day)} ${formatMinutes(g.earliestEntryMin)}–${formatMinutes(g.latestExitMin)}`;
+    }
+    const t = resolved.trade;
+    const venueTag = t.venue === "nxt" ? "NXT · " : "";
+    const span = t.swing
+      ? `${dayShortLabel(t.entryDay)} ${formatMinutes(t.entryMin)} → ${dayShortLabel(t.exitDay)} ${formatMinutes(t.exitMin)}`
+      : `${dayShortLabel(t.exitDay)} ${formatMinutes(t.entryMin)}–${formatMinutes(t.exitMin)}`;
+    return `${t.code} · ${venueTag}${span}`;
+  }, [resolved]);
 
   return (
     <div ref={rootRef} className="jrn-shell">
@@ -283,7 +364,7 @@ export function JournalStudioView({
           <span className="jrn-grow" />
           {isSyncingHistory && (
             <span className="jrn-mute jrn-fs-xs" data-testid="journal-sync-status">
-              {pendingDays > 0 ? `과거 체결 불러오는 중 (${pendingDays}일 남음)` : "체결 불러오는 중…"}
+              {pendingDays > 0 ? `동기화 중 (${pendingDays}일)` : "불러오는 중…"}
             </span>
           )}
           {historyError !== null && (
@@ -293,7 +374,7 @@ export function JournalStudioView({
           )}
           {demoMode && (
             <button type="button" className="jrn-txt-btn" onClick={() => setDemoMode(false)}>
-              예시 데이터 닫기
+              예시 닫기
             </button>
           )}
           <div className="jrn-quiet-summary" data-testid="journal-quiet-summary">
@@ -318,7 +399,7 @@ export function JournalStudioView({
         <section className="jrn-studio" aria-label="타점 복기 스튜디오">
           <aside className="jrn-list-col">
             <div className="jrn-list-top">
-              <span className="jrn-list-count" data-testid="journal-list-count">{`거래 ${sortedList.length}건`}</span>
+              <span className="jrn-list-count" data-testid="journal-list-count">{`거래 ${visibleList.length}건`}</span>
               <Segmented
                 label="정렬"
                 mode="pressed"
@@ -340,80 +421,72 @@ export function JournalStudioView({
                   </button>
                 ))}
               </div>
-              {quick !== "all" && (
-                <span className="jrn-mute jrn-fs-xs">{`필터 전 ${filteredTrades.length}건`}</span>
-              )}
-            </div>
-            <div className="jrn-glyph-legend">
-              <svg width="52" height="12" aria-hidden="true">
-                <line className="jrn-g-line" x1="6" x2="46" y1="6" y2="6" />
-                <line className="jrn-g-tick" x1="24" x2="24" y1="2" y2="10" />
-                <circle className="jrn-f-up" cx="38" cy="6" r="3" />
-              </svg>
-              <span>보유 중 최저~최고 · 눈금 평단 · 점 청산</span>
             </div>
 
             <div className="jrn-rows" role="listbox" aria-label="라운드트립 거래 목록">
-              {sortedList.length === 0 ? (
+              {groups.length === 0 ? (
                 <div className="jrn-empty" data-testid="journal-empty-state">
                   <p>
                     {isSyncingHistory
-                      ? "이 기간의 체결 내역을 불러오는 중입니다"
+                      ? "체결 내역을 불러오는 중입니다"
                       : tokens.length > 0 || quick !== "all"
-                        ? "이 조건에 맞는 거래가 없습니다"
-                        : "이 기간에 청산한 거래가 없습니다"}
+                        ? "조건에 맞는 거래가 없습니다"
+                        : "청산한 거래가 없습니다"}
                   </p>
                   <div className="jrn-empty-actions">
                     {tokens.length > 0 || quick !== "all" ? (
                       <button type="button" className="jrn-route-btn" onClick={() => clearFilter("*")}>
-                        조건 모두 지우기
+                        조건 지우기
                       </button>
                     ) : (
-                      <>
-                        {!hasRealTrades && !demoMode && (
-                          <button
-                            type="button"
-                            className="jrn-route-btn jrn-route-primary"
-                            data-testid="journal-enable-demo"
-                            onClick={() => setDemoMode(true)}
-                          >
-                            예시 데이터로 체험
-                          </button>
-                        )}
-                      </>
+                      !hasRealTrades && !demoMode && (
+                        <button
+                          type="button"
+                          className="jrn-route-btn jrn-route-primary"
+                          data-testid="journal-enable-demo"
+                          onClick={() => setDemoMode(true)}
+                        >
+                          예시 데이터 체험
+                        </button>
+                      )
                     )}
                   </div>
                 </div>
               ) : (
-                sortedList.map((t, idx) => {
-                  const prevDay = idx > 0 ? sortedList[idx - 1]!.exitDay : null;
-                  const showGroup = grouped && t.exitDay !== prevDay;
-                  const dayVal = daySums.get(t.exitDay) ?? 0;
-                  const p = tradePnl(t, afterCost);
-                  const r = tradeRetPct(t, afterCost);
-                  const pTone = toneClass(p);
-                  const rTone = toneClass(r);
-                  const note = resolveNote(t, notes);
-                  const preview = note.memo || note.tags.slice(0, 2).map((x) => `#${x}`).join(" ");
-                  const when = t.swing
-                    ? `${dayShortLabel(t.entryDay)}→${dayShortLabel(t.exitDay)}`
-                    : `${grouped || range[0] === range[1] ? "" : `${dayShortLabel(t.exitDay)} `}${formatMinutes(t.entryMin)}–${formatMinutes(t.exitMin)}`;
-                  const badge = [
-                    t.venue === "nxt" ? "NXT" : "",
-                    t.swing ? "스윙" : "",
-                    t.styleIdx !== 0 ? STYLE_SHORT[t.styleIdx] : "",
+                groups.map((g, idx) => {
+                  const prevDay = idx > 0 ? groups[idx - 1]!.day : null;
+                  const showGroup = showDayHeaders && g.day !== prevDay;
+                  const dayVal = daySums.get(g.day) ?? 0;
+                  const pTone = toneClass(g.net);
+                  const rTone = toneClass(g.retPct);
+                  const isMulti = g.trades.length > 1;
+                  const single = g.trades[0]!;
+                  const isSelected = activeGroup?.key === g.key;
+                  const [, m, d] = g.day.split("-").map(Number);
+
+                  const singleBadge = [
+                    single.venue === "nxt" ? "NXT" : "",
+                    single.swing ? "스윙" : "",
+                    single.styleIdx !== 0 ? STYLE_SHORT[single.styleIdx] : "",
                   ]
                     .filter(Boolean)
                     .join(" · ");
 
+                  const multiBadge = [g.hasNxt ? "NXT" : "", g.hasSwing ? "스윙" : ""].filter(Boolean).join(" · ");
+                  const prefixDay = showDayHeaders || range[0] === range[1] ? "" : `${dayShortLabel(g.day)} `;
+                  const when = isMulti
+                    ? `${prefixDay}${formatMinutes(g.earliestEntryMin)}–${formatMinutes(g.latestExitMin)}`
+                    : single.swing
+                      ? `${dayShortLabel(single.entryDay)}→${dayShortLabel(single.exitDay)}`
+                      : `${prefixDay}${formatMinutes(single.entryMin)}–${formatMinutes(single.exitMin)}`;
+
                   const gx = (v: number) => (42 + clamp(v, -glyphCap, glyphCap) * (36 / glyphCap)).toFixed(1);
-                  const [, m, d] = t.exitDay.split("-").map(Number);
 
                   return (
-                    <div key={t.id}>
+                    <div key={g.key}>
                       {showGroup && (
                         <div className="jrn-grp">
-                          <span>{`${m}월 ${d}일 ${DOW_KO[dayOfWeek(t.exitDay)]}`}</span>
+                          <span>{`${m}월 ${d}일 ${DOW_KO[dayOfWeek(g.day)]}`}</span>
                           <span className={toneClass(dayVal) ? `jrn-${toneClass(dayVal)}` : ""}>{`${formatWon(dayVal)}원`}</span>
                         </div>
                       )}
@@ -421,66 +494,76 @@ export function JournalStudioView({
                         type="button"
                         role="option"
                         className="jrn-row"
-                        aria-selected={selectedTrade?.id === t.id}
-                        data-testid={`journal-trade-row-${t.code}`}
-                        onClick={() => selectTrade(t.id)}
+                        aria-selected={isSelected}
+                        data-testid={`journal-trade-row-${g.code}`}
+                        data-group-key={g.key}
+                        data-group-count={g.trades.length}
+                        onClick={() => (isMulti ? selectGroup(g.key) : selectTrade(single.id))}
                       >
                         <span className="jrn-r-title">
-                          <span className="jrn-r-name">{t.name}</span>
-                          {badge !== "" && <span className="jrn-r-badge">{badge}</span>}
+                          <span className="jrn-r-name">{g.name}</span>
+                          {isMulti ? (
+                            <>
+                              <span className="jrn-cnt-pill">{`${g.trades.length}건`}</span>
+                              {multiBadge !== "" && <span className="jrn-r-badge">{multiBadge}</span>}
+                            </>
+                          ) : (
+                            singleBadge !== "" && <span className="jrn-r-badge">{singleBadge}</span>
+                          )}
                         </span>
                         <span className="jrn-r-glyph">
-                          <svg width="84" height="20" aria-hidden="true">
-                            <line className="jrn-g-line" x1={gx(t.mae)} x2={gx(t.mfe)} y1="10" y2="10" />
-                            <line className="jrn-g-tick" x1="42" x2="42" y1="5" y2="15" />
-                            <circle className={t.exitRet > 0 ? "jrn-f-up" : t.exitRet < 0 ? "jrn-f-dn" : "jrn-f-flat"} cx={gx(t.exitRet)} cy="10" r="3" />
-                          </svg>
+                          {isMulti ? (
+                            <span className="jrn-wl-dots" aria-hidden="true">
+                              {g.trades.map((t) => {
+                                const tp = tradePnl(t, afterCost);
+                                const dotTone = tp > 0 ? "up" : tp < 0 ? "dn" : "flat";
+                                return <span key={t.id} className={`jrn-wl-dot jrn-wl-dot-${dotTone}`} />;
+                              })}
+                            </span>
+                          ) : (
+                            <svg width="84" height="20" aria-hidden="true">
+                              <line className="jrn-g-line" x1={gx(single.mae)} x2={gx(single.mfe)} y1="10" y2="10" />
+                              <line className="jrn-g-tick" x1="42" x2="42" y1="5" y2="15" />
+                              <circle
+                                className={single.exitRet > 0 ? "jrn-f-up" : single.exitRet < 0 ? "jrn-f-dn" : "jrn-f-flat"}
+                                cx={gx(single.exitRet)}
+                                cy="10"
+                                r="3"
+                              />
+                            </svg>
+                          )}
                         </span>
-                        <span className={`jrn-r-pnl${pTone ? ` jrn-${pTone}` : ""}`}>{formatWon(p)}</span>
+                        <span className={`jrn-r-pnl${pTone ? ` jrn-${pTone}` : ""}`}>{formatWon(g.net)}</span>
                         <span className="jrn-r-meta">
                           <span>{when}</span>
-                          <span>{formatHoldDuration(t)}</span>
-                          {preview !== "" && <u>{preview}</u>}
+                          <span>{isMulti ? `${g.wins}승 ${g.losses}패` : formatHoldDuration(single)}</span>
                         </span>
-                        <span className={`jrn-r-ret${rTone ? ` jrn-${rTone}` : ""}`}>{formatPct(r)}</span>
+                        <span className={`jrn-r-ret${rTone ? ` jrn-${rTone}` : ""}`}>{formatPct(g.retPct)}</span>
                       </button>
                     </div>
                   );
                 })
               )}
             </div>
-
-            <div className="jrn-keys">
-              <span><kbd>↑</kbd><kbd>↓</kbd>이동</span>
-              <span><kbd>1</kbd><kbd>3</kbd><kbd>5</kbd><kbd>D</kbd>봉 주기</span>
-              <span><kbd>0</kbd>맞춤</span>
-              <span><kbd>Esc</kbd>조건 해제</span>
-            </div>
           </aside>
 
           <section className="jrn-detail-col" aria-label="개별 거래 타점 복기">
-            {selectedTrade === null ? (
-              <div className="jrn-detail-empty">거래를 선택하면 타점 차트와 체결 내역이 표시됩니다</div>
+            {resolved === null || activeGroup === null ? (
+              <div className="jrn-detail-empty">거래를 선택하면 차트와 체결 내역이 표시됩니다</div>
             ) : (
               <>
                 <div className="jrn-d-head">
                   <div className="jrn-d-title">
-                    <b data-testid="journal-detail-name">{selectedTrade.name}</b>
-                    <span className="jrn-code jrn-mono">
-                      {`${selectedTrade.code} · ${selectedTrade.venue} · ${
-                        selectedTrade.swing
-                          ? `${dayShortLabel(selectedTrade.entryDay)} ${formatMinutes(selectedTrade.entryMin)} → ${dayShortLabel(selectedTrade.exitDay)} ${formatMinutes(selectedTrade.exitMin)}`
-                          : `${selectedTrade.exitDay} · ${formatMinutes(selectedTrade.entryMin)}–${formatMinutes(selectedTrade.exitMin)}`
-                      }`}
-                    </span>
+                    <b data-testid="journal-detail-name">{activeGroup.name}</b>
+                    <span className="jrn-code jrn-mono">{detailMeta}</span>
                   </div>
                   <div className="jrn-d-head-right">
                     <div className="jrn-d-pnl-pair">
-                      <b className={toneClass(tradePnl(selectedTrade, afterCost)) ? `jrn-${toneClass(tradePnl(selectedTrade, afterCost))}` : ""}>
-                        {`${formatWon(tradePnl(selectedTrade, afterCost))}원`}
+                      <b className={toneClass(activeTotals.net) ? `jrn-${toneClass(activeTotals.net)}` : ""}>
+                        {`${formatWon(activeTotals.net)}원`}
                       </b>
-                      <span className={toneClass(tradeRetPct(selectedTrade, afterCost)) ? `jrn-${toneClass(tradeRetPct(selectedTrade, afterCost))}` : ""}>
-                        {formatPct(tradeRetPct(selectedTrade, afterCost))}
+                      <span className={toneClass(activeTotals.retPct) ? `jrn-${toneClass(activeTotals.retPct)}` : ""}>
+                        {formatPct(activeTotals.retPct)}
                       </span>
                     </div>
                     <Segmented
@@ -494,38 +577,86 @@ export function JournalStudioView({
                   </div>
                 </div>
 
+                {activeGroup.trades.length > 1 && (
+                  <div className="jrn-rt-tabs" role="group" aria-label="회차 선택" data-testid="journal-rt-tabs">
+                    <button
+                      type="button"
+                      className="jrn-rt-tab"
+                      aria-pressed={resolved.kind === "group"}
+                      data-testid="journal-rt-tab-all"
+                      onClick={() => selectGroup(activeGroup.key)}
+                    >
+                      <span>{`전체 ${activeGroup.trades.length}건`}</span>
+                      <span className={toneClass(activeGroup.net) ? `jrn-${toneClass(activeGroup.net)}` : ""}>
+                        {formatWon(activeGroup.net)}
+                      </span>
+                    </button>
+                    {activeGroup.trades.map((t, idx) => {
+                      const tp = tradePnl(t, afterCost);
+                      const tr = tradeRetPct(t, afterCost);
+                      const dotTone = tp > 0 ? "up" : tp < 0 ? "dn" : "flat";
+                      const label = t.swing
+                        ? `${idx + 1}회 스윙`
+                        : `${idx + 1}회 ${formatMinutes(t.entryMin)}–${formatMinutes(t.exitMin)}`;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          className="jrn-rt-tab"
+                          aria-pressed={selectedTrade?.id === t.id}
+                          data-testid={`journal-rt-tab-${idx + 1}`}
+                          onClick={() => selectTrade(t.id)}
+                        >
+                          <span className={`jrn-wl-dot jrn-wl-dot-${dotTone}`} aria-hidden="true" />
+                          <span>{label}</span>
+                          <span className={toneClass(tr) ? `jrn-${toneClass(tr)}` : ""}>{formatPct(tr)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <dl className="jrn-d-stats">
                   <div>
-                    <dt>평균 매입 → 청산</dt>
-                    <dd>{`${formatWon(selectedTrade.avgBuy, false)} → ${formatWon(selectedTrade.avgSell, false)}원`}</dd>
+                    <dt>평단 → 청산</dt>
+                    <dd>{`${formatWon(activeTotals.avgBuy, false)} → ${formatWon(activeTotals.avgSell, false)}원`}</dd>
                   </div>
+                  {selectedTrade !== null ? (
+                    <div>
+                      <dt>보유</dt>
+                      <dd>{formatHoldDuration(selectedTrade)}</dd>
+                    </div>
+                  ) : (
+                    <div>
+                      <dt>승패</dt>
+                      <dd>{`${activeGroup.wins}승 ${activeGroup.losses}패`}</dd>
+                    </div>
+                  )}
                   <div>
-                    <dt>보유 기간</dt>
-                    <dd>{formatHoldDuration(selectedTrade)}</dd>
+                    <dt>수량 · 금액</dt>
+                    <dd>{`${activeTotals.qty.toLocaleString("ko-KR")}주 · ${formatCompactWon(activeTotals.buyAmt, false)}`}</dd>
                   </div>
-                  <div>
-                    <dt>수량 · 투입</dt>
-                    <dd>{`${selectedTrade.qty.toLocaleString("ko-KR")}주 · ${formatCompactWon(selectedTrade.buyAmt, false)}`}</dd>
-                  </div>
-                  <div>
-                    <dt>진입 방식</dt>
-                    <dd>{STYLE_LABELS[selectedTrade.styleIdx]}</dd>
-                  </div>
-                  <div>
-                    <dt>보유 중 최저 / 최고</dt>
-                    <dd>
-                      <span className="jrn-dn">{formatPct(selectedTrade.mae)}</span>
-                      <small> / </small>
-                      <span className="jrn-up">{formatPct(selectedTrade.mfe)}</span>
-                    </dd>
-                  </div>
+                  {selectedTrade !== null ? (
+                    <div>
+                      <dt>최저 / 최고</dt>
+                      <dd>
+                        <span className="jrn-dn">{formatPct(selectedTrade.mae)}</span>
+                        <small> / </small>
+                        <span className="jrn-up">{formatPct(selectedTrade.mfe)}</span>
+                      </dd>
+                    </div>
+                  ) : (
+                    <div>
+                      <dt>체결</dt>
+                      <dd>{`매수 ${activeTotals.buyCount} · 매도 ${activeTotals.sellCount}`}</dd>
+                    </div>
+                  )}
                 </dl>
 
                 <JournalCandleChart
-                  trade={selectedTrade}
+                  trades={activeTrades}
                   tf={activeTf}
                   today={today}
-                  isAutoTf={tfOverride === null}
                   afterCost={afterCost}
                   highlightFill={highlightFill}
                   resetTick={resetTick}
@@ -535,7 +666,11 @@ export function JournalStudioView({
                   <div>
                     <h3>
                       <span>체결 내역</span>
-                      <span className="jrn-mute">행에 올리면 해당 봉 강조</span>
+                      <span className="jrn-mute">
+                        {`매수 ${activeTotals.buyCount} · 매도 ${activeTotals.sellCount}${
+                          afterCost ? ` · 비용 ${formatWon(activeTotals.cost, false)}원` : ""
+                        }`}
+                      </span>
                     </h3>
                     <div className="jrn-fills" onMouseLeave={() => setHighlightFill(null)}>
                       <table>
@@ -549,18 +684,19 @@ export function JournalStudioView({
                           </tr>
                         </thead>
                         <tbody>
-                          {fillsOfSelected.map(({ fill, seq, multi }) => (
+                          {fillsOfActive.map(({ fill, seq, multi, rtIdx }) => (
                             <tr
-                              key={`${fill.side}-${fill.orderNo}-${seq}`}
+                              key={`${rtIdx}-${fill.side}-${fill.orderNo}-${seq}`}
+                              data-fill-highlighted={highlightFill === fill ? "true" : undefined}
                               onMouseEnter={() => setHighlightFill(fill)}
                             >
                               <td>
                                 <span className={fill.side === "sell" ? "jrn-dn" : "jrn-up"}>
-                                  {`${fill.side === "sell" ? "▼ 매도" : "▲ 매수"}${multi ? seq : ""}`}
+                                  {`${resolved.kind === "group" ? `${rtIdx}회 ` : ""}${fill.side === "sell" ? "▼ 매도" : "▲ 매수"}${multi ? seq : ""}`}
                                 </span>
                               </td>
                               <td className="jrn-mute">
-                                {selectedTrade.swing ? `${dayShortLabel(fill.day)} ${fill.timeLabel}` : fill.timeLabel}
+                                {fill.day !== activeGroup.day ? `${dayShortLabel(fill.day)} ${fill.timeLabel}` : fill.timeLabel}
                               </td>
                               <td>{fill.qty.toLocaleString("ko-KR")}</td>
                               <td>{formatWon(fill.price, false)}</td>
@@ -570,48 +706,76 @@ export function JournalStudioView({
                         </tbody>
                       </table>
                     </div>
-                    <div className="jrn-fills-foot">
-                      <span>{`매입 ${formatWon(selectedTrade.buyAmt, false)} · 매도 ${formatWon(selectedTrade.sellAmt, false)} · 비용 ${afterCost ? `${formatWon(selectedTrade.cost, false)}원` : "제외"}`}</span>
-                      <b className={toneClass(tradePnl(selectedTrade, afterCost)) ? `jrn-${toneClass(tradePnl(selectedTrade, afterCost))}` : ""}>
-                        {`${formatWon(tradePnl(selectedTrade, afterCost))}원 (${formatPct(tradeRetPct(selectedTrade, afterCost))})`}
-                      </b>
-                    </div>
                   </div>
 
                   <div className="jrn-memo-area">
-                    <h3>
-                      <label htmlFor="journal-memo-input">복기 메모 · 태그</label>
-                      <span className={`jrn-save-ind${savedFlash ? " on" : ""}`}>저장됨</span>
-                    </h3>
-                    <div className="jrn-memo-tags">
-                      {DEFAULT_TAGS.map((tg) => {
-                        const active = selectedNote?.tags.includes(tg) ?? false;
-                        return (
-                          <button
-                            key={tg}
-                            type="button"
-                            className="jrn-m-tag"
-                            aria-pressed={active}
-                            onClick={() => {
-                              toggleTradeTag(selectedTrade.id, tg, selectedTrade.defaultMemo, selectedTrade.defaultTags);
-                              triggerFlash();
-                            }}
-                          >
-                            {`#${tg}`}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <textarea
-                      id="journal-memo-input"
-                      data-testid="journal-memo-input"
-                      placeholder="진입·청산 근거를 남겨 두세요. 입력하면 즉시 저장됩니다."
-                      value={selectedNote?.memo ?? ""}
-                      onChange={(e) => {
-                        saveMemo(selectedTrade.id, e.target.value, selectedTrade.defaultTags);
-                        triggerFlash();
-                      }}
-                    />
+                    {selectedTrade !== null ? (
+                      <>
+                        <h3>
+                          <label htmlFor="journal-memo-input">복기 메모 · 태그</label>
+                          <span className={`jrn-save-ind${savedFlash ? " on" : ""}`}>저장됨</span>
+                        </h3>
+                        <div className="jrn-memo-tags">
+                          {DEFAULT_TAGS.map((tg) => {
+                            const active = selectedNote?.tags.includes(tg) ?? false;
+                            return (
+                              <button
+                                key={tg}
+                                type="button"
+                                className="jrn-m-tag"
+                                aria-pressed={active}
+                                onClick={() => {
+                                  toggleTradeTag(selectedTrade.id, tg, selectedTrade.defaultMemo, selectedTrade.defaultTags);
+                                  triggerFlash();
+                                }}
+                              >
+                                {`#${tg}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <textarea
+                          id="journal-memo-input"
+                          data-testid="journal-memo-input"
+                          placeholder="복기 메모"
+                          value={selectedNote?.memo ?? ""}
+                          onChange={(e) => {
+                            saveMemo(selectedTrade.id, e.target.value, selectedTrade.defaultTags);
+                            triggerFlash();
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <h3>
+                          <span>회차별 메모</span>
+                          <span className="jrn-mute">{`${activeGroup.trades.length}건`}</span>
+                        </h3>
+                        <div className="jrn-group-memos" data-testid="journal-group-memos">
+                          {activeGroup.trades.map((t, idx) => {
+                            const n = resolveNote(t, notes);
+                            const tr = tradeRetPct(t, afterCost);
+                            const text = n.memo || n.tags.map((x) => `#${x}`).join(" ");
+                            return (
+                              <button
+                                key={t.id}
+                                type="button"
+                                className="jrn-group-memo-item"
+                                onClick={() => selectTrade(t.id)}
+                              >
+                                <span className="jrn-gm-head">
+                                  <b>{`${idx + 1}회 · ${formatMinutes(t.entryMin)}–${formatMinutes(t.exitMin)}`}</b>
+                                  <span className={toneClass(tr) ? `jrn-${toneClass(tr)}` : ""}>{formatPct(tr)}</span>
+                                </span>
+                                <span className={text !== "" ? "jrn-gm-body" : "jrn-gm-empty"}>
+                                  {text !== "" ? text : "메모 작성"}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </>
@@ -621,7 +785,7 @@ export function JournalStudioView({
 
         <JournalWhereSection
           periodTrades={periodTrades}
-          filteredListCount={sortedList.length}
+          filteredListCount={visibleList.length}
           onScrollTop={() => {
             rootRef.current?.closest(".page-stage")?.scrollTo({ top: 0, behavior: "smooth" });
           }}
