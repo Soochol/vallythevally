@@ -756,12 +756,13 @@ pub fn read_quote_day(hogaplay_dir: &Path) -> Result<Option<QuoteDay>, String> {
             if acc.single_price { None } else { Some(&acc.close) },
             (!acc.peak.is_empty()).then_some(&acc.peak),
         );
+        let quote = VenueQuote { close: acc.close, peak: acc.peak, price_max };
         minutes.push(QuoteMinute {
             minute,
             close_sec: acc.close_sec,
             single_price: acc.single_price,
-            combined: VenueQuote { close: acc.close, peak: acc.peak, price_max },
-            krx: VenueQuote::default(),
+            combined: quote.clone(),
+            krx: quote,
             nxt: VenueQuote::default(),
         });
     }
@@ -909,7 +910,7 @@ mod tests {
         assert!(!quote_day.minutes[0].single_price);
         assert_eq!(quote_day.minutes[0].combined.close.ask_total(), 400);
         assert_eq!(quote_day.minutes[0].combined.close.bid_total(), 400);
-        assert!(quote_day.minutes[0].krx.close.is_empty());
+        assert_eq!(quote_day.minutes[0].krx, quote_day.minutes[0].combined);
         assert!(quote_day.minutes[0].nxt.close.is_empty());
         assert_eq!(quote_day.minutes[1].minute, 545);
         assert_eq!(quote_day.minutes[1].combined.close.ask_total(), 720);
