@@ -495,7 +495,7 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
               ctx.fillStyle = palette.text3;
               ctx.font = `600 11px ${palette.fontSans}`;
               ctx.textAlign = "center";
-              ctx.fillText("블라인드 복기 (H 해제)", blindLeft + (PAD_L + plotW - blindLeft) / 2, padT + priceH / 2);
+              ctx.fillText("블라인드", blindLeft + (PAD_L + plotW - blindLeft) / 2, padT + priceH / 2);
             }
             ctx.restore();
           }
@@ -931,18 +931,19 @@ export function ReplayCharts({ session, engine, paper, blindMode, bookmarks, pal
   };
 
   return (
-    <section className="rp-col" aria-label="분봉 차트와 4대 보조지표">
-      <div className="rp-pane-head">
+    <section className="rp-col" aria-label="분봉 차트와 보조지표">
+      <div className="mw-head rp-chart-head">
         <div className="rp-pane-title">
-          <span>{`${timeframe}분봉 · VWAP`}</span>
+          <span className="mw-head-name">{`${timeframe}분봉 · VWAP`}</span>
           <span ref={hmLabelRef} className="rp-muted rp-mono">09:00</span>
         </div>
         <div className="rp-pane-controls">
-          <div className="rp-seg rp-mono" role="group" aria-label="분봉 주기" data-testid="replay-chart-timeframe">
+          <div className="ui-seg" data-size="sm" role="group" aria-label="분봉 주기" data-testid="replay-chart-timeframe">
             {REPLAY_CHART_TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
                 type="button"
+                className="ui-seg-item"
                 aria-pressed={timeframe === tf}
                 onClick={() => setTimeframe(tf)}
               >

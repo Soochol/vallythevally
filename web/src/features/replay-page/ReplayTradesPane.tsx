@@ -115,6 +115,12 @@ export function ReplayTradesPane({
     const apply = (frame: ReplayEngineFrame) => {
       latestFrameRef.current = frame;
       setText(strengthRef.current, `${formatDecimal(frame.strength)}%`);
+      if (strengthRef.current) {
+        const dir = frame.strength >= 100 ? "up" : "down";
+        if (strengthRef.current.getAttribute("data-dir") !== dir) {
+          strengthRef.current.setAttribute("data-dir", dir);
+        }
+      }
       setText(cumRef.current, formatQuantity(frame.cumVol));
 
       const resetChanged = frame.tradesResetVersion !== lastResetVersionRef.current;
@@ -230,7 +236,7 @@ export function ReplayTradesPane({
   const withMs = pane.resolution === "tick";
   const minKey = minKeyOf(tapeMinWon);
   const visibleSlice = displayedTrades.slice(windowed.range.start, windowed.range.end);
-  const showFooter = pane.backfilling || pane.hasMore || (tapeMinWon > 0 && displayedTrades.length > 0 && pane.scannedFromMin !== null);
+  const showFooter = pane.backfilling || pane.hasMore;
 
   const emptyMessage = pane.backfilling
     ? `${formatWonCompact(tapeMinWon)} 이상의 과거 체결을 찾는 중입니다`
@@ -242,20 +248,16 @@ export function ReplayTradesPane({
     ? (pane.scannedFromMin !== null
         ? `과거 체결 탐색 중 (${formatReplayHM(pane.scannedFromMin * 60)} 이전)`
         : "과거 체결 탐색 중")
-    : tapeMinWon > 0 && pane.scannedFromMin !== null
-      ? `${formatReplayHM(pane.scannedFromMin * 60)} ~ ${formatReplayHM(pane.cursorMs / 1000)} (${displayedTrades.length.toLocaleString("ko-KR")}건)`
-      : `${displayedTrades.length.toLocaleString("ko-KR")}건 표시`;
+    : `${displayedTrades.length.toLocaleString("ko-KR")}건`;
 
   return (
-    <section className="rp-col" aria-label="체결창" data-testid="replay-trades-pane">
+    <section className="rp-stream-pane" aria-label="체결창" data-testid="replay-trades-pane">
       <div className="tr-window">
         <div className="mw-head tr-strips">
-          <span className="mw-head-name">체결</span>
-          <span className="mw-head-div" aria-hidden="true" />
           <div className="tr-strip-metrics">
             <span className="tr-figure" data-figure="strength" title="체결강도">
               <span className="tr-name">강도</span>
-              <b ref={strengthRef} data-testid="replay-trade-strength">100.0%</b>
+              <b ref={strengthRef} data-testid="replay-trade-strength" data-dir="up">100.0%</b>
             </span>
             <RatioBar buy={buySell.buy} sell={buySell.sell} label="최근 체결의 매수·매도 비율" />
             <span className="tr-figure" data-figure="cumulative" title="누적">
@@ -289,7 +291,7 @@ export function ReplayTradesPane({
           )}
           <div
             ref={windowed.scroller}
-            className="tr-tape rp-mono rp-tape-scroll"
+            className="tr-tape rp-tape-scroll"
             data-testid="replay-tape"
             data-pinned={pinned ? "true" : "false"}
             role="table"

@@ -251,6 +251,12 @@ test("/replay는 센터드 3열 콕핏·선택형 보조 흐름·체결/프로�
 
   await expect(page.getByTestId("replay-tab-trades")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("replay-trades-pane")).toBeVisible();
+  await expect(page.getByTestId("replay-trade-strength")).toHaveAttribute("data-dir", "up");
+  await expect(page.getByTestId("replay-sim-status")).toHaveCount(0);
+  await expect(page.getByTestId("replay-ladder")).toHaveClass(/\bod\b/);
+  await expect(page.getByTestId("replay-ladder").locator(".mw-footer.od-footer .mw-strip-ratio")).toBeVisible();
+  const ladderRowBox = (await page.getByTestId("replay-ladder").locator(".mw-lr").first().boundingBox())!;
+  expect(ladderRowBox.height).toBeCloseTo(24, 0);
 
   await page.getByTestId("replay-tab-program").click();
   await expect(page.getByTestId("replay-program-pane")).toBeVisible();
