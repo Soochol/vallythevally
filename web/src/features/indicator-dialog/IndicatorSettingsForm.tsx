@@ -193,7 +193,7 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
                 {f.type === "optionalInt" && (
                   <Switch label={f.toggle} checked={on} className="min-h-[var(--size-30)] text-s" onChange={(next) => setEnabled(f.key, next)} />
                 )}
-                {!usePopover && kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
+                {kind === "ma" && f.key === "period" && <span role="group" aria-label="자주 쓰는 기간" className="flex items-center gap-1">
                   {PERIOD_PRESETS.map((preset) => <button key={preset} type="button" aria-pressed={text === preset} className="h-6 rounded-s border border-line bg-bg px-2 text-xs text-text-2 hover:text-text aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-accent-ink" onClick={() => setText(f.key, preset)}>{preset}</button>)}
                 </span>}
                 <span className="flex items-center gap-1.5">
@@ -299,7 +299,6 @@ export function IndicatorSettingsForm({ draft, color, errors, onChange, lineSamp
               theme={THEME_SWATCHES}
               width={draft.width}
               size="lg"
-              opacity={hasBarOpacity(draft.form) ? { value: draft.barOpacity, min: BAR_OPACITY_MIN, max: BAR_OPACITY_MAX, onChange: (barOpacity) => onChange({ ...draft, barOpacity }) } : undefined}
               onColorChange={(next) => onChange({ ...draft, color: next })}
               onWidthChange={(width) => onChange({ ...draft, width })}
             />

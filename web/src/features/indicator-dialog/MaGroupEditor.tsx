@@ -169,7 +169,7 @@ export function MaGroupEditor({ cellId }: { cellId: WindowId }) {
   return <MaGroupEditorView cellId={cellId} allIndicators={cell.chartSettings.indicators} />;
 }
 
-export function MaGroupEditorView({ cellId, allIndicators }: { cellId: WindowId; allIndicators: readonly IndicatorConfig[] }) {
+export function MaGroupEditorView({ cellId, allIndicators, compact = false }: { cellId: WindowId; allIndicators: readonly IndicatorConfig[]; compact?: boolean }) {
   const validator = useValidator();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [newPeriod, setNewPeriod] = useState("");
@@ -216,15 +216,17 @@ export function MaGroupEditorView({ cellId, allIndicators }: { cellId: WindowId;
 
   return (
     <>
-      <div className="ic-ed-head">
-        <h3 className="text-l font-semibold">이동평균선</h3>
-        <span className="ic-place-badge">가격 패널</span>
-        <span className="flex-1" />
-        <p className="inline-flex items-center gap-1.5 text-s text-accent">
-          <span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />
-          자동 저장됨
-        </p>
-      </div>
+      {!compact && (
+        <div className="ic-ed-head">
+          <h3 className="text-l font-semibold">이동평균선</h3>
+          <span className="ic-place-badge">가격 패널</span>
+          <span className="flex-1" />
+          <p className="inline-flex items-center gap-1.5 text-s text-accent">
+            <span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />
+            자동 저장됨
+          </p>
+        </div>
+      )}
 
       <div className="ic-ma-preview">
         <div className="ic-ma-preview-tags">

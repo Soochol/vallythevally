@@ -3,6 +3,7 @@ import { KINDS, specName } from "../../chart/indicators/kinds";
 import type { IndicatorConfig } from "../../chart/settings";
 import { chartWindows, useLayoutStore } from "../../stores/layout";
 import { CloseIcon, DRAWING_ICONS, EyeIcon, Icon } from "../icons";
+import { removeIndicatorWithUndo } from "../indicator-inspector/removalUndo";
 import { Popover } from "../overlay/Popover";
 import { IndicatorSettingsForm } from "./IndicatorSettingsForm";
 import { useLiveIndicatorDraft } from "./liveDraft";
@@ -33,7 +34,7 @@ export function IndicatorPopover({ cellId, initial, anchor, editRoot, onClose }:
       <div className="ip-head">
         <h3 className="flex-1 text-m font-semibold">{KINDS[initial.spec.kind].label}</h3>
         <button type="button" className="icon-btn" aria-label={shown ? "지표 숨기기" : "지표 보이기"} aria-pressed={!shown} title={shown ? "숨기기" : "보이기"} onClick={() => useLayoutStore.getState().updateIndicator(cellId, initial.id, { visible: !shown })}><EyeIcon size={15} off={!shown} /></button>
-        <button type="button" className="icon-btn text-danger" aria-label="지표 지우기" title="지우기" onClick={() => { useLayoutStore.getState().removeIndicator(cellId, initial.id); onClose(); }}><Icon path={DRAWING_ICONS.trash} size={15} /></button>
+        <button type="button" className="icon-btn text-danger" aria-label="지표 지우기" title="지우기" onClick={() => { removeIndicatorWithUndo(cellId, initial); onClose(); }}><Icon path={DRAWING_ICONS.trash} size={15} /></button>
         <button type="button" className="icon-btn" aria-label="설정 닫기" onClick={() => close()}><CloseIcon size={14} /></button>
       </div>
       <div className="ip-body">

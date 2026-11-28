@@ -23,6 +23,7 @@ export type SearchPurpose = "open" | "watch" | "page" | "replay";
 export interface PutTarget { listId: string; groupId: string | null }
 export type IndicatorCommandMode = "current" | "add" | "compare";
 export type ChartPanelMode = IndicatorCommandMode | "settings";
+export type ChartDockMode = ChartPanelMode | "drawings";
 export type Dialog =
   | { kind: "search"; purpose: SearchPurpose }
   | { kind: "indicatorCommand"; cellId: WindowId; mode: ChartPanelMode; indicatorId: string | null }
@@ -30,7 +31,7 @@ export type Dialog =
   | { kind: "hotkey-sheet" }
   | { kind: "system-settings"; menu: SystemMenuId | null };
 export type InspectorRequest = { cellId: WindowId; mode: IndicatorCommandMode; indicatorId: string | null };
-export type ChartDockState = { cellId: WindowId; mode: ChartPanelMode; indicatorId: string | null };
+export type ChartDockState = { cellId: WindowId; mode: ChartDockMode; indicatorId: string | null; snapped: boolean };
 export type PhoneTab = "chart" | "watch" | "screener";
 
 /** 저장하지 않는 화면 상태(frontend.md §5.3). */
@@ -49,7 +50,9 @@ interface SelectionState {
   openIndicatorDialog(cellId: WindowId, mode: ChartPanelMode, indicatorId: string | null): void;
   setIndicatorDialogMode(mode: ChartPanelMode): void;
   openIndicatorInspector(cellId: WindowId, mode: IndicatorCommandMode, indicatorId: string | null): void;
-  openChartDock(cellId: WindowId, mode: ChartPanelMode, indicatorId: string | null): void;
+  openChartDock(cellId: WindowId, mode: ChartDockMode, indicatorId: string | null, snapped?: boolean): void;
+  setChartDockSnapped(snapped: boolean): void;
+  selectChartDockIndicator(indicatorId: string | null): void;
   closeChartDock(): void;
   takeInspectorRequest(): InspectorRequest | null;
   openScreenEditor(window: WindowId | null): void;
@@ -88,7 +91,18 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     useLayoutStore.getState().showWindow("indicators");
     if (!useLayoutStore.getState().layout.windows.some((w) => w.kind === "indicators")) set({ inspector: null, dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } });
   },
-  openChartDock: (cellId, mode, indicatorId) => set({ dialog: null, activeCell: cellId, chartDock: { cellId, mode, indicatorId } }),
+  openChartDock: (cellId, mode, indicatorId, snapped) => set((s) => ({
+    dialog: null,
+    activeCell: cellId,
+    chartDock: {
+      cellId,
+      mode,
+      indicatorId,
+      snapped: snapped ?? (s.chartDock?.cellId === cellId ? s.chartDock.snapped : true),
+    },
+  })),
+  setChartDockSnapped: (snapped) => set((s) => (s.chartDock ? { chartDock: { ...s.chartDock, snapped } } : s)),
+  selectChartDockIndicator: (indicatorId) => set((s) => (s.chartDock ? { chartDock: { ...s.chartDock, indicatorId } } : s)),
   closeChartDock: () => set({ chartDock: null }),
   takeInspectorRequest: () => {
     const request = get().inspector;
