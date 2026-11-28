@@ -5,6 +5,7 @@ import type { SymbolInfo } from "../../api/generated/SymbolInfo";
 import type { Venue } from "../../api/generated/Venue";
 import { useFundamentals, useSymbolInfo } from "../../api/queries";
 import { daySummaryQuery } from "../../api/userData";
+import type { WindowId } from "../../layout/kinds";
 import { marketSocket } from "../../stores/realtime";
 import { serverNow, useServerClock } from "../../stores/serverClock";
 import { useSymbolVi } from "../../stores/symbolVi";
@@ -59,11 +60,11 @@ export interface LadderMarket extends ResolvedLadderMarket {
   readonly downSince: number | null;
 }
 
-export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGap: boolean): LadderMarket {
+export function useLadderMarket(code: SymbolCode, pager: InfoPager, skipSpreadGap: boolean, windowId?: WindowId): LadderMarket {
   const venue = useShownVenue(code);
-  const replayEnabled = useBookReplayEnabled();
-  const replayOrderLock = useBookReplayOrderLock();
-  const replay = useBookReplay(code);
+  const replayEnabled = useBookReplayEnabled(code, windowId);
+  const replayOrderLock = useBookReplayOrderLock(code, windowId);
+  const replay = useBookReplay(code, windowId);
   const liveEnabled = replay.kind === "live";
   const { state: tapeState, dispatch: tapeDispatch } = useTradeTape(marketSocket, code, venue, HISTORY_PAGES, liveEnabled);
   const shownVenue = tapeState.historyVenue ?? venue;

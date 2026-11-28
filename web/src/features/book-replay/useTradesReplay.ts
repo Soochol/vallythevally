@@ -4,7 +4,10 @@ import { bookReplayTradesQueryKey, TODAY_REFETCH_MS, useBookReplayTrades } from 
 import type { BookReplayTrades } from "../../api/generated/BookReplayTrades";
 import type { SymbolCode } from "../../api/generated/SymbolCode";
 import type { Venue } from "../../api/generated/Venue";
+import type { WindowId } from "../../layout/kinds";
 import { gapContaining } from "../brokers/history";
+import { projectTickReplayTrades } from "../tick-replay/projections";
+import { useTickReplayFrame, useTickReplayMatch } from "../tick-replay/scope";
 import { projectTradesReplay, type TradesReplayView } from "./tradesReplay";
 import type { WorkspaceReplayCursor } from "./useWorkspaceReplayCursor";
 
@@ -23,9 +26,12 @@ export function useTradesReplay(
   cursor: WorkspaceReplayCursor,
   venue: Venue,
   minWon: number,
+  windowId?: WindowId,
 ): TradesReplayView {
+  const tickMatch = useTickReplayMatch(windowId, code);
+  const tickFrame = useTickReplayFrame(tickMatch?.engine ?? null);
   const queryClient = useQueryClient();
-  const pointed = cursor.kind === "pointed" ? cursor : null;
+  const pointed = tickMatch === null && cursor.kind === "pointed" ? cursor : null;
   const [settled, setSettled] = useState<SettledTarget | null>(() =>
     pointed === null ? null : { code, date: pointed.date, untilSec: pointed.secondOfDay },
   );
@@ -89,13 +95,12 @@ export function useTradesReplay(
     return () => window.clearTimeout(timer);
   }, [retryDelay, query.refetch, query.dataUpdatedAt, query.errorUpdatedAt, pointed]);
 
-  return useMemo(
-    () =>
-      projectTradesReplay(cursor, {
-        data: query.data,
-        isPending: query.isPending,
-        isError: query.isError,
-      }),
-    [cursor, query.data, query.isPending, query.isError],
-  );
+  return useMemo(() => {
+    if (tickMatch !== null) return projectTickReplayTrades(tickMatch, tickFrame, minWon);
+    return projectTradesReplay(cursor, {
+      data: query.data,
+      isPending: query.isPending,
+      isError: query.isError,
+    });
+  }, [tickMatch, tickFrame, minWon, cursor, query.data, query.isPending, query.isError]);
 }
