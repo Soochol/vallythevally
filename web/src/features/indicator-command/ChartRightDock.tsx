@@ -112,7 +112,15 @@ function DockCompareBody({ cellId }: { cellId: WindowId }) {
   );
 }
 
-export function ChartRightDock({ cellId, hostRef }: { cellId: WindowId; hostRef: React.RefObject<HTMLElement | null> }) {
+export function ChartRightDock({
+  cellId,
+  hostRef,
+  hideDrawings = false,
+}: {
+  cellId: WindowId;
+  hostRef: React.RefObject<HTMLElement | null>;
+  hideDrawings?: boolean;
+}) {
   const dock = useSelectionStore((s) => s.chartDock);
   const active = dock?.cellId === cellId ? dock : null;
   const [cellWidth, setCellWidth] = useState(0);
@@ -140,9 +148,10 @@ export function ChartRightDock({ cellId, hostRef }: { cellId: WindowId; hostRef:
   return (
     <ChartRightDockBody
       cellId={cellId}
-      mode={active.mode}
+      mode={hideDrawings && active.mode === "drawings" ? defaultIndicatorMode(cellId) : active.mode}
       indicatorId={active.indicatorId}
       layout={chartDockLayoutFor(cellWidth)}
+      hideDrawings={hideDrawings}
     />
   );
 }
@@ -152,11 +161,13 @@ function ChartRightDockBody({
   mode,
   indicatorId,
   layout,
+  hideDrawings,
 }: {
   cellId: WindowId;
   mode: ChartDockMode;
   indicatorId: string | null;
   layout: ChartDockLayout;
+  hideDrawings: boolean;
 }) {
   const cell = useCell(cellId);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
@@ -310,7 +321,7 @@ function ChartRightDockBody({
       <header className="b3-head">
         <div role="group" aria-label="차트 설정 영역" className="ic-section-seg b3-seg">
           <button type="button" aria-pressed={tab === "layers"} onClick={() => switchTab("layers")}>레이어</button>
-          <button type="button" aria-pressed={tab === "drawings"} onClick={() => switchTab("drawings")}>드로잉</button>
+          {!hideDrawings && <button type="button" aria-pressed={tab === "drawings"} onClick={() => switchTab("drawings")}>드로잉</button>}
           <button type="button" aria-label="차트 설정" aria-pressed={tab === "chart"} onClick={() => switchTab("chart")}>차트</button>
         </div>
         <div className="b3-head-actions">

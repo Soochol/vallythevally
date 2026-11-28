@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { WindowId } from "../layout/kinds";
 import type { SystemMenuId } from "../features/system-settings/menus";
-import { chartWindows, DEFAULT_LAYOUT, useLayoutStore } from "./layout";
+import { chartWindows, DEFAULT_LAYOUT, findChartCell, useLayoutStore } from "./layout";
 import { useUiStore } from "./ui";
 import { activeWatchlist, useWatchlistStore } from "./watchlist";
 
@@ -68,7 +68,7 @@ interface SelectionState {
 let toastId = 0;
 
 export function defaultIndicatorMode(cellId: WindowId): IndicatorCommandMode {
-  const chart = chartWindows(useLayoutStore.getState().layout).find((w) => w.id === cellId);
+  const chart = findChartCell(useLayoutStore.getState(), cellId);
   return chart?.chartSettings.indicators.length ? "current" : "add";
 }
 
@@ -91,16 +91,23 @@ export const useSelectionStore = create<SelectionState>()((set, get) => ({
     useLayoutStore.getState().showWindow("indicators");
     if (!useLayoutStore.getState().layout.windows.some((w) => w.kind === "indicators")) set({ inspector: null, dialog: { kind: "indicatorCommand", cellId, mode, indicatorId } });
   },
-  openChartDock: (cellId, mode, indicatorId) => set({
-    dialog: null,
-    activeCell: cellId,
-    chartDock: { cellId, mode, indicatorId },
+  openChartDock: (cellId, mode, indicatorId) => set((s) => {
+    const isWorkspaceChart = chartWindows(useLayoutStore.getState().layout).some((w) => w.id === cellId);
+    return {
+      dialog: null,
+      activeCell: isWorkspaceChart ? cellId : s.activeCell,
+      chartDock: { cellId, mode, indicatorId },
+    };
   }),
-  toggleChartDock: (cellId) => set((s) => (
-    s.chartDock?.cellId === cellId
-      ? { chartDock: null }
-      : { dialog: null, activeCell: cellId, chartDock: { cellId, mode: defaultIndicatorMode(cellId), indicatorId: null } }
-  )),
+  toggleChartDock: (cellId) => set((s) => {
+    if (s.chartDock?.cellId === cellId) return { chartDock: null };
+    const isWorkspaceChart = chartWindows(useLayoutStore.getState().layout).some((w) => w.id === cellId);
+    return {
+      dialog: null,
+      activeCell: isWorkspaceChart ? cellId : s.activeCell,
+      chartDock: { cellId, mode: defaultIndicatorMode(cellId), indicatorId: null },
+    };
+  }),
   selectChartDockIndicator: (indicatorId) => set((s) => (s.chartDock ? { chartDock: { ...s.chartDock, indicatorId } } : s)),
   closeChartDock: () => set({ chartDock: null }),
   takeInspectorRequest: () => {

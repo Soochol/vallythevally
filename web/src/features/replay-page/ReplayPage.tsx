@@ -432,6 +432,7 @@ export function ReplayPage() {
             style={{ flexGrow: chartShare, flexShrink: 1, flexBasis: 0 }}
           >
             <ReplayCharts
+              code={code}
               session={session}
               engine={engine}
               paper={paper}

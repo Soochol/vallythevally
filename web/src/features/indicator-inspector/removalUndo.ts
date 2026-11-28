@@ -1,7 +1,7 @@
 import { specName } from "../../chart/indicators/kinds";
 import { type IndicatorConfig, placementOfConfig } from "../../chart/settings";
 import type { WindowId } from "../../layout/kinds";
-import { chartWindows, useLayoutStore } from "../../stores/layout";
+import { findChartCell, useLayoutStore } from "../../stores/layout";
 import { useSelectionStore } from "../../stores/selection";
 
 export function restoreIndicator(cellId: WindowId, config: IndicatorConfig): IndicatorConfig | null {
@@ -10,7 +10,7 @@ export function restoreIndicator(cellId: WindowId, config: IndicatorConfig): Ind
   if (!createdId) return null;
   if (!config.visible) useLayoutStore.getState().updateIndicator(cellId, createdId, { visible: false });
   if (config.axis && config.axis !== "auto") useLayoutStore.getState().setIndicatorAxis(cellId, createdId, config.axis);
-  return chartWindows(useLayoutStore.getState().layout).find((cell) => cell.id === cellId)?.chartSettings.indicators.find((item) => item.id === createdId) ?? null;
+  return findChartCell(useLayoutStore.getState(), cellId)?.chartSettings.indicators.find((item) => item.id === createdId) ?? null;
 }
 
 export function restoreIndicators(cellId: WindowId, configs: readonly IndicatorConfig[]): void {

@@ -212,7 +212,7 @@ function seedTickReplay(scenario: Scenario) {
   );
 }
 
-test("/replay는 센터드 3열 콕핏·선택형 보조 흐름·체결/프로그램/거래원 탭·10호가를 보이고 상단 종목찾기·연동색이 없다", async ({ page, scenario }) => {
+test("/replay는 센터드 3열 콕핏·메인 차트/지표 도킹·체결/프로그램/거래원 탭·10호가를 보이고 상단 종목찾기·연동색이 없다", async ({ page, scenario }) => {
   seedTickReplay(scenario);
   await page.goto(`/replay?symbol=${CODE}&date=${DATE}`);
 
@@ -236,18 +236,22 @@ test("/replay는 센터드 3열 콕핏·선택형 보조 흐름·체결/프로�
   expect(chartBox.x).toBeLessThan(ladderSlotBox.x);
   expect(ladderSlotBox.x).toBeLessThan(rightSlotBox.x);
 
-  const subs = page.getByTestId("replay-sub-indicators");
-  await expect(subs.locator('[data-indicator="obi"]')).toContainText("호가 잔량비");
-  await subs.locator('[data-indicator-tab="totals"]').click();
-  await expect(subs.locator('[data-indicator="totals"]')).toContainText("총잔량");
-  await subs.locator('[data-indicator-tab="strength"]').click();
-  await expect(subs.locator('[data-indicator="strength"]')).toContainText("체결강도");
-  await subs.locator('[data-indicator-tab="program"]').click();
-  await expect(subs.locator('[data-indicator="program"]')).toContainText("프로그램 누적");
-  await subs.locator('[data-indicator-tab="none"]').click();
-  await expect(subs.locator("[data-indicator]")).toHaveCount(0);
-  await subs.locator('[data-indicator-tab="obi"]').click();
-  await expect(subs.locator('[data-indicator="obi"]')).toBeVisible();
+  const mainChart = page.getByTestId("replay-main-chart");
+  await expect(mainChart).toBeVisible();
+  await expect(mainChart.locator("canvas").first()).toBeVisible();
+  const dockToggle = page.getByRole("button", { name: "지표 레이어 열기" });
+  await expect(dockToggle).toContainText("1");
+  await dockToggle.click();
+  const chartDock = page.getByRole("complementary", { name: "차트 우측 설정 패널" });
+  await expect(chartDock).toBeVisible();
+  await expect(chartDock.getByRole("button", { name: "드로잉" })).toHaveCount(0);
+  const quickInput = chartDock.getByPlaceholder(/지표 추가/);
+  await quickInput.click();
+  await chartDock.getByRole("group", { name: "이동평균 기간 빠른 추가" }).getByRole("button", { name: "20", exact: true }).click();
+  await expect(page.getByRole("button", { name: "지표 레이어 닫기" })).toContainText("2");
+  await expect(mainChart.locator("[data-indicator-row]")).toHaveCount(2);
+  await chartDock.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(chartDock).toHaveCount(0);
 
   await expect(page.getByTestId("replay-tab-trades")).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByTestId("replay-trades-pane")).toBeVisible();
