@@ -138,13 +138,13 @@ const Table = memo(function Table({ lines, previousClose }: { lines: readonly Pr
   );
 });
 
-function ProgramBody({ code }: { code: SymbolCode }) {
+function ProgramBody({ id, code }: { id: WindowId; code: SymbolCode }) {
   const windowVisible = useWindowVisible();
-  const replayEnabled = useBookReplayEnabled();
-  const cursor = useWorkspaceReplayCursor(code);
+  const replayEnabled = useBookReplayEnabled(code, id);
+  const cursor = useWorkspaceReplayCursor(code, id);
   const isLive = cursor.kind === "live";
   const liveActive = windowVisible && isLive;
-  const replay = useProgramReplay(code, cursor);
+  const replay = useProgramReplay(code, cursor, id);
   const [clockTick, setClockTick] = useState(0);
   useEffect(() => {
     if (!liveActive) return;
@@ -270,5 +270,5 @@ function ProgramBody({ code }: { code: SymbolCode }) {
 }
 
 export function ProgramWindow({ id }: { id: WindowId }) {
-  return <MarketWindowGate id={id}>{(code) => <ProgramBody key={code} code={code} />}</MarketWindowGate>;
+  return <MarketWindowGate id={id}>{(code) => <ProgramBody key={code} id={id} code={code} />}</MarketWindowGate>;
 }

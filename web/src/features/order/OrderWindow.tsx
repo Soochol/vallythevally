@@ -10,8 +10,8 @@ import { useMockEnvironment } from "../../stores/kiwoomLink";
 import { useLayoutStore } from "../../stores/layout";
 import { useOrderSettings, useUiStore } from "../../stores/ui";
 import { useCallAuctionSession } from "../../stores/callAuctionSession";
+import { exitActiveReplay } from "../../stores/tickReplay";
 import { useViSession } from "../../stores/viSession";
-import { disableBookReplay } from "../book-replay/useBookReplay";
 import { basePrice, buildLadderRows, defaultLadderPrices, type LadderPrices, type LadderRow } from "../market-window/ladder";
 import { infoSlot, replayTradeSlot, tradeSlot } from "../market-window/LadderSlots";
 import { useLinkedSymbol } from "../market-window/MarketWindowGate";
@@ -117,7 +117,7 @@ function OrderBody({
   const orderVenue: Venue = mock ? "krx" : settings.venue;
   const setSettings = useUiStore((s) => s.setOrderSettings);
   const rememberEntry = useUiStore((s) => s.rememberOrderEntry);
-  const market = useLadderMarket(code, infoPager, settings.skipSpreadGap);
+  const market = useLadderMarket(code, infoPager, settings.skipSpreadGap, id);
   const { feed, replay, replayLocked, liveView, liveQuotes, bounds, tickRule, totals, trades, symbolInfo } = market;
   const accountRef = choice.current?.ref ?? null;
   const entryKey = useLayoutStore((s) => orderEntryKey(s.layout.id, id, code));
@@ -140,7 +140,7 @@ function OrderBody({
   const data = useOrderData(accountRef, code, access.open, referencePrice, balance);
   const writes = useOrderWrites(choice.current, code, orderVenue, id, {
     blocked: replayLocked,
-    onBlocked: () => statusOfReplayLocked(disableBookReplay),
+    onBlocked: () => statusOfReplayLocked(exitActiveReplay),
   });
   const fellBack = choice.fellBack;
   useEffect(() => {
@@ -179,7 +179,7 @@ function OrderBody({
     writes,
     (nextQuantity, usedAt) => rememberEntry(entryKey, { quantity: nextQuantity, usedAt }),
     clearBuyRatio,
-    disableBookReplay,
+    exitActiveReplay,
   );
 
   const drag = useOrderDrag(ladder, (source, outcome) => commands.drop(source, outcome));
@@ -290,11 +290,11 @@ function OrderBody({
         onBuyRatio={setBuyRatio}
       />
       <div className="bk-ladder od-ladder-wrap" data-stale={replay.kind === "live" && !feed.connected ? "" : undefined} data-exploring={explorerOn ? "" : undefined} data-state={shownLadder ? undefined : ""}>
-        {replayLocked && (replay.kind === "none" || !shownLadder) && <OrderReplayBanner onUnlock={disableBookReplay} />}
+        {replayLocked && (replay.kind === "none" || !shownLadder) && <OrderReplayBanner onUnlock={exitActiveReplay} />}
         {replay.kind === "none" ? (
           <EmptyState title={replay.reason} />
         ) : shownLadder ? (
-          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable} replayLocked={replayLocked} onReplayBlocked={commands.notifyReplayLocked} onReplayUnlock={disableBookReplay} previewQuantity={quantity} buyRatio={buyRatioActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayViewingPast || referencePrice === null || fullPrices === null} explorerTitle={replayViewingPast ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} headerOverlay={headerOverlay} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
+          <OrderLadder rows={rows} previousClose={market.headPreviousClose} groups={data.groups} writable={writable} replayLocked={replayLocked} onReplayBlocked={commands.notifyReplayLocked} onReplayUnlock={exitActiveReplay} previewQuantity={quantity} buyRatio={buyRatioActive} buying={data.capacity.buying} hover={hover} averagePrice={averagePrice} dayPrices={replay.kind === "live" ? feed.dayPrices : null} divider={settings.divider} rateShown={settings.rate} rowHeightPx={rowHeightPx} explorerOn={explorerOn} explorerUnavailable={replayViewingPast || referencePrice === null || fullPrices === null} explorerTitle={replayViewingPast ? undefined : fullPrices === null ? EXPLORER_UNAVAILABLE : undefined} onToggleExplorer={toggleExplorer} explorerCenterPrice={explorerOn ? referencePrice : null} ladder={ladder} drag={drag} expectedPrice={market.expected?.price ?? null} headerOverlay={headerOverlay} rowSlots={replay.kind === "past" ? pastRowSlots : { infoCard: infoSlot(infoSlots, infoPager), bottomLeft: tradeSlot(trades, feed.previousClose) }} actions={ladderActions} />
         ) : feed.snapshotFailed ? (
           <ErrorState message="호가를 불러오지 못했습니다" retry={feed.retry} />
         ) : (

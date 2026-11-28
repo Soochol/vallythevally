@@ -34,8 +34,11 @@ import type { MicroRange } from "../api/microSeries";
 import { ApiRequestError } from "../api/http";
 import { formatPrice } from "../lib/format";
 import type { Connection, MarketSocketLike } from "../api/socket";
-import { isIndexCode, PERIOD_LABEL, symbolSub } from "../lib/symbol";
+import { isIndexCode, isMinutePeriod, type MinutePeriod, PERIOD_LABEL, symbolSub } from "../lib/symbol";
 import { type ShownVenue, venueLabel } from "../lib/venue";
+import type { ReplayEngine, ReplayEngineFrame } from "../features/replay-page/replayEngine";
+import type { ReplaySession } from "../features/replay-page/replayModel";
+import { projectTickReplayBars } from "../features/tick-replay/chartBars";
 import { displayBars, type FetchPage, filterRegularHistory, type History } from "./barFeed";
 import { barAtRightEdge, type JumpAnchor, jumpAnchor, jumpHeld, type JumpOutcome, jumpRoute, kstDateOf, lastBarBefore } from "./barJump";
 import { type CompareEntry, CompareLayer, compareVenue } from "./compare";
@@ -120,6 +123,18 @@ const PRICE_MODE: Record<PriceScale, PriceScaleMode> = {
 export interface JumpRequest {
   date: KstDate;
   interval: BarInterval;
+}
+
+export interface ChartTickReplayConfig {
+  readonly session: ReplaySession;
+  readonly engine: ReplayEngine;
+  readonly isArchive: boolean;
+}
+
+interface ActiveChartTickReplay extends ChartTickReplayConfig {
+  readonly priorBars: readonly Bar[];
+  readonly priorPeriod: MinutePeriod | null;
+  readonly unsub: () => void;
 }
 
 export interface CellView {
@@ -237,6 +252,7 @@ export class ChartController {
   private readonly socket: MarketSocketLike | undefined;
   private tradeFeedSub: { symbol: SymbolCode; venue: ShownVenue | null; stop: () => void } | null = null;
   private programFeedSub: { symbol: SymbolCode; stop: () => void } | null = null;
+  private tickReplay: ActiveChartTickReplay | null = null;
   private readonly resize: ResizeObserver;
   private readonly hostResize: ResizeObserver;
   private readonly narrowMedia: MediaQueryList;
@@ -408,7 +424,7 @@ export class ChartController {
       if (this.settingData) return;
       const left = this.leftT();
       const before = left === null ? -1 : barIndexAtOrAfter(this.bars, left);
-      if (r && before >= 0 && before < LOAD_OLDER_WITHIN) this.feed.needOlder();
+      if (r && before >= 0 && before < LOAD_OLDER_WITHIN && this.tickReplay === null) this.feed.needOlder();
       this.updateIntradayEnd();
       this.compare.coverFrom(this.leftT());
       if (this.view?.settings.compare.length) this.renderLegend();
@@ -454,40 +470,55 @@ export class ChartController {
         },
       });
     }
-    if (prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period) {
-      this.jumpToken++;
-      this.enteringJump = null;
-      this.extendingJump = false;
-      const preservingJump = prev !== null && this.feed.activeDate !== null && keepsJumpMode({ symbol: prev.symbol, venue: prev.venue, period: prev.period }, { symbol: next.symbol, venue: next.venue, period: next.period });
-      if (preservingJump) {
-        const edge = barAtRightEdge(this.bars, this.rightEdgeT());
-        const last = this.bars.at(-1);
-        if (edge !== null && last !== undefined) {
-          this.jumpInterval = edge.t < last.t ? barInterval(edge.t, prev.period) : null;
+    const targetChanged = prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period;
+    const preserveTickReplay =
+      this.tickReplay !== null
+      && prev !== null
+      && prev.symbol === next.symbol
+      && isIntraday(next.period);
+    if (targetChanged) {
+      if (this.tickReplay !== null && !preserveTickReplay) {
+        this.detachTickReplayState();
+      }
+      if (!preserveTickReplay) {
+        this.jumpToken++;
+        this.enteringJump = null;
+        this.extendingJump = false;
+        const preservingJump = prev !== null && this.feed.activeDate !== null && keepsJumpMode({ symbol: prev.symbol, venue: prev.venue, period: prev.period }, { symbol: next.symbol, venue: next.venue, period: next.period });
+        if (preservingJump) {
+          const edge = barAtRightEdge(this.bars, this.rightEdgeT());
+          const last = this.bars.at(-1);
+          if (edge !== null && last !== undefined) {
+            this.jumpInterval = edge.t < last.t ? barInterval(edge.t, prev.period) : null;
+          }
+        } else {
+          this.jumpInterval = null;
         }
+        if (prev && isIndexCode(prev.symbol) !== isIndex) {
+          this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, this.priceAxisGeometry()) });
+          this.indicators.refreshPriceFormat();
+        }
+        this.clearPointedBar();
+        this.crosshairMarker.show(null);
+        this.rawHistory = null;
+        this.history = null;
+        this.initialRange.release();
+        this.ready = null;
+        this.legend.setNotice(null);
+        this.setBars([]);
+        this.indicators.clear();
+        this.onStatus({ kind: "loading" });
+        this.pendingEnd = null;
+        this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
+        this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
       } else {
-        this.jumpInterval = null;
+        this.clearPointedBar();
+        this.crosshairMarker.show(null);
+        this.hoverIndex = null;
+        this.financialHoverTime = null;
       }
-      if (prev && isIndexCode(prev.symbol) !== isIndex) {
-        this.main.api.applyOptions({ priceFormat: priceFormat(isIndex, this.priceAxisGeometry()) });
-        this.indicators.refreshPriceFormat();
-      }
-      this.clearPointedBar();
-      this.crosshairMarker.show(null);
-      this.rawHistory = null;
-      this.history = null;
-      this.initialRange.release();
-      this.ready = null;
-      this.legend.setNotice(null);
-      this.setBars([]);
-      this.indicators.clear();
-      this.onStatus({ kind: "loading" });
-      this.pendingEnd = null;
-      this.feed.open({ symbol: next.symbol, venue: next.venue, period: next.period });
-      this.fineBars.open({ symbol: next.symbol, venue: next.venue, period: next.period });
     }
     const configsChanged = prev?.period !== next.period || (prev !== null && isIndexCode(prev.symbol) !== isIndex) || prev?.settings.indicators !== next.settings.indicators || prev?.settings.panels !== next.settings.panels;
-    const targetChanged = prev?.symbol !== next.symbol || prev.venue !== next.venue || prev.period !== next.period;
     if (targetChanged) {
       this.indicators.setQuoteTarget({ symbol: next.symbol, venue: next.venue, period: next.period }, !configsChanged);
       this.indicators.setMicroTarget({ symbol: next.symbol, period: next.period }, !configsChanged);
@@ -503,8 +534,14 @@ export class ChartController {
     if (prev !== null && prev.settings.candlesOnTop !== next.settings.candlesOnTop) this.indicators.syncPriceOrder();
     if (prev !== null && prev.settings.scalePriceOnly !== next.settings.scalePriceOnly) this.indicators.syncPriceScale();
     if (targetChanged || configsChanged) this.syncMicroFeeds();
-    if (!targetChanged && prev !== null && prev.settings.regularHoursOnly !== next.settings.regularHoursOnly && isIntraday(next.period) && this.rawHistory !== null) {
-      this.reapplyHistory();
+    if (preserveTickReplay && this.tickReplay !== null) {
+      this.applyTickReplayFrame(this.tickReplay.engine.getFrame(), true);
+    } else if (!targetChanged && prev !== null && prev.settings.regularHoursOnly !== next.settings.regularHoursOnly && isIntraday(next.period)) {
+      if (this.tickReplay !== null) {
+        this.applyTickReplayFrame(this.tickReplay.engine.getFrame(), true);
+      } else if (this.rawHistory !== null) {
+        this.reapplyHistory();
+      }
     } else if (prev && prev.settings.visibleBars !== next.settings.visibleBars) {
       this.fitInitialRange();
     }
@@ -644,8 +681,166 @@ export class ChartController {
     this.renderLegend();
   }
 
+  setTickReplay(config: ChartTickReplayConfig | null): void {
+    if (this.disposed) return;
+    if (config === null) {
+      if (this.tickReplay === null) return;
+      this.detachTickReplayState();
+      const view = this.view;
+      if (!view) return;
+      this.hoverIndex = null;
+      this.financialHoverTime = null;
+      this.initialRange.release();
+      this.ready = null;
+      this.pendingDraw.clear();
+      this.onStatus({ kind: "loading" });
+      this.feed.open({ symbol: view.symbol, venue: view.venue, period: view.period });
+      this.fineBars.open({ symbol: view.symbol, venue: view.venue, period: view.period });
+      this.syncCompare();
+      this.syncMicroFeeds();
+      this.renderBadge();
+      this.daySeparators.sync();
+      return;
+    }
+
+    if (
+      this.tickReplay !== null
+      && this.tickReplay.engine === config.engine
+    ) {
+      if (this.tickReplay.session !== config.session || this.tickReplay.isArchive !== config.isArchive) {
+        this.tickReplay = { ...this.tickReplay, session: config.session, isArchive: config.isArchive };
+        this.applyTickReplayFrame(config.engine.getFrame(), false);
+      }
+      return;
+    }
+
+    const priorBars = this.tickReplay !== null
+      ? this.tickReplay.priorBars
+      : this.view !== null && isMinutePeriod(this.view.period)
+        ? (this.rawHistory ? displayBars(this.rawHistory) : [...this.bars])
+        : [];
+    const priorPeriod = this.tickReplay !== null
+      ? this.tickReplay.priorPeriod
+      : this.view !== null && isMinutePeriod(this.view.period)
+        ? this.view.period
+        : null;
+
+    if (this.tickReplay !== null) {
+      this.tickReplay.unsub();
+    }
+
+    this.el.dataset.tickReplay = "active";
+    this.stopMicroFeeds();
+    let initialApplied = false;
+    const active: ActiveChartTickReplay = {
+      ...config,
+      priorBars,
+      priorPeriod,
+      unsub: () => {},
+    };
+    this.tickReplay = active;
+    this.syncCompare();
+    this.syncMicroFeeds();
+    const unsub = config.engine.subscribeFrame((frame) => {
+      const refit = !initialApplied;
+      initialApplied = true;
+      this.applyTickReplayFrame(frame, refit);
+    });
+    if (this.tickReplay === active) {
+      this.tickReplay = { ...active, unsub };
+    } else {
+      unsub();
+    }
+  }
+
+  private detachTickReplayState(): void {
+    if (this.tickReplay === null) return;
+    this.tickReplay.unsub();
+    this.tickReplay = null;
+    delete this.el.dataset.tickReplay;
+  }
+
+  private applyTickReplayFrame(frame: ReplayEngineFrame, refit: boolean): void {
+    const view = this.view;
+    const tr = this.tickReplay;
+    if (this.disposed || !view || !tr || !isMinutePeriod(view.period)) return;
+
+    const { bars, current } = projectTickReplayBars({
+      session: tr.session,
+      frame,
+      period: view.period,
+      priorBars: tr.priorBars,
+      priorPeriod: tr.priorPeriod,
+      regularHoursOnly: this.regularFilterActive(),
+      isArchive: tr.isArchive,
+    });
+    const h: History = { bars, current, nextBefore: null };
+    const prev = this.bars;
+    const next = displayBars(h);
+    this.history = h;
+
+    const lastNext = next[next.length - 1];
+    const prevLast = prev[prev.length - 1];
+    const prevSecondLast = prev[prev.length - 2];
+    const nextSecondLast = next[next.length - 2];
+    const sameBar = (a: Bar | undefined, b: Bar | undefined): boolean =>
+      a !== undefined && b !== undefined && a.t === b.t && a.o === b.o && a.h === b.h && a.l === b.l && a.c === b.c && a.v === b.v;
+    const sameCountTail =
+      !refit
+      && prev.length > 0
+      && next.length === prev.length
+      && lastNext !== undefined
+      && prevLast?.t === lastNext.t
+      && (next.length < 2 || sameBar(prevSecondLast, nextSecondLast));
+    const appendedTail =
+      !refit
+      && prev.length > 0
+      && next.length === prev.length + 1
+      && lastNext !== undefined
+      && prevLast !== undefined
+      && nextSecondLast !== undefined
+      && prevLast.t === nextSecondLast.t;
+
+    if (sameCountTail || appendedTail) {
+      this.bars = next;
+      if (appendedTail && !sameBar(prevLast, nextSecondLast)) {
+        this.pendingDraw.set(nextSecondLast!.t, nextSecondLast!);
+      }
+      this.pendingDraw.set(lastNext!.t, lastNext!);
+      this.exposeBarsToE2e();
+      this.indicators.advance(h, lastNext!, current !== null && lastNext!.t === current.t ? "live" : "confirmed");
+      this.requestTailLegendSources(next.length - 1);
+    } else {
+      this.hoverIndex = null;
+      this.financialHoverTime = null;
+      this.withDataGuard(() => {
+        this.setBars(next);
+        this.indicators.reset(h);
+        if ((refit || prev.length === 0) && next.length > 0) this.fitInitialRange();
+      });
+      this.renderLegend();
+    }
+
+    this.daySeparators.sync();
+    if (lastNext !== undefined) {
+      const wasNull = this.ready === null;
+      this.ready = {
+        kind: "ready",
+        latest: lastNext,
+        prev: next[next.length - 2] ?? null,
+        isCurrent: current !== null && lastNext.t === current.t,
+        olderError: null,
+        olderLoading: false,
+        intradayEnd: false,
+      };
+      if (wasNull) this.emitReady();
+      else this.refreshReady();
+    }
+  }
+
   dispose(): void {
     this.disposed = true;
+    this.detachTickReplayState();
     this.narrowMedia.removeEventListener("change", this.onNarrowChange);
     this.initialRange.forget();
     this.clearPointedBar();
@@ -872,6 +1067,9 @@ export class ChartController {
     d.firstBarT = String(this.bars[0]?.t ?? "");
     d.lastBarT = String(last?.t ?? "");
     d.lastClose = String(last?.c ?? "");
+    d.lastHigh = String(last?.h ?? "");
+    d.lastLow = String(last?.l ?? "");
+    d.lastVolume = String(last?.v ?? "");
   }
 
   private regularFilterActive(): boolean {
@@ -921,6 +1119,7 @@ export class ChartController {
 
   private onRealtime(raw: History, bar: Bar, kind: "live" | "confirmed"): void {
     this.rawHistory = raw;
+    if (this.tickReplay !== null) return;
     if (this.regularFilterActive() && !isRegularHours(bar.t)) {
       this.realtimeSeen = true;
       this.lastRealtimeAt = nowSeconds();
@@ -1158,8 +1357,9 @@ export class ChartController {
   }
 
   private onReset(raw: History): void {
-    this.pendingEnd = null;
     this.rawHistory = raw;
+    if (this.tickReplay !== null) return;
+    this.pendingEnd = null;
     const h = this.deriveHistory(raw);
     this.history = h;
     this.hoverIndex = null;
@@ -1259,6 +1459,8 @@ export class ChartController {
   }
 
   private onJumpEntered(raw: History): void {
+    this.rawHistory = raw;
+    if (this.tickReplay !== null) return;
     if (this.enteringJump !== null && this.enteringJump.date === this.feed.activeDate && this.feed.mode?.entering !== true) {
       this.jumpInterval = this.enteringJump.interval;
       this.enteringJump = null;
@@ -1354,7 +1556,7 @@ export class ChartController {
   private syncMicroFeeds(): void {
     const view = this.view;
     const socket = this.socket;
-    const liveAllowed = this.feed.activeDate === null;
+    const liveAllowed = this.feed.activeDate === null && this.tickReplay === null;
     this.indicators.setMicroLive(liveAllowed);
     const eligible = this.active && liveAllowed && view !== null && socket !== undefined && !isIndexCode(view.symbol) && isIntraday(view.period);
     const wantTrades = eligible && view.settings.indicators.some(
@@ -1393,7 +1595,7 @@ export class ChartController {
   private syncCompare(): void {
     const view = this.view;
     if (!view) return;
-    const shown = this.feed.activeDate === null ? compareEntries(view) : [];
+    const shown = this.feed.activeDate === null && this.tickReplay === null ? compareEntries(view) : [];
     this.compare.setCodes(shown, { period: view.period, venueFor: (code) => compareVenue(code, view) });
   }
 
@@ -1440,6 +1642,7 @@ export class ChartController {
 
   private onPrepended(raw: History, added: number): void {
     this.rawHistory = raw;
+    if (this.tickReplay !== null) return;
     const wasLoadingEmpty = this.ready === null && this.bars.length === 0;
     const prevLen = this.bars.length;
     const h = this.deriveHistory(raw);
@@ -1513,6 +1716,7 @@ export class ChartController {
   }
 
   private onFailed(error: ApiRequestError, clearRaw = true): void {
+    if (this.tickReplay !== null) return;
     this.initialRange.release();
     this.ready = null;
     if (clearRaw) this.rawHistory = null;

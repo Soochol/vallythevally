@@ -9,7 +9,7 @@ import type { IndicatorCommand } from "../../chart/indicators/legendRows";
 import { nextIndicatorAxis, resolvePanelScales } from "../../chart/indicators/scales";
 import { crosshairGroupKey, crosshairSync } from "../../chart/crosshairSync";
 import { readThemeTokens } from "../../chart/theme";
-import { PERIOD_LABEL } from "../../lib/symbol";
+import { isMinutePeriod, PERIOD_LABEL } from "../../lib/symbol";
 import { shownVenue, venueLabel } from "../../lib/venue";
 import { chartNumber, chartWindows, useCell, useLayoutStore } from "../../stores/layout";
 import { marketSocket } from "../../stores/realtime";
@@ -21,6 +21,7 @@ import { useVenue } from "../../stores/ui";
 import { matchesSnapTarget, useChartPointerStore } from "../../stores/chartPointer";
 import { replayPointScheduler } from "../book-replay/pointScheduler";
 import { useBookReplayEnabled } from "../book-replay/useBookReplay";
+import { useTickReplayMatch } from "../tick-replay/scope";
 import { type CellAction, cellErrorView, olderErrorView } from "./cellError";
 import { CellState } from "./CellState";
 import { openSystemSettings } from "../system-settings/open";
@@ -79,6 +80,7 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   const financial = useFinancials(cell.symbol, request.period, request.enabled);
   const theme = useSyncExternalStore(subscribeTheme, () => appliedThemeKey(), () => DEFAULT_THEME_KEY);
   const replayEnabled = useBookReplayEnabled();
+  const tickReplay = useTickReplayMatch(cellId, cell.symbol);
   const pointerSnap = useChartPointerStore((s) => s.snap);
   const lastSnapSeq = useRef(0);
   const openSearch = useSelectionStore((s) => s.openSearch);
@@ -152,6 +154,20 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   }, [cell, chartSettings, venue, info, preview, compareNames]);
 
   useEffect(() => {
+    const controller = ctl.current;
+    if (!controller) return;
+    if (tickReplay !== null && isMinutePeriod(cell.period) && tickReplay.session !== null && tickReplay.engine !== null) {
+      controller.setTickReplay({
+        session: tickReplay.session,
+        engine: tickReplay.engine,
+        isArchive: tickReplay.isArchive,
+      });
+    } else {
+      controller.setTickReplay(null);
+    }
+  }, [tickReplay?.session, tickReplay?.engine, tickReplay?.isArchive, cell.period]);
+
+  useEffect(() => {
     if (!pointerSnap) return;
     if (lastSnapSeq.current === pointerSnap.seq) return;
     if (!matchesSnapTarget(pointerSnap.target, cellId, cell.link)) {
@@ -186,7 +202,10 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
   useEffect(() => {
     if (connected && failedRef.current) ctl.current?.reload();
   }, [connected]);
-  const error = status.kind === "error" && notice === null ? cellErrorView(status.error, cell.symbol) : null;
+  const tickReplayAttached =
+    tickReplay !== null && isMinutePeriod(cell.period) && tickReplay.session !== null && tickReplay.engine !== null;
+  const showLoading = status.kind === "loading" && !tickReplayAttached;
+  const error = status.kind === "error" && notice === null && !tickReplayAttached ? cellErrorView(status.error, cell.symbol) : null;
   const runCellAction = (action: CellAction) => {
     if (action === "retry") ctl.current?.reload();
     else if (action === "search") openSearch();
@@ -200,14 +219,14 @@ export function ChartCell({ cellId, status, onStatus }: Props) {
       data-cell={cellId}
       tabIndex={0}
       aria-label={`칸 ${cellNumber}: ${[name, venueLabel(cell.symbol, venue), PERIOD_LABEL[cell.period]].filter(Boolean).join(" ")}`}
-      aria-busy={status.kind === "loading"}
+      aria-busy={showLoading}
       className="relative min-h-0 min-w-0 bg-chart-bg focus-visible:outline-offset-[-2px]"
     >
       <div ref={chartEl} className={chartBoxClass} />
       {status.kind === "ready" && <AxisMode cellId={cellId} corner={corner} />}
       {venueAnchor && venue !== null && venue !== appVenue && createPortal(<VenueFallbackBadge />, venueAnchor)}
       <DrawingOverlay cellId={cellId} />
-      {status.kind === "loading" && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[15] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}
+      {showLoading && <div role="status" aria-label="차트 불러오는 중" className="pointer-events-none absolute inset-0 z-[15] grid place-items-center bg-chart-bg"><span className="chart-loading-label text-s text-text-3">차트 불러오는 중</span></div>}
       {olderError && (
         <div
           role="alert"

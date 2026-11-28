@@ -23,18 +23,18 @@ import "./trades.css";
 
 export function TradesWindow({ id }: { id: WindowId }) {
   const venue = useVenue();
-  return <MarketWindowGate id={id}>{(code) => <TradesBody key={`${code}:${venue}`} code={code} venue={venue} />}</MarketWindowGate>;
+  return <MarketWindowGate id={id}>{(code) => <TradesBody key={`${code}:${venue}`} id={id} code={code} venue={venue} />}</MarketWindowGate>;
 }
 
-function TradesBody({ code, venue }: { code: SymbolCode; venue: Venue }) {
-  const replayEnabled = useBookReplayEnabled();
-  const cursor = useWorkspaceReplayCursor(code);
+function TradesBody({ id, code, venue }: { id: WindowId; code: SymbolCode; venue: Venue }) {
+  const replayEnabled = useBookReplayEnabled(code, id);
+  const cursor = useWorkspaceReplayCursor(code, id);
   const isLive = cursor.kind === "live";
   const { state, history, feedError, retry } = useTradeTape(marketSocket, code, venue, undefined, isLive);
   const quote = useDayQuote(code, venue);
   const [minKey, setMinKey] = useState<MinAmountKey>("all");
   const minWon = minAmountWon(minKey);
-  const replay = useTradesReplay(code, cursor, venue, minWon);
+  const replay = useTradesReplay(code, cursor, venue, minWon, id);
   const previousClose =
     replay.kind === "past"
       ? resolveReplayPreviousClose(replay.previousClose, cursor.kind === "pointed" && cursor.isToday, quote.previousClose)

@@ -2,7 +2,8 @@ import { Popover } from "../overlay/Popover";
 import { ErrorState } from "../overlay/State";
 import { Icon, DRAWING_ICONS, CopyIcon, MoreIcon, CloseIcon } from "../icons";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { bookReplayAvailable, useBookReplayAccess, useBookReplayDays } from "../../api/bookReplay";
 import { drawingColor } from "../../chart/drawings/DrawingLayer";
 import { ColorPicker } from "../color/ColorPicker";
 import { surfaceFor } from "../../chart/drawings/DrawingSurface";
@@ -12,11 +13,12 @@ import { toolOf } from "../../chart/drawings/tools";
 import type { DrawingTemplate } from "../../chart/drawings/prefs";
 import type { DrawingBody, Extend } from "../../chart/drawings/types";
 import { DESKTOP_QUERY, useMediaQuery } from "../../lib/media";
+import { isIndexCode, isMinutePeriod } from "../../lib/symbol";
 import { cellDrawing, useDrawingSession } from "../../stores/drawingSession";
 import { useUiStore } from "../../stores/ui";
 import { Menu } from "../menu/Menu";
 import { DashInput, WidthInput } from "./StyleFields";
-import { drawingMenu } from "./menus";
+import { drawingMenu, type TickReplayMenuContext } from "./menus";
 import { DrawingDetails, DrawingTextEditor } from "./DrawingDetails";
 import { FavoritesQuickBar } from "./FavoritesQuickBar";
 import { ObjectTree } from "./ObjectTree";
@@ -29,14 +31,26 @@ export function DrawingOverlay({ cellId }: { cellId: WindowId }) {
   const root = useRef<HTMLDivElement>(null);
   const [more, setMore] = useState(false);
   const surface = surfaceFor(cellId);
+  const view = surface?.host.view() ?? null;
+  const isMinuteStock = view !== null && isMinutePeriod(view.period) && !isIndexCode(view.symbol);
+  const access = useBookReplayAccess();
+  const available = bookReplayAvailable(access);
+  const daysQuery = useBookReplayDays(view?.symbol ?? "", desktop && available && isMinuteStock);
+  const tickReplayMenu = useMemo<TickReplayMenuContext | null>(() => {
+    if (!available || !isMinuteStock) return null;
+    return {
+      days: new Set(daysQuery.data?.days ?? []),
+      pending: daysQuery.isPending,
+    };
+  }, [available, isMinuteStock, daysQuery.data?.days, daysQuery.isPending]);
   if (!desktop || !surface) return null;
-  const error = sync.loadError(surface.host.view()?.symbol ?? "");
+  const error = sync.loadError(view?.symbol ?? "");
   return <div data-chart-control ref={root} className="drawing-overlay" onPointerDown={(e) => e.stopPropagation()}>
     {error && <div className="draw-load-error"><ErrorState message={error} retry={() => sync.refresh()} /></div>}
     <FavoritesQuickBar cellId={cellId} />
     <ObjectTree cellId={cellId} />
     {cell.selected.length > 0 && cell.editor?.kind !== "text" && <FloatingBar cellId={cellId} />}
-    {cell.popup && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, cell.popup.id === null, cell.popup.fromChart ? { x: cell.popup.x, y: cell.popup.y } : null, more, () => setMore((open) => !open))}
+    {cell.popup && <Menu label="드로잉 메뉴" root={root} items={drawingMenu(surface, cell.popup.id === null, cell.popup.fromChart ? { x: cell.popup.x, y: cell.popup.y } : null, more, () => setMore((open) => !open), tickReplayMenu)}
       className="fixed max-h-[min(600px,85vh)] overflow-y-auto text-s" style={{ left: cell.popup.x, top: cell.popup.y, minWidth: 220 }}
       onClose={(restore) => { setMore(false); useDrawingSession.getState().patchCell(cellId, { popup: null }); if (restore) surface.focus(); }} />}
     {cell.editor?.kind === "text" && <DrawingTextEditor cellId={cellId} editor={cell.editor} />}

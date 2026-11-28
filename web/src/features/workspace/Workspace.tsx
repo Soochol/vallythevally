@@ -24,6 +24,7 @@ import { DockTabGhost } from "./DockTabGhost";
 import { DockGroup } from "./DockGroup";
 import { DockTabMenu } from "./DockTabMenu";
 import { SymbolDragOverlay } from "./SymbolDragOverlay";
+import { TickReplayHost } from "../tick-replay/TickReplayHost";
 import { floatPanelId, useDockInteraction } from "./dockInteraction";
 import { useDockMaximize } from "./useDockMaximize";
 import { WindowHost } from "./WindowHost";
@@ -113,6 +114,7 @@ export function Workspace() {
       {mode === "dock" && preview && preview.kind !== "unchanged" && <DockDropPreview preview={preview} />}
       {mode === "dock" && interaction.grab && <DockTabGhost grab={interaction.grab} />}
       <SymbolDragOverlay />
+      <TickReplayHost workspaceRef={root} />
       <div role="status" className="sr-only">{mode === "dock" && preview && preview.kind !== "unchanged" ? preview.label : ""}</div>
       {mode === "dock" && interaction.menu && space && <DockTabMenu key={interaction.menu.window} interaction={interaction} dock={drawn.dock} root={root} maximized={maximize.maximized} onToggleMaximize={maximize.toggle} />}
     </main>

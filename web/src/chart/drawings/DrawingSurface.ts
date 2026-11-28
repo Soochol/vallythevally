@@ -432,6 +432,13 @@ export class DrawingSurface implements ChartExtension {
     const price = frame.axes.price.toPrice(client.y - r.top);
     return price === null ? null : { price, t: null };
   }
+  barTimeAt(client: ScreenPoint): number | null {
+    const r = this.host.el.getBoundingClientRect();
+    const logical = this.host.chart.timeScale().coordinateToLogical(client.x - r.left);
+    if (logical === null) return null;
+    const index = Math.round(logical);
+    return this.host.bars()[index]?.t ?? null;
+  }
   placeHorizontalLine(client: ScreenPoint) {
     const tool = toolOf("hline"); const point = this.pointAt(client); const t = point?.t ?? this.host.bars().at(-1)?.t;
     if (tool && point && t !== undefined) this.effect({ kind: "place", tool, points: [{ t, price: point.price }] });
@@ -465,12 +472,13 @@ export class DrawingSurface implements ChartExtension {
     if (e.composedPath().some((target) => target instanceof Element && target.hasAttribute("data-chart-control"))) return;
     if (ownsChartKeyboard(e) || !this.editable || isTypingTarget(e.target) || e.isComposing || this.cell().editor || useSelectionStore.getState().dialog) return;
     if (!this.host.el.parentElement?.contains(document.activeElement)) return;
-    const session = useDrawingSession.getState(); const selected = this.cell().selected; const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
+    const cell = this.cell();
+    const session = useDrawingSession.getState(); const selected = cell.selected; const ui = useUiStore.getState(); const prefs = ui.prefs.drawing;
     const ctrl = e.ctrlKey || e.metaKey;
     const hotkey = matchDrawingHotkey(e, currentActionKeys());
     let handled = true;
     if (hotkey) this.runHotkey(hotkey);
-    else if (e.code === "Escape") this.endDrawingRun();
+    else if (e.code === "Escape" && (this.state.kind !== "idle" || session.tool !== null || session.mode !== null || this.keepsDrawing() || selected.length > 0 || cell.popup !== null)) this.endDrawingRun();
     else if ((e.code === "Delete" || e.code === "Backspace") && selected.length) this.remove();
     else if (ctrl && e.code === "KeyC" && selected.length) this.copy();
     else if (ctrl && e.code === "KeyV" && session.clip) this.paste();
