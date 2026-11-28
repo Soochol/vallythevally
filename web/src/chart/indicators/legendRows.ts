@@ -10,8 +10,6 @@ import { indicatorsPinnedOpen, onIndicatorsPinnedChange, setIndicatorsPinnedOpen
 
 export type IndicatorCommand = "edit" | "toggle" | "remove" | "up" | "down" | "collapse" | "split" | "axis";
 
-export const HOVER_CLOSE_DELAY_MS = 280;
-
 const ROW =
   "group pointer-events-auto flex w-max max-w-full items-center gap-1.5 whitespace-nowrap rounded-s pr-1 text-s " +
   "bg-[color-mix(in_srgb,var(--chart-bg)_78%,transparent)]";
@@ -133,13 +131,9 @@ export class IndicatorLegend {
   readonly priceBox = el("div", "relative flex flex-col gap-px");
   private readonly rowsBox = el("div", ROWS_BOX);
   private readonly fold = foldButton();
-  private readonly pinBar = el("div", "indicator-fold-footer");
-  private readonly pinButton = el("button", "indicator-fold-pin", "항상 펼치기");
   private readonly rows = new Map<string, RowEls>();
   private tier: LegendTier = "compact";
   private open = false;
-  private hoverOpen = false;
-  private hoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly unsubscribePinned: () => void;
 
   private layoutRows: readonly IndicatorRow[] = [];
@@ -153,18 +147,18 @@ export class IndicatorLegend {
   }[] | null = null;
 
   private readonly onDocumentPointerDown = (event: PointerEvent): void => {
-    if (!this.open && !this.hoverOpen) return;
+    if (!this.open) return;
     const target = event.target;
     if (typeof Node !== "undefined" && target instanceof Node && typeof this.priceBox.contains === "function" && this.priceBox.contains(target)) return;
     if (typeof Element !== "undefined" && target instanceof Element && target.closest(".ip-popover, .ui-popover")) return;
-    this.closeDropdown();
+    this.open = false;
     this.syncFold();
   };
 
   private readonly onDocumentKeyDown = (event: KeyboardEvent): void => {
-    if (event.key !== "Escape" || (!this.open && !this.hoverOpen)) return;
+    if (event.key !== "Escape" || !this.open) return;
     if (typeof document.querySelector === "function" && document.querySelector(".ip-popover") !== null) return;
-    this.closeDropdown();
+    this.open = false;
     this.syncFold();
   };
 
@@ -175,28 +169,18 @@ export class IndicatorLegend {
   ) {
     this.priceBox.dataset.indicatorFoldBox = "";
     this.rowsBox.dataset.indicatorFoldPanel = "";
-    this.pinButton.type = "button";
-    this.pinButton.dataset.chartControl = "";
-    this.pinButton.dataset.indicatorPin = "";
-    this.pinBar.append(this.pinButton);
-    this.pinBar.hidden = true;
-    this.rowsBox.append(this.pinBar);
     this.priceBox.append(this.fold, this.rowsBox);
     this.fold.addEventListener("click", () => this.toggleFold());
-    this.pinButton.addEventListener("click", () => this.pinOpen());
-    this.fold.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") this.openHover(); });
-    this.rowsBox.addEventListener("pointerenter", (event) => { if (event.pointerType !== "touch") this.openHover(); });
-    this.priceBox.addEventListener("pointerleave", (event) => { if (event.pointerType !== "touch") this.scheduleHoverClose(); });
     document.addEventListener?.("pointerdown", this.onDocumentPointerDown);
     document.addEventListener?.("keydown", this.onDocumentKeyDown);
-    this.unsubscribePinned = onIndicatorsPinnedChange(() => { this.closeDropdown(); this.syncFold(); this.onFoldChange(); });
+    this.unsubscribePinned = onIndicatorsPinnedChange(() => { this.open = false; this.syncFold(); this.onFoldChange(); });
     this.syncFold();
   }
 
   setTier(tier: LegendTier): void {
     if (this.tier === tier) return;
     this.tier = tier;
-    this.closeDropdown();
+    this.open = false;
     this.syncFold();
   }
 
@@ -204,90 +188,31 @@ export class IndicatorLegend {
     return indicatorRowsFolded(this.tier, this.layoutRows.length, indicatorsPinnedOpen());
   }
 
-  private cancelHoverClose(): void {
-    if (this.hoverCloseTimer === null) return;
-    clearTimeout(this.hoverCloseTimer);
-    this.hoverCloseTimer = null;
-  }
-
-  private closeDropdown(): void {
-    this.cancelHoverClose();
-    this.open = false;
-    this.hoverOpen = false;
-  }
-
-  private hasActiveSubLayer(): boolean {
-    for (const row of this.rows.values()) {
-      if (row.key === "price" && row.detail.open) return true;
-    }
-    const active = document.activeElement;
-    if (
-      typeof Element !== "undefined"
-      && active instanceof Element
-      && typeof this.priceBox.contains === "function"
-      && this.priceBox.contains(active)
-      && active.matches(":focus-visible")
-    ) {
-      return true;
-    }
-    if (typeof document.querySelector === "function" && document.querySelector(".ip-popover") !== null) return true;
-    return false;
-  }
-
-  private openHover(): void {
-    if (!this.isFolded()) return;
-    this.cancelHoverClose();
-    if (!this.hoverOpen) {
-      this.hoverOpen = true;
-      this.syncFold();
-    }
-  }
-
-  private scheduleHoverClose(): void {
-    if (!this.isFolded() || this.open || !this.hoverOpen) return;
-    this.cancelHoverClose();
-    this.hoverCloseTimer = setTimeout(() => {
-      this.hoverCloseTimer = null;
-      if (this.open || this.hasActiveSubLayer()) return;
-      this.hoverOpen = false;
-      this.syncFold();
-    }, HOVER_CLOSE_DELAY_MS);
-  }
-
-  private pinOpen(): void {
-    this.closeDropdown();
-    setIndicatorsPinnedOpen(true);
-  }
-
   private toggleFold(): void {
-    if (!this.isFolded()) {
-      setIndicatorsPinnedOpen(false);
+    if (this.tier === "minimal") {
+      this.open = !this.open;
+      this.syncFold();
       return;
     }
-    this.cancelHoverClose();
-    this.open = !this.open;
-    if (!this.open) this.hoverOpen = false;
-    this.syncFold();
+    setIndicatorsPinnedOpen(this.isFolded());
   }
 
   private syncFold(): void {
     const count = this.layoutRows.length;
     const folded = indicatorRowsFolded(this.tier, count, indicatorsPinnedOpen());
     const foldable = this.tier === "minimal" ? count > 0 : count > FOLD_ABOVE_ROWS;
-    if (!folded) this.closeDropdown();
-    const expanded = folded ? (this.open || this.hoverOpen) : foldable;
+    if (!folded) this.open = false;
+    const expanded = folded ? this.open : foldable;
     this.priceBox.toggleAttribute("data-folded", folded);
     this.priceBox.toggleAttribute("data-open", folded && this.open);
-    this.priceBox.toggleAttribute("data-hover-open", folded && this.hoverOpen);
     if (folded) this.rowsBox.dataset.chartControl = "";
     else delete this.rowsBox.dataset.chartControl;
-    this.pinBar.hidden = !folded || this.tier === "minimal";
     this.fold.hidden = !foldable;
     this.fold.setAttribute("aria-expanded", String(expanded));
     const label = this.fold.firstElementChild;
     if (label && label.textContent !== `지표 ${count}`) label.textContent = `지표 ${count}`;
     const caret = this.fold.lastElementChild;
-    const nextCaret = !folded && foldable ? "▴" : "▾";
+    const nextCaret = expanded ? "▴" : "▾";
     if (caret && caret.textContent !== nextCaret) caret.textContent = nextCaret;
   }
 
@@ -353,9 +278,8 @@ export class IndicatorLegend {
       }
     }
     const price = rows.filter((row) => !row.panel).map((row) => this.rows.get(row.id)!.root);
-    const expected = [...price, this.pinBar];
-    if (expected.some((root, i) => this.rowsBox.children[i] !== root) || this.rowsBox.children.length !== expected.length) {
-      this.rowsBox.replaceChildren(...expected);
+    if (price.some((root, i) => this.rowsBox.children[i] !== root) || this.rowsBox.children.length !== price.length) {
+      this.rowsBox.replaceChildren(...price);
     }
     for (const [id, r] of this.rows) {
       if (seen.has(id)) continue;
@@ -471,7 +395,6 @@ export class IndicatorLegend {
   }
 
   dispose(): void {
-    this.cancelHoverClose();
     document.removeEventListener?.("pointerdown", this.onDocumentPointerDown);
     document.removeEventListener?.("keydown", this.onDocumentKeyDown);
     for (const r of this.rows.values()) { r.dispose(); r.root.remove(); }

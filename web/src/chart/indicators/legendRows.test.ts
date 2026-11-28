@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { indicatorsPinnedOpen, setIndicatorsPinnedOpen } from "../legendFold";
 import { TrackedValues } from "../legendShapes";
 import type { IndicatorRow } from "./layer";
-import { HOVER_CLOSE_DELAY_MS, IndicatorLegend } from "./legendRows";
+import { IndicatorLegend } from "./legendRows";
 
 class FakeElement {
   className = "";
@@ -165,66 +165,68 @@ test("비활성 패널 이동 화살표는 호버 없이 드러나지 않고, �
   expect("fade" in buttonOf("down").dataset).toBe(true);
 });
 
-test("접힌 지표 드롭다운은 이탈 유예 시간 동안 유지되고 목록에 다시 들어오면 닫힘을 취소한다", () => {
-  vi.useFakeTimers();
-  const legend = newLegend();
+test("접힌 지표 버튼은 호버로 열리지 않고 1클릭으로 즉시 인라인 펼침과 접힘을 전환한다", () => {
+  const onFoldChange = vi.fn();
+  const legend = new IndicatorLegend(document.createElement("div"), () => {}, onFoldChange);
   legend.render(MOVING_AVERAGES.slice(0, 4), []);
   const box = legend.priceBox as unknown as FakeElement;
   const fold = box.children[0]!;
   const rowsBox = box.children[1]!;
 
   expect(box.hasAttribute("data-folded")).toBe(true);
-  expect(box.hasAttribute("data-hover-open")).toBe(false);
+  expect(box.hasAttribute("data-open")).toBe(false);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(fold.lastElementChild?.textContent).toBe("▾");
+  expect(rowsBox.children).toHaveLength(4);
   expect("chartControl" in rowsBox.dataset).toBe(true);
 
-  fold.dispatch("pointerenter", { pointerType: "touch" });
-  expect(box.hasAttribute("data-hover-open")).toBe(false);
-
   fold.dispatch("pointerenter", { pointerType: "mouse" });
-  expect(box.hasAttribute("data-hover-open")).toBe(true);
-  expect(fold.getAttribute("aria-expanded")).toBe("true");
-
-  box.dispatch("pointerleave", { pointerType: "mouse" });
-  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS - 40);
-  expect(box.hasAttribute("data-hover-open")).toBe(true);
-
-  rowsBox.dispatch("pointerenter", { pointerType: "mouse" });
-  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS * 2);
-  expect(box.hasAttribute("data-hover-open")).toBe(true);
-
-  box.dispatch("pointerleave", { pointerType: "mouse" });
-  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS);
-  expect(box.hasAttribute("data-hover-open")).toBe(false);
+  expect(box.hasAttribute("data-folded")).toBe(true);
+  expect(box.hasAttribute("data-open")).toBe(false);
   expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(indicatorsPinnedOpen()).toBe(false);
+
+  fold.dispatch("click");
+  expect(indicatorsPinnedOpen()).toBe(true);
+  expect(box.hasAttribute("data-folded")).toBe(false);
+  expect(box.hasAttribute("data-open")).toBe(false);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(fold.lastElementChild?.textContent).toBe("▴");
+  expect("chartControl" in rowsBox.dataset).toBe(false);
+  expect(onFoldChange).toHaveBeenCalledTimes(1);
+
+  fold.dispatch("click");
+  expect(indicatorsPinnedOpen()).toBe(false);
+  expect(box.hasAttribute("data-folded")).toBe(true);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(fold.lastElementChild?.textContent).toBe("▾");
+  expect(onFoldChange).toHaveBeenCalledTimes(2);
   legend.dispose();
 });
 
-test("접힌 지표 버튼 클릭은 드롭다운만 고정하고 하단 항상 펼치기 버튼이 전역 펼침을 켠다", () => {
-  vi.useFakeTimers();
+test("최소 단계의 지표 버튼은 1클릭으로 플로팅 목록을 열고 다시 클릭하면 닫는다", () => {
   const legend = newLegend();
   legend.render(MOVING_AVERAGES.slice(0, 4), []);
+  legend.setTier("minimal");
   const box = legend.priceBox as unknown as FakeElement;
   const fold = box.children[0]!;
-  const rowsBox = box.children[1]!;
-  const pinBar = rowsBox.children.at(-1)!;
-  const pinButton = pinBar.children[0]!;
 
-  expect(pinBar.hidden).toBe(false);
-  fold.dispatch("click");
-  expect(box.hasAttribute("data-open")).toBe(true);
-  expect(indicatorsPinnedOpen()).toBe(false);
-
-  box.dispatch("pointerleave", { pointerType: "mouse" });
-  vi.advanceTimersByTime(HOVER_CLOSE_DELAY_MS * 2);
-  expect(box.hasAttribute("data-open")).toBe(true);
-
-  pinButton.dispatch("click");
-  expect(indicatorsPinnedOpen()).toBe(true);
-  expect(box.hasAttribute("data-folded")).toBe(false);
-  expect(pinBar.hidden).toBe(true);
-
-  fold.dispatch("click");
-  expect(indicatorsPinnedOpen()).toBe(false);
   expect(box.hasAttribute("data-folded")).toBe(true);
+  expect(box.hasAttribute("data-open")).toBe(false);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(fold.lastElementChild?.textContent).toBe("▾");
+
+  fold.dispatch("click");
+  expect(box.hasAttribute("data-folded")).toBe(true);
+  expect(box.hasAttribute("data-open")).toBe(true);
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(fold.lastElementChild?.textContent).toBe("▴");
+  expect(indicatorsPinnedOpen()).toBe(false);
+
+  fold.dispatch("click");
+  expect(box.hasAttribute("data-folded")).toBe(true);
+  expect(box.hasAttribute("data-open")).toBe(false);
+  expect(fold.getAttribute("aria-expanded")).toBe("false");
+  expect(fold.lastElementChild?.textContent).toBe("▾");
   legend.dispose();
 });

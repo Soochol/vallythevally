@@ -315,7 +315,7 @@ test("일봉과 분봉 차트 범례가 동일한 1줄 헤더로 통일되고 �
   }
 });
 
-test("접힌 지표 4개에서 대각선·행간 이동해도 닫히지 않고 클릭 고정과 항상 펼치기가 동작한다", async ({ page, scenario }) => {
+test("접힌 지표 4개는 호버로 열리지 않고 버튼 1클릭으로 즉시 펼치고 다시 눌러 닫는다", async ({ page, scenario }) => {
   await page.addInitScript(installChartProbe);
   seedCharts(scenario, [chartWindow("cell-0", { indicators: movingAverages(4) }, "D")]);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -324,34 +324,33 @@ test("접힌 지표 4개에서 대각선·행간 이동해도 닫히지 않고 �
   const current = cell(page);
   const foldBox = current.locator("[data-indicator-fold-box]");
   const pill = current.getByRole("button", { name: /^지표 4/ });
-  await expect(foldBox).toHaveAttribute("data-folded", "");
-  await pill.hover();
-  await expect(foldBox).toHaveAttribute("data-hover-open", "");
   const thirdRow = current.locator('[data-indicator-row="ma20"]');
+  await expect(foldBox).toHaveAttribute("data-folded", "");
+  await expect(pill).toHaveAttribute("aria-expanded", "false");
+  await expect(thirdRow).toBeHidden();
+
+  await pill.hover();
+  await expect(foldBox).toHaveAttribute("data-folded", "");
+  await expect(thirdRow).toBeHidden();
+
+  await pill.click();
+  await expect(foldBox).not.toHaveAttribute("data-folded", "");
+  await expect(foldBox).not.toHaveAttribute("data-open", "");
+  await expect(pill).toHaveAttribute("aria-expanded", "true");
+  await expect(pill).toContainText("▴");
   await expect(thirdRow).toBeVisible();
-  const pillBox = await pill.boundingBox();
-  const hideBtn = thirdRow.getByRole("button", { name: /숨기기/ });
-  const hideBox = await hideBtn.boundingBox();
-  if (!pillBox || !hideBox) throw new Error("지표 드롭다운 좌표가 없습니다");
-  await page.mouse.move(pillBox.x + pillBox.width / 2, pillBox.y + pillBox.height / 2);
-  await page.mouse.move(hideBox.x + hideBox.width / 2, hideBox.y + hideBox.height / 2, { steps: 6 });
-  await expect(thirdRow).toBeVisible();
-  await hideBtn.click();
+  await expect(current.getByRole("button", { name: "항상 펼치기", exact: true })).toHaveCount(0);
+
+  await thirdRow.hover();
+  await thirdRow.getByRole("button", { name: /숨기기/ }).click();
   await expect(thirdRow.getByRole("button", { name: /보이기/ })).toHaveCount(1);
 
   await page.mouse.move(0, 0);
-  await expect(foldBox).not.toHaveAttribute("data-hover-open", "");
-
-  await pill.click();
-  await page.mouse.move(0, 0);
-  await expect(foldBox).toHaveAttribute("data-open", "");
-  await expect(thirdRow).toBeVisible();
-  const pinBtn = current.getByRole("button", { name: "항상 펼치기", exact: true });
-  await expect(pinBtn).toBeVisible();
-  await pinBtn.click();
-  await expect(foldBox).not.toHaveAttribute("data-folded", "");
   await expect(thirdRow).toBeVisible();
 
   await pill.click();
   await expect(foldBox).toHaveAttribute("data-folded", "");
+  await expect(pill).toHaveAttribute("aria-expanded", "false");
+  await expect(pill).toContainText("▾");
+  await expect(thirdRow).toBeHidden();
 });

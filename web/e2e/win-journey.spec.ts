@@ -303,7 +303,7 @@ for (const mode of MODES) {
     await inspector.getByRole("button", { name: "이동평균 단순 9 추가", exact: true }).click();
     await inspector.getByRole("searchbox").fill("");
     const fold = cell(page).locator("[data-indicator-fold]:visible");
-    if (await fold.count()) await fold.first().hover();
+    if (await fold.count()) await fold.first().click();
     await cell(page).locator("[data-indicator-row]").filter({ hasText: "이동평균 단순 9" }).hover();
     await expect(cell(page).getByRole("button", { name: "이동평균 단순 9 설정 열기", exact: true })).toBeVisible();
     if (mode === "dock") await tab(page, "cell-1").click();
