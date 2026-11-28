@@ -122,12 +122,13 @@ export function ReplayBrokersPane({
     : 0;
 
   return (
-    <section className="rp-col" aria-label="거래원 및 가상매매" data-testid="replay-brokers-pane">
-      <div className="rp-bottom-switch">
+    <section className="rp-stream-pane" aria-label="거래원 및 가상매매" data-testid="replay-brokers-pane">
+      <div className="mw-head rp-bottom-switch">
         {forcedMode === undefined && (
-          <div className="rp-seg" role="group" aria-label="하단 분석 전환">
+          <div className="ui-seg" data-size="sm" role="group" aria-label="하단 분석 전환">
             <button
               type="button"
+              className="ui-seg-item"
               data-testid="replay-tab-brokers"
               aria-pressed={bottomPane === "brokers"}
               onClick={() => setBottomPane("brokers")}
@@ -136,6 +137,7 @@ export function ReplayBrokersPane({
             </button>
             <button
               type="button"
+              className="ui-seg-item"
               data-testid="replay-tab-journal"
               aria-pressed={bottomPane === "journal"}
               onClick={() => setBottomPane("journal")}
@@ -147,9 +149,10 @@ export function ReplayBrokersPane({
 
         {bottomPane === "brokers" ? (
           <div className="rp-brokers-head-controls">
-            <div className="rp-seg" role="group" aria-label="거래원 보기">
+            <div className="ui-seg" data-size="sm" role="group" aria-label="거래원 보기">
               <button
                 type="button"
+                className="ui-seg-item"
                 data-testid="replay-broker-view-board"
                 aria-pressed={brokerView === "board"}
                 onClick={() => setBrokerView("board")}
@@ -158,6 +161,7 @@ export function ReplayBrokersPane({
               </button>
               <button
                 type="button"
+                className="ui-seg-item"
                 data-testid="replay-broker-view-list"
                 aria-pressed={brokerView === "list"}
                 onClick={() => setBrokerView("list")}
@@ -166,6 +170,7 @@ export function ReplayBrokersPane({
               </button>
               <button
                 type="button"
+                className="ui-seg-item"
                 data-testid="replay-broker-view-table"
                 aria-pressed={brokerView === "table"}
                 onClick={() => setBrokerView("table")}
@@ -174,6 +179,7 @@ export function ReplayBrokersPane({
               </button>
               <button
                 type="button"
+                className="ui-seg-item"
                 data-testid="replay-broker-view-transfer"
                 aria-pressed={brokerView === "transfer"}
                 onClick={() => setBrokerView("transfer")}
@@ -182,26 +188,28 @@ export function ReplayBrokersPane({
               </button>
             </div>
             {brokerView === "board" && (
-              <div className="rp-seg" role="group" aria-label="카드 모양">
-                <button type="button" aria-pressed={brokerCards === "bars"} onClick={() => setBrokerCards("bars")}>막대</button>
-                <button type="button" aria-pressed={brokerCards === "both"} onClick={() => setBrokerCards("both")}>복합</button>
-                <button type="button" aria-pressed={brokerCards === "numbers"} onClick={() => setBrokerCards("numbers")}>숫자</button>
+              <div className="ui-seg" data-size="sm" role="group" aria-label="카드 모양">
+                <button type="button" className="ui-seg-item" aria-pressed={brokerCards === "bars"} onClick={() => setBrokerCards("bars")}>막대</button>
+                <button type="button" className="ui-seg-item" aria-pressed={brokerCards === "both"} onClick={() => setBrokerCards("both")}>복합</button>
+                <button type="button" className="ui-seg-item" aria-pressed={brokerCards === "numbers"} onClick={() => setBrokerCards("numbers")}>숫자</button>
               </div>
             )}
-            <span className="br-now rp-mono">
-              <span className="br-time">{formatClock(effectiveCursor).slice(0, 5)}</span>
-              <span ref={brokerPriceRef} className="br-price">-</span>
-            </span>
+            {forcedMode === undefined && (
+              <span className="br-now rp-mono">
+                <span className="br-time">{formatClock(effectiveCursor).slice(0, 5)}</span>
+                <span ref={brokerPriceRef} className="br-price">-</span>
+              </span>
+            )}
           </div>
         ) : (
-          <div className="rp-seg" role="group" aria-label="가상 매매 보기">
-            <button type="button" aria-pressed={journalTab === "fills"} onClick={() => setJournalTab("fills")}>
+          <div className="ui-seg" data-size="sm" role="group" aria-label="가상 매매 보기">
+            <button type="button" className="ui-seg-item" aria-pressed={journalTab === "fills"} onClick={() => setJournalTab("fills")}>
               {`체결 ${paperSummary.fills.length}`}
             </button>
-            <button type="button" aria-pressed={journalTab === "open"} onClick={() => setJournalTab("open")}>
+            <button type="button" className="ui-seg-item" aria-pressed={journalTab === "open"} onClick={() => setJournalTab("open")}>
               {`미체결 ${paperSummary.openOrders.length}`}
             </button>
-            <button type="button" aria-pressed={journalTab === "stats"} onClick={() => setJournalTab("stats")}>
+            <button type="button" className="ui-seg-item" aria-pressed={journalTab === "stats"} onClick={() => setJournalTab("stats")}>
               통계
             </button>
           </div>
@@ -278,7 +286,7 @@ export function ReplayBrokersPane({
               </div>
               <div className="rp-journal-list rp-mono">
                 {paperSummary.fills.length === 0 ? (
-                  <div className="rp-tape-empty">아직 가상 체결 내역이 없습니다</div>
+                  <p className="tr-empty">가상 체결 내역이 없습니다</p>
                 ) : (
                   paperSummary.fills.map((fill) => (
                     <button
@@ -319,7 +327,7 @@ export function ReplayBrokersPane({
               </div>
               <div className="rp-journal-list rp-mono">
                 {paperSummary.openOrders.length === 0 ? (
-                  <div className="rp-tape-empty">대기 중인 가상 미체결 주문이 없습니다</div>
+                  <p className="tr-empty">대기 중인 미체결 주문이 없습니다</p>
                 ) : (
                   paperSummary.openOrders.map((order) => (
                     <div key={order.id} className="rp-jopen-row" data-testid="replay-sim-open-row">

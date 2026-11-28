@@ -82,7 +82,6 @@ export function ReplayPaperHud({
 
   const statusPillRef = useRef<HTMLSpanElement>(null);
   const netRef = useRef<HTMLSpanElement>(null);
-  const retRef = useRef<HTMLSpanElement>(null);
   const qtyRef = useRef<HTMLElement>(null);
   const sellRemainRef = useRef<HTMLElement>(null);
   const avgRef = useRef<HTMLElement>(null);
@@ -110,17 +109,20 @@ export function ReplayPaperHud({
       setText(netRef.current, `${formatSignedQty(s.unrealizedPnl)}원 (${formatPercent(s.unrealizedPct)})`);
 
       const eqTone = s.totalReturn > 0 ? "up" : s.totalReturn < 0 ? "down" : null;
-      setAttr(retRef.current, "data-tone", eqTone);
-      setText(retRef.current, formatPercent(s.totalReturnPct));
 
       if (statusPillRef.current) {
-        const label = s.quantity > 0
-          ? `보유 ${formatPrice(s.quantity, false)}주`
-          : s.openOrders.length > 0
-            ? `미체결 ${s.openOrders.length}건`
-            : "포지션 없음";
-        setAttr(statusPillRef.current, "data-live", s.quantity > 0 ? "true" : null);
-        setText(statusPillRef.current, label);
+        if (s.quantity > 0) {
+          statusPillRef.current.hidden = false;
+          setAttr(statusPillRef.current, "data-live", "true");
+          setText(statusPillRef.current, `보유 ${formatPrice(s.quantity, false)}주`);
+        } else if (s.openOrders.length > 0) {
+          statusPillRef.current.hidden = false;
+          setAttr(statusPillRef.current, "data-live", null);
+          setText(statusPillRef.current, `미체결 ${s.openOrders.length}건`);
+        } else {
+          statusPillRef.current.hidden = true;
+          setAttr(statusPillRef.current, "data-live", null);
+        }
       }
 
       setText(qtyRef.current, `${formatPrice(s.quantity, false)}주`);
@@ -212,11 +214,11 @@ export function ReplayPaperHud({
   };
 
   return (
-    <section className="rp-hud" aria-label="실시간 스캘핑 손익 HUD" data-testid="replay-sim-pnl">
+    <section className="rp-hud" aria-label="모의 포지션 손익" data-testid="replay-sim-pnl">
       <div className="rp-hud-kicker">
-        <span className="rp-hud-title">실시간 스캘핑 손익</span>
+        <span className="rp-hud-title">모의 포지션</span>
         <div className="rp-hud-kicker-right">
-          <span ref={statusPillRef} className="rp-hud-status-pill rp-mono">포지션 없음</span>
+          <span ref={statusPillRef} className="rp-hud-status-pill rp-mono" hidden />
           <button
             type="button"
             className="rp-hud-link-btn"
@@ -240,7 +242,6 @@ export function ReplayPaperHud({
 
       <div className="rp-hud-net-row rp-mono">
         <span ref={netRef} className="rp-hud-net" data-testid="replay-sim-unreal">0원 (0.00%)</span>
-        <span ref={retRef} className="rp-hud-ret">0.00%</span>
       </div>
 
       <div className="rp-hud-facts rp-mono">

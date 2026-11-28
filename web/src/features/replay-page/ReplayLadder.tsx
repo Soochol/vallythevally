@@ -9,7 +9,9 @@ import {
   useState,
 } from "react";
 import { formatPercent, formatPrice } from "../../lib/format";
+import { useOrderSettings } from "../../stores/ui";
 import { replayGlow } from "../market-window/flash";
+import { ladderColumns } from "../market-window/PriceLadder";
 import { PRESET_MODES, type PresetMode } from "../order/orderSettings";
 import { type BuyRatioPercent, quantityForAmount, quantityForRatio, RATIO_PRESETS } from "../order/orderRules";
 import type { ReplayEngine, ReplayEngineFrame } from "./replayEngine";
@@ -50,6 +52,7 @@ const DAY_TAG_LABEL = {
 
 const ROW_INDICES = Array.from({ length: 20 }, (_, i) => i);
 const MAN_WON = 10_000;
+const LADDER_COLUMNS = ladderColumns(true, true);
 
 interface DragView {
   readonly side: PaperOrderSide;
@@ -150,6 +153,7 @@ export function ReplayLadder({
   onDeltaMode,
   onUndoRewind,
 }: Props) {
+  const orderSettings = useOrderSettings();
   const [clickMode, setClickMode] = useState<OrderClickMode>("single");
   const [presetMode, setPresetMode] = useState<PresetMode>("amount");
   const [paperTick, setPaperTick] = useState(0);
@@ -164,14 +168,9 @@ export function ReplayLadder({
   const viBannerRef = useRef<HTMLDivElement>(null);
   const totalAskRef = useRef<HTMLElement>(null);
   const totalBidRef = useRef<HTMLElement>(null);
-  const totalAskDeltaRef = useRef<HTMLSpanElement>(null);
-  const totalBidDeltaRef = useRef<HTMLSpanElement>(null);
   const ladderClockRef = useRef<HTMLSpanElement>(null);
-  const ratioAskBarRef = useRef<HTMLSpanElement>(null);
-  const ratioBidBarRef = useRef<HTMLSpanElement>(null);
-  const ratioAskPctRef = useRef<HTMLSpanElement>(null);
-  const ratioBidPctRef = useRef<HTMLSpanElement>(null);
-  const obiRef = useRef<HTMLElement>(null);
+  const ratioAskBarRef = useRef<HTMLElement>(null);
+  const ratioBidBarRef = useRef<HTMLElement>(null);
 
   const rowPricesRef = useRef<(number | null)[]>(ROW_INDICES.map(() => null));
   const prevRowQtyRef = useRef<Map<string, number>>(new Map());
@@ -317,9 +316,9 @@ export function ReplayLadder({
         rowPricesRef.current[i] = row.price;
 
         setAttr(refs.row, "data-side", row.side);
+        setAttr(refs.row, "data-empty", row.price === null ? "" : null);
         setAttr(refs.row, "data-dim", row.dimmed ? "true" : null);
-        setAttr(refs.row, "data-current", row.current ? "true" : null);
-        setAttr(refs.row, "data-last-hit", row.lastHit);
+        setAttr(refs.row, "data-current", row.current ? "" : null);
         setAttr(
           refs.row,
           "data-sim-fill",
@@ -398,7 +397,6 @@ export function ReplayLadder({
         const flash = levelKey ? frame.cellFlashes.get(levelKey) : undefined;
 
         if (row.side === "ask") {
-          setAttr(refs.askCell, "data-wall", row.wall ? "true" : null);
           if (refs.askBar) {
             const tr = `scaleX(${row.price !== null ? row.ratio.toFixed(3) : 0})`;
             if (refs.askBar.style.transform !== tr) refs.askBar.style.transform = tr;
@@ -408,13 +406,11 @@ export function ReplayLadder({
           setAttr(refs.askDelta, "data-flash", deltaFlash);
           setText(refs.askVal, row.price !== null ? formatPrice(row.quantity, false) : "");
 
-          setAttr(refs.bidCell, "data-wall", null);
           if (refs.bidBar && refs.bidBar.style.transform !== "scaleX(0)") refs.bidBar.style.transform = "scaleX(0)";
           setText(refs.bidVal, "");
           setText(refs.bidDelta, "");
           setAttr(refs.bidDelta, "data-flash", null);
         } else {
-          setAttr(refs.bidCell, "data-wall", row.wall ? "true" : null);
           if (refs.bidBar) {
             const tr = `scaleX(${row.price !== null ? row.ratio.toFixed(3) : 0})`;
             if (refs.bidBar.style.transform !== tr) refs.bidBar.style.transform = tr;
@@ -424,7 +420,6 @@ export function ReplayLadder({
           setText(refs.bidDelta, deltaText);
           setAttr(refs.bidDelta, "data-flash", deltaFlash);
 
-          setAttr(refs.askCell, "data-wall", null);
           if (refs.askBar && refs.askBar.style.transform !== "scaleX(0)") refs.askBar.style.transform = "scaleX(0)";
           setText(refs.askVal, "");
           setText(refs.askDelta, "");
@@ -438,33 +433,8 @@ export function ReplayLadder({
       setText(totalBidRef.current, formatPrice(snapshot.totalBid, false));
       setText(ladderClockRef.current, formatReplayClock(frame.cursorMs / 1000, false));
 
-      if (totalAskDeltaRef.current) {
-        if (snapshot.totalAskDelta !== 0) {
-          totalAskDeltaRef.current.hidden = false;
-          totalAskDeltaRef.current.className = snapshot.totalAskDelta > 0 ? "rp-ratio-delta rp-up" : "rp-ratio-delta rp-down";
-          setText(totalAskDeltaRef.current, formatSignedQty(snapshot.totalAskDelta));
-        } else {
-          totalAskDeltaRef.current.hidden = true;
-        }
-      }
-      if (totalBidDeltaRef.current) {
-        if (snapshot.totalBidDelta !== 0) {
-          totalBidDeltaRef.current.hidden = false;
-          totalBidDeltaRef.current.className = snapshot.totalBidDelta > 0 ? "rp-ratio-delta rp-up" : "rp-ratio-delta rp-down";
-          setText(totalBidDeltaRef.current, formatSignedQty(snapshot.totalBidDelta));
-        } else {
-          totalBidDeltaRef.current.hidden = true;
-        }
-      }
-
       if (ratioAskBarRef.current) ratioAskBarRef.current.style.width = `${snapshot.askPct}%`;
       if (ratioBidBarRef.current) ratioBidBarRef.current.style.width = `${snapshot.bidPct}%`;
-      setText(ratioAskPctRef.current, `매도 ${snapshot.askPct}%`);
-      setText(ratioBidPctRef.current, `매수 ${snapshot.bidPct}%`);
-      if (obiRef.current) {
-        obiRef.current.className = snapshot.obi > 0 ? "rp-up" : snapshot.obi < 0 ? "rp-down" : "rp-muted";
-        setText(obiRef.current, `${snapshot.obi > 0 ? "+" : ""}${snapshot.obi.toFixed(2)}`);
-      }
     };
 
     const unsubFrame = engine.subscribeFrame(apply);
@@ -645,29 +615,37 @@ export function ReplayLadder({
     ? summary.openOrders.filter((o) => o.side === ctxMenu.side && o.price === ctxMenu.price)
     : [];
 
+  const statusTone = summary.status === null
+    ? null
+    : summary.status.tone === "info"
+      ? "replay"
+      : summary.status.tone;
+
   return (
-    <section className="rp-col rp-ladder-col" aria-label="10호가 사다리" data-testid="replay-ladder">
-      <div className="rp-pane-head">
-        <div className="rp-pane-title">
-          <span>호가주문</span>
-          <span ref={spreadRef} className="rp-badge-mini" data-testid="replay-spread">—</span>
-        </div>
+    <section
+      className="rp-col rp-ladder-col od"
+      data-ladder-density={orderSettings.ladderDensity}
+      aria-label="10호가 사다리"
+      data-testid="replay-ladder"
+    >
+      <div className="mw-head rp-ladder-head">
+        <span ref={spreadRef} className="rp-spread-text" data-testid="replay-spread">—</span>
         <div className="rp-pane-controls">
-          <div className="rp-seg" role="group" aria-label="주문 클릭 방식">
-            <button type="button" aria-pressed={clickMode === "single"} onClick={() => setClickMode("single")}>원클릭</button>
-            <button type="button" aria-pressed={clickMode === "double"} onClick={() => setClickMode("double")}>더블클릭</button>
+          <div className="ui-seg" data-size="sm" role="group" aria-label="주문 클릭 방식">
+            <button type="button" className="ui-seg-item" aria-pressed={clickMode === "single"} onClick={() => setClickMode("single")}>원클릭</button>
+            <button type="button" className="ui-seg-item" aria-pressed={clickMode === "double"} onClick={() => setClickMode("double")}>더블클릭</button>
           </div>
-          <div className="rp-seg" role="group" aria-label="델타 표시 기준">
-            <button type="button" aria-pressed={deltaMode === "tick"} title="직전 틱 델타" onClick={() => onDeltaMode("tick")}>직전 틱</button>
-            <button type="button" aria-pressed={deltaMode === "min"} title="1분 누적 델타" onClick={() => onDeltaMode("min")}>1분 누적</button>
-            <button type="button" aria-pressed={deltaMode === "off"} onClick={() => onDeltaMode("off")}>끄기</button>
+          <div className="ui-seg" data-size="sm" role="group" aria-label="델타 표시 기준">
+            <button type="button" className="ui-seg-item" aria-pressed={deltaMode === "tick"} title="직전 틱 델타" onClick={() => onDeltaMode("tick")}>직전 틱</button>
+            <button type="button" className="ui-seg-item" aria-pressed={deltaMode === "min"} title="1분 누적 델타" onClick={() => onDeltaMode("min")}>1분 누적</button>
+            <button type="button" className="ui-seg-item" aria-pressed={deltaMode === "off"} onClick={() => onDeltaMode("off")}>끄기</button>
           </div>
         </div>
       </div>
 
-      <div className="od-qty rp-sim-qty-row" data-testid="replay-sim-quantity-row">
+      <div className="od-qty" data-testid="replay-sim-quantity-row">
         <input
-          className="od-qty-input rp-mono"
+          className="od-qty-input"
           data-testid="replay-sim-qty-input"
           data-ratio-active={buyRatioPercent !== null ? "" : undefined}
           aria-label="가상 주문 수량"
@@ -695,7 +673,7 @@ export function ReplayLadder({
             </button>
           ))}
         </div>
-        <div className="od-presets rp-mono" role="group" aria-label="주문 수량 프리셋">
+        <div className="od-presets" role="group" aria-label="주문 수량 프리셋">
           {presetButtons.map((btn) => {
             const isBuyRatio = btn.buyRatio !== null;
             const active = isBuyRatio ? buyRatioPercent === btn.buyRatio : pickedPreset === btn.key;
@@ -732,48 +710,47 @@ export function ReplayLadder({
       </div>
 
       <div ref={gapBannerRef} className="rp-banner" data-mode="gap" role="status" data-testid="replay-gap-banner" hidden>
-        <span>수집기 연결 끊김 구간 — 이 시각 호가·체결이 비어 있습니다</span>
-        <span className="rp-mono">수집 끊김</span>
+        <span>수집 끊김 구간</span>
       </div>
       <div ref={viBannerRef} className="rp-banner" data-mode="vi" role="status" data-testid="replay-vi-banner" hidden>
-        <span>단일가 호가 (VI · 동시호가 3단 이하)</span>
-        <span className="rp-mono">단일가</span>
+        <span>단일가 호가</span>
       </div>
 
-      <div className="od-colhead rp-order-colhead">
-        <span>매도주문</span>
-        <span>매도잔량</span>
-        <span>호가 · 등락률</span>
-        <span>매수잔량</span>
-        <span>매수주문</span>
-      </div>
+      <div className="bk-ladder od-ladder-wrap rp-ladder-wrap">
+        <div
+          ref={ladderScrollRef}
+          className="od-ladder rp-order-ladder"
+          data-divider={orderSettings.divider ? "" : undefined}
+          data-dragging={dragView ? "" : undefined}
+          onContextMenu={openLadderMenu}
+        >
+          <div className="od-colhead" role="row" style={{ gridTemplateColumns: LADDER_COLUMNS }}>
+            <span role="columnheader">매도주문</span>
+            <span role="columnheader">매도잔량</span>
+            <span role="columnheader">호가</span>
+            <span role="columnheader">매수잔량</span>
+            <span role="columnheader">매수주문</span>
+          </div>
+          <div className="mw-ladder">
+            {ROW_INDICES.map((idx) => {
+              const rowPrice = rowPricesRef.current[idx] ?? null;
+              const sellOpenQty = rowPrice !== null ? (openOrderQtyByKey.get(`sell:${rowPrice}`) ?? 0) : 0;
+              const buyOpenQty = rowPrice !== null ? (openOrderQtyByKey.get(`buy:${rowPrice}`) ?? 0) : 0;
+              const sellTargeted = dragView !== null && !dragView.outside && dragView.side === "sell" && rowPrice !== null && dragView.targetPrice === rowPrice;
+              const buyTargeted = dragView !== null && !dragView.outside && dragView.side === "buy" && rowPrice !== null && dragView.targetPrice === rowPrice;
+              const sellChipDragging = dragView !== null && dragView.side === "sell" && rowPrice !== null && dragView.fromPrice === rowPrice;
+              const buyChipDragging = dragView !== null && dragView.side === "buy" && rowPrice !== null && dragView.fromPrice === rowPrice;
 
-      <div
-        ref={ladderScrollRef}
-        className="od-ladder rp-order-ladder"
-        data-divider=""
-        data-dragging={dragView ? "" : undefined}
-        onContextMenu={openLadderMenu}
-      >
-        <div className="mw-ladder rp-order-mw-ladder rp-mono">
-          {ROW_INDICES.map((idx) => {
-            const rowPrice = rowPricesRef.current[idx] ?? null;
-            const sellOpenQty = rowPrice !== null ? (openOrderQtyByKey.get(`sell:${rowPrice}`) ?? 0) : 0;
-            const buyOpenQty = rowPrice !== null ? (openOrderQtyByKey.get(`buy:${rowPrice}`) ?? 0) : 0;
-            const sellTargeted = dragView !== null && !dragView.outside && dragView.side === "sell" && rowPrice !== null && dragView.targetPrice === rowPrice;
-            const buyTargeted = dragView !== null && !dragView.outside && dragView.side === "buy" && rowPrice !== null && dragView.targetPrice === rowPrice;
-            const sellChipDragging = dragView !== null && dragView.side === "sell" && rowPrice !== null && dragView.fromPrice === rowPrice;
-            const buyChipDragging = dragView !== null && dragView.side === "buy" && rowPrice !== null && dragView.fromPrice === rowPrice;
-
-            return (
-              <div
-                key={idx}
-                ref={(el) => {
-                  rowRefs.current[idx]!.row = el;
-                }}
-                className="mw-lr rp-order-row"
-                data-side={idx < 10 ? "ask" : "bid"}
-              >
+              return (
+                <div
+                  key={idx}
+                  ref={(el) => {
+                    rowRefs.current[idx]!.row = el;
+                  }}
+                  className="mw-lr rp-order-row"
+                  data-side={idx < 10 ? "ask" : "bid"}
+                  style={{ gridTemplateColumns: LADDER_COLUMNS }}
+                >
                 <div
                   ref={(el) => {
                     rowRefs.current[idx]!.sellCell = el;
@@ -954,76 +931,64 @@ export function ReplayLadder({
               </div>
             );
           })}
+          </div>
         </div>
       </div>
 
-      <div className="od-totals rp-order-totals">
-        <button
-          type="button"
-          className="od-total rp-mono"
-          data-side="sell"
-          data-empty={totalSellOpenQty === 0 ? "" : undefined}
-          title="클릭 시 매도 미체결 일괄 취소"
-          onClick={() => paper.cancelOrdersBySide("sell", engine.getFrame().cursorMs)}
-        >
-          {formatPrice(totalSellOpenQty, false)}
-        </button>
-        <div
-          className="rp-sim-status"
-          data-testid="replay-sim-status"
-          data-tone={summary.status.tone}
-        >
-          <span className="rp-sim-status-text">{summary.status.text}</span>
-          {summary.lastRewindUndo !== null && (
-            <button
-              type="button"
-              className="rp-sim-undo-btn"
-              data-testid="replay-sim-undo-rewind"
-              onClick={onUndoRewind}
-            >
-              실행 취소
-            </button>
-          )}
+      <div className="mw-footer od-footer">
+        <div className="mw-strip-ratio" aria-hidden="true">
+          <i ref={ratioAskBarRef} className="mw-strip-ratio-ask" style={{ width: "50%" }} />
+          <i ref={ratioBidBarRef} className="mw-strip-ratio-bid" style={{ width: "50%" }} />
         </div>
-        <button
-          type="button"
-          className="od-total rp-mono"
-          data-side="buy"
-          data-empty={totalBuyOpenQty === 0 ? "" : undefined}
-          title="클릭 시 매수 미체결 일괄 취소"
-          onClick={() => paper.cancelOrdersBySide("buy", engine.getFrame().cursorMs)}
-        >
-          {formatPrice(totalBuyOpenQty, false)}
-        </button>
+        <div className="mw-footer-side">
+          <button
+            type="button"
+            className="od-total"
+            data-side="sell"
+            data-empty={totalSellOpenQty === 0 ? "" : undefined}
+            title="매도 미체결 일괄 취소"
+            onClick={() => paper.cancelOrdersBySide("sell", engine.getFrame().cursorMs)}
+          >
+            {formatPrice(totalSellOpenQty, false)}
+          </button>
+          <b ref={totalAskRef} className="mw-down" data-testid="replay-total-ask" aria-label="매도 총잔량">0</b>
+        </div>
+        <span ref={ladderClockRef} className="mw-strip-ratio-btn rp-footer-clock" data-testid="replay-ladder-clock" aria-label="복기 당시 시각">09:00:00</span>
+        <div className="mw-footer-side">
+          <b ref={totalBidRef} className="mw-up" data-testid="replay-total-bid" aria-label="매수 총잔량">0</b>
+          <button
+            type="button"
+            className="od-total"
+            data-side="buy"
+            data-empty={totalBuyOpenQty === 0 ? "" : undefined}
+            title="매수 미체결 일괄 취소"
+            onClick={() => paper.cancelOrdersBySide("buy", engine.getFrame().cursorMs)}
+          >
+            {formatPrice(totalBuyOpenQty, false)}
+          </button>
+        </div>
       </div>
 
-      <div className="rp-ladder-foot rp-mono">
-        <div className="rp-ratio-nums">
-          <div className="rp-ratio-side" title="매도 총잔량">
-            <b ref={totalAskRef} className="rp-down" data-testid="replay-total-ask" aria-label="매도 총잔량">0</b>
-            <span ref={totalAskDeltaRef} className="rp-ratio-delta" hidden />
+      <div className="mw-status-slot">
+        {summary.status !== null && statusTone !== null && (
+          <div
+            className="mw-status"
+            data-testid="replay-sim-status"
+            data-tone={statusTone}
+          >
+            <span className="mw-status-text">{summary.status.text}</span>
+            {summary.lastRewindUndo !== null && (
+              <button
+                type="button"
+                className="mw-status-button"
+                data-testid="replay-sim-undo-rewind"
+                onClick={onUndoRewind}
+              >
+                실행 취소
+              </button>
+            )}
           </div>
-          <span ref={ladderClockRef} className="rp-ratio-clock rp-mono" data-testid="replay-ladder-clock" aria-label="복기 당시 시각">09:00:00</span>
-          <div className="rp-ratio-side rp-ratio-side-bid" title="매수 총잔량">
-            <span ref={totalBidDeltaRef} className="rp-ratio-delta" hidden />
-            <b ref={totalBidRef} className="rp-up" data-testid="replay-total-bid" aria-label="매수 총잔량">0</b>
-          </div>
-        </div>
-        <div className="rp-ratio-bar" aria-label="매도 대 매수 잔량 비율">
-          <span ref={ratioAskBarRef} className="rp-ratio-ask" style={{ width: "50%" }} />
-          <span ref={ratioBidBarRef} className="rp-ratio-bid" style={{ width: "50%" }} />
-        </div>
-        <div className="rp-ratio-meta">
-          <span>
-            <span ref={ratioAskPctRef} className="rp-down">매도 50%</span>
-            {" : "}
-            <span ref={ratioBidPctRef} className="rp-up">매수 50%</span>
-          </span>
-          <span data-testid="replay-obi">
-            {"불균형(OBI) "}
-            <b ref={obiRef} className="rp-up">+0.00</b>
-          </span>
-        </div>
+        )}
       </div>
 
       {dragView && (

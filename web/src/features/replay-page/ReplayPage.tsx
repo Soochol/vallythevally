@@ -507,7 +507,7 @@ export function ReplayPage() {
                 onClearBuyRatio={handleClearBuyRatio}
               />
 
-              <div className="rp-right-stream">
+              <div className="rp-col rp-right-stream">
                 <div className="rp-right-tabs" role="group" aria-label="우측 수급 및 복기 전환">
                   <button
                     type="button"
@@ -613,14 +613,13 @@ export function ReplayPage() {
                 <div className="rp-head-meta">
                   <span>기준가 <b data-testid="replay-prev-close">{prevClose !== null ? formatPrice(prevClose, false) : "-"}</b></span>
                   <span>누적대금 <b ref={headValRef}>-</b></span>
-                  <span>커버리지 <b>{`${session.coveragePct.toFixed(1)}%`}</b></span>
                 </div>
               </div>
             )}
 
             <div className="rp-context-right">
               <span className="rp-badge-mini" data-testid="replay-resolution-badge" data-resolution={resolution}>
-                {resolution === "tick" ? "통합 · 틱 복기" : "장중 1분 요약 · 마감 후 틱 복기"}
+                {resolution === "tick" ? "틱 복기" : "1분 요약"}
               </span>
               {session && (
                 <button
