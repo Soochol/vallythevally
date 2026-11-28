@@ -132,7 +132,7 @@ function buildReplayHistory(
   const replayBars: Bar[] = [];
   for (const b of aggregated) {
     if (blindMode && b.isFuture) break;
-    if (b.open === null || b.high === null || b.low === null || b.close === null) continue;
+    if (b.inGap || b.open === null || b.high === null || b.low === null || b.close === null) continue;
     replayBars.push({
       t: session.dayStartUnix + b.startMinute * 60,
       o: b.open,
@@ -141,6 +141,11 @@ function buildReplayHistory(
       c: b.close,
       v: b.volume,
     });
+  }
+  while (replayBars.length > 1) {
+    const last = replayBars[replayBars.length - 1]!;
+    if (last.v > 0 || last.o !== last.h || last.l !== last.c) break;
+    replayBars.pop();
   }
   const merged = priorBars.length > 0 ? priorBars.concat(replayBars) : replayBars;
   const tailBar = merged.length > 0 ? merged[merged.length - 1]! : null;
