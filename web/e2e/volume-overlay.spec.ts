@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import type { Layout } from "../src/api/generated/Layout";
 import { parseChartSettings } from "../src/chart/settings";
 import { installChartProbe } from "./chart-probe";
+import { openChartSettings } from "./chart-settings-menu";
 import { type Scenario, cell, chartOf, DEFAULT_LAYOUT_ID, expect, test, firstChart, withFirstChart, pollSaved } from "./harness";
 
 const VOLUME = { id: "volume", spec: { kind: "volume", maPeriod: null }, panel: "p-volume", visible: true, style: { colors: ["ind-1"], width: 1 } };
@@ -49,8 +50,7 @@ async function openPopover(page: Page) {
 }
 
 async function setScale(page: Page, name: "%" | "로그" | "일반", attribute: string) {
-  const settings = page.getByRole("dialog", { name: "차트 설정", exact: true });
-  if (!(await settings.isVisible())) await page.getByRole("toolbar", { name: "차트 도구 막대" }).getByRole("button", { name: "차트 설정", exact: true }).click();
+  const settings = await openChartSettings(page, "축 · 눈금");
   await settings.getByRole("group", { name: "가격 축" }).getByRole("button", { name, exact: true }).click();
   await expect(chartOf(cell(page))).toHaveAttribute("data-price-scale", attribute);
 }
