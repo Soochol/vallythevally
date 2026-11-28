@@ -154,15 +154,10 @@ test("계좌 탭 호버는 배경만 바뀌고 밑줄은 열렸을 때만 표시
   await openBand(page, scenario);
   const holdings = tab(page, "holdings");
   await holdings.hover();
-  const hovered = await holdings.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { bg: style.backgroundColor, shadow: style.boxShadow };
-  });
-  expect(hovered.bg).not.toBe("rgba(0, 0, 0, 0)");
-  expect(hovered.shadow).toBe("none");
+  await expect(holdings).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(holdings).toHaveCSS("box-shadow", "none");
 
   await holdings.click();
   await expect(holdings).toHaveAttribute("aria-expanded", "true");
-  const expandedShadow = await holdings.evaluate((element) => getComputedStyle(element).boxShadow);
-  expect(expandedShadow).not.toBe("none");
+  await expect(holdings).not.toHaveCSS("box-shadow", "none");
 });
